@@ -10,12 +10,15 @@ import {
   type IpcResult,
 } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
+import { MIN_ROUTING_SAMPLES } from '@shared/v2'
 import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
 import type { GitService } from '@main/modules/git'
-import type { Orchestrator } from '@main/modules/orchestrator'
+import { refreshProjectFacts, type Orchestrator } from '@main/modules/orchestrator'
 import type { Repositories } from '@main/modules/persistence'
+import { recommendPlanningMode } from '@main/modules/planning'
+import { aggregatePerformance } from '@main/modules/routing'
 import { ProjectService, QueryService } from './services'
 
 export interface IpcContext {
@@ -179,6 +182,35 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'memory.delete': ({ memoryId }) => {
       repos.memory.delete(memoryId)
       return null
+    },
+
+    'graph.revisions': ({ runId }) => repos.graphRevisions.listByRun(runId),
+    'graph.proposals': ({ runId }) => repos.graphProposals.listByRun(runId),
+    'planning.candidates': ({ runId }) => ({
+      candidates: repos.planningCandidates.listByRun(runId),
+      critiques: repos.planningCritiques.listByRun(runId),
+    }),
+    'planning.recommend': ({ projectId, prompt }) => recommendPlanningMode(prompt, repos.projects.require(projectId).profile),
+    'routing.list': ({ runId }) => repos.routingDecisions.listByRun(runId),
+    'performance.summary': ({ projectId }) => {
+      const outcomes = projectId ? repos.taskOutcomes.listByProject(projectId) : repos.taskOutcomes.listAll()
+      return { stats: aggregatePerformance(outcomes), totalOutcomes: outcomes.length, minSamples: MIN_ROUTING_SAMPLES }
+    },
+    'intelligence.list': ({ projectId, query, includeStale }) =>
+      query?.trim()
+        ? repos.facts.search(projectId, query, { includeStale: includeStale ?? false, limit: 50 })
+        : repos.facts.listByProject(projectId, { includeStale: includeStale ?? false }),
+    'intelligence.refresh': async ({ projectId }) => {
+      const project = repos.projects.require(projectId)
+      const result = await refreshProjectFacts({ repos, git: ctx.git }, project)
+      if (!result) throw new NexusError('internal', 'Repository analysis failed; the previous facts are unchanged')
+      return result
+    },
+    'context.packs': ({ taskId, agentId }) => {
+      if (!taskId && !agentId) throw new NexusError('invalid_input', 'context.packs needs a taskId or an agentId')
+      const packs = [...(taskId ? repos.contextPacks.listByTask(taskId) : []), ...(agentId ? repos.contextPacks.listByAgent(agentId) : [])]
+      const seen = new Set<string>()
+      return packs.filter((p) => !seen.has(p.id) && seen.add(p.id))
     },
   }
 }

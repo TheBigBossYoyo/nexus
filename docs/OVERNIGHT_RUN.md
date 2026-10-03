@@ -74,3 +74,7 @@ to the user immediately, with the command to run by hand. It is not worked aroun
   All 10 reviews approved (no HIGH finding), so review-rejection repair was not exercised by real agents;
   the repairs came from verification failures. Fix scheduled in v0.2: give the reviewer and verifier the
   orchestration evidence they cannot see in the repository (messages sent by the task and its repairs).
+- **Stress campaign on the v0.1 orchestrator: 1000/1000 seeds passed** (seeds 1 to 1000, concurrency 4,
+  2090 s, log `test-results/stress-v01.log`, no failure dumps). No unexplained pause occurred. The
+  original once-in-35 `paused` symptom was therefore not reproduced after task worktree creation was
+  serialized with merges; the cause is still inferred (git lock contention), not proven.

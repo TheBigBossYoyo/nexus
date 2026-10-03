@@ -81,6 +81,15 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'memory.add': { scope: 'global', title: 't', content: 'c', tags: [] },
   'memory.setStatus': { memoryId: 'm1', status: 'approved' },
   'memory.delete': { memoryId: 'm1' },
+  'graph.revisions': { runId: 'r1' },
+  'graph.proposals': { runId: 'r1' },
+  'planning.candidates': { runId: 'r1' },
+  'planning.recommend': { projectId: 'p1', prompt: 'Refactor everything' },
+  'routing.list': { runId: 'r1' },
+  'performance.summary': { projectId: 'p1' },
+  'intelligence.list': { projectId: 'p1', query: 'router', includeStale: false },
+  'intelligence.refresh': { projectId: 'p1' },
+  'context.packs': { taskId: 't1', agentId: 'a1' },
 }
 
 const CHANNELS = Object.keys(ipcInputs) as IpcChannel[]
@@ -394,6 +403,61 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     expect(await value('app.openDataDir')).toBeNull()
     expect(await value<{ state: string }>('auth.status', {})).toMatchObject({ state: 'authenticated' })
     expect(await value<{ value: string }[]>('auth.models')).toEqual([expect.objectContaining({ value: 'fake-model' })])
+  })
+
+  it('serves the v0.2 channels from durable state and passes planningMode/reviewMode into the run config', async () => {
+    const project = await value<{ id: string }>('projects.open', { path: h.repoDir })
+    const created = await value<{ id: string }>('runs.create', {
+      projectId: project.id,
+      mode: 'build',
+      preset: 'balanced',
+      prompt: 'Create alpha and beta',
+      planningMode: 'consensus',
+      reviewMode: 'dual',
+    })
+    expect(h.repos.runs.require(created.id).config).toMatchObject({ planningMode: 'consensus', reviewMode: 'dual' })
+    expect((await h.waitForState(created.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+
+    // Graph history: the approved plan is version 1; nothing was proposed.
+    const revisions = await value<{ version: number; proposalId: string | null; snapshot: { tasks: unknown[] } }[]>('graph.revisions', { runId: created.id })
+    expect(revisions.map((r) => r.version)).toEqual([1])
+    expect(revisions[0]?.snapshot.tasks).toHaveLength(2)
+    expect(await value('graph.proposals', { runId: created.id })).toEqual([])
+    expect(await value('planning.candidates', { runId: created.id })).toEqual({ candidates: [], critiques: [] })
+    expect(await value('routing.list', { runId: created.id })).toEqual([])
+
+    // Project open refreshed the repository facts; they can be listed, searched and refreshed again.
+    const now = new Date().toISOString()
+    h.repos.facts.upsert({ id: 'f1', projectId: project.id, kind: 'hazard', subject: 'shared.txt', statement: 'Edited by several tasks at once', source: 'user', confidence: 'high', files: ['shared.txt'], fingerprint: 'x', stale: false, createdAt: now, verifiedAt: now })
+    h.repos.facts.upsert({ id: 'f2', projectId: project.id, kind: 'hazard', subject: 'old.txt', statement: 'Obsolete hazard', source: 'user', confidence: 'low', files: [], fingerprint: 'y', stale: true, createdAt: now, verifiedAt: now })
+    const listed = await value<{ subject: string }[]>('intelligence.list', { projectId: project.id })
+    expect(listed.map((f) => f.subject)).toContain('shared.txt')
+    expect(listed.map((f) => f.subject)).not.toContain('old.txt')
+    expect((await value<{ subject: string }[]>('intelligence.list', { projectId: project.id, includeStale: true })).map((f) => f.subject)).toContain('old.txt')
+    expect((await value<{ subject: string }[]>('intelligence.list', { projectId: project.id, query: 'several tasks' })).map((f) => f.subject)).toEqual(['shared.txt'])
+    expect(await value('intelligence.refresh', { projectId: project.id })).toEqual({ facts: expect.any(Number), stale: expect.any(Number) })
+    expect(await call('intelligence.refresh', { projectId: 'missing' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+
+    // Performance: outcomes aggregate by role/model/category with the sample size and threshold.
+    expect(await value('performance.summary', {})).toEqual({ stats: [], totalOutcomes: 0, minSamples: 5 })
+    const task = h.repos.tasks.listByRun(created.id)[0]
+    h.repos.taskOutcomes.upsertForTask({
+      id: 'o1', projectId: project.id, runId: created.id, taskId: task?.id ?? '', role: 'worker', model: 'fake-model', tier: 'balanced', category: 'implement',
+      complexity: 'small', risk: 'low', attempts: 1, firstPassVerified: true, completed: true, reviewRejections: 0, repairCount: 0, checksFailed: 0,
+      humanInterventions: 0, elapsedMs: 1000, inputTokens: null, outputTokens: null, createdAt: now,
+    })
+    const summary = await value<{ stats: { samples: number; sufficient: boolean; role: string }[]; totalOutcomes: number; minSamples: number }>('performance.summary', { projectId: project.id })
+    expect(summary).toMatchObject({ totalOutcomes: 1, minSamples: 5, stats: [{ role: 'worker', samples: 1, sufficient: false }] })
+    expect((await value<{ totalOutcomes: number }>('performance.summary', { projectId: 'other-project' })).totalOutcomes).toBe(0)
+
+    // Planning recommendation uses the project's profile.
+    expect(await value('planning.recommend', { projectId: project.id, prompt: 'Fix a typo' })).toMatchObject({ mode: 'single', reasons: expect.any(Array) })
+    expect(await call('planning.recommend', { projectId: 'missing', prompt: 'x' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+
+    // Context packs need an owner id.
+    expect(await call('context.packs', {})).toMatchObject({ ok: false, error: { code: 'invalid_input' } })
+    expect(await value('context.packs', { taskId: task?.id })).toEqual([])
+    expect(await value('context.packs', { agentId: 'nobody' })).toEqual([])
   })
 
   it('refuses to remove a project that has active runs, and removes one that has none', async () => {

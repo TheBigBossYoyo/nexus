@@ -387,6 +387,22 @@ describe('nexus MCP server', () => {
     expect(proposeMemory).toHaveBeenCalledWith({ title: 't', content: 'c', evidence: 'e', tags: [], filePaths: [] })
   })
 
+  it('exposes propose_graph_change only when the handler exists and passes the raw arguments through', async () => {
+    const proposeGraphChange = vi.fn(async () => 'Applied as plan v2')
+    const client = await connect(handlers({ proposeGraphChange }))
+    expect((await client.listTools()).tools.map((t) => t.name)).toContain('propose_graph_change')
+    const args = {
+      type: 'ADD_TASK',
+      reason: 'missing prerequisite',
+      evidence: 'src/a.ts imports ./b which does not exist',
+      changes: { tasks: [{ key: 'b', title: 'B', description: 'd', role: 'worker' }], blocksProposer: true },
+    }
+    const r = await client.callTool({ name: 'propose_graph_change', arguments: args })
+    expect(r.isError).toBeFalsy()
+    expect(JSON.stringify(r.content)).toContain('Applied as plan v2')
+    expect(proposeGraphChange).toHaveBeenCalledWith(args)
+  })
+
   it('turns handler errors into isError results', async () => {
     const client = await connect(
       handlers({

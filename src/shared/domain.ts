@@ -462,6 +462,8 @@ export interface Review {
   verdict: 'approved' | 'changes_requested'
   summary: string
   findings: ReviewFinding[]
+  /** v0.2: set on the arbiter's review record of a dual review. Indexes refer to `findings`. */
+  arbitration?: { summary: string; decisions: { findingIndex: number; accepted: boolean; reason: string }[] } | null
   createdAt: string
 }
 

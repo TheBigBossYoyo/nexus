@@ -79,6 +79,8 @@ const issueText = (issues: readonly { path: PropertyKey[]; message: string }[]):
 /** Apply validated proposals transactionally and keep the revision history of the run's graph. */
 export class GraphService {
   private host: GraphHost | null = null
+  /** Submissions per agent, malformed ones included (those leave no row to count). */
+  private readonly submissions = new Map<string, number>()
 
   constructor(
     private readonly deps: OrchestratorDeps,
@@ -107,7 +109,9 @@ export class GraphService {
 
     if (!PROPOSING.includes(current.state)) errors.push(`The run is ${current.state}; the graph can only change while it is executing.`)
     if (who.agentId !== null) {
-      const used = repos.graphProposals.listByRun(run.id).filter((p) => p.proposedByAgentId === who.agentId).length
+      const rows = repos.graphProposals.listByRun(run.id).filter((p) => p.proposedByAgentId === who.agentId).length
+      const used = Math.max(rows, this.submissions.get(who.agentId) ?? 0)
+      this.submissions.set(who.agentId, used + 1)
       if (used >= MAX_PROPOSALS_PER_AGENT) {
         errors.push(`Rate limit: an agent may submit at most ${MAX_PROPOSALS_PER_AGENT} graph proposals and you have used them all. Finish your task with the plan as it is.`)
       }
@@ -416,6 +420,11 @@ export class GraphService {
 
   yieldMarker(taskId: string): YieldMarker | null {
     return this.deps.repos.settings.getValue<YieldMarker>(yieldKey(taskId))
+  }
+
+  /** The task is about to wait for new prerequisites; remember it so its next start is a resume. */
+  markYielded(taskId: string): void {
+    if (!this.yieldMarker(taskId)) this.deps.repos.settings.setValue(yieldKey(taskId), { proposalId: '', at: nowIso() } satisfies YieldMarker)
   }
 
   clearYield(taskId: string): void {

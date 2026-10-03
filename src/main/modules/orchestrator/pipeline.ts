@@ -28,6 +28,7 @@ import {
 } from '@main/modules/context/context-builder'
 import type { DiffResult } from '@main/modules/git'
 import { nextAttemptPlan, type FailureKind } from '@main/modules/scheduler'
+import { fingerprintFiles } from '@main/modules/intelligence'
 import { dependenciesOf } from '@main/modules/task-graph'
 import type { AgentOutcome, AgentRunResult, SessionControl } from './agent-runner'
 import type { Core } from './core'
@@ -139,9 +140,14 @@ export class TaskPipeline {
     let stage = startStage
     if (stage === 'implement') {
       this.host.setStage(taskId, 'implement')
-      const proceed = await this.implement(run, task, cwd, project.rootPath, control)
+      // A task that yielded to a new prerequisite restarts here once the prerequisite has merged.
+      const resume = await this.prepareResume(run, task, worktree)
+      const proceed = await this.implement(run, task, cwd, project.rootPath, control, resume)
       if (!proceed) return
       task = repos.tasks.require(taskId)
+      // Cancelled by its own graph proposal (a split): the task ends here, it must not be checked or merged.
+      if (task.state === 'cancelled') return
+      if (await this.yieldIfWaiting(run, task, worktree)) return
       if (!writing) {
         this.complete(run, task)
         return
@@ -164,6 +170,8 @@ export class TaskPipeline {
     for (;;) {
       if (this.halted(runId, control)) return
       task = repos.tasks.require(taskId)
+      // A graph change approved after the agent's turn may have given the task a prerequisite.
+      if (task.state === 'running' && (await this.yieldIfWaiting(run, task, worktree))) return
       const cycle = task.repairCycles + 1
 
       if (stage === 'checks') {
@@ -221,6 +229,7 @@ export class TaskPipeline {
         stage = 'checks'
         continue
       }
+      await this.recordDecisionFacts(run, task, diff)
 
       // Verified: integrate. Merges are serialized; a conflict goes back through repair.
       this.host.setStage(taskId, 'merge')
@@ -277,11 +286,12 @@ export class TaskPipeline {
     cwd: string,
     projectRoot: string,
     control: SessionControl,
+    resume: string | null,
   ): Promise<boolean> {
     const { repos, bus } = this.core.deps
-    const resumeId = this.resumableSession(initial.id)
-    // A resumed session continues the same attempt; a fresh one consumes a new attempt.
-    const attempt = resumeId && initial.attempt > 0 ? initial.attempt : initial.attempt + 1
+    const resumeId = resume ? undefined : this.resumableSession(initial.id)
+    // A resumed session continues the same attempt; so does a restart after a yield; a fresh one consumes a new attempt.
+    const attempt = (resumeId || resume) && initial.attempt > 0 ? initial.attempt : initial.attempt + 1
     const leaseOwner = newId()
     let task = this.core.setTaskState(initial.id, 'running', {
       attempt,
@@ -291,6 +301,7 @@ export class TaskPipeline {
       error: null,
     })
     bus.emit({ runId: run.id, taskId: task.id, type: 'task.started', payload: { attempt } })
+    this.core.graph.clearYield(task.id)
 
     // Messages (user instructions included) that arrived while no session could take them ride along on resume.
     const prompt = resumeId
@@ -298,7 +309,7 @@ export class TaskPipeline {
           'Continue the task from where you stopped. Check `git status` and `git log` first to see what is already done.',
           ...this.core.messages.takeForTask(task.id).map(renderMessage),
         ].join('\n\n')
-      : this.contextFor(run, task, cwd, initial.error)
+      : [resume, this.contextFor(run, task, cwd, initial.error)].filter((p): p is string => p !== null).join('\n\n')
 
     let lastBeat = Date.now()
     const result = await this.core.agents.run({
@@ -322,6 +333,8 @@ export class TaskPipeline {
       },
     })
     task = repos.tasks.require(task.id)
+    // Cancelled while the agent worked (by its own split proposal or another agent's approved one).
+    if (task.state === 'cancelled') return false
 
     if (result.outcome === 'success') {
       if (result.blocker) {
@@ -724,6 +737,100 @@ export class TaskPipeline {
       bus.emit({ runId: run.id, taskId: parent.id, type: 'task.failed', payload: error })
     })
     return false
+  }
+
+  // ───────────────────────────── yield and resume ─────────────────────────────
+
+  /**
+   * A task that waits for a new, uncompleted prerequisite (added by an applied graph proposal) does not
+   * continue to checks or review: leftovers are committed, the worktree is kept and the task goes back to
+   * 'queued', where the scheduler holds it until its dependencies completed. Its attempt is not consumed.
+   */
+  private async yieldIfWaiting(run: Run, task: Task, worktree: Worktree | null): Promise<boolean> {
+    const waitingOn = this.core.graph.unmetPrerequisites(task)
+    if (waitingOn.length === 0) return false
+    if (worktree) await this.commitLeftovers(run, task, worktree)
+    const keys = waitingOn.map((t) => t.key).join(', ')
+    this.core.graph.markYielded(task.id)
+    const reason = `yielded: waiting for ${keys} (graph change); resumes once it is merged`
+    return this.core.tryTaskState(task.id, 'queued', { leaseOwner: null, leaseExpiresAt: null }, reason) !== null
+  }
+
+  /**
+   * Restart of a yielded task: the integration branch (which now holds the prerequisites' merged work) is
+   * merged into the task's worktree, then a FRESH session is told what happened. A conflicting merge is
+   * aborted and left to the agent: the instruction names the command, and the later merge into the
+   * integration branch still goes through the repair path if it conflicts. Null when the task did not yield.
+   */
+  private async prepareResume(run: Run, task: Task, worktree: Worktree | null): Promise<string | null> {
+    const { repos, git } = this.core.deps
+    if (!this.core.graph.yieldMarker(task.id)) return null
+    const upstream = dependenciesOf(repos.dependencies.listByRun(run.id), task.id)
+      .map((id) => repos.tasks.get(id))
+      .filter((t): t is Task => t !== null)
+    // The prerequisites a proposal added were created after this task first started.
+    const added = upstream.filter((t) => task.startedAt !== null && t.createdAt >= task.startedAt)
+    const prerequisites = added.length > 0 ? added : upstream
+
+    let sync = 'This task has no worktree of its own.'
+    if (worktree) {
+      try {
+        const integration = await this.host.ensureIntegration(run)
+        await this.commitLeftovers(run, task, worktree)
+        const merged = await this.host.withMergeLock(run.id, () =>
+          git.merge(worktree.path, integration.branch, {
+            message: `Sync ${task.key} with ${integration.branch}`,
+            author: this.core.author(),
+          }),
+        )
+        sync = merged.ok
+          ? `The integration branch ${integration.branch} was merged into your worktree, so the prerequisites' work is present.`
+          : `Merging the integration branch ${integration.branch} into your worktree conflicted in: ${merged.conflicts.join(', ')}. The merge was aborted. Run \`git merge ${integration.branch}\`, resolve the conflicts so that both changes keep working, and commit the merge before continuing.`
+      } catch (e) {
+        this.core.log(`resume sync for ${task.key} failed: ${errorMessage(e)}`)
+        sync = `NEXUS could not merge the integration branch into your worktree (${errorMessage(e)}). Run \`git merge ${run.integrationBranch ?? 'the integration branch'}\` yourself before continuing.`
+      }
+    }
+    return [
+      '## Resuming after a prerequisite',
+      `You stopped earlier because you proposed a graph change that added prerequisite task(s) your task needs. ${prerequisites.map((t) => t.key).join(', ')} completed and merged. This is a new session: continue the task from the current state of the worktree (check \`git log\` and \`git status\`), using the prerequisites' work.`,
+      sync,
+      ...prerequisites.map((t) => `### Prerequisite ${t.key}: ${t.title}\n${t.resultSummary ?? '(no summary)'}`),
+      `### Your previous summary\n${task.resultSummary ?? '(none)'}`,
+    ].join('\n\n')
+  }
+
+  /** Decisions agents recorded for a task that passed verification become 'decision' facts of the repository. */
+  private async recordDecisionFacts(run: Run, task: Task, diff: DiffResult): Promise<void> {
+    const { repos } = this.core.deps
+    try {
+      const ids = new Set([task.id, ...repos.tasks.listByParent(task.id).map((t) => t.id)])
+      const decisions = repos.decisions.listByRun(run.id).filter((d) => d.taskId !== null && ids.has(d.taskId))
+      if (decisions.length === 0) return
+      const project = this.core.project(run)
+      const changed = diff.files.map((f) => f.path)
+      const files = (changed.length > 0 ? changed : task.suggestedFiles).slice(0, 20)
+      const fingerprint = await fingerprintFiles(project.rootPath, files)
+      const now = nowIso()
+      for (const d of decisions) {
+        repos.facts.upsert({
+          id: newId(),
+          projectId: project.id,
+          kind: 'decision',
+          subject: d.title,
+          statement: `${d.decision} Rationale: ${d.rationale}`,
+          source: 'agent',
+          confidence: 'medium',
+          files,
+          fingerprint,
+          stale: false,
+          createdAt: now,
+          verifiedAt: now,
+        })
+      }
+    } catch (e) {
+      this.core.log(`recording decision facts for ${task.key} failed: ${errorMessage(e)}`)
+    }
   }
 
   // ───────────────────────────── helpers ─────────────────────────────

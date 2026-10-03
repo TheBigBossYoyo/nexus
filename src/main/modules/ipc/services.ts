@@ -5,6 +5,7 @@ import type { DiffFile, DiffResult, RunSummary } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { NexusError } from '@shared/result'
 import type { DiffResult as GitDiff, GitService } from '@main/modules/git'
+import { refreshProjectFacts } from '@main/modules/orchestrator'
 import type { Repositories } from '@main/modules/persistence'
 import { profileProject, type ProfilerGit } from '@main/modules/profile/project-profiler'
 
@@ -27,6 +28,7 @@ export class ProjectService {
   constructor(
     private readonly repos: Repositories,
     private readonly git: GitService,
+    private readonly logger?: (line: string) => void,
   ) {
     this.profilerGit = {
       isRepository: (p) => git.isRepository(p),
@@ -44,22 +46,32 @@ export class ProjectService {
     const rootPath = isRepo ? resolve(await this.git.repoRoot(absolute)) : absolute
     const profile = await profileProject(rootPath, this.profilerGit)
     const existing = this.repos.projects.getByRootPath(rootPath)
-    if (existing) return this.repos.projects.update(existing.id, { profile, lastOpenedAt: nowIso() })
-    return this.repos.projects.insert({
-      id: newId(),
-      name: basename(rootPath),
-      rootPath,
-      profile,
-      respectProjectClaudeConfig: false,
-      createdAt: nowIso(),
-      lastOpenedAt: nowIso(),
-    })
+    const project = existing
+      ? this.repos.projects.update(existing.id, { profile, lastOpenedAt: nowIso() })
+      : this.repos.projects.insert({
+          id: newId(),
+          name: basename(rootPath),
+          rootPath,
+          profile,
+          respectProjectClaudeConfig: false,
+          createdAt: nowIso(),
+          lastOpenedAt: nowIso(),
+        })
+    await this.refreshFacts(project)
+    return project
   }
 
   async reprofile(projectId: string): Promise<Project> {
     const project = this.repos.projects.require(projectId)
     const profile = await profileProject(project.rootPath, this.profilerGit)
-    return this.repos.projects.update(projectId, { profile })
+    const updated = this.repos.projects.update(projectId, { profile })
+    await this.refreshFacts(updated)
+    return updated
+  }
+
+  /** Repository facts follow the profile; a failed analysis is logged and never fails the open. */
+  private refreshFacts(project: Project): Promise<unknown> {
+    return refreshProjectFacts({ repos: this.repos, git: this.git }, project, this.logger)
   }
 }
 
