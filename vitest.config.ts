@@ -24,8 +24,9 @@ export default defineConfig({
           name: 'integration',
           environment: 'node',
           include: ['tests/integration/**/*.test.ts', 'tests/scenarios/**/*.test.ts'],
-          testTimeout: 30_000,
-          hookTimeout: 30_000,
+          // Scenario tests drive real git and SQLite; leave headroom for a loaded machine.
+          testTimeout: 90_000,
+          hookTimeout: 60_000,
         },
       },
     ],

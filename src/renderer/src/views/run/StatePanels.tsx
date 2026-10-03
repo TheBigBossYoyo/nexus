@@ -144,7 +144,7 @@ export function MissionComplete() {
           <Stat label="Commits" value={String(s.commits)} />
           <Stat label="Agents (sessions)" value={String(s.agentSessions)} />
           <Stat label="Duration" value={formatDuration(s.durationMs)} />
-          <Stat label="Cost" value={s.costUsd === null ? DASH : formatCost(s.costUsd)} />
+          <Stat label="Est. cost (runtime)" value={s.costUsd === null ? DASH : formatCost(s.costUsd)} />
         </div>
         {s.tasksFailed > 0 || s.tasksCancelled > 0 ? (
           <div className="text-fg-muted">

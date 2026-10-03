@@ -88,9 +88,21 @@ environment variables (`src/main/index.ts`):
 - `NEXUS_DATA_DIR=<dir>` moves Electron's `userData` (database, worktrees, Chromium profile) to a
   throwaway directory.
 
-Status at the time of writing: the `test:e2e` script is defined in `package.json`, but this repository
-contains no `playwright.config.ts` and no `tests/e2e` directory yet, so the script has nothing to run.
-The renderer's test ids (`data-testid`) and the demo script are in place for such tests.
+The suite lives in `tests/e2e/` (`playwright.config.ts`, single worker):
+
+- `mission.spec.ts` opens a temporary Git repository through the real Open Project button (the native
+  folder dialog is stubbed in the main process), creates a BUILD mission, checks the plan panel,
+  approves, watches the task graph reach completion including the `ui-fix1` repair node, inspects the
+  review, agent output, task diff and timeline, and verifies with plain `git` that the integration
+  branch has the files while the working tree does not. It also asserts the renderer has no `require`
+  or `process`, that `window.nexus` exposes only `invoke` and `onPush`, and that an unknown IPC channel
+  is rejected.
+- `restart.spec.ts` closes and relaunches the app on the same data directory: a run awaiting plan
+  approval survives, and a run interrupted mid-execution shows the recovery dialog and resumes.
+
+A manual acceptance run with the real Claude runtime is scripted in `scripts/acceptance-mission.mjs`
+(`node scripts/acceptance-mission.mjs [path-to-NEXUS.exe]`). It consumes Claude usage and writes its
+evidence to `docs/acceptance/`.
 
 ## Manual real-SDK smoke test
 

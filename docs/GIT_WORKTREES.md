@@ -17,7 +17,8 @@ interpolated into a command line. Revisions that start with `-` are rejected.
 | Task worktree | `<data dir>\worktrees\<run>\<key>` |
 
 `<key>` is the planner's task id, sanitized by `WorktreeManager.planPaths`: lowercased, runs of
-characters outside `a-z0-9` become `-`, trimmed, cut to 24 characters. If sanitizing changed the key, a
+characters outside `a-z0-9` become `-`, trimmed, cut to 24 characters. If sanitizing changed the key (or the key is a Windows reserved device name such as `con`, `aux`, `nul`,
+`com1` or `lpt1`, which cannot be a directory name), a
 4 hex digit SHA-1 suffix is appended so two different keys cannot collide (an empty result becomes
 `task-<hash>`). If the branch name already exists (a leftover from a lost worktree, or a task literally
 called `integration`), the pipeline appends a short random id instead of failing on the clash.
@@ -59,9 +60,12 @@ Diffs shown in the UI: a task's diff is its worktree against the merge base with
 2. `GitService.merge(integration.path, task.branch, ...)` runs, in the integration worktree,
    `git merge --no-ff --no-edit --no-verify -m "Merge <key>: <title>" <sha>`. It first requires that no
    merge is in progress and that the integration worktree is clean (staged, unstaged and untracked files
-   all count, ignored files do not), otherwise it throws `dirty_repository` and the task fails with a
-   pipeline error. A repository that does not ignore its install output (for example `node_modules`) will
-   hit this.
+   all count, ignored files do not), otherwise it throws `dirty_repository`. Check and setup commands run in
+   the integration worktree can leave files behind, so the pipeline first restores the (NEXUS-owned)
+   integration worktree with `WorktreeManager.resetClean`: `git reset --hard HEAD` (which also clears an
+   interrupted merge) and `git clean -fd`, never `-x`, so ignored dependencies survive. It refuses paths
+   outside the worktrees root. A repository that does not ignore its install output (for example
+   `node_modules`) loses it in this step.
 3. Success: the worktree row becomes `merged`, `git.merged` is emitted with the merge commit, the task
    completes.
 4. Conflict: the conflicting paths are collected (`git diff --name-only --diff-filter=U`), the merge is
@@ -80,7 +84,10 @@ task. Mission-level checks and verification run on it before the run completes (
 In NEXUS's own Git calls (everything in `GitService`, as used by the orchestrator):
 
 - No `push`, and no remote operation of any kind.
-- No `reset`, `clean`, `checkout`, `stash`, `rebase` or `gc`.
+- No `checkout`, `stash`, `rebase` or `gc`. `reset --hard` and `clean -fd` exist only as `GitService.resetClean`,
+  reachable through `WorktreeManager.resetClean`, which refuses any path outside the NEXUS worktrees root; they
+  are applied to the integration worktree before merges and after mission checks, and to a task worktree after
+  its checks (to discard check side effects). Never to your checkout.
 - No force option on removal in practice: `removeWorktree(..., { force: true })` exists in the API, but the
   application never passes it. `worktree remove` is refused when the worktree has uncommitted or untracked
   changes.
@@ -109,7 +116,7 @@ test, build and lint commands there.
 |---|---|
 | `runs.cleanup` on a finished run | For each worktree not already `removed`: `worktree remove` (clean only), mark `removed`, emit `git.worktree.removed`. A worktree that cannot be removed (for example it has changes) is skipped and logged. Branches stay. |
 | `git.removeWorktreesOnSuccess` | The merged task's worktree is removed immediately after the merge, if clean. |
-| Worktree directory vanished (found on recovery) | On `runs.recover` with `resume`, `reconcileWorktrees` marks that worktree `orphaned` and runs `git worktree prune`. A task whose worktree is gone gets a fresh worktree on its next start (with a new branch name, since the old branch still exists). |
+| Worktree directory vanished (found on recovery) | On every resume (`runs.resume`, or `runs.recover` with `resume`), `reconcileWorktrees` marks that worktree `orphaned` and runs `git worktree prune`. A task whose worktree is gone gets a fresh worktree on its next start (with a new branch name, since the old branch still exists). |
 | Merge left in progress by a crash | On resume, `git merge --abort` is run in any existing worktree that has `MERGE_HEAD`. |
 | Worktrees unknown to NEXUS | `WorktreeManager.findOrphans` and `cleanupOrphans` implement detection and safe removal (clean ones removed, dirty ones reported, never deleted) but the application does not call them. Such worktrees stay until you remove them with Git. |
 

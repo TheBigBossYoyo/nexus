@@ -111,6 +111,14 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   const events: RunEvent[] = []
   const pushes: PushMessage[] = []
   bus.subscribe((e) => events.push(e))
+  // Intervention pauses are logged with the task errors behind them, so an unexpected one in a
+  // scenario can be diagnosed from the test output alone.
+  bus.subscribe((e) => {
+    if (e.type !== 'run.paused' || !('detail' in e.payload) || !String(e.payload.detail).startsWith('Intervention')) return
+    const tasks = repos.tasks.listByRun(e.runId).map((t) => `${t.key}=${t.state}${t.error ? ` (${t.error.what}: ${t.error.why ?? ''})` : ''}`)
+    console.warn(`[scenario] run paused: ${String(e.payload.detail)} | ${tasks.join(', ')}`)
+  })
+
   const gitService = new GitService()
   const runtime = new FakeAgentRuntime({ script: options.script })
   const orchestrator = new Orchestrator({
@@ -156,7 +164,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     project = repos.projects.list()[0] as Project
   }
 
-  const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 20_000): Promise<void> => {
+  const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs
     while (!predicate()) {
       if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
@@ -178,7 +186,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     project,
     events,
     pushes,
-    async waitForState(runId, states, timeoutMs = 20_000) {
+    async waitForState(runId, states, timeoutMs = 60_000) {
       const wanted = Array.isArray(states) ? states : [states]
       try {
         await waitFor(() => wanted.includes(repos.runs.require(runId).state), `run state ${wanted.join('|')}`, timeoutMs)

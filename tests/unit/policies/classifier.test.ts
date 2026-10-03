@@ -562,3 +562,110 @@ describe('verification commands', () => {
     expect(r.level).toBe('needs_approval')
   })
 })
+
+describe('read-only allowlists fail closed on program-running and file-writing options', () => {
+  const notSafe = (c: string, shell: 'bash' | 'powershell' = 'bash') => {
+    const r = shell === 'bash' ? bash(c) : ps(c)
+    expect(r.level === 'safe' && r.segments.every((s) => s.kind === 'readonly'), `${shell}: ${c}`).toBe(false)
+  }
+
+  it.each([
+    'git grep -Ocalc.exe foo',
+    'git grep -O calc.exe foo',
+    'git grep -nOcalc foo',
+    'git grep --open-files-in-pager=calc.exe foo',
+    'git grep --open-files-in-pager calc.exe foo',
+    'git grep --open=calc.exe foo',
+    'git grep --op=calc.exe foo',
+    'git log --output=x.txt',
+    'git log --out=x.txt',
+    'git diff --ext-diff',
+    'git diff --ext=x',
+    'git show --exec=x',
+    'git log -o x',
+    'git -c core.pager=calc.exe log',
+    'git -C .. status',
+    'git --git-dir=.. status',
+    'GIT_EXTERNAL_DIFF=calc.exe git diff',
+    'GIT_PAGER=calc.exe git log',
+    'env GIT_PAGER=calc.exe git log',
+  ])('bash: %s is not read-only', (c) => notSafe(c))
+
+  it.each([
+    'uniq a.txt b.txt',
+    'uniq -c a.txt b.txt',
+    'uniq -f 1 a.txt b.txt',
+    'uniq -- a.txt b.txt',
+    'tree -o out.txt',
+    'tree -ao out.txt',
+    'tree --output=out.txt',
+    'tree --out out.txt',
+    'sort -o out.txt a.txt',
+    'sort --output=out.txt a.txt',
+    'sort --out=out.txt a.txt',
+    'sort --compress-program=calc.exe a.txt',
+    'sort --comp=calc.exe a.txt',
+    'rg -nz foo',
+    'rg -z foo',
+    'rg --pre=calc.exe foo',
+    'date -s 12:00',
+    'date 010112002020',
+    'find . -exec calc.exe {} ;',
+    'find . -fprint out.txt',
+    'sed -i s/a/b/ f.txt',
+    'awk "BEGIN{system(\\"calc\\")}"',
+    'xargs calc.exe',
+    'tee out.txt',
+    'less f.txt',
+    'more f.txt',
+  ])('bash: %s is not read-only', (c) => notSafe(c))
+
+  it.each([
+    'Get-Content a.txt | Out-File b.txt',
+    'Get-Content a.txt | Set-Content b.txt',
+    'Get-Content a.txt | Add-Content b.txt',
+    'Get-ChildItem | Export-Csv out.csv',
+    'Get-ChildItem | Tee-Object out.txt',
+    'Start-Process calc.exe',
+    'Invoke-Item calc.exe',
+    '& calc.exe',
+    '& "calc.exe"',
+    'iex "calc"',
+    'Get-Content a.txt | iex',
+    'powershell -EncodedCommand AAAA',
+    'powershell -Command "Remove-Item x"',
+    'cmd /c calc.exe',
+    'Get-ChildItem | Select-Object @{n="x";e={Remove-Item a.txt}}',
+    'Get-ChildItem | Sort-Object { Remove-Item a.txt }',
+    'Get-ChildItem | where { Remove-Item a.txt }',
+    'Get-ChildItem | Format-Table @{e={Remove-Item a.txt}}',
+    'sort /o out.txt a.txt',
+    '$env:GIT_PAGER = "calc.exe"; git log',
+  ])('powershell: %s is not read-only', (c) => notSafe(c, 'powershell'))
+
+  it.each([
+    'git grep foo',
+    'git grep -n -i foo src',
+    'git grep -e Opts foo',
+    'git log --oneline --stat --format=%h',
+    'git diff --no-ext-diff HEAD~1',
+    'uniq a.txt',
+    'uniq -c -f 1 a.txt',
+    'tree -L 2',
+    'sort a.txt',
+    'sort -r -n a.txt',
+    'rg -n foo src',
+    'date',
+    'date +%Y',
+  ])('bash: %s stays safe', (c) => expectLevel(c, 'safe'))
+
+  it('asks for approval when a writing role sets program-running environment variables', () => {
+    approve('GIT_EXTERNAL_DIFF=calc.exe git diff')
+    approve('PAGER=calc.exe git log')
+    approve('env GIT_PAGER=x git log')
+    approve('$env:GIT_SSH_COMMAND = "x"', 'powershell')
+    approve('git -c diff.external=calc.exe diff')
+    approve('git -c core.sshCommand=x fetch')
+    approve('git --config-env=core.pager=X log')
+  })
+})

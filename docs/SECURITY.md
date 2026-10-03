@@ -101,6 +101,13 @@ Forbidden: anything referring to the Claude credential store (`.claude/.credenti
 or modify security tooling (Defender preferences, firewall profiles, `bcdedit` integrity switches and the
 like), and commands the analyzer cannot parse safely.
 
+Read-only status is decided per command, not by name alone: options that run a program or write a file
+(`git grep -O`/`--open-files-in-pager`, `--output`, `--ext-diff`, `--exec`, unique abbreviations of those,
+`sort -o`/`--compress-program`, `tree -o`, `rg --pre`/`-z`, `uniq IN OUT`, `date -s`, PowerShell script-block
+arguments) make a segment non-read-only, and a `GIT_*`/`PAGER`/`EDITOR`/`LD_*`/`PATH` assignment needs approval.
+WebFetch treats loopback, private, link-local, CGNAT and unspecified addresses as private in every literal
+spelling (trailing dot, IPv6 and IPv4-mapped forms, decimal/octal/hex IPv4) and single-label intranet names.
+
 Needs approval (examples, the full list is in `command-classifier.ts`): elevation (`sudo`, `gsudo`, `-Verb
 RunAs`); download-and-execute pipes; encoded PowerShell; shells without an inspectable command or running a
 script file; WSL; destructive deletes and moves (recursive or forced, `find -delete`, `robocopy /mir`);

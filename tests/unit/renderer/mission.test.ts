@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAXIMUM_PRESET_WARNING,
+  PRESET_INFO,
   buildCreateRunInput,
   validateMission,
   type MissionDraft,
@@ -40,5 +42,13 @@ describe('mission composer input', () => {
     expect(validateMission({ ...base, maxAgents: 0 })).toMatch(/1 to 16/)
     expect(validateMission({ ...base, maxAgents: 2.5 })).toMatch(/whole number/)
     expect(validateMission({ ...base, mode: 'loop', maxIterations: 51 })).toMatch(/1 to 50/)
+  })
+})
+
+describe('preset copy', () => {
+  it('does not claim MAXIMUM uses stronger models than BALANCED', () => {
+    expect(PRESET_INFO.maximum).not.toMatch(/strongest/i)
+    expect(PRESET_INFO.maximum).toMatch(/parallelism only/i)
+    expect(MAXIMUM_PRESET_WARNING).not.toMatch(/strongest/i)
   })
 })

@@ -82,6 +82,12 @@ export function completeWith(result: { text: string; structuredOutput?: unknown;
 
 class FakeCrash extends Error {}
 
+/** Cumulative usage of one SDK session. Like the real SDK, a resumed session continues the totals. */
+interface SessionTotals {
+  costUsd: number
+  byModel: Map<string, UsageInfo>
+}
+
 class FakeHandle implements AgentSessionHandle {
   readonly agentId: string
   readonly events: AsyncIterable<AgentEvent>
@@ -91,14 +97,12 @@ class FakeHandle implements AgentSessionHandle {
   private finished = false
   private stopRequested = false
   private readonly sdkSessionId: string
-  private turns = 0
-  private costUsd = 0
-  private readonly usageTotals = new Map<string, UsageInfo>()
   private readonly done: Promise<void>
 
   constructor(
     private readonly spec: SessionSpec,
     sessionId: string,
+    private readonly totals: SessionTotals,
     script: FakeScript,
     private readonly delayMs: number,
     private readonly onFinished: (h: FakeHandle) => void,
@@ -258,12 +262,11 @@ class FakeHandle implements AgentSessionHandle {
         return true
       },
       completeTurn: (r) => {
-        this.turns += 1
         const model = this.spec.model ?? 'fake-model'
-        const prev = this.usageTotals.get(model)
+        const prev = this.totals.byModel.get(model)
         const outputTokens = Math.max(1, Math.ceil(r.text.length / 4))
         const turnCost = 0.001
-        this.costUsd += turnCost
+        this.totals.costUsd += turnCost
         const usage: UsageInfo = {
           model,
           inputTokens: (prev?.inputTokens ?? 0) + 1000,
@@ -273,7 +276,7 @@ class FakeHandle implements AgentSessionHandle {
           costUsd: (prev?.costUsd ?? 0) + turnCost,
           contextWindow: 200_000,
         }
-        this.usageTotals.set(model, usage)
+        this.totals.byModel.set(model, usage)
         const outcome = r.outcome ?? 'success'
         return this.emit({
           type: 'turn.completed',
@@ -281,10 +284,11 @@ class FakeHandle implements AgentSessionHandle {
             outcome,
             text: outcome === 'success' ? r.text : '',
             structuredOutput: r.structuredOutput ?? null,
-            numTurns: this.turns,
+            // Per result, as the SDK reports it; usage and cost below are cumulative for the session.
+            numTurns: 1,
             durationMs: this.delayMs,
-            usage: [...this.usageTotals.values()],
-            totalCostUsd: this.costUsd,
+            usage: [...this.totals.byModel.values()],
+            totalCostUsd: this.totals.costUsd,
             errors: outcome === 'success' ? [] : [r.text],
           },
         })
@@ -303,6 +307,7 @@ export class FakeAgentRuntime implements AgentRuntime {
   authStatus: NonNullable<FakeRuntimeOptions['authStatus']>
   models: ModelOption[]
   private readonly live = new Set<FakeHandle>()
+  private readonly totals = new Map<string, SessionTotals>()
   private counter = 0
 
   constructor(options: FakeRuntimeOptions) {
@@ -318,7 +323,12 @@ export class FakeAgentRuntime implements AgentRuntime {
     this.sessions.push(spec)
     this.counter += 1
     const id = spec.resumeSessionId ?? `fake-session-${this.counter}`
-    const handle = new FakeHandle(spec, id, this.script, this.delayMs, (h) => this.live.delete(h))
+    let totals = this.totals.get(id)
+    if (!totals) {
+      totals = { costUsd: 0, byModel: new Map() }
+      this.totals.set(id, totals)
+    }
+    const handle = new FakeHandle(spec, id, totals, this.script, this.delayMs, (h) => this.live.delete(h))
     if (!handle.isFinished) this.live.add(handle)
     this.handles.push(handle)
     return handle

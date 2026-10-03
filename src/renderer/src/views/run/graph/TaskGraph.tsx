@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Background, Controls, MarkerType, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type NodeTypes } from '@xyflow/react'
+import { Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import '../run.css'
 import { EmptyState } from '../../../components/ui'
+import { useSettings } from '../../../lib/queries'
 import { latestAgentOf, useRunCtx } from '../runContext'
 import { TaskNode, type TaskFlowNode } from './TaskNode'
 import { buildGraphModel, isEdgeSatisfied, layoutGraph, type Position } from './graphModel'
@@ -31,6 +32,7 @@ function FitOnce({ hasNodes }: { hasNodes: boolean }) {
 function GraphInner({ selectedTaskId, onSelect }: { selectedTaskId: string | null; onSelect: (taskId: string) => void }) {
   const { detail, tasksById } = useRunCtx()
   const { tasks, dependencies, agents, pendingApprovals } = detail
+  const colorMode = useSettings().data?.appearance.theme === 'light' ? 'light' : 'dark'
 
   const model = useMemo(() => buildGraphModel(tasks, dependencies), [tasks, dependencies])
   // Positions depend only on the node/edge set (the signature), so a state change never reshuffles the graph.
@@ -89,12 +91,11 @@ function GraphInner({ selectedTaskId, onSelect }: { selectedTaskId: string | nul
       minZoom={0.2}
       maxZoom={1.75}
       proOptions={{ hideAttribution: true }}
-      colorMode="dark"
+      colorMode={colorMode}
     >
       <FitOnce hasNodes={nodes.length > 0} />
       <Background gap={20} />
       <Controls showInteractive={false} position="bottom-left" />
-      <MiniMap pannable zoomable position="bottom-right" nodeColor="var(--color-tone-neutral)" />
     </ReactFlow>
   )
 }

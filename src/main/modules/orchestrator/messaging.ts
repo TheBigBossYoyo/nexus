@@ -109,6 +109,19 @@ export class MessageService {
     return messages
   }
 
+  /** Only the user's undelivered instructions for a task, marked delivered. Other messages stay queued. */
+  takeInstructions(taskId: string): Message[] {
+    const { repos } = this.deps
+    const instructions = repos.messages.listUndeliveredForTask(taskId).filter((m) => m.type === 'user_instruction')
+    if (instructions.length > 0) {
+      repos.messages.markDelivered(
+        taskId,
+        instructions.map((m) => m.id),
+      )
+    }
+    return instructions
+  }
+
   private route(input: SendMessageInput, tasks: Task[]): Task[] {
     const { repos } = this.deps
     const open = tasks.filter(

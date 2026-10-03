@@ -33,8 +33,108 @@ function strField(input: Record<string, unknown>, key: string): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v : null
 }
 
-const PRIVATE_HOST =
-  /^(localhost|.*\.local|.*\.internal|.*\.localhost|\[?::1\]?|127\..*|10\..*|192\.168\..*|169\.254\..*|172\.(1[6-9]|2\d|3[01])\..*|0\.0\.0\.0)$/i
+const LOCAL_SUFFIXES = ['localhost', 'local', 'internal', 'localdomain', 'lan', 'intranet', 'corp', 'home', 'private']
+const NUMERIC_LABEL = /^(0x[0-9a-f]*|\d+)$/i
+
+/** inet_aton-style parse (1-4 parts; decimal, octal or hex). null when invalid. */
+function parseIPv4(labels: string[]): number | null {
+  if (labels.length < 1 || labels.length > 4) return null
+  const vals: number[] = []
+  for (const l of labels) {
+    const hex = /^0x/i.test(l)
+    const octal = !hex && l.length > 1 && l.startsWith('0')
+    if (octal && /[89]/.test(l)) return null
+    const v = hex ? (l.length === 2 ? 0 : Number.parseInt(l.slice(2), 16)) : Number.parseInt(l, octal ? 8 : 10)
+    if (!Number.isSafeInteger(v) || v < 0) return null
+    vals.push(v)
+  }
+  const last = vals[vals.length - 1] ?? 0
+  const head = vals.slice(0, -1)
+  if (head.some((v) => v > 255) || last >= 256 ** (5 - vals.length)) return null
+  let n = last
+  head.forEach((v, idx) => {
+    n += v * 256 ** (3 - idx)
+  })
+  return n
+}
+
+function isPrivateIPv4(n: number): boolean {
+  const a = Math.floor(n / 2 ** 24)
+  const b = Math.floor(n / 2 ** 16) % 256
+  const c = Math.floor(n / 2 ** 8) % 256
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 198 && (b === 18 || b === 19))
+  )
+}
+
+/** Eight 16-bit groups of an IPv6 literal, or null when malformed. */
+function parseIPv6(host: string): number[] | null {
+  let h = host
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(h)
+  if (dotted?.[1] !== undefined) {
+    const v4 = parseIPv4(dotted[1].split('.'))
+    if (v4 === null) return null
+    h = `${h.slice(0, -dotted[1].length)}${Math.floor(v4 / 65536).toString(16)}:${(v4 % 65536).toString(16)}`
+  }
+  const halves = h.split('::')
+  if (halves.length > 2) return null
+  const toGroups = (part: string): number[] | null => {
+    if (part === '') return []
+    const out: number[] = []
+    for (const g of part.split(':')) {
+      if (!/^[0-9a-f]{1,4}$/i.test(g)) return null
+      out.push(Number.parseInt(g, 16))
+    }
+    return out
+  }
+  const left = toGroups(halves[0] ?? '')
+  const right = halves.length === 2 ? toGroups(halves[1] ?? '') : []
+  if (left === null || right === null) return null
+  if (halves.length === 1) return left.length === 8 ? left : null
+  const fill = 8 - left.length - right.length
+  if (fill < 1) return null
+  return [...left, ...new Array<number>(fill).fill(0), ...right]
+}
+
+function isPrivateIPv6(g: number[]): boolean {
+  const g0 = g[0] ?? 0
+  const embedded = (hi: number, lo: number): number => hi * 65536 + lo
+  if (g.slice(0, 7).every((x) => x === 0) && (g[7] === 0 || g[7] === 1)) return true // :: and ::1
+  if ((g0 & 0xfe00) === 0xfc00) return true // unique local fc00::/7
+  if ((g0 & 0xffc0) === 0xfe80 || (g0 & 0xffc0) === 0xfec0) return true // link-local and site-local
+  if (g0 === 0xff00 || (g0 & 0xff00) === 0xff00) return true // multicast
+  if (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0xffff || g[5] === 0)) return isPrivateIPv4(embedded(g[6] ?? 0, g[7] ?? 0)) // mapped / compatible
+  if (g0 === 0x64 && g[1] === 0xff9b) return isPrivateIPv4(embedded(g[6] ?? 0, g[7] ?? 0)) // NAT64
+  if (g0 === 0x2002) return isPrivateIPv4(embedded(g[1] ?? 0, g[2] ?? 0)) // 6to4
+  return false
+}
+
+/** True for loopback, private, link-local and otherwise non-public hosts, in any literal spelling. Fails closed. */
+export function isPrivateHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '')
+  if (host === '') return true
+  if (host.includes(':')) {
+    const groups = parseIPv6(host)
+    return groups === null || isPrivateIPv6(groups)
+  }
+  const labels = host.split('.')
+  if (labels.every((l) => NUMERIC_LABEL.test(l))) {
+    const n = parseIPv4(labels)
+    return n === null || isPrivateIPv4(n)
+  }
+  if (labels.length === 1) return true // single-label intranet name
+  const tld = labels[labels.length - 1] ?? ''
+  return LOCAL_SUFFIXES.includes(tld)
+}
 
 /**
  * Builds the per-call policy check for one agent. Never throws: any internal failure is a deny.
@@ -181,7 +281,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
           return deny(`Invalid URL: ${raw}`)
         }
         if (url.protocol !== 'http:' && url.protocol !== 'https:') return deny(`Only http(s) URLs may be fetched, not ${url.protocol}`)
-        if (PRIVATE_HOST.test(url.hostname)) return ask(`fetches a local or private-network address: ${url.hostname}`, 'medium')
+        if (isPrivateHost(url.hostname)) return ask(`fetches a local or private-network address: ${url.hostname}`, 'medium')
         return ALLOW
       }
       default:

@@ -44,6 +44,8 @@ export interface ClaudeSdkRuntimeOptions {
 
 const KEY_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']
 const NEXUS_TOOL_PREFIX = 'mcp__nexus__'
+/** The runtime delivers `outputFormat` results through this internal tool; it has no side effects. */
+const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput'
 const INIT_TIMEOUT_MS = 20_000
 
 /**
@@ -72,9 +74,16 @@ function apiKeyEnvPresent(env: Record<string, string | undefined>): boolean {
 // ---------------------------------------------------------------------------------------------
 // Auth status mapping
 
+interface AuthFlags {
+  subscriptionMode: boolean
+  apiKeyEnvDetected: boolean
+  /** Version of the Claude Code binary in use, when known; null/absent shows as unknown. */
+  claudeCodeVersion?: string | null
+}
+
 export function authStatusFromAccount(
   account: AccountInfo,
-  flags: { subscriptionMode: boolean; apiKeyEnvDetected: boolean },
+  flags: AuthFlags,
 ): AuthStatus {
   const keyInUse = !!account.apiKeySource && account.apiKeySource !== 'none'
   const bearerToken = account.tokenSource?.toUpperCase().startsWith('ANTHROPIC_') === true
@@ -109,7 +118,7 @@ export function authStatusFromAccount(
 
 export function authStatusFromError(
   error: unknown,
-  flags: { subscriptionMode: boolean; apiKeyEnvDetected: boolean },
+  flags: AuthFlags,
 ): AuthStatus {
   const message = errorMessage(error).slice(0, 300)
   const unavailable = /not found|ENOENT|EACCES|EPERM|spawn|Native CLI binary/i.test(message)
@@ -126,11 +135,11 @@ export function authStatusFromError(
   }
 }
 
-function baseStatus(flags: { subscriptionMode: boolean; apiKeyEnvDetected: boolean }) {
+function baseStatus(flags: AuthFlags) {
   return {
     apiKeyEnvDetected: flags.apiKeyEnvDetected,
     apiKeyEnvStripped: flags.apiKeyEnvDetected && flags.subscriptionMode,
-    claudeCodeVersion: null,
+    claudeCodeVersion: flags.claudeCodeVersion ?? null,
     warnings: flags.apiKeyEnvDetected ? [API_KEY_WARNING] : [],
     checkedAt: nowIso(),
   }
@@ -145,15 +154,19 @@ function toModelOption(m: ModelInfo): ModelOption {
   }
 }
 
-function readSdkVersion(): string {
+function readSdkManifest(): { version?: string; claudeCodeVersion?: string } | null {
   try {
     // package.json is not in the SDK's export map, so locate it next to the resolved entry point.
     const entry = createRequire(import.meta.url).resolve('@anthropic-ai/claude-agent-sdk')
     let dir = dirname(entry)
     for (let i = 0; i < 4; i++) {
       try {
-        const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: string; version?: string }
-        if (pkg.name === '@anthropic-ai/claude-agent-sdk' && pkg.version) return pkg.version
+        const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+          name?: string
+          version?: string
+          claudeCodeVersion?: string
+        }
+        if (pkg.name === '@anthropic-ai/claude-agent-sdk') return pkg
       } catch {
         // keep walking up
       }
@@ -162,7 +175,16 @@ function readSdkVersion(): string {
   } catch {
     // fall through
   }
-  return 'unknown'
+  return null
+}
+
+function readSdkVersion(): string {
+  return readSdkManifest()?.version || 'unknown'
+}
+
+/** The Claude Code version the SDK package pins (the native binary it ships), or null when unreadable. */
+function readBundledClaudeCodeVersion(): string | null {
+  return readSdkManifest()?.claudeCodeVersion || null
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -183,6 +205,7 @@ class PolicyGate {
 
   private async decide(toolName: string, input: Record<string, unknown>, toolUseId: string): Promise<ToolDecision> {
     if (toolName.startsWith(NEXUS_TOOL_PREFIX)) return { behavior: 'allow' }
+    if (toolName === STRUCTURED_OUTPUT_TOOL && this.spec.outputSchema) return { behavior: 'allow' }
     try {
       const d = await this.spec.authorize({ agentId: this.spec.agentId, toolName, input, toolUseId })
       if (d.behavior === 'allow') return d
@@ -570,9 +593,11 @@ export class ClaudeSdkRuntime implements AgentRuntime {
   }
 
   async getAccountInfo(options: { subscriptionMode: boolean }): Promise<AuthStatus> {
-    const flags = {
+    const flags: AuthFlags = {
       subscriptionMode: options.subscriptionMode,
       apiKeyEnvDetected: apiKeyEnvPresent(this.processEnv),
+      // A user-chosen executable may be any version, so only the SDK-shipped binary has a known one.
+      claudeCodeVersion: this.options.executablePath ? null : readBundledClaudeCodeVersion(),
     }
     try {
       const init = await this.initialize(options.subscriptionMode)

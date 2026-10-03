@@ -5,6 +5,7 @@ import {
   dependencyFailureCascade,
   findExpiredLeases,
   isRunFinished,
+  isSupersededRepair,
   nextAttemptPlan,
   runOutcome,
 } from '@main/modules/scheduler'
@@ -131,6 +132,21 @@ describe('run completion helpers', () => {
     expect(runOutcome([t('completed'), t('failed'), t('cancelled')])).toBe('failed')
     expect(runOutcome([t('cancelled')])).toBe('cancelled')
     expect(runOutcome([makeTask('x', { state: 'completed' }), makeTask('y', { state: 'cancelled' })])).toBe('cancelled')
+  })
+
+  it('ignores repair attempts that died while their parent was retried or completed', () => {
+    const parent = makeTask('p', { state: 'completed' })
+    const failedFix = makeTask('p-fix1', { state: 'failed', kind: 'repair', role: 'debugger', parentTaskId: 'p' })
+    const cancelledFix = makeTask('p-fix2', { state: 'cancelled', kind: 'repair', role: 'debugger', parentTaskId: 'p' })
+    expect(isSupersededRepair(failedFix, [parent, failedFix])).toBe(true)
+    expect(runOutcome([parent, failedFix, cancelledFix])).toBe('completed')
+    // While the parent itself is failed its dead attempts stay part of the picture.
+    const failedParent = makeTask('p', { state: 'failed' })
+    expect(isSupersededRepair(failedFix, [failedParent, failedFix])).toBe(false)
+    expect(runOutcome([failedParent, failedFix])).toBe('failed')
+    // A top-level repair task (mission-fix) is a normal task.
+    const missionFix = makeTask('mission-fix-1', { state: 'failed', kind: 'repair', role: 'debugger' })
+    expect(runOutcome([parent, missionFix])).toBe('failed')
   })
 
   it('counts tasks by state', () => {

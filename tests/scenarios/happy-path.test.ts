@@ -13,7 +13,9 @@ describe('scenario: plan → parallel workers → review → verification → me
     const worker: FakeScript = async (spec, ctx) => {
       concurrentWorkers++
       maxConcurrentWorkers = Math.max(maxConcurrentWorkers, concurrentWorkers)
-      await ctx.sleep(60)
+      // Hold the first worker until the second independent one has started (or give up after 5s),
+      // so the assertion does not depend on how fast git creates the second worktree.
+      for (let waited = 0; maxConcurrentWorkers < 2 && waited < 5000; waited += 20) await ctx.sleep(20)
       await fileWorker(spec, ctx)
       concurrentWorkers--
     }

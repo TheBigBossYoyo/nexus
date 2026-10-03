@@ -306,6 +306,18 @@ describe('policy enforcement', () => {
     expect(authorize).not.toHaveBeenCalled()
   })
 
+  it('allows the StructuredOutput tool only for sessions that requested structured output', async () => {
+    const authorize = vi.fn(async (): Promise<ToolDecision> => ({ behavior: 'deny', reason: 'not in role tools' }))
+    const structured = start({ authorize, outputSchema: { type: 'object' } })
+    expect(decisionOf(await structured.hook('StructuredOutput')).permissionDecision).toBe('allow')
+    expect(authorize).not.toHaveBeenCalled()
+  })
+
+  it('does not exempt StructuredOutput when no structured output was requested', async () => {
+    const plain = start({ authorize: async () => ({ behavior: 'deny', reason: 'not in role tools' }), outputSchema: undefined })
+    expect(decisionOf(await plain.hook('StructuredOutput')).permissionDecision).toBe('deny')
+  })
+
   it('routes ask through requestApproval once, honouring the answer', async () => {
     const authorize = vi.fn(async (): Promise<ToolDecision> => ({ behavior: 'ask', reason: 'risky', risk: 'high' }))
     const requestApproval = vi.fn(async () => true)
@@ -420,6 +432,13 @@ describe('getAccountInfo', () => {
     ])
     expect(caps.sdkVersion).toMatch(/^\d+\.\d+\.\d+/)
     expect(created).toHaveLength(1) // models were cached from the same initialization
+  })
+
+  it('reports the SDK-pinned Claude Code version only when the bundled binary is used', async () => {
+    initResult = { account: { subscriptionType: 'max', tokenSource: 'claude.ai' }, models: [] }
+    const bundled = new ClaudeSdkRuntime({ processEnv: { PATH: 'p' } })
+    expect((await bundled.getAccountInfo({ subscriptionMode: true })).claudeCodeVersion).toMatch(/^\d+\.\d+\.\d+/)
+    expect((await runtime().getAccountInfo({ subscriptionMode: true })).claudeCodeVersion).toBeNull()
   })
 
   it('reports authentication_required, api_key, third_party', () => {

@@ -65,7 +65,10 @@ researcher `research`; AUDIT uses `audit`/`synthesis`), dependency rows, and acc
 `tick(runId)` in order:
 
 1. Do nothing unless the run is `executing`, `testing`, `reviewing`, `verifying` or `repairing`.
-2. If `maxDurationMinutes` has elapsed since `startedAt`, pause the run (reason `user`).
+2. If the run's active time exceeds `maxDurationMinutes`, pause the run (reason `user`). Active time excludes
+   paused intervals (user, quota and recovery pauses): it is kept per run in the settings key/value table
+   (`run-active:<runId>`, accumulated on every pause, restarted on every resume, and after a restart counted
+   only up to the run's last event). A pause caused by the limit starts a fresh window, so Resume continues.
 3. Clear expired leases of tasks that have no active pipeline (`findExpiredLeases`, event
    `task.lease_expired`).
 4. `restartOrphans`: relaunch pipelines for tasks left in `assigned`, `running`, `review`,
@@ -93,7 +96,7 @@ candidate, in order, the first matching rule defers it:
 | Run paused (not used by the orchestrator, which only calls it for active runs) | `run_paused` |
 | Unexpired lease held | `leased` |
 | Any dependency not `completed` | `waiting_on_dependencies` |
-| `requiresApproval` and not `approvalGranted` | `awaiting_approval` (the tick creates a `task` approval once) |
+| `requiresApproval` and not `approvalGranted` | `awaiting_approval` (the tick creates a `task` approval once; a still-pending one from before a restart counts, so none is duplicated) |
 | Already started `maxParallelAgents - active` tasks this pass | `no_free_slot` |
 | Writing role and conflicts with a running or just-selected writer | `serialized_file_overlap` or `serialized_not_parallelizable` |
 
@@ -160,13 +163,22 @@ task, and dependants blocked only by a dependency failure, to `ready`.
 - Bound: if `parent.repairCycles >= config.maxIterations` (default 3, range 1 to 50) the parent task
   fails with `<kind> still failing after N repair cycle(s)`.
 - Otherwise the parent goes to `waiting` with `repairCycles + 1`, and a child task is inserted already
-  `running`: role `debugger`, kind `repair`, key `<parent>-fix<n>`, `parentTaskId` set. From the second
+  `running`: role `debugger`, kind `repair`, key `<parent>-fix<n>` (`n` is one more than the highest suffix among the
+  parent's existing repair children, so keys stay unique across retries), `parentTaskId` set. From the second
   repair on, the child uses the `strongest` tier (`task.escalated`).
 - The debugger runs in the parent's worktree with `buildRepairPrompt` (failure kind, summary, details,
   review findings or verification failures, check output).
 - If the child succeeds without a blocker it is `completed`, the parent returns to `running`, and the
   pipeline restarts at `checks`. If it fails or reports a blocker, both child and parent are `failed`.
   If it was halted by a pause or quota the pipeline just stops.
+- Repair children are attempts, kept as history. `retryTask` cancels open ones and rejects a retry of a repair child
+  itself. A failed or cancelled repair child whose parent is not `failed` is ignored when deciding whether the
+  run is finished, stuck or failed (`isSupersededRepair`). Cancelling a repair child stops its debugger, cancels
+  that repair cycle and fails the parent with "Repair cancelled by user" (retryable).
+- Pending user instructions for the parent are appended to the repair prompt.
+- Checks may modify the task worktree. Before review everything the agent did is already committed, so what
+  is dirty then came from the checks and is discarded (`WorktreeManager.resetClean`): the reviewed diff is
+  exactly what is merged.
 - Failure kinds that enter repair: failed checks, a review with `critical` or `high` findings, a failed
   verification, and a merge conflict with the integration branch (the debugger is told to run
   `git merge <integration branch>` in its worktree, resolve and commit).
@@ -178,10 +190,10 @@ The same `repairCycles` budget is shared by all four failure kinds for one task.
 `finalize(runId)` runs when all tasks are terminal:
 
 1. If any task is `failed`: pause the run for intervention (`Intervention required: tasks ... failed`).
-2. If all tasks are `cancelled`: the run is `cancelled`.
+2. If all tasks are `cancelled`: the run is `cancelled`. (Superseded repair attempts are not counted in 1 and 2.)
 3. Otherwise set the run to `verifying`. If the run has an integration worktree, run the check
-   commands there (`runChecks`, attempt number = number of `mission-fix-*` tasks + 1) and compute the
-   diff `baseCommit..HEAD`.
+   commands there (`runChecks`, attempt number = number of `mission-fix-*` tasks + 1), restore the integration
+   worktree to its committed state (the checks may have left files behind) and compute the diff `baseCommit..HEAD`.
 4. If checks passed and the plan has mission-level criteria, run one `verifier` agent
    (`buildMissionVerifierPrompt`) on the integration worktree. Its criteria update the
    `acceptance_criteria` rows. With no mission-level criteria the verifier is skipped and checks alone decide.
@@ -205,8 +217,9 @@ this step. If the verifier cannot produce valid output the run is paused, not fa
 | Stuck (failed or blocked tasks, nothing runnable) | Paused with reason `user` and an `Intervention required` message. |
 | Startup after the app was closed mid-run | Paused with reason `recovery` (see RECOVERY.md). |
 
-`resumeRun` waits for in-flight work to settle, restores `resumeState` (`resumeTarget`), clears the
-pause, and then: `planning` re-plans, `awaiting_approval` re-creates the plan approval if none is
+`resumeRun` waits for in-flight work to settle, reconciles worktrees (aborts a merge a crash left in progress,
+marks vanished worktrees `orphaned`; done on every resume, including after recovery `inspect`), restores
+`resumeState` (`resumeTarget`), clears the pause, and then: `planning` re-plans, `awaiting_approval` re-creates the plan approval if none is
 pending, anything else requests a tick (which restarts orphaned pipelines).
 
 ## Human interventions
@@ -220,10 +233,10 @@ All emit `user.intervention` events with an `action`.
 | `runs.pause`, `runs.resume`, `runs.cancel` | Cancel moves the run and every non-terminal task to `cancelled`, expires pending approvals and stops sessions. Worktrees stay until `runs.cleanup`. |
 | `agents.stop` | Stops the agent's pipeline control; the task becomes `failed` ("Agent stopped by user"). |
 | `tasks.retry` | `failed` or `blocked` to `ready`, resets attempts and repair cycles. |
-| `tasks.cancel` | Cancels the task and its repair children. |
+| `tasks.cancel` | Cancels the task and its repair children. On a repair child it also stops the debugger and fails the parent ("Repair cancelled by user"). |
 | `tasks.setPriority` (-100 to 100) | Ranking input for the scheduler. |
 | `tasks.add` | Adds a task `user-task-<n>` with dependencies (cycle-checked). Writing roles are refused in AUDIT. It is `ready` immediately unless the run is still planning or awaiting approval. |
-| `tasks.instruct` | Sends a `user_instruction` message: delivered live to a running agent, otherwise included in the next context pack. |
+| `tasks.instruct` | Sends a `user_instruction` message: delivered live to the session doing the work (implementer or debugger, never a reviewer, verifier or planner session), otherwise included in the next prompt (context pack, resume prompt or repair prompt) and only then marked delivered. |
 | `tasks.resolveBlocker` | Only for `blocked` tasks: optional instruction, then `ready`. |
 | `criteria.update` | Edits a criterion text and resets it to `pending`. |
 | `runs.recover` | `resume`, `inspect` or `cancel` for a run found paused after a restart. |

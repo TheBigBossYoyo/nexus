@@ -455,3 +455,57 @@ describe('never throws', () => {
     expect(d.behavior).toBe('deny')
   })
 })
+
+describe('WebFetch private-address detection', () => {
+  const fetchBehavior = (url: string) => behavior('researcher', 'WebFetch', { url }, { allowNetworkTools: true })
+
+  it.each([
+    'http://localhost./',
+    'http://LOCALHOST.:8080/',
+    'http://foo.localhost/',
+    'http://intranet/',
+    'http://[::1]/',
+    'http://[::]/',
+    'http://[0:0:0:0:0:0:0:1]/',
+    'http://[fd00::1]/',
+    'http://[fc00::1]/',
+    'http://[fe80::1]/',
+    'http://[::ffff:7f00:1]/',
+    'http://[::ffff:127.0.0.1]/',
+    'http://[::ffff:10.0.0.1]/',
+    'http://[::127.0.0.1]/',
+    'http://[64:ff9b::7f00:1]/',
+    'http://[2002:7f00:1::]/',
+    'http://2130706433/',
+    'http://0x7f.1/',
+    'http://0x7f000001/',
+    'http://017700000001/',
+    'http://0177.0.0.1/',
+    'http://127.1/',
+    'http://127.0.0.1./',
+    'http://0.0.0.0/',
+    'http://0.1.2.3/',
+    'http://0/',
+    'http://100.64.0.1/',
+    'http://100.127.255.255/',
+    'http://169.254.169.254/',
+    'http://172.16.0.1/',
+    'http://172.31.255.255/',
+    'http://192.168.0.1/',
+    'http://10.1.2.3/',
+  ])('asks for %s', async (url) => {
+    expect(await fetchBehavior(url)).toBe('ask')
+  })
+
+  it.each([
+    'https://example.com/',
+    'https://example.com./',
+    'http://8.8.8.8/',
+    'http://100.128.0.1/',
+    'http://172.32.0.1/',
+    'http://[2606:4700:4700::1111]/',
+    'http://[::ffff:808:808]/',
+  ])('allows %s', async (url) => {
+    expect(await fetchBehavior(url)).toBe('allow')
+  })
+})

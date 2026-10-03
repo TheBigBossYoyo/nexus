@@ -20,6 +20,7 @@ import {
   type RunMode,
   type RunState,
   type Task,
+  type TaskError,
   type TaskKind,
   type Worktree,
 } from '@shared/domain'
@@ -34,6 +35,7 @@ import {
   verifierOutputJsonSchema,
 } from '@main/modules/context/context-builder'
 import {
+  countedTasks,
   dependencyFailureCascade,
   findExpiredLeases,
   isRunFinished,
@@ -388,6 +390,7 @@ export class Orchestrator implements PipelineHost {
         bus.emit({ runId, taskId: task.id, type: 'task.ready', payload: {} })
       }
       this.core.setRunState(runId, 'executing', { startedAt: nowIso() })
+      this.core.markRunActive(runId, true)
       bus.emit({ runId, type: 'run.started', payload: {} })
     })
     this.requestTick(runId)
@@ -424,8 +427,11 @@ export class Orchestrator implements PipelineHost {
     const run = repos.runs.get(runId)
     if (this.closing || !run || !ACTIVE_RUN_STATES.includes(run.state)) return
 
-    if (run.startedAt && Date.now() - Date.parse(run.startedAt) > run.config.maxDurationMinutes * 60_000) {
+    // The limit bounds active time: paused intervals (user, quota, recovery) do not count, and a resume
+    // after the limit paused the run grants a fresh window.
+    if (run.startedAt && this.core.runActiveMs(run) > run.config.maxDurationMinutes * 60_000) {
       await this.pauseRun(runId, 'user', `Mission duration limit of ${run.config.maxDurationMinutes} minutes reached`)
+      this.core.resetRunActive(runId)
       return
     }
 
@@ -480,7 +486,7 @@ export class Orchestrator implements PipelineHost {
     // Nothing is running and nothing can start. Unless an approval can unblock it, a human must step in.
     const awaitingApproval = decision.deferred.some((d) => d.reason.kind === 'awaiting_approval')
     if (!awaitingApproval && decision.start.length === 0) {
-      const stuck = tasks.filter((t) => t.state === 'failed' || t.state === 'blocked').map((t) => t.key)
+      const stuck = countedTasks(tasks).filter((t) => t.state === 'failed' || t.state === 'blocked').map((t) => t.key)
       await this.pauseRun(runId, 'user', `Intervention required: ${stuck.length > 0 ? `tasks ${stuck.join(', ')} are failed or blocked` : 'no task can make progress'}`)
     }
   }
@@ -497,6 +503,8 @@ export class Orchestrator implements PipelineHost {
       const key = `${taskId}:approval`
       if (this.announced.has(key)) return
       this.announced.add(key)
+      // The in-memory set is empty after a restart; the pending request itself is durable.
+      if (repos.approvals.listPending(runId).some((a) => a.kind === 'task' && a.taskId === taskId)) return
       const task = repos.tasks.require(taskId)
       this.core.approvals.create({
         runId,
@@ -522,7 +530,8 @@ export class Orchestrator implements PipelineHost {
       switch (task.state) {
         case 'assigned':
         case 'running':
-          stage = 'implement'
+          // 'running' also covers checks: resume there when the implementer already finished.
+          stage = this.pipeline.resumeStage(task)
           break
         case 'review':
           stage = 'review'
@@ -642,7 +651,7 @@ export class Orchestrator implements PipelineHost {
     const { repos, bus, git } = this.deps
     let run = repos.runs.require(runId)
     if (!ACTIVE_RUN_STATES.includes(run.state)) return
-    const tasks = repos.tasks.listByRun(runId)
+    const tasks = countedTasks(repos.tasks.listByRun(runId))
 
     if (tasks.some((t) => t.state === 'failed')) {
       const failed = tasks.filter((t) => t.state === 'failed').map((t) => t.key)
@@ -665,6 +674,9 @@ export class Orchestrator implements PipelineHost {
       const control = this.runControl(runId)
       const cycle = tasks.filter((t) => t.key.startsWith('mission-fix-')).length + 1
       const checks = await this.core.runChecks(run, null, integration.path, cycle)
+      // Checks can leave files behind; only merges are committed in the integration worktree, so restore
+      // it before a mission-fix task merges into it.
+      await this.core.cleanWorktree(integration.path)
       if (control.stopReason || repos.runs.require(runId).state !== 'verifying') return
       const diff = await git.diff(integration.path, run.baseCommit, 'HEAD')
       const stat = diff.files.map((f) => `${f.status} ${f.path} (+${f.additions} -${f.deletions})`).join('\n')
@@ -800,8 +812,12 @@ export class Orchestrator implements PipelineHost {
     if (run.state !== 'paused') throw new NexusError('invalid_state', `Run is ${run.state}, not paused`)
     await this.settle(runId)
     const target = resumeTarget(run)
+    // Every resume reconciles first (recovery 'inspect' included): a merge interrupted by a crash would
+    // otherwise block all later merges. Idempotent when nothing is wrong.
+    await this.reconcileWorktrees(run)
     bus.transaction(() => {
       this.core.setRunState(runId, target, { resumeState: null, pauseReason: null })
+      this.core.markRunActive(runId)
       bus.emit({ runId, type: 'run.resumed', payload: {} })
     })
     this.runControls.delete(runId)
@@ -846,7 +862,17 @@ export class Orchestrator implements PipelineHost {
     if (task.state !== 'failed' && task.state !== 'blocked') {
       throw new NexusError('invalid_state', `Only failed or blocked tasks can be retried (task is ${task.state})`)
     }
+    if (task.parentTaskId) {
+      throw new NexusError('invalid_state', 'A repair attempt cannot be retried on its own; retry its parent task')
+    }
     bus.transaction(() => {
+      // Repair attempts of earlier runs of the pipeline are dead: cancel any that are still open. Failed ones
+      // stay as history (lifecycle.isSupersededRepair keeps them from blocking the run).
+      for (const child of repos.tasks.listByParent(taskId)) {
+        if (this.core.tryTaskState(child.id, 'cancelled')) {
+          bus.emit({ runId: task.runId, taskId: child.id, type: 'task.cancelled', payload: {} })
+        }
+      }
       this.core.setTaskState(taskId, 'ready', { attempt: 0, repairCycles: 0, error: null, blockedReason: null, finishedAt: null }, 'user retry')
       bus.emit({ runId: task.runId, taskId, type: 'user.intervention', payload: { action: 'retry_task' } })
       // Dependants that were blocked only because this task failed can run again.
@@ -864,13 +890,24 @@ export class Orchestrator implements PipelineHost {
     const { repos, bus } = this.deps
     const task = repos.tasks.require(taskId)
     if (TERMINAL_TASK_STATES.includes(task.state)) throw new NexusError('invalid_state', `Task is already ${task.state}`)
+    // A repair child runs its debugger under the parent's pipeline control.
+    const pipeline = this.active.get(taskId) ?? this.activeForChild(taskId)
     bus.transaction(() => {
       this.core.setTaskState(taskId, 'cancelled')
       bus.emit({ runId: task.runId, taskId, type: 'task.cancelled', payload: {} })
       bus.emit({ runId: task.runId, taskId, type: 'user.intervention', payload: { action: 'cancel_task' } })
       for (const child of repos.tasks.listByParent(taskId)) this.core.tryTaskState(child.id, 'cancelled')
+      // Cancelling a repair cancels that repair cycle: the parent fails (retryable) instead of carrying on
+      // without the fix, and its pipeline stops with the debugger.
+      const parent = task.parentTaskId ? repos.tasks.get(task.parentTaskId) : null
+      if (parent && parent.state === 'waiting') {
+        const error: TaskError = { what: 'Repair cancelled by user', where: task.key, why: null, retryable: true }
+        if (this.core.tryTaskState(parent.id, 'failed', { error })) {
+          bus.emit({ runId: task.runId, taskId: parent.id, type: 'task.failed', payload: error })
+        }
+      }
     })
-    await this.active.get(taskId)?.control.stop('cancelled')
+    await pipeline?.control.stop('cancelled')
     this.requestTick(task.runId)
     return repos.tasks.require(taskId)
   }
@@ -1030,6 +1067,9 @@ export class Orchestrator implements PipelineHost {
         void this.cancelRun(run.id)
       }
     } else if (approval.kind === 'task' && approval.taskId) {
+      // A stale request (the task already started, finished or was cancelled) must not change it.
+      const task = repos.tasks.get(approval.taskId)
+      if (!task || !(['draft', 'ready', 'queued'] as const).some((s) => s === task.state)) return
       if (approved) repos.tasks.update(approval.taskId, { approvalGranted: true })
       else if (this.core.tryTaskState(approval.taskId, 'cancelled')) {
         bus.emit({ runId: approval.runId, taskId: approval.taskId, type: 'task.cancelled', payload: {} })
@@ -1039,7 +1079,8 @@ export class Orchestrator implements PipelineHost {
   }
 
   private deliverLive(taskId: string, message: Message): boolean {
-    const pipeline = this.active.get(taskId)
+    // A repair child's debugger runs under its parent's pipeline control.
+    const pipeline = this.active.get(taskId) ?? this.activeForChild(taskId)
     return pipeline ? pipeline.control.send(renderMessage(message)) : false
   }
 
@@ -1062,6 +1103,9 @@ export class Orchestrator implements PipelineHost {
         continue
       }
       const stale = this.markStaleAgents(run.id)
+      // The time the app was closed is not active time: count up to the run's last recorded activity.
+      const lastActivity = repos.events.lastEventAt(run.id)
+      this.core.markRunInactive(run.id, lastActivity ? Date.parse(lastActivity) : Date.now())
       bus.transaction(() => {
         this.core.setRunState(run.id, 'paused', { resumeState: run.state, pauseReason: 'recovery' }, 'application restarted')
         bus.emit({ runId: run.id, type: 'run.paused', payload: { reason: 'recovery', detail: 'NEXUS was closed while this run was active' } })
@@ -1106,7 +1150,7 @@ export class Orchestrator implements PipelineHost {
 
   async recover(runId: string, action: 'resume' | 'inspect' | 'cancel'): Promise<Run> {
     const { repos, bus } = this.deps
-    const run = repos.runs.require(runId)
+    repos.runs.require(runId)
     bus.emit({ runId, type: 'run.recovered', payload: { action, staleAgents: 0 } })
     if (action === 'inspect') {
       // Keep it paused but no longer flagged for recovery; the user resumes or cancels it later.
@@ -1114,7 +1158,6 @@ export class Orchestrator implements PipelineHost {
     }
     if (action === 'cancel') return this.cancelRun(runId)
 
-    await this.reconcileWorktrees(run)
     return this.resumeRun(runId)
   }
 
@@ -1127,6 +1170,7 @@ export class Orchestrator implements PipelineHost {
         if (await git.isMergeInProgress(worktree.path).catch(() => false)) await git.abortMerge(worktree.path)
         continue
       }
+      if (worktree.taskId === null) this.integrations.delete(run.id)
       bus.transaction(() => {
         repos.worktrees.update(worktree.id, { state: 'orphaned' })
         bus.emit({ runId: run.id, taskId: worktree.taskId, type: 'git.worktree.removed', payload: { path: worktree.path } })

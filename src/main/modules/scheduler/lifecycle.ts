@@ -144,10 +144,29 @@ export function isRunFinished(tasks: readonly Task[]): boolean {
 }
 
 /**
+ * A repair child that failed or was cancelled while its parent is not failed. Repair children are
+ * attempts, kept as history: once the parent has been retried (or completed) a dead attempt must not
+ * make the run failed, stuck or cancelled. A failed parent keeps its dead children visible.
+ */
+export function isSupersededRepair(task: Task, tasks: readonly Task[]): boolean {
+  if (task.kind !== 'repair' || task.parentTaskId === null) return false
+  if (task.state !== 'failed' && task.state !== 'cancelled') return false
+  const parent = tasks.find((t) => t.id === task.parentTaskId)
+  return parent !== undefined && parent.state !== 'failed'
+}
+
+/** The tasks that count towards run completion: everything except superseded repair attempts. */
+export function countedTasks(tasks: readonly Task[]): Task[] {
+  return tasks.filter((t) => !isSupersededRepair(t, tasks))
+}
+
+/**
  * Null while unfinished. Any failed task makes the run failed; all completed is completed;
  * otherwise (completed mixed with cancelled, or all cancelled) it is cancelled.
+ * Superseded repair attempts (see isSupersededRepair) do not count.
  */
-export function runOutcome(tasks: readonly Task[]): RunOutcome | null {
+export function runOutcome(allTasks: readonly Task[]): RunOutcome | null {
+  const tasks = countedTasks(allTasks)
   if (!isRunFinished(tasks)) return null
   if (tasks.some((t) => t.state === 'failed')) return 'failed'
   if (tasks.every((t) => t.state === 'completed')) return 'completed'

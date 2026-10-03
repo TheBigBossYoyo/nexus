@@ -19,6 +19,15 @@ import type { OrchestratorDeps } from './deps'
 import { MemoryService } from './memory'
 import { MessageService } from './messaging'
 
+/** Active (non-paused) time of a run, which the mission duration limit is measured against. */
+interface ActiveTime {
+  usedMs: number
+  /** Start of the interval the run is currently active in; null while paused. */
+  since: string | null
+}
+
+const activeKey = (runId: string): string => `run-active:${runId}`
+
 const CHECK_ORDER = ['typecheck', 'lint', 'build', 'test'] as const
 const CHECK_OUTPUT_BYTES = 48 * 1024
 
@@ -107,6 +116,47 @@ export class Core {
     })
   }
 
+  // ───────────────────────────── active time (duration limit) ─────────────────────────────
+
+  private activeTime(runId: string): ActiveTime | null {
+    return this.deps.repos.settings.getValue<ActiveTime>(activeKey(runId))
+  }
+
+  /** Milliseconds the run has been active: paused intervals do not count. */
+  runActiveMs(run: Run, now: number = Date.now()): number {
+    const record = this.activeTime(run.id)
+    if (!record) return run.startedAt ? Math.max(0, now - Date.parse(run.startedAt)) : 0
+    return record.usedMs + (record.since ? Math.max(0, now - Date.parse(record.since)) : 0)
+  }
+
+  /** The run starts or resumes being active. `fresh` grants a new duration window. */
+  markRunActive(runId: string, fresh = false): void {
+    const record = this.activeTime(runId)
+    this.deps.repos.settings.setValue(activeKey(runId), { usedMs: fresh || !record ? 0 : record.usedMs, since: nowIso() })
+  }
+
+  /** The run stops being active: fold the running interval (up to `at`) into the accumulated time. */
+  markRunInactive(runId: string, at: number = Date.now()): void {
+    const record = this.activeTime(runId)
+    if (!record?.since) return
+    const usedMs = record.usedMs + Math.max(0, at - Date.parse(record.since))
+    this.deps.repos.settings.setValue(activeKey(runId), { usedMs, since: null })
+  }
+
+  /** The duration limit was hit: the next resume starts a fresh window. */
+  resetRunActive(runId: string): void {
+    this.deps.repos.settings.setValue(activeKey(runId), { usedMs: 0, since: null })
+  }
+
+  /**
+   * Discard what check and setup commands left in a NEXUS-owned worktree: restore tracked files and
+   * remove untracked files that are not ignored. Refuses paths outside the worktrees root, so the
+   * user's own checkout can never be touched.
+   */
+  async cleanWorktree(path: string): Promise<void> {
+    await this.deps.worktrees.resetClean(path)
+  }
+
   /** Pause a run, remembering the state to return to. Returns null when it cannot be paused. */
   pauseRun(runId: string, reason: PauseReason, detail?: string): Run | null {
     const { repos, bus } = this.deps
@@ -114,6 +164,7 @@ export class Core {
     if (!canPauseRun(run.state)) return null
     return bus.transaction(() => {
       const paused = this.setRunState(runId, 'paused', { resumeState: run.state, pauseReason: reason }, detail)
+      this.markRunInactive(runId)
       bus.emit({ runId, type: 'run.paused', payload: { reason, ...(detail ? { detail } : {}) } })
       return paused
     })

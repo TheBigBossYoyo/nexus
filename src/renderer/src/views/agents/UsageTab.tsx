@@ -79,13 +79,13 @@ export function UsageTab({ agent }: { agent: Agent }) {
           { label: 'Input tokens', value: formatTokens(m.inputTokens), mono: true },
           { label: 'Output tokens', value: formatTokens(m.outputTokens), mono: true },
           { label: 'Cache-read tokens', value: formatTokens(m.cacheReadTokens), mono: true },
-          { label: 'Cost', value: formatCost(m.costUsd), mono: true },
+          { label: 'Est. cost (runtime)', value: formatCost(m.costUsd), mono: true },
           { label: 'Context window', value: formatTokens(m.contextWindow), mono: true },
         ]}
       />
       <p className="m-0 text-[0.85rem] text-fg-faint">
-        {DASH} means the runtime has not reported that value. Token counts and cost are the latest report from the runtime,
-        not estimates.
+        {DASH} means the runtime has not reported that value. Token counts are the latest report from the runtime. Cost is
+        the runtime's own list-price estimate, not an invoice: with a Claude subscription it is not what you are charged.
       </p>
       <section>
         <h3 className="m-0 mb-1 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">Sessions · {sessions.length}</h3>

@@ -5,6 +5,7 @@ import {
   TERMINAL_RUN_STATES,
   VerifierOutputSchema,
   WRITING_ROLES,
+  type Agent,
   type AgentPurpose,
   type CommandResult,
   type ModelTier,
@@ -30,6 +31,7 @@ import { nextAttemptPlan, type FailureKind } from '@main/modules/scheduler'
 import { dependenciesOf } from '@main/modules/task-graph'
 import type { AgentOutcome, AgentRunResult, SessionControl } from './agent-runner'
 import type { Core } from './core'
+import { renderMessage } from './messaging'
 
 export type Stage = 'implement' | 'checks' | 'review' | 'verification'
 
@@ -184,6 +186,11 @@ export class TaskPipeline {
         stage = 'review'
       }
 
+      // Checks may rewrite or create files (formatters, snapshots, build output). Everything the agent did
+      // is committed by now, so what is dirty came from the checks: discard it, so the diff that is reviewed
+      // and verified is exactly what gets merged, and build output never reaches the integration branch.
+      await this.core.cleanWorktree(worktree.path)
+
       const integration = await this.host.ensureIntegration(run)
       const base = (await git.mergeBase(worktree.path, 'HEAD', integration.branch)) ?? worktree.baseCommit
       const diff = await git.diffWorkingTree(worktree.path, base)
@@ -218,12 +225,15 @@ export class TaskPipeline {
       // Verified: integrate. Merges are serialized; a conflict goes back through repair.
       this.host.setStage(taskId, 'merge')
       const branch = worktree.branch
-      const merged = await this.host.withMergeLock(runId, () =>
-        git.merge(integration.path, branch, {
+      const merged = await this.host.withMergeLock(runId, async () => {
+        // Mission checks and dependency setup run in the integration worktree and can leave files behind;
+        // git refuses to merge into a dirty tree. The worktree is NEXUS-owned: only merges are committed there.
+        await this.core.cleanWorktree(integration.path)
+        return git.merge(integration.path, branch, {
           message: `Merge ${task.key}: ${task.title}`,
           author: this.core.author(),
-        }),
-      )
+        })
+      })
       if (!merged.ok) {
         bus.emit({
           runId,
@@ -282,8 +292,12 @@ export class TaskPipeline {
     })
     bus.emit({ runId: run.id, taskId: task.id, type: 'task.started', payload: { attempt } })
 
+    // Messages (user instructions included) that arrived while no session could take them ride along on resume.
     const prompt = resumeId
-      ? 'Continue the task from where you stopped. Check `git status` and `git log` first to see what is already done.'
+      ? [
+          'Continue the task from where you stopped. Check `git status` and `git log` first to see what is already done.',
+          ...this.core.messages.takeForTask(task.id).map(renderMessage),
+        ].join('\n\n')
       : this.contextFor(run, task, cwd, initial.error)
 
     let lastBeat = Date.now()
@@ -628,10 +642,14 @@ export class TaskPipeline {
     const tier: ModelTier | null = n >= 2 ? 'strongest' : null
     const child = bus.transaction(() => {
       this.core.setTaskState(parent.id, 'waiting', { repairCycles: n }, `repair ${n}: ${failure.kind}`)
+      // Keys are unique per run and earlier children are kept as history, so the suffix counts the
+      // parent's existing repair children rather than its (retry-resettable) repairCycles.
+      const suffix =
+        Math.max(0, ...repos.tasks.listByParent(parent.id).map((c) => Number(/-fix(\d+)$/.exec(c.key)?.[1] ?? 0))) + 1
       const row = repos.tasks.insert({
         ...parent,
         id: newId(),
-        key: `${parent.key}-fix${n}`,
+        key: `${parent.key}-fix${suffix}`,
         title: `Repair ${parent.key}: ${failure.kind} failure`,
         description: failure.summary,
         role: 'debugger',
@@ -669,17 +687,23 @@ export class TaskPipeline {
       cwd: worktree.path,
       worktreeRoot: worktree.path,
       projectRoot: this.core.project(run).rootPath,
-      prompt: buildRepairPrompt({
-        task: parent,
-        failure: { kind: failure.kind, summary: failure.summary, details: failure.details },
-        findings: failure.findings,
-        failures: failure.failures,
-        checkResults: failure.checkResults,
-      }).prompt,
+      prompt: this.withInstructions(
+        buildRepairPrompt({
+          task: parent,
+          failure: { kind: failure.kind, summary: failure.summary, details: failure.details },
+          findings: failure.findings,
+          failures: failure.failures,
+          checkResults: failure.checkResults,
+        }).prompt,
+        parent.id,
+      ),
       tier: tier ?? run.config.modelPolicy.debugger,
       control,
       allowRotation: true,
     })
+
+    // The user cancelled this repair while it ran: cancelTask already settled the child and the parent.
+    if (repos.tasks.require(child.id).state === 'cancelled') return false
 
     if (result.outcome === 'success' && !result.blocker) {
       bus.transaction(() => {
@@ -725,13 +749,36 @@ export class TaskPipeline {
     return new Date(Date.now() + run.config.leaseMinutes * 60_000).toISOString()
   }
 
-  /** SDK session of the task's last implementing agent, when it ended in a resumable way. */
-  private resumableSession(taskId: string): string | undefined {
-    const { repos } = this.core.deps
-    const agent = repos.agents
+  /** The user's pending instructions for a task, appended to a prompt (and marked delivered with it). */
+  private withInstructions(prompt: string, taskId: string): string {
+    const instructions = this.core.messages.takeInstructions(taskId)
+    if (instructions.length === 0) return prompt
+    return [prompt, '## Instructions from the user', ...instructions.map((m) => `- ${m.body}`)].join('\n\n')
+  }
+
+  /**
+   * The stage a task left in state 'running' resumes at. The state stays 'running' through checks (and
+   * after a successful repair), so it cannot tell by itself: when the task's implementing agent already
+   * finished its session successfully the work is done and only the checks onwards remain.
+   */
+  resumeStage(task: Pick<Task, 'id' | 'state'>): Stage {
+    if (task.state !== 'running') return 'implement'
+    const agent = this.lastWorkerAgent(task.id)
+    const session = agent ? this.core.deps.repos.sessions.latestForAgent(agent.id) : null
+    return agent?.state === 'stopped' && session?.endReason === 'completed' ? 'checks' : 'implement'
+  }
+
+  private lastWorkerAgent(taskId: string): Agent | undefined {
+    return this.core.deps.repos.agents
       .listByTask(taskId)
       .filter((a) => a.purpose !== 'review' && a.purpose !== 'verify')
       .at(-1)
+  }
+
+  /** SDK session of the task's last implementing agent, when it ended in a resumable way. */
+  private resumableSession(taskId: string): string | undefined {
+    const { repos } = this.core.deps
+    const agent = this.lastWorkerAgent(taskId)
     if (!agent) return undefined
     const session = repos.sessions.latestForAgent(agent.id)
     if (!session?.sdkSessionId || !session.endReason) return undefined
@@ -801,7 +848,11 @@ export class TaskPipeline {
     // A lost worktree leaves its branch behind; take a fresh key rather than fail on the name clash.
     const planned = worktrees.planPaths(run.id, task.key)
     const taskKey = (await git.branchExists(repoRoot, planned.branch)) ? `${task.key}-${shortId(newId())}` : task.key
-    const created = await worktrees.createForTask({ repoRoot, runId: run.id, taskKey, startPoint: integration.branch })
+    // Serialized with merges: concurrent `git worktree add` and ref updates in one repository can
+    // collide on git's lock files, and the start point must not move while the worktree is created.
+    const created = await this.host.withMergeLock(run.id, () =>
+      worktrees.createForTask({ repoRoot, runId: run.id, taskKey, startPoint: integration.branch }),
+    )
     const worktree = bus.transaction(() => {
       const row = repos.worktrees.insert({
         id: newId(),

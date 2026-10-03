@@ -99,6 +99,10 @@ const SECURITY_TOOLING =
 const MACHINE_ENV = /setenvironmentvariable\s*\([^)]*\b(machine|user)\b/i
 const SECRET_ENV_REF =
   /(?:\$env:|\$\{env:|\$\{?|%|printenv\s+|getenvironmentvariable\w*\(\s*['"]?)[a-z0-9_]*(?:key|token|secret|passw|credential)[a-z0-9_]*/i
+const DANGEROUS_ENV_NAME = '(?:git_[a-z0-9_]*|ld_[a-z0-9_]*|dyld_[a-z0-9_]*|node_options|pager|editor|visual|browser|ssh_askpass|pythonstartup|pythonpath|path)'
+const DANGEROUS_ENV_ASSIGN = new RegExp(`(?:\\$\\{?env:|\\benv:)${DANGEROUS_ENV_NAME}\\}?\\s*\\+?=|\\bset\\s+"?${DANGEROUS_ENV_NAME}=`, 'i')
+const DANGEROUS_ENV_WORD = new RegExp(`^${DANGEROUS_ENV_NAME}=`, 'i')
+const ENV_ASSIGN_REASON = 'sets an environment variable that makes tools run programs (GIT_*, PAGER, EDITOR, LD_*, PATH, ...)'
 const DOTNET_NETWORK = /net\.webclient|downloadstring|downloadfile|start-bitstransfer|system\.net\.http/i
 
 function analyzeText(text: string, shell: Shell, a: Analysis, depth: number): void {
@@ -118,6 +122,7 @@ function analyzeText(text: string, shell: Shell, a: Analysis, depth: number): vo
   if (SECRET_ENV_REF.test(text)) {
     a.ask('high', 'accessing secrets: references a key/token/secret-like environment variable')
   }
+  if (DANGEROUS_ENV_ASSIGN.test(text)) a.ask('high', ENV_ASSIGN_REASON)
   if (DOTNET_NETWORK.test(text)) {
     a.ask('medium', 'network operation (.NET web client / BITS transfer)')
   }
@@ -144,7 +149,12 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
   const hasPathSep = words[0] !== undefined && /[\\/]/.test(words[0]) && !/^\.[\\/]node_modules[\\/]\.bin[\\/]/.test(words[0])
 
   let i = 0
-  if (shell === 'bash') while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i] ?? '')) i++
+  if (shell === 'bash') {
+    while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i] ?? '')) {
+      if (DANGEROUS_ENV_WORD.test(words[i] ?? '')) a.ask('high', ENV_ASSIGN_REASON)
+      i++
+    }
+  }
   let wrapped = i > 0
   let isCallOp = false
   if (shell === 'powershell' && (words[i] === '&' || words[i] === '.')) {
@@ -165,6 +175,7 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
       wrapped = true
     } else if (w === 'env') {
       const j = skipEnvArgs(words, i + 1)
+      if (words.slice(i + 1, j).some((x) => DANGEROUS_ENV_WORD.test(x))) a.ask('high', ENV_ASSIGN_REASON)
       if (j >= words.length) {
         a.ask('high', 'accessing secrets: env prints every environment variable')
         break
@@ -598,7 +609,8 @@ function analyzeFind(args: string[], lc: string[], a: Analysis): void {
   }
 }
 
-const GIT_UNSAFE_CONFIG = /^(core\.(sshcommand|hookspath|pager|editor|fsmonitor)|credential\.|alias\.|http\.proxy|protocol\.ext)/i
+const GIT_UNSAFE_CONFIG =
+  /^(core\.|credential\.|alias\.|http\.|protocol\.|diff\.|difftool\.|merge\.|mergetool\.|filter\.|pager\.|gpg\.|sequence\.|url\.|uploadpack\.|receive\.|include|submodule\.|ssh\.|man\.|web\.|browser\.|remote\.[^.]*\.(proxy|uploadpack|receivepack|vcs))/i
 
 function analyzeGit(args: string[], lc: string[], a: Analysis): void {
   let i = 0
@@ -607,6 +619,9 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
     if (w === '-c') {
       if (GIT_UNSAFE_CONFIG.test(args[i + 1] ?? '')) a.ask('high', 'git -c can configure arbitrary command execution')
       i += 2
+    } else if (/^--config-env/i.test(w)) {
+      a.ask('high', 'git --config-env can configure arbitrary command execution')
+      i += w.includes('=') ? 1 : 2
     } else if (['-C', '--git-dir', '--work-tree', '--namespace', '--exec-path'].includes(w)) i += 2
     else if (w.startsWith('-')) i++
     else break
@@ -769,17 +784,74 @@ const VERSION_PROBES = new Set(['node', 'npm', 'pnpm', 'yarn', 'bun', 'python', 
 const GIT_READ_SUBS = new Set(['status', 'log', 'diff', 'show', 'rev-parse', 'ls-files', 'blame', 'describe', 'shortlog', 'ls-tree', 'cat-file', 'rev-list', 'merge-base', 'show-ref', 'grep', 'diff-tree', 'name-rev', 'annotate'])
 const GIT_BRANCH_FLAGS = new Set(['--list', '-l', '-a', '--all', '-r', '--remotes', '-v', '-vv', '--verbose', '--show-current', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format', '--no-color', '--color'])
 
+/** True when `x` (lowercased) is a long option equal to, an abbreviation of, or an extension of one of `names`. */
+function matchesLong(x: string, names: string[]): boolean {
+  const n = x.split('=')[0] ?? x
+  return n.length >= 3 && n.startsWith('--') && names.some((d) => d.startsWith(n) || n.startsWith(d))
+}
+
+/** True when `x` is a single-dash short-option cluster containing one of `chars` (case-sensitive). */
+function shortClusterHas(x: string, chars: string): boolean {
+  return /^-[^-]/.test(x) && [...x.slice(1)].some((c) => chars.includes(c))
+}
+
+/** Pipeline cmdlets whose arguments may be script blocks that PowerShell executes. */
+const SCRIPTBLOCK_ARG_CMDS = new Set(['where', 'select', 'select-object', 'sort-object', 'measure-object', 'measure', 'format-table', 'ft', 'format-list', 'fl', 'out-string'])
+/** git options that name a program to run or a file to write. */
+const GIT_DANGEROUS_LONG = ['--output', '--open-files-in-pager', '--ext-diff', '--exec', '--upload-pack', '--receive-pack']
+const UNIQ_VALUE_LONG = new Set(['--skip-fields', '--skip-chars', '--check-chars'])
+
+/** `uniq [OPTION]... [INPUT [OUTPUT]]`: the second operand is an output file, so at most one operand is read-only. */
+function isReadOnlyUniq(args: string[]): boolean {
+  let operands = 0
+  for (let k = 0; k < args.length; k++) {
+    const x = args[k] ?? ''
+    if (x === '--') {
+      operands += args.length - k - 1
+      break
+    }
+    if (x.startsWith('--')) {
+      if (UNIQ_VALUE_LONG.has(x)) k++
+    } else if (x.startsWith('-') && x.length > 1) {
+      if (/[fsw]$/.test(x)) k++
+    } else operands++
+  }
+  return operands <= 1
+}
+
+/** `date` can set the clock (-s, or a bare MMDDhhmm operand); only formatting and display are read-only. */
+function isReadOnlyDate(args: string[]): boolean {
+  for (let k = 0; k < args.length; k++) {
+    const x = args[k] ?? ''
+    if (x.startsWith('+') || ['-u', '--utc', '--universal', '-R', '--rfc-email'].includes(x)) continue
+    if (/^--(date|iso-8601|rfc-[a-z0-9-]+|reference)=/.test(x) || /^-I\w*$/.test(x)) continue
+    if (x === '-d' || x === '--date' || x === '-r' || x === '--reference') {
+      k++
+      continue
+    }
+    return false
+  }
+  return true
+}
+
 function isReadOnly(cmd: string, args: string[], lc: string[]): boolean {
   if (VERSION_PROBES.has(cmd) && args.length === 1 && ['-v', '--version', '-V', 'version', '-version'].includes(args[0] ?? '')) return true
+  if (SCRIPTBLOCK_ARG_CMDS.has(cmd) && args.some((x) => x.includes('{'))) return false
   switch (cmd) {
     case 'git':
       return isReadOnlyGit(args, lc)
     case 'sort':
-      return !lc.some((x) => x === '-o' || x.startsWith('--output') || (/^-[a-z]*o/.test(x) && !x.startsWith('--')))
+      return !lc.some((x) => x === '-o' || matchesLong(x, ['--output', '--compress-program']) || (/^-[a-z]*o/.test(x) && !x.startsWith('--')) || x.startsWith('/o'))
     case 'tail':
       return !lc.some((x) => x === '-f' || x.startsWith('--follow'))
     case 'rg':
-      return !lc.some((x) => x.startsWith('--pre') || x.startsWith('--hostname-bin') || x === '-z' || x === '--search-zip')
+      return !lc.some((x) => x.startsWith('--pre') || x.startsWith('--hostname-bin') || x === '--search-zip' || shortClusterHas(x, 'z'))
+    case 'tree':
+      return !lc.some((x) => matchesLong(x, ['--output']) || shortClusterHas(x, 'o'))
+    case 'uniq':
+      return isReadOnlyUniq(args)
+    case 'date':
+      return isReadOnlyDate(args)
     case 'get-content':
     case 'gc':
       return !lc.some((x) => x === '-wait')
@@ -795,7 +867,10 @@ function isReadOnlyGit(args: string[], lc: string[]): boolean {
   const sub = first.toLowerCase()
   const rest = args.slice(1)
   const rlc = lc.slice(1)
-  if (rlc.some((x) => x.startsWith('--output') || x === '-o' || x.startsWith('--ext-diff') || x.startsWith('--exec'))) return false
+  // git accepts unique abbreviations of long options, so match prefixes; -O/-o differ by case.
+  if (rlc.some((x) => x === '-o' || matchesLong(x, GIT_DANGEROUS_LONG))) return false
+  if (rest.some((x) => x.startsWith('-O'))) return false
+  if (sub === 'grep' && rest.some((x) => shortClusterHas(x, 'O'))) return false
   if (GIT_READ_SUBS.has(sub)) return true
   const pos = rest.filter((x) => !x.startsWith('-'))
   switch (sub) {
@@ -836,6 +911,7 @@ function pmWords(words: string[]): string[] {
 
 function verifyTool(tool: string, args: string[], lc: string[]): boolean {
   if (!VERIFY_TOOLS.has(tool)) return false
+  if (lc.some((x) => x.startsWith('--out') || x === '-o')) return false
   if (lc.some((x) => x === '--fix' || x === '--fix-dry-run' || x === '-u' || x === '--update' || x === '--updatesnapshot' || x === '--write')) return false
   if (tool === 'playwright') return args.find((x) => !x.startsWith('-'))?.toLowerCase() === 'test'
   return true

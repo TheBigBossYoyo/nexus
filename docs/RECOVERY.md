@@ -52,11 +52,12 @@ worktrees. `runs.recover { runId, action }`:
 
 | Action | Effect |
 |---|---|
-| `resume` | `reconcileWorktrees`, then `resumeRun` |
+| `resume` | `resumeRun` (which reconciles worktrees first) |
 | `inspect` | The run stays paused; `pauseReason` becomes `user` so it is no longer flagged. You can read everything and resume or cancel later. |
 | `cancel` | `cancelRun`: run and non-terminal tasks become `cancelled`, approvals expire. Worktrees and branches are left for you. |
 
-`runs.resume` on a paused run does the same as `resume` without the worktree reconciliation step.
+`runs.resume` on a paused run does the same as `resume`: `resumeRun` runs the worktree reconciliation on every
+resume, so a run that was only inspected first is reconciled too.
 
 ### Worktree reconciliation
 
@@ -86,7 +87,8 @@ relaunches a pipeline for each task without an active pipeline, by task state:
 
 | Task state | Restarts at |
 |---|---|
-| `assigned`, `running` | implement stage (see below for session handling). The `running` state does not record whether the task was in implement or checks, so a task stopped during its checks begins again at implement, starts a new attempt and re-runs checks afterwards. |
+| `assigned` | implement stage (see below for session handling). |
+| `running` | The state stays `running` through the checks and after a successful repair, so the stage is derived from the implementing agent: if its latest agent finished with a `completed` session (`TaskPipeline.resumeStage`), the work is done and the task restarts at checks, without a new attempt or agent. Otherwise implement, as for `assigned`. |
 | `review` | review stage (checks results are read back from the last persisted checks record) |
 | `verification` | verification stage |
 | `waiting` | Its repair child is cancelled, and the pipeline restarts at checks |
@@ -102,7 +104,8 @@ verifications are excluded) and its latest session record.
 
 - If that session has an SDK session id and ended for a resumable reason (`paused`, `quota`, `auth`,
   `app_restart`, `shutdown`), NEXUS resumes it with `resume: <session id>` and the prompt "Continue the
-  task from where you stopped. Check `git status` and `git log` first to see what is already done." The
+  task from where you stopped. Check `git status` and `git log` first to see what is already done." followed
+  by any messages (user instructions included) that were not delivered while no session could take them. The
   attempt number is not incremented. The worktree and the Claude transcript are what make this possible;
   if the runtime can no longer resume the session, the agent ends in an error and the ordinary retry path
   (below) takes over.

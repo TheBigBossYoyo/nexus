@@ -52,6 +52,14 @@ export class EventRepository {
     return row ? decode(eventCodec, row) : null
   }
 
+  /** Timestamp of the run's latest event, or null when it has none. */
+  lastEventAt(runId: string): string | null {
+    const row = prepare(this.db, 'SELECT created_at FROM run_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1').get(runId) as
+      | { created_at: string }
+      | undefined
+    return row?.created_at ?? null
+  }
+
   /** Events with seq > afterSeq in ascending order. */
   listByRun(runId: string, afterSeq = 0, limit = 1000): RunEvent[] {
     const rows = prepare(

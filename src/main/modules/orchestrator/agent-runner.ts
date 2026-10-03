@@ -43,18 +43,47 @@ import type { MessageService } from './messaging'
 
 export type StopReason = 'paused' | 'cancelled' | 'user_stop' | 'shutdown'
 
+/** Gate and planning sessions never receive instructions meant for the agent doing the work. */
+const NON_WORKER_PURPOSES: ReadonlySet<AgentPurpose> = new Set<AgentPurpose>(['plan', 'review', 'verify'])
+
+interface RegisteredHandle {
+  purpose: AgentPurpose
+  /** False once the session takes no more input (turn finished, or a handoff request). */
+  open: boolean
+}
+
 /** Live-session registry for one unit of work (a task pipeline, the planner, the mission verifier). */
 export class SessionControl {
-  readonly handles = new Set<AgentSessionHandle>()
+  private readonly registered = new Map<AgentSessionHandle, RegisteredHandle>()
   stopReason: StopReason | null = null
+
+  register(handle: AgentSessionHandle, purpose: AgentPurpose, open = true): void {
+    this.registered.set(handle, { purpose, open })
+  }
+
+  /** The session still runs (and can be stopped) but can no longer be handed a message. */
+  closeInput(handle: AgentSessionHandle): void {
+    const entry = this.registered.get(handle)
+    if (entry) entry.open = false
+  }
+
+  unregister(handle: AgentSessionHandle): void {
+    this.registered.delete(handle)
+  }
 
   async stop(reason: StopReason): Promise<void> {
     this.stopReason = reason
-    await Promise.allSettled([...this.handles].map((h) => h.stop()))
+    await Promise.allSettled([...this.registered.keys()].map((h) => h.stop()))
   }
 
+  /**
+   * Hand a message to the live session doing the work (implementer, debugger, read-only worker).
+   * Reviewer, verifier and planner sessions are never targets. Returns false when nobody took it,
+   * so the caller keeps the message undelivered for the next prompt.
+   */
   send(text: string): boolean {
-    for (const handle of this.handles) {
+    for (const [handle, entry] of this.registered) {
+      if (!entry.open || NON_WORKER_PURPOSES.has(entry.purpose)) continue
       handle.send(text)
       return true
     }
@@ -103,7 +132,14 @@ interface SessionResult {
   result: TurnResult | null
   error: string | null
   sdkSessionId: string | null
+  /** Model round-trips over every turn of this session (each result reports its own turn's count). */
+  turns: number
 }
+
+/** Last cumulative figures the runtime reported for one SDK session, per model (a resumed session continues them). */
+type CumulativeUsage = Record<string, UsageInfo>
+
+const usageKey = (sdkSessionId: string): string => `usage-cumulative:${sdkSessionId}`
 
 const FILE_READ_TOOLS = new Set(['Read'])
 const FILE_WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
@@ -147,20 +183,18 @@ export class AgentRunner {
     let prompt = input.prompt
     let resumeId = input.resumeSdkSessionId
     let blocker: AgentRunResult['blocker'] = null
-    const priorUsage: UsageInfo[] = []
     const files = { read: new Set<string>(), changed: new Set<string>() }
 
     const base = this.buildSpec(input, agent, model, (b) => (blocker = b))
-    let last: SessionResult = { outcome: 'error', result: null, error: null, sdkSessionId: null }
+    let last: SessionResult = { outcome: 'error', result: null, error: null, sdkSessionId: null, turns: 0 }
 
     try {
       for (;;) {
         const maxTurns = rotationTurns > 0 ? Math.min(rotationTurns, remainingTurns) : remainingTurns
         const spec: SessionSpec = { ...base, prompt, maxTurns, resumeSessionId: resumeId }
-        last = await this.runSession(input, agent.id, spec, priorUsage, files)
+        last = await this.runSession(input, agent.id, spec, files)
         resumeId = undefined
-        remainingTurns -= last.result?.numTurns ?? maxTurns
-        if (last.result) priorUsage.push(...last.result.usage)
+        remainingTurns -= last.result ? last.turns : maxTurns
 
         const canRotate =
           last.outcome === 'max_turns' &&
@@ -177,7 +211,7 @@ export class AgentRunner {
           taskId: input.task?.id ?? null,
           agentId: agent.id,
           type: 'agent.rotated',
-          payload: { fromSessionId: last.sdkSessionId, turns: last.result?.numTurns ?? maxTurns },
+          payload: { fromSessionId: last.sdkSessionId, turns: last.result ? last.turns : maxTurns },
         })
         prompt = buildResumeFromHandoffPrompt({
           task: input.task as Task,
@@ -187,7 +221,7 @@ export class AgentRunner {
         }).prompt
       }
     } catch (e) {
-      last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId }
+      last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId, turns: last.turns }
     }
 
     const failed = last.outcome !== 'success' && last.outcome !== 'stopped'
@@ -359,8 +393,8 @@ export class AgentRunner {
     input: AgentRunInput,
     agentId: string,
     spec: SessionSpec,
-    priorUsage: UsageInfo[],
     files: { read: Set<string>; changed: Set<string> },
+    opts: { handoff?: boolean } = {},
   ): Promise<SessionResult> {
     const { repos, bus, runtime, push } = this.deps
     const runId = input.run.id
@@ -381,13 +415,15 @@ export class AgentRunner {
     const handle = spec.resumeSessionId
       ? runtime.resumeSession(spec, spec.resumeSessionId)
       : runtime.startSession(spec)
-    input.control.handles.add(handle)
+    input.control.register(handle, input.purpose, !opts.handoff)
     // A stop requested while the session was being created must still take effect.
     if (input.control.stopReason) void handle.stop()
 
     let result: TurnResult | null = null
     let ended: { reason: string; error: string | null } = { reason: 'crashed', error: null }
     let quota = false
+    let turns = 0
+    let sdkId: string | null = spec.resumeSessionId ?? null
     const toolNames = new Map<string, string>()
 
     const appendOutput = (kind: 'text' | 'system' | 'error', content: string): void => {
@@ -400,6 +436,7 @@ export class AgentRunner {
         input.onActivity?.()
         switch (event.type) {
           case 'session.started': {
+            sdkId = event.sessionId
             repos.sessions.update(session.id, { sdkSessionId: event.sessionId, model: event.model })
             repos.agents.update(agentId, { model: event.model })
             this.setState(agentId, 'working')
@@ -485,9 +522,11 @@ export class AgentRunner {
             break
           case 'turn.completed': {
             result = event.result
-            this.recordUsage(input, agentId, [...priorUsage, ...event.result.usage], event.result.numTurns)
+            turns += event.result.numTurns
+            this.recordUsage(input, agentId, sdkId ?? session.id, event.result)
             if (event.result.errors.length > 0) appendOutput('error', event.result.errors.join('\n'))
             // Single-turn agents: let the process exit. Queued follow-ups still run before it does.
+            input.control.closeInput(handle)
             handle.end()
             break
           }
@@ -497,7 +536,7 @@ export class AgentRunner {
         }
       }
     } finally {
-      input.control.handles.delete(handle)
+      input.control.unregister(handle)
     }
 
     const stopReason = input.control.stopReason
@@ -513,7 +552,7 @@ export class AgentRunner {
       endReason: stopReason ?? (outcome === 'success' ? 'completed' : outcome),
       endedAt: nowIso(),
     })
-    return { outcome, result, error: ended.error, sdkSessionId: handle.sessionId() }
+    return { outcome, result, error: ended.error, sdkSessionId: handle.sessionId(), turns }
   }
 
   /** Ask the exhausted session for a structured handoff; fall back to an empty one. */
@@ -541,7 +580,7 @@ export class AgentRunner {
       nexusTools: undefined,
       resumeSessionId: sdkSessionId,
     }
-    const result = await this.runSession(input, agentId, spec, [], { read: new Set(), changed: new Set() })
+    const result = await this.runSession(input, agentId, spec, { read: new Set(), changed: new Set() }, { handoff: true })
     const parsed = HandoffSchema.safeParse(result.result?.structuredOutput)
     const handoff = parsed.success ? parsed.data : empty
     const latest = this.deps.repos.sessions.latestForAgent(agentId)
@@ -573,28 +612,48 @@ export class AgentRunner {
     repos.agents.update(agentId, { metrics, activity: `${toolName}: ${activity}`.slice(0, 200) })
   }
 
-  /** Usage is copied from what the SDK reports (cumulative per session); nothing is estimated. */
-  private recordUsage(input: AgentRunInput, agentId: string, usage: UsageInfo[], turns: number): void {
+  /**
+   * The runtime reports usage cumulatively per SDK session (and a resumed session continues the totals
+   * of the session it resumes), while `numTurns` is per result. The agent's metrics and the usage rows
+   * therefore hold deltas against the last cumulative figures seen for that SDK session. That keeps
+   * follow-up turns, resumed sessions (which get a new agent row) and the handoff request on a rotated
+   * session from being counted twice. A figure that went down means the counter restarted.
+   */
+  private recordUsage(input: AgentRunInput, agentId: string, sessionKey: string, result: TurnResult): void {
     const { repos, bus } = this.deps
-    if (usage.length === 0) return
-    const sum = (pick: (u: UsageInfo) => number): number => usage.reduce((n, u) => n + pick(u), 0)
-    const inputTokens = sum((u) => u.inputTokens)
-    const outputTokens = sum((u) => u.outputTokens)
-    const costUsd = sum((u) => u.costUsd)
+    const key = usageKey(sessionKey)
+    const before = repos.settings.getValue<CumulativeUsage>(key) ?? {}
+    const after: CumulativeUsage = { ...before }
+    const deltas: UsageInfo[] = []
+    for (const u of result.usage) {
+      const prev = before[u.model]
+      const step = (cur: number, old: number | undefined): number => (old === undefined || cur < old ? cur : cur - old)
+      deltas.push({
+        model: u.model,
+        inputTokens: step(u.inputTokens, prev?.inputTokens),
+        outputTokens: step(u.outputTokens, prev?.outputTokens),
+        cacheReadTokens: step(u.cacheReadTokens, prev?.cacheReadTokens),
+        cacheCreationTokens: step(u.cacheCreationTokens, prev?.cacheCreationTokens),
+        costUsd: step(u.costUsd, prev?.costUsd),
+        contextWindow: u.contextWindow,
+      })
+      after[u.model] = u
+    }
+    const sum = (pick: (u: UsageInfo) => number): number => deltas.reduce((n, u) => n + pick(u), 0)
     const agent = repos.agents.require(agentId)
     bus.transaction(() => {
-      repos.agents.update(agentId, {
-        metrics: {
-          ...agent.metrics,
-          turns: agent.metrics.turns + turns,
-          inputTokens,
-          outputTokens,
-          cacheReadTokens: sum((u) => u.cacheReadTokens),
-          costUsd,
-          contextWindow: usage[usage.length - 1]?.contextWindow ?? null,
-        },
-      })
-      for (const u of usage.slice(-1)) {
+      if (result.usage.length > 0) repos.settings.setValue(key, after)
+      const metrics: AgentMetrics = {
+        ...agent.metrics,
+        turns: agent.metrics.turns + result.numTurns,
+        inputTokens: (agent.metrics.inputTokens ?? 0) + sum((u) => u.inputTokens),
+        outputTokens: (agent.metrics.outputTokens ?? 0) + sum((u) => u.outputTokens),
+        cacheReadTokens: (agent.metrics.cacheReadTokens ?? 0) + sum((u) => u.cacheReadTokens),
+        costUsd: (agent.metrics.costUsd ?? 0) + sum((u) => u.costUsd),
+        contextWindow: deltas.length > 0 ? (deltas[deltas.length - 1]?.contextWindow ?? null) : agent.metrics.contextWindow,
+      }
+      repos.agents.update(agentId, { metrics })
+      for (const u of deltas) {
         repos.usage.insert({
           id: newId(),
           runId: input.run.id,
@@ -606,7 +665,7 @@ export class AgentRunner {
           cacheCreationTokens: u.cacheCreationTokens,
           costUsd: u.costUsd,
           contextWindow: u.contextWindow,
-          turns,
+          turns: result.numTurns,
           createdAt: nowIso(),
         })
       }
@@ -615,7 +674,7 @@ export class AgentRunner {
         taskId: input.task?.id ?? null,
         agentId,
         type: 'agent.usage',
-        payload: { inputTokens, outputTokens, costUsd },
+        payload: { inputTokens: metrics.inputTokens ?? 0, outputTokens: metrics.outputTokens ?? 0, costUsd: metrics.costUsd ?? 0 },
       })
     })
   }

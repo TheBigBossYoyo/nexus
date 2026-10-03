@@ -228,9 +228,9 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
 }
 
 /**
- * Thin, safe wrapper over the git CLI. Deliberately exposes no force-push, hard reset, `branch -D`
- * or checkout: NEXUS only ever creates branches/worktrees, commits, merges with abort, and
- * removes worktrees.
+ * Thin, safe wrapper over the git CLI. Deliberately exposes no force-push, `branch -D` or checkout:
+ * NEXUS only ever creates branches/worktrees, commits, merges with abort, and removes worktrees. The one
+ * hard reset (resetClean) is for NEXUS-owned worktrees only.
  */
 export class GitService {
   private readonly env: NodeJS.ProcessEnv
@@ -381,8 +381,28 @@ export class GitService {
     const sha = await this.resolveCommit(repo, startPoint)
     const abs = resolve(path)
     await mkdir(dirname(abs), { recursive: true })
-    await this.run(repo, ['worktree', 'add', '--no-track', '-b', branch, '--', abs, sha])
+    const branchExisted = await this.branchExists(repo, branch)
+    try {
+      await this.run(repo, ['worktree', 'add', '--no-track', '-b', branch, '--', abs, sha])
+    } catch (e) {
+      // `worktree add -b` can leave the new branch behind when the checkout fails (e.g. an uncreatable path).
+      if (!branchExisted && (await this.branchExists(repo, branch))) {
+        await this.run(repo, ['update-ref', '-d', `refs/heads/${branch}`], { okCodes: [0, 1] }).catch(() => undefined)
+      }
+      throw e
+    }
     return sha
+  }
+
+  /**
+   * Restores tracked files to HEAD, clears any merge in progress and removes untracked files that are
+   * not ignored (never `clean -x`, so ignored dependencies survive). Destructive: callers must only
+   * point it at a NEXUS-owned worktree, never at the user's checkout (WorktreeManager.resetClean
+   * enforces that).
+   */
+  async resetClean(worktree: string): Promise<void> {
+    await this.run(worktree, ['reset', '--hard', '--quiet', 'HEAD'])
+    await this.run(worktree, ['clean', '-f', '-d', '--quiet'])
   }
 
   /**

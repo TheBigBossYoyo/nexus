@@ -35,6 +35,8 @@ export interface CleanupReport {
 }
 
 const MAX_KEY_LENGTH = 24
+/** Windows device names cannot be file or directory names (with or without an extension). */
+const RESERVED_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/
 
 function sanitizeKey(key: string): string {
   const slug = key
@@ -44,7 +46,7 @@ function sanitizeKey(key: string): string {
     .slice(0, MAX_KEY_LENGTH)
     .replace(/-+$/g, '')
   // Lossy sanitising (or truncation) could make two keys collide, so disambiguate with a hash.
-  if (slug !== '' && slug === key) return slug
+  if (slug !== '' && slug === key && !RESERVED_DEVICE_NAME.test(slug)) return slug
   const hash = createHash('sha1').update(key).digest('hex').slice(0, 4)
   return slug === '' ? `task-${hash}` : `${slug}-${hash}`
 }
@@ -77,6 +79,17 @@ export class WorktreeManager {
   private async create(repoRoot: string, plan: PlannedPaths, startPoint: string): Promise<CreatedWorktree> {
     const baseCommit = await this.git.createWorktree(repoRoot, plan.path, plan.branch, startPoint)
     return { ...plan, baseCommit }
+  }
+
+  /**
+   * Restores a worktree under the root to its HEAD commit and removes untracked files that are not
+   * ignored (ignored dependencies and caches survive). Never touches paths outside the root.
+   */
+  async resetClean(path: string): Promise<void> {
+    if (!(await isPathInside(path, this.worktreesRoot))) {
+      throw new NexusError('path_violation', `Refusing to reset a worktree outside ${this.worktreesRoot}: ${path}`, { path })
+    }
+    await this.git.resetClean(path)
   }
 
   /** Removes a worktree under the root; refuses dirty ones unless `force`. Never touches paths outside the root. */

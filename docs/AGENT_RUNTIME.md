@@ -109,6 +109,13 @@ Dropped on purpose: thinking blocks (hidden reasoning is never stored) and subag
 Usage is taken from the result's `modelUsage` (input, output, cache read and creation tokens, cost,
 context window with 0 mapped to null). Nothing is estimated; values the SDK does not report stay null.
 
+`modelUsage` and cost are cumulative per SDK session, and a resumed session continues the totals of the one it
+resumes, while `num_turns` is per result. `AgentRunner.recordUsage` therefore stores deltas against the last
+cumulative figures seen for that SDK session (kept under `usage-cumulative:<sdkSessionId>` in the settings
+table): an agent's metrics and its `usage_snapshots` rows (one per model) sum to what that agent spent, follow-up
+turns, resumed sessions and the handoff request on a rotated session are counted once, and the run total is the
+sum over agents. A figure that goes down is treated as a counter restart.
+
 ## Structured output
 
 Planner, per-task reviewer and verifier, the mission verifier and the handoff request pass a JSON

@@ -75,7 +75,7 @@ const RENDER: Renderers = {
   'agent.failed': (p) => `Agent failed: ${trunc(p.error)}`,
   'agent.stopped': (p) => `Agent stopped: ${trunc(p.reason)}`,
   'agent.rotated': (p) => `Agent session rotated after ${plural(p.turns, 'turn')}`,
-  'agent.usage': (p) => `Usage: ${p.inputTokens} in, ${p.outputTokens} out, $${p.costUsd.toFixed(4)}`,
+  'agent.usage': (p) => `Usage: ${p.inputTokens} in, ${p.outputTokens} out, est. $${p.costUsd.toFixed(4)}`,
   'agent.rate_limited': (p) =>
     `Rate limited (${p.status}${p.limitType ? `, ${p.limitType}` : ''})${p.resetsAt ? `, resets ${new Date(p.resetsAt * 1000).toLocaleTimeString()}` : ''}`,
 
