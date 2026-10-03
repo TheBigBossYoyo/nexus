@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import type { MemoryScope } from '@shared/domain'
 import { api, type IpcError } from './bridge'
@@ -80,6 +80,15 @@ export const useRunDiff = (runId: string | null, enabled = true) =>
 export const useRecoverableRuns = () => useRead(qk.recoverable(), 'runs.recoverable', {})
 export const useTaskDiff = (taskId: string | null, enabled = true) =>
   useRead(qk.taskDiff(taskId ?? ''), 'tasks.diff', { taskId: taskId ?? '' }, taskId !== null && enabled)
+/** Diffs of several tasks at once (same cache entries as useTaskDiff). */
+export const useTaskDiffs = (taskIds: readonly string[], enabled = true) =>
+  useQueries({
+    queries: taskIds.map((taskId) => ({
+      queryKey: qk.taskDiff(taskId),
+      queryFn: () => api.invoke('tasks.diff', { taskId }),
+      enabled,
+    })),
+  })
 export const useTaskReviews = (taskId: string | null) =>
   useRead(qk.taskReviews(taskId ?? ''), 'tasks.reviews', { taskId: taskId ?? '' }, taskId !== null)
 export const useTaskVerifications = (taskId: string | null) =>

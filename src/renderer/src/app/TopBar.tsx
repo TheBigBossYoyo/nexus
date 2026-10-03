@@ -79,7 +79,7 @@ function RunControls() {
   return (
     <div className="flex items-center gap-1">
       {c.canApprovePlan ? (
-        <Button size="sm" variant="primary" icon={<CheckIcon size={12} />} onClick={c.approvePlan} disabled={c.busy} data-testid="approve-plan">
+        <Button size="sm" variant="primary" icon={<CheckIcon size={12} />} onClick={c.approvePlan} disabled={c.busy} data-testid="topbar-approve-plan">
           Approve plan
         </Button>
       ) : null}

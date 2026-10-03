@@ -22,7 +22,22 @@ export function Tabs<T extends string>({
   className?: string
 }) {
   return (
-    <div role="tablist" className={cn('flex shrink-0 items-end gap-0.5 border-b', className)}>
+    <div
+      role="tablist"
+      className={cn('flex shrink-0 items-end gap-0.5 border-b', className)}
+      onKeyDown={(e) => {
+        // Arrow keys / Home / End move between tabs.
+        const idx = tabs.findIndex((t) => t.id === active)
+        const next =
+          e.key === 'ArrowRight' ? idx + 1 : e.key === 'ArrowLeft' ? idx - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null
+        const target = next === null ? undefined : tabs[(next + tabs.length) % tabs.length]
+        if (!target) return
+        e.preventDefault()
+        onChange(target.id)
+        const buttons = e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')
+        buttons[tabs.indexOf(target)]?.focus()
+      }}
+    >
       {tabs.map((t) => {
         const selected = t.id === active
         return (
@@ -31,6 +46,7 @@ export function Tabs<T extends string>({
             role="tab"
             type="button"
             aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
             data-testid={t.testId}
             onClick={() => onChange(t.id)}
             className={cn(

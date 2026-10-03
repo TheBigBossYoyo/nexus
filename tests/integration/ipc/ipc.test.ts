@@ -1,0 +1,419 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ipcInputs, type AppInfo, type IpcChannel, type IpcInput } from '@shared/ipc'
+import { DEFAULT_SETTINGS } from '@shared/settings'
+import type { RunEvent } from '@shared/events'
+import type { PushMessage } from '@shared/events'
+import { NexusError } from '@shared/result'
+import { completeWith } from '@main/modules/agent-runtime/fake-runtime'
+import type { AgentRuntime } from '@main/modules/agent-runtime/types'
+import { createIpcHandlers, dispatchIpc, type IpcContext } from '@main/modules/ipc/handlers'
+import { createHarness, fileWorker, keyOf, plan, plannedTask, scenarioScript, type Harness } from '../../scenarios/harness'
+
+const APP_INFO: AppInfo = {
+  version: '0.0.0-test',
+  dataDir: 'data',
+  dbPath: 'data/nexus.db',
+  worktreesDir: 'data/worktrees',
+  platform: 'win32',
+  gitVersion: '2.50.0',
+  sdkVersion: 'fake',
+  isPackaged: false,
+}
+
+/** One minimal valid input per channel. Typed so that adding a channel without an entry fails to compile. */
+const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
+  'app.info': {},
+  'app.openDataDir': {},
+  'auth.status': {},
+  'auth.models': {},
+  'settings.get': {},
+  'settings.update': { settings: DEFAULT_SETTINGS },
+  'projects.list': {},
+  'projects.open': { path: 'C:\\somewhere' },
+  'projects.get': { projectId: 'p1' },
+  'projects.reprofile': { projectId: 'p1' },
+  'projects.update': { projectId: 'p1', respectProjectClaudeConfig: true },
+  'projects.remove': { projectId: 'p1' },
+  'runs.list': {},
+  'runs.get': { runId: 'r1' },
+  'runs.create': { projectId: 'p1', mode: 'build', preset: 'balanced', prompt: 'do it' },
+  'runs.approvePlan': { runId: 'r1' },
+  'runs.replan': { runId: 'r1', feedback: 'again' },
+  'runs.pause': { runId: 'r1' },
+  'runs.resume': { runId: 'r1' },
+  'runs.cancel': { runId: 'r1' },
+  'runs.summary': { runId: 'r1' },
+  'runs.diff': { runId: 'r1' },
+  'runs.recoverable': {},
+  'runs.recover': { runId: 'r1', action: 'resume' },
+  'runs.cleanup': { runId: 'r1' },
+  'tasks.retry': { taskId: 't1' },
+  'tasks.cancel': { taskId: 't1' },
+  'tasks.setPriority': { taskId: 't1', priority: 5 },
+  'tasks.add': {
+    runId: 'r1',
+    title: 'T',
+    description: 'D',
+    role: 'worker',
+    dependsOn: [],
+    suggestedFiles: [],
+    acceptanceCriteria: ['c'],
+    complexity: 'small',
+  },
+  'tasks.instruct': { taskId: 't1', instruction: 'go' },
+  'tasks.resolveBlocker': { taskId: 't1', note: '' },
+  'tasks.diff': { taskId: 't1' },
+  'tasks.reviews': { taskId: 't1' },
+  'tasks.verifications': { taskId: 't1' },
+  'criteria.update': { criterionId: 'c1', text: 'new' },
+  'agents.get': { agentId: 'a1' },
+  'agents.stop': { agentId: 'a1' },
+  'agents.output': { agentId: 'a1' },
+  'agents.tools': { agentId: 'a1' },
+  'messages.list': { runId: 'r1' },
+  'events.list': { runId: 'r1' },
+  'reviews.list': { runId: 'r1' },
+  'verifications.list': { runId: 'r1' },
+  'decisions.list': { runId: 'r1' },
+  'approvals.pending': {},
+  'approvals.resolve': { approvalId: 'ap1', approve: true },
+  'memory.list': {},
+  'memory.add': { scope: 'global', title: 't', content: 'c', tags: [] },
+  'memory.setStatus': { memoryId: 'm1', status: 'approved' },
+  'memory.delete': { memoryId: 'm1' },
+}
+
+const CHANNELS = Object.keys(ipcInputs) as IpcChannel[]
+
+/** Inputs no channel accepts: wrong container types and values the schemas must refuse. */
+const JUNK: unknown[] = ['junk', 42, true, [], [1, 2], { __proto__: null, x: 1 }, { unknownKey: 1 }, { runId: { nested: true } }, { taskId: 12 }, { path: 7 }]
+
+type SpyHandlers = Record<IpcChannel, ReturnType<typeof vi.fn>>
+
+function spyHandlers(): SpyHandlers {
+  return Object.fromEntries(CHANNELS.map((c) => [c, vi.fn(() => null)])) as SpyHandlers
+}
+
+describe('IPC dispatch contract', () => {
+  it('has a valid example input for every channel, and handlers for exactly the contract channels', async () => {
+    for (const channel of CHANNELS) {
+      expect(ipcInputs[channel].safeParse(VALID_INPUTS[channel]).success, channel).toBe(true)
+    }
+    const h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('x')]) }) })
+    try {
+      const handlers = createIpcHandlers(makeContext(h, []))
+      expect(Object.keys(handlers).sort()).toEqual([...CHANNELS].sort())
+    } finally {
+      await h.dispose()
+    }
+  })
+
+  it('rejects an unknown channel without invoking any handler', async () => {
+    const spies = spyHandlers()
+    for (const channel of ['nope', 'runs.delete', '', 'toString', '__proto__', 'constructor', 'runs.get ', 'RUNS.GET', 42, null, undefined, {}, ['runs.get']]) {
+      const result = await dispatchIpc(spies as never, channel, { runId: 'r1' })
+      expect(result).toEqual({ ok: false, error: { code: 'invalid_input', message: 'Unknown IPC channel' } })
+    }
+    for (const spy of Object.values(spies)) expect(spy).not.toHaveBeenCalled()
+  })
+
+  it.each(CHANNELS)('%s rejects malformed input and unknown extra keys without invoking its handler', async (channel) => {
+    const spies = spyHandlers()
+    const malformed: unknown[] = [...JUNK, { ...VALID_INPUTS[channel], __extra__: 'surprise' }, { ...VALID_INPUTS[channel], constructor: 1 }]
+    // A channel that takes no fields still must refuse any field; one with required fields refuses an empty object.
+    if (!ipcInputs[channel].safeParse({}).success) malformed.push({}, null, undefined)
+    // Right keys, wrong value types.
+    for (const [key, value] of Object.entries(VALID_INPUTS[channel])) {
+      const wrong = typeof value === 'string' ? 123 : typeof value === 'number' ? 'NaN' : typeof value === 'boolean' ? 'yes' : { not: 'valid' }
+      malformed.push({ ...VALID_INPUTS[channel], [key]: wrong })
+    }
+    for (const input of malformed) {
+      const result = await dispatchIpc(spies as never, channel, input)
+      expect(result.ok, `${channel} accepted ${JSON.stringify(input)}`).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('invalid_input')
+    }
+    expect(spies[channel]).not.toHaveBeenCalled()
+  })
+
+  it('invokes the handler with the parsed input for valid requests, and treats a missing input as {}', async () => {
+    const spies = spyHandlers()
+    for (const channel of CHANNELS) {
+      const result = await dispatchIpc(spies as never, channel, VALID_INPUTS[channel])
+      expect(result, channel).toEqual({ ok: true, value: null })
+      expect(spies[channel], channel).toHaveBeenCalledTimes(1)
+    }
+    expect((await dispatchIpc(spies as never, 'projects.list', undefined)).ok).toBe(true)
+    expect((await dispatchIpc(spies as never, 'projects.list', null)).ok).toBe(true)
+    expect(spies['runs.get']).toHaveBeenCalledTimes(1)
+    // Strings are limited: an over-long id and an out-of-range number are refused.
+    expect((await dispatchIpc(spies as never, 'runs.get', { runId: 'x'.repeat(65) })).ok).toBe(false)
+    expect((await dispatchIpc(spies as never, 'tasks.setPriority', { taskId: 't', priority: 1000 })).ok).toBe(false)
+    expect((await dispatchIpc(spies as never, 'events.list', { runId: 'r', limit: 0 })).ok).toBe(false)
+    expect((await dispatchIpc(spies as never, 'runs.create', { ...VALID_INPUTS['runs.create'], mode: 'chaos' })).ok).toBe(false)
+    expect(spies['runs.get']).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps handler errors to { ok:false, error:{ code, message } }, keeping NexusError codes', async () => {
+    const spies = spyHandlers()
+    spies['runs.get']?.mockImplementation(() => {
+      throw new NexusError('invalid_state', 'Run is not paused')
+    })
+    spies['runs.pause']?.mockImplementation(() => Promise.reject(new NexusError('git_conflict', 'conflict!', { files: ['a'] })))
+    spies['runs.resume']?.mockImplementation(() => {
+      throw new Error('boom: disk on fire')
+    })
+    spies['runs.cancel']?.mockImplementation(() => Promise.reject('a thrown string'))
+    expect(await dispatchIpc(spies as never, 'runs.get', { runId: 'r' })).toEqual({ ok: false, error: { code: 'invalid_state', message: 'Run is not paused' } })
+    expect(await dispatchIpc(spies as never, 'runs.pause', { runId: 'r' })).toEqual({ ok: false, error: { code: 'git_conflict', message: 'conflict!' } })
+    expect(await dispatchIpc(spies as never, 'runs.resume', { runId: 'r' })).toEqual({ ok: false, error: { code: 'internal', message: 'boom: disk on fire' } })
+    expect(await dispatchIpc(spies as never, 'runs.cancel', { runId: 'r' })).toEqual({ ok: false, error: { code: 'internal', message: 'a thrown string' } })
+  })
+})
+
+function makeContext(h: Harness, pushed: PushMessage[], overrides: Partial<IpcContext> = {}): IpcContext {
+  return {
+    repos: h.repos,
+    git: h.git,
+    runtime: h.runtime,
+    orchestrator: h.orchestrator,
+    appInfo: () => Promise.resolve(APP_INFO),
+    pickDirectory: () => Promise.resolve(null),
+    openDataDir: () => Promise.resolve(),
+    push: (m) => void pushed.push(m),
+    ...overrides,
+  }
+}
+
+describe('IPC against a real orchestrator with the fake runtime', () => {
+  let h: Harness
+  let pushed: PushMessage[]
+  let call: <C extends IpcChannel>(channel: C, input?: IpcInput<C>) => Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }>
+
+  /** Calls a channel and returns its value, failing the test with the error otherwise. */
+  async function value<T>(channel: IpcChannel, input?: unknown): Promise<T> {
+    const result = await dispatchIpc(handlers, channel, input)
+    if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}: ${result.error.message}`)
+    return result.value as T
+  }
+  let handlers: ReturnType<typeof createIpcHandlers>
+
+  beforeEach(async () => {
+    pushed = []
+    const worker = async (...args: Parameters<typeof fileWorker>): Promise<void> => {
+      const [spec, ctx] = args
+      for (let i = 1; i <= 5; i++) await ctx.emitText(`${keyOf(spec)} progress ${i}`)
+      await fileWorker(spec, ctx)
+    }
+    h = await createHarness({
+      script: scenarioScript({ plan: plan([plannedTask('alpha'), plannedTask('beta', { dependencies: ['alpha'] })]), worker }),
+    })
+    handlers = createIpcHandlers(makeContext(h, pushed))
+    call = (channel, input) => dispatchIpc(handlers, channel, input ?? {}) as never
+  })
+  afterEach(async () => h?.dispose())
+
+  it('projects.open → runs.create → runs.get → approvals.pending → summary, diffs, agent output and event paging', async () => {
+    // projects.open profiles the real repository and registers it (or returns the existing project).
+    const project = await value<{ id: string; rootPath: string; profile: { isGitRepo: boolean; currentBranch: string | null } }>('projects.open', { path: h.repoDir })
+    expect(project.profile.isGitRepo).toBe(true)
+    expect(project.profile.currentBranch).toBe('main')
+    expect(await value<unknown[]>('projects.list')).toContainEqual(expect.objectContaining({ id: project.id }))
+    expect(await value('projects.get', { projectId: project.id })).toMatchObject({ id: project.id })
+    expect(await value('projects.open', {})).toBeNull() // the folder picker was cancelled
+
+    const created = await value<{ id: string; state: string }>('runs.create', {
+      projectId: project.id,
+      mode: 'build',
+      preset: 'balanced',
+      prompt: 'Create alpha and beta',
+      maxParallelAgents: 2,
+    })
+    expect(created.state).toBe('planning')
+    expect((await h.waitForState(created.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+    expect(h.repos.runs.require(created.id).config.maxParallelAgents).toBe(2)
+
+    const detail = await value<{
+      run: { state: string }
+      tasks: { id: string; key: string; state: string }[]
+      dependencies: unknown[]
+      agents: { id: string; role: string; taskId: string | null }[]
+      criteria: unknown[]
+      worktrees: unknown[]
+      pendingApprovals: unknown[]
+    }>('runs.get', { runId: created.id })
+    expect(detail.run.state).toBe('completed')
+    expect(detail.tasks.map((t) => [t.key, t.state])).toEqual([['alpha', 'completed'], ['beta', 'completed']])
+    expect(detail.dependencies).toHaveLength(1)
+    expect(detail.agents.length).toBeGreaterThanOrEqual(7)
+    expect(detail.criteria.length).toBeGreaterThanOrEqual(3)
+    expect(detail.worktrees).toHaveLength(3)
+    expect(detail.pendingApprovals).toEqual([])
+    expect(await value('approvals.pending')).toEqual([])
+    expect(await value<unknown[]>('runs.list', { projectId: project.id })).toHaveLength(1)
+
+    // Summary is assembled from durable state and git.
+    const summary = await value<Record<string, unknown>>('runs.summary', { runId: created.id })
+    expect(summary).toMatchObject({
+      runId: created.id,
+      tasksTotal: 2,
+      tasksCompleted: 2,
+      tasksFailed: 0,
+      reviewsTotal: 2,
+      reviewsApproved: 2,
+      verificationsPassed: 3,
+      filesChanged: 2,
+    })
+    expect(summary['commits']).toBeGreaterThanOrEqual(2)
+    expect(summary['agentSessions']).toBeGreaterThanOrEqual(7)
+    expect(summary['costUsd']).toBeGreaterThan(0)
+
+    // Run diff = integration branch against the base commit.
+    const runDiff = await value<{ scope: string; files: { path: string; status: string }[]; patch: string; base: string; head: string }>('runs.diff', { runId: created.id })
+    expect(runDiff.scope).toBe('run')
+    expect(runDiff.files.map((f) => f.path).sort()).toEqual(['alpha.txt', 'beta.txt'])
+    expect(runDiff.files.every((f) => f.status === 'added')).toBe(true)
+    expect(runDiff.patch).toContain('+alpha')
+    expect(runDiff.head).toBe(h.repos.runs.require(created.id).integrationBranch)
+
+    // Task diff shows exactly that task's change, also after it was merged.
+    const alpha = detail.tasks.find((t) => t.key === 'alpha')
+    const taskDiff = await value<{ scope: string; files: { path: string }[]; patch: string }>('tasks.diff', { taskId: alpha?.id })
+    expect(taskDiff.scope).toBe('task')
+    expect(taskDiff.files.map((f) => f.path)).toEqual(['alpha.txt'])
+    expect(taskDiff.patch).toContain('+alpha')
+
+    // Task-level records.
+    expect(await value<unknown[]>('tasks.reviews', { taskId: alpha?.id })).toHaveLength(1)
+    expect((await value<{ kind: string }[]>('tasks.verifications', { taskId: alpha?.id })).map((v) => v.kind).sort()).toEqual(['checks', 'verifier'])
+    expect(await value<unknown[]>('reviews.list', { runId: created.id })).toHaveLength(2)
+    expect((await value<unknown[]>('verifications.list', { runId: created.id })).length).toBeGreaterThanOrEqual(5)
+    expect(await value('decisions.list', { runId: created.id })).toEqual([])
+    expect(await value('messages.list', { runId: created.id })).toEqual([])
+
+    // Agent output paging: ascending, gapless sequence numbers, resumable with afterSeq.
+    const worker = detail.agents.find((a) => a.taskId === alpha?.id && a.role === 'worker')
+    const all = await value<{ seq: number; content: string }[]>('agents.output', { agentId: worker?.id })
+    expect(all.map((o) => o.seq)).toEqual([1, 2, 3, 4, 5])
+    expect(all[0]?.content).toBe('alpha progress 1')
+    const page1 = await value<{ seq: number }[]>('agents.output', { agentId: worker?.id, limit: 2 })
+    const page2 = await value<{ seq: number }[]>('agents.output', { agentId: worker?.id, afterSeq: 2, limit: 2 })
+    const page3 = await value<{ seq: number }[]>('agents.output', { agentId: worker?.id, afterSeq: 4 })
+    expect([...page1, ...page2, ...page3].map((o) => o.seq)).toEqual([1, 2, 3, 4, 5])
+    expect(await value('agents.output', { agentId: worker?.id, afterSeq: 5 })).toEqual([])
+    expect((await value<{ toolName: string; status: string }[]>('agents.tools', { agentId: worker?.id })).map((t) => [t.toolName, t.status])).toEqual([['Write', 'completed']])
+    const agentDetail = await value<{ agent: { id: string }; sessions: unknown[]; task: { key: string } | null }>('agents.get', { agentId: worker?.id })
+    expect(agentDetail.agent.id).toBe(worker?.id)
+    expect(agentDetail.sessions).toHaveLength(1)
+    expect(agentDetail.task?.key).toBe('alpha')
+    // Streaming output was pushed to the renderer as it happened.
+    expect(h.pushes.filter((m) => m.kind === 'agent.output' && m.agentId === worker?.id)).toHaveLength(5)
+
+    // Event paging: stable ascending order, no gaps or duplicates across pages, same as an unpaged read.
+    const everything = await value<RunEvent[]>('events.list', { runId: created.id })
+    expect(everything.length).toBeGreaterThan(50)
+    expect(everything.map((e) => e.seq)).toEqual([...everything.map((e) => e.seq)].sort((a, b) => a - b))
+    const paged: RunEvent[] = []
+    for (let after = 0; ; ) {
+      const page = await value<RunEvent[]>('events.list', { runId: created.id, afterSeq: after, limit: 7 })
+      if (page.length === 0) break
+      expect(page.length).toBeLessThanOrEqual(7)
+      paged.push(...page)
+      after = page.at(-1)?.seq ?? after
+    }
+    expect(paged.map((e) => e.id)).toEqual(everything.map((e) => e.id))
+    expect(everything[0]?.type).toBe('run.created')
+    expect(everything.at(-1)?.type).toBe('run.completed')
+  })
+
+  it('exercises the control channels: approvals, pause/resume/cancel, task controls, memory, settings, projects', async () => {
+    const project = h.project
+    // A run that waits for plan approval shows up in approvals.pending and is released through approvals.resolve.
+    const waiting = await value<{ id: string }>('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Needs a plan review', requirePlanApproval: true })
+    await h.waitForState(waiting.id, 'awaiting_approval')
+    const pending = await value<{ id: string; kind: string; runId: string }[]>('approvals.pending')
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({ kind: 'plan', runId: waiting.id })
+    expect((await value<{ pendingApprovals: unknown[] }>('runs.get', { runId: waiting.id })).pendingApprovals).toHaveLength(1)
+
+    const resolved = await value<{ status: string }>('approvals.resolve', { approvalId: pending[0]?.id, approve: true, note: 'looks good' })
+    expect(resolved.status).toBe('approved')
+    expect((await h.waitForState(waiting.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+    expect(await value('approvals.pending')).toEqual([])
+    // A second resolution is an invalid_state error, an unknown id is not_found.
+    expect(await call('approvals.resolve', { approvalId: pending[0]?.id ?? '', approve: false })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await call('approvals.resolve', { approvalId: 'missing', approve: true })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+
+    // Lifecycle errors keep their codes.
+    expect(await call('runs.pause', { runId: waiting.id })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await call('runs.resume', { runId: waiting.id })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await call('runs.get', { runId: 'missing' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+    expect(await call('tasks.retry', { taskId: h.repos.tasks.listByRun(waiting.id)[0]?.id ?? '' })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await call('tasks.cancel', { taskId: h.repos.tasks.listByRun(waiting.id)[0]?.id ?? '' })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await call('runs.recover', { runId: 'missing', action: 'resume' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+    expect(await call('projects.open', { path: `${h.dir}\\does-not-exist` })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+
+    // Replan, pause and cancel through the channels.
+    h.runtime.script = scenarioScript({ plan: plan([plannedTask('later')]) })
+    const second = await value<{ id: string }>('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Another', requirePlanApproval: true })
+    await h.waitForState(second.id, 'awaiting_approval')
+    expect(await value<{ state: string }>('runs.replan', { runId: second.id, feedback: 'smaller please' })).toMatchObject({ state: 'planning' })
+    await h.waitFor(() => h.repos.runs.require(second.id).state === 'awaiting_approval', 'the revised plan')
+    expect(await value<{ state: string }>('runs.pause', { runId: second.id })).toMatchObject({ state: 'paused' })
+    expect(await value<{ state: string }>('runs.resume', { runId: second.id })).toMatchObject({ state: 'awaiting_approval' })
+    expect(await value<{ state: string }>('runs.cancel', { runId: second.id })).toMatchObject({ state: 'cancelled' })
+    expect(await value('runs.recoverable')).toEqual([])
+
+    // Task controls on a finished run's task: priority, instruct, criteria.
+    const task = h.repos.tasks.listByRun(waiting.id)[0]
+    expect(await value('tasks.setPriority', { taskId: task?.id, priority: 7 })).toMatchObject({ priority: 7 })
+    expect(await value('tasks.instruct', { taskId: task?.id, instruction: 'for next time' })).toMatchObject({ type: 'user_instruction', body: 'for next time' })
+    expect(await value<unknown[]>('messages.list', { runId: waiting.id, taskId: task?.id })).toHaveLength(1)
+    expect(await value<unknown[]>('messages.list', { runId: waiting.id, taskId: 'other' })).toHaveLength(0)
+    const criterion = h.repos.criteria.listByRun(waiting.id)[0]
+    expect(await value('criteria.update', { criterionId: criterion?.id, text: 'Edited criterion' })).toMatchObject({ text: 'Edited criterion', status: 'pending' })
+    expect(await call('tasks.add', { ...VALID_INPUTS['tasks.add'], runId: second.id })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await value('runs.cleanup', { runId: waiting.id })).toBeNull()
+
+    // Memory.
+    const entry = await value<{ id: string; status: string; source: string }>('memory.add', { scope: 'project', projectId: project.id, title: 'Use pnpm', content: 'This repo uses pnpm', tags: ['tooling'] })
+    expect(entry).toMatchObject({ status: 'approved', source: 'user' })
+    expect(await call('memory.add', { scope: 'project', title: 't', content: 'c', tags: [] })).toMatchObject({ ok: false, error: { code: 'invalid_input' } })
+    expect(await value<unknown[]>('memory.list', { projectId: project.id, query: 'pnpm' })).toHaveLength(1)
+    expect(await value('memory.setStatus', { memoryId: entry.id, status: 'rejected' })).toMatchObject({ status: 'rejected' })
+    expect(await value('memory.delete', { memoryId: entry.id })).toBeNull()
+    expect(await value<unknown[]>('memory.list', { projectId: project.id })).toEqual([])
+
+    // Settings and project metadata.
+    const settings = await value<typeof DEFAULT_SETTINGS>('settings.get')
+    const updated = await value<typeof DEFAULT_SETTINGS>('settings.update', { settings: { ...settings, appearance: { ...settings.appearance, theme: 'light' } } })
+    expect(updated.appearance.theme).toBe('light')
+    expect((await value<typeof DEFAULT_SETTINGS>('settings.get')).appearance.theme).toBe('light')
+    expect(await value('projects.update', { projectId: project.id, respectProjectClaudeConfig: true })).toMatchObject({ respectProjectClaudeConfig: true })
+    expect(await value('projects.reprofile', { projectId: project.id })).toMatchObject({ id: project.id })
+    expect(await value('app.info')).toEqual(APP_INFO)
+    expect(await value('app.openDataDir')).toBeNull()
+    expect(await value<{ state: string }>('auth.status', {})).toMatchObject({ state: 'authenticated' })
+    expect(await value<{ value: string }[]>('auth.models')).toEqual([expect.objectContaining({ value: 'fake-model' })])
+  })
+
+  it('refuses to remove a project that has active runs, and removes one that has none', async () => {
+    h.runtime.script = async (spec, ctx) => {
+      if (spec.role === 'planner') await ctx.sleep(60_000)
+      else await completeWith({ text: 'x' })(spec, ctx)
+    }
+    const run = await value<{ id: string }>('runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'slow' })
+    expect(await call('projects.remove', { projectId: h.project.id })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    await value('runs.cancel', { runId: run.id })
+    expect(await value('projects.remove', { projectId: h.project.id })).toBeNull()
+    expect(await value('projects.list')).toEqual([])
+    // The repository on disk is untouched.
+    expect((await h.git.status(h.repoDir)).clean).toBe(true)
+  })
+
+  it('maps unexpected (non-NexusError) failures to the internal code', async () => {
+    const broken: AgentRuntime = Object.create(h.runtime) as AgentRuntime
+    broken.getAccountInfo = () => Promise.reject(new Error('sdk exploded'))
+    const local = createIpcHandlers(makeContext(h, [], { runtime: broken }))
+    expect(await dispatchIpc(local, 'auth.status', { refresh: true })).toEqual({ ok: false, error: { code: 'internal', message: 'sdk exploded' } })
+  })
+})

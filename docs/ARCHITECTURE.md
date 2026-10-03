@@ -34,20 +34,18 @@ src/
       scheduler/     concurrency, leases, priorities, file-overlap serialization
       state/         task / agent / run state machines
       agent-runtime/ AgentRuntime interface, ClaudeSdkRuntime adapter, FakeAgentRuntime
-      policies/      role tool policies, command classification, path boundaries, approvals
+      policies/      role tool policies, command classification, path boundaries, authorizer
       git/           GitService (spawn with arg arrays), worktree manager
-      planner/       planner invocation, plan validation and repair
-      context/       ContextBuilder (context packs), handoff / session rotation
-      messaging/     inter-agent message bus and routing
-      memory/        global / project / run memory with FTS5
-      verification/  check-command runner, review and verification records, failure objects
-      orchestrator/  run lifecycle, task pipeline, repair loop, recovery
+      process/       runProcess / runCommandLine (no shell), process-tree kill
+      context/       context packs, role prompts, stage prompts (planner, review, verifier, repair, handoff)
+      orchestrator/  run lifecycle, planner loop, task pipeline, repair loop, recovery, approvals,
+                     inter-agent messaging, project memory service
       profile/       read-only project discovery (ProjectProfile)
-      ipc/           validated IPC handlers
+      ipc/           validated IPC handlers and read-model services
   preload/           narrow typed bridge (CJS, sandboxed)
   renderer/          React UI
 tests/
-  unit/ integration/ scenarios/ e2e/ smoke/
+  unit/ integration/ scenarios/ smoke/   (Playwright E2E is run by `pnpm test:e2e`)
 ```
 
 Dependency direction: `renderer → preload bridge → ipc → orchestrator/services → domain
@@ -78,7 +76,8 @@ Dependency direction: `renderer → preload bridge → ipc → orchestrator/serv
    (`allowedTools` only auto-approves, it does not restrict). A `PreToolUse` hook, which the runtime
    evaluates before rules and modes for every call, runs the NEXUS policy engine: hard `deny` for
    out-of-boundary paths and forbidden tools, `allow` for in-policy calls, `ask` for gated actions.
-   `ask` reaches `canUseTool`, which creates an `ApprovalRequest` and awaits the user. Nested
+   `ask` reaches `canUseTool`, which calls the session's `requestApproval`; the orchestrator creates an
+   `ApprovalRequest` and awaits the user. Nested
    subagents are disabled (`Agent`/`Task` are never in `tools`).
 
 6. **Agents talk to NEXUS through an in-process MCP server** (`createSdkMcpServer`), exposing
@@ -89,8 +88,9 @@ Dependency direction: `renderer → preload bridge → ipc → orchestrator/serv
    `nexus/<run>/integration` with its own worktree under the NEXUS data dir. Each writing task gets
    a branch `nexus/<run>/<task>` and worktree created from the integration tip once its dependencies
    are merged. A task that passes verification is merged into the integration branch under a mutex;
-   a conflict aborts the merge, emits `git.conflict`, and creates a repair task. Bringing the
-   integration branch into the user's branch is an explicit approval-gated action.
+   a conflict aborts the merge, emits `git.conflict`, and sends the task through the repair loop (a
+   child debugger task). NEXUS never merges the integration branch into the user's branch: the user
+   runs `git merge` themselves (see GIT_WORKTREES.md).
 
 8. **Authentication is delegated.** NEXUS never reads tokens or credential stores. Status comes
    from the SDK's `initializationResult().account` / `accountInfo()` and the init message's
@@ -109,6 +109,6 @@ Dependency direction: `renderer → preload bridge → ipc → orchestrator/serv
 
 ## Data location
 
-`%APPDATA%/NEXUS/` (Electron `userData`): `nexus.db` (SQLite, WAL), `worktrees/<runId>/<task>/`,
-`logs/`. Overridable with `NEXUS_DATA_DIR` for tests. Claude session transcripts are stored by the
+`%APPDATA%/NEXUS/` (Electron `userData`): `nexus.db` (SQLite, WAL) and `worktrees/<run>/<task>/`,
+where `<run>` is the first 8 hex characters of the run id. Overridable with `NEXUS_DATA_DIR` for tests. Claude session transcripts are stored by the
 Claude runtime itself under `~/.claude/projects/`.

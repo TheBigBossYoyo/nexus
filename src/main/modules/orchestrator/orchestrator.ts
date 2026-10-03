@@ -111,6 +111,8 @@ export class Orchestrator implements PipelineHost {
   private readonly mergeLocks = new Map<string, Promise<unknown>>()
   private readonly integrations = new Map<string, Promise<Worktree>>()
   private readonly announced = new Set<string>()
+  /** Set once shutdown starts: no scheduling pass may launch new work while sessions are being stopped. */
+  private closing = false
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.core = new Core(deps)
@@ -395,6 +397,7 @@ export class Orchestrator implements PipelineHost {
 
   /** Schedule a scheduler pass for the run. Passes for one run never overlap. */
   requestTick(runId: string): void {
+    if (this.closing) return
     const slot = this.ticks.get(runId) ?? { running: false, again: false }
     this.ticks.set(runId, slot)
     if (slot.running) {
@@ -419,7 +422,7 @@ export class Orchestrator implements PipelineHost {
   private async tick(runId: string): Promise<void> {
     const { repos, bus } = this.deps
     const run = repos.runs.get(runId)
-    if (!run || !ACTIVE_RUN_STATES.includes(run.state)) return
+    if (this.closing || !run || !ACTIVE_RUN_STATES.includes(run.state)) return
 
     if (run.startedAt && Date.now() - Date.parse(run.startedAt) > run.config.maxDurationMinutes * 60_000) {
       await this.pauseRun(runId, 'user', `Mission duration limit of ${run.config.maxDurationMinutes} minutes reached`)
@@ -564,9 +567,11 @@ export class Orchestrator implements PipelineHost {
     const run = this.deps.repos.runs.require(runId)
     if (!ACTIVE_RUN_STATES.includes(run.state)) return
     const stages = [...this.active.values()].filter((p) => p.runId === runId).map((p) => p.stage)
-    if (stages.length === 0) return
+    // Without a live pipeline the phase still has to follow the tasks (e.g. back to executing while a
+    // task waits for approval), except while finalization owns the run's verifying phase.
+    if (stages.length === 0 && this.runWork.has(runId)) return
     let phase = deriveRunPhase(this.deps.repos.tasks.listByRun(runId))
-    if (phase === 'executing' && stages.every((s) => s === 'checks')) phase = 'testing'
+    if (phase === 'executing' && stages.length > 0 && stages.every((s) => s === 'checks')) phase = 'testing'
     if (phase !== run.state) this.core.setRunState(runId, phase)
   }
 
@@ -588,6 +593,14 @@ export class Orchestrator implements PipelineHost {
     const row = repos.worktrees.listByRun(run.id).find((w) => w.taskId === null && w.state === 'active')
     if (row && existsSync(row.path)) return row
     if (!run.baseCommit) throw new NexusError('invalid_state', 'Run has no base commit')
+    const lost = repos.worktrees.listByRun(run.id).find((w) => w.taskId === null && w.state !== 'removed')
+    if (lost && (await this.deps.git.branchExists(this.core.project(run).rootPath, lost.branch))) {
+      // The directory vanished but the branch (and everything merged into it) is intact: re-attach it.
+      const repoRoot = this.core.project(run).rootPath
+      await this.deps.git.pruneWorktrees(repoRoot)
+      await this.deps.git.run(repoRoot, ['worktree', 'add', lost.path, lost.branch])
+      return repos.worktrees.update(lost.id, { state: 'active' })
+    }
     const created = await worktrees.createIntegration({
       repoRoot: this.core.project(run).rootPath,
       runId: run.id,
@@ -1203,6 +1216,7 @@ export class Orchestrator implements PipelineHost {
   }
 
   async shutdown(): Promise<void> {
+    this.closing = true
     const runIds = new Set([...this.active.values()].map((p) => p.runId))
     for (const runId of this.runControls.keys()) runIds.add(runId)
     await Promise.allSettled([...runIds].map((runId) => this.stopRunSessions(runId, 'shutdown')))

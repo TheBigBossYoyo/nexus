@@ -1,6 +1,9 @@
 import { PanelGroup, ResizablePanel, ResizeHandle } from '../components/ui/Resizable'
 import { useApplySavedAppearance } from './appearance'
-import { ApprovalBar, ApprovalDrawer } from './Approvals'
+import { ApprovalBar, useAutoOpenApprovals } from '../views/approvals/ApprovalBar'
+import { ApprovalDrawer } from '../views/approvals/ApprovalDrawer'
+import { RecoveryDialog } from '../views/recovery/RecoveryDialog'
+import { AuthBanner } from './AuthBanner'
 import { CommandPalette } from './CommandPalette'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useHotkeys } from './hotkeys'
@@ -12,12 +15,14 @@ import { ViewRouter } from './ViewRouter'
 export function AppShell() {
   useHotkeys()
   useApplySavedAppearance()
+  useAutoOpenApprovals()
   return (
     <div className="flex h-full flex-col" data-testid="app-shell">
       <ErrorBoundary label="Top bar failed">
         <TopBar />
       </ErrorBoundary>
       <ApprovalBar />
+      <AuthBanner />
       <div className="min-h-0 flex-1">
         <PanelGroup id="shell">
           <ResizablePanel id="sidebar" defaultSize="230px" minSize="180px" maxSize="380px">
@@ -34,6 +39,7 @@ export function AppShell() {
         </PanelGroup>
       </div>
       <ApprovalDrawer />
+      <RecoveryDialog />
       <CommandPalette />
       <Toasts />
     </div>

@@ -1,21 +1,8 @@
 import { existsSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { completeWith, scriptsByRole, type FakeScript } from '@main/modules/agent-runtime/fake-runtime'
-import { approvedReview, createHarness, passedVerification, plan, plannedTask, type Harness } from './harness'
-
-/** A worker that writes `<task key>.txt` in its worktree through the policy-checked Write tool. */
-export const fileWorker: FakeScript = async (spec, ctx) => {
-  const key = basename(spec.cwd)
-  const target = join(spec.cwd, `${key}.txt`)
-  const allowed = await ctx.useTool('Write', { file_path: target, content: key }, async () => {
-    await writeFile(target, `${key}\n`)
-    return 'written'
-  })
-  await ctx.completeTurn({ text: allowed ? `Created ${key}.txt` : 'Write was denied' })
-}
-
+import { approvedReview, createHarness, fileWorker, passedVerification, plan, plannedTask, type Harness } from './harness'
 describe('scenario: plan → parallel workers → review → verification → merge', () => {
   let h: Harness
   afterEach(async () => h?.dispose())

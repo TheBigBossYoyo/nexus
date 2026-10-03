@@ -38,7 +38,7 @@ function RecentRuns() {
   return (
     <div className="min-h-0 flex-1 overflow-auto border-t pt-2">
       <div className="px-3 pb-1 text-[0.75rem] font-semibold uppercase tracking-wider text-fg-faint">
-        Recent runs · {project.name}
+        Runs · {project.name}
       </div>
       {recent.length === 0 ? (
         <div className="px-3 py-1 text-fg-faint">No runs yet</div>

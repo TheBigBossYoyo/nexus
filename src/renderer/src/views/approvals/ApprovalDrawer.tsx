@@ -1,0 +1,125 @@
+import { useState } from 'react'
+import type { ApprovalRequest, Risk } from '@shared/domain'
+import { assertNever } from '@shared/result'
+import { usePendingApprovals, useResolveApproval, useRunDetail } from '../../lib/queries'
+import { formatDateTime, shortId } from '../../lib/format'
+import type { Tone } from '../../lib/status'
+import { useUiStore } from '../../store/ui'
+import { Badge, Button, CodeBlock, Drawer, EmptyState, ErrorNote, Input, TimeAgo } from '../../components/ui'
+
+export function riskTone(risk: Risk): Tone {
+  switch (risk) {
+    case 'low':
+      return 'neutral'
+    case 'medium':
+      return 'waiting'
+    case 'high':
+      return 'danger'
+    default:
+      return assertNever(risk, 'risk')
+  }
+}
+
+function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
+  const resolve = useResolveApproval()
+  const openRun = useUiStore((s) => s.openRun)
+  const selectTask = useUiStore((s) => s.selectTask)
+  const setDrawer = useUiStore((s) => s.setDrawer)
+  const run = useRunDetail(approval.runId).data
+  const [note, setNote] = useState('')
+
+  const task = run?.tasks.find((t) => t.id === approval.taskId) ?? null
+  const agent = run?.agents.find((a) => a.id === approval.agentId) ?? null
+  const isPlan = approval.kind === 'plan'
+
+  const submit = (approve: boolean) =>
+    resolve.mutate({ approvalId: approval.id, approve, ...(note.trim() ? { note: note.trim() } : {}) })
+  const goToRun = () => {
+    openRun(approval.runId)
+    if (task) selectTask(task.id)
+    setDrawer(null)
+  }
+
+  return (
+    <li data-testid="approval-item" className="flex flex-col gap-2 border-b border-l-2 border-l-tone-waiting p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{approval.action}</span>
+        <Badge tone={riskTone(approval.risk)} data-testid="approval-risk">
+          {approval.risk} risk
+        </Badge>
+        <Badge mono>{approval.kind}</Badge>
+        <TimeAgo iso={approval.createdAt} className="ml-auto text-fg-faint" />
+      </div>
+      <div className="text-fg-muted">{approval.reason}</div>
+      {isPlan ? (
+        <div className="text-fg-muted">
+          The plan is reviewed in the run view.{' '}
+          <button type="button" className="text-accent hover:underline" onClick={goToRun} data-testid="approval-open-plan">
+            Open plan panel
+          </button>
+        </div>
+      ) : approval.command ? (
+        <CodeBlock>{approval.command}</CodeBlock>
+      ) : null}
+      <dl className="m-0 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[0.88rem]">
+        <dt className="text-fg-faint">Requested by</dt>
+        <dd className="m-0">{agent ? `${agent.label} (${approval.requestedBy})` : approval.requestedBy}</dd>
+        <dt className="text-fg-faint">Run</dt>
+        <dd className="m-0 min-w-0">
+          <span className="font-mono">{shortId(approval.runId)}</span>
+          {run ? <span className="ml-2 text-fg-muted">{run.run.prompt.slice(0, 100)}{run.run.prompt.length > 100 ? '…' : ''}</span> : null}
+        </dd>
+        {approval.taskId ? (
+          <>
+            <dt className="text-fg-faint">Task</dt>
+            <dd className="m-0">{task ? `${task.key}: ${task.title}` : shortId(approval.taskId)}</dd>
+          </>
+        ) : null}
+        <dt className="text-fg-faint">Created</dt>
+        <dd className="m-0 font-mono">{formatDateTime(approval.createdAt)}</dd>
+      </dl>
+      {!isPlan ? (
+        <div>
+          <button type="button" className="text-[0.85rem] text-accent hover:underline" onClick={goToRun}>
+            Open run
+          </button>
+        </div>
+      ) : null}
+      {resolve.error ? <ErrorNote error={resolve.error} /> : null}
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder="Optional note"
+          aria-label="Note"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          maxLength={2000}
+        />
+        <Button variant="primary" loading={resolve.isPending} onClick={() => submit(true)} data-testid="approval-approve">
+          Approve
+        </Button>
+        <Button variant="danger" disabled={resolve.isPending} onClick={() => submit(false)} data-testid="approval-deny">
+          Deny
+        </Button>
+      </div>
+    </li>
+  )
+}
+
+export function ApprovalDrawer() {
+  const open = useUiStore((s) => s.drawer === 'approvals')
+  const setDrawer = useUiStore((s) => s.setDrawer)
+  const pending = usePendingApprovals().data ?? []
+  return (
+    <Drawer open={open} onClose={() => setDrawer(null)} title={`Approvals (${pending.length})`} testId="approval-drawer" width={520}>
+      {pending.length === 0 ? (
+        <EmptyState title="Nothing awaiting approval" />
+      ) : (
+        <ul className="m-0 list-none p-0">
+          {pending.map((a) => (
+            <ApprovalCard key={a.id} approval={a} />
+          ))}
+        </ul>
+      )}
+    </Drawer>
+  )
+}

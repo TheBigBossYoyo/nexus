@@ -123,7 +123,9 @@ export class QueryService {
     const worktree = task.worktreeId ? repos.worktrees.get(task.worktreeId) : null
     if (!worktree) return EMPTY_DIFF('task')
     const run = repos.runs.require(task.runId)
-    if (worktree.state !== 'removed' && existsSync(worktree.path)) {
+    // Once merged, the branch tip is contained in the integration branch (the merge base would be the tip itself),
+    // so a merged or removed task is shown as its committed range instead of the live worktree.
+    if (worktree.state === 'active' && existsSync(worktree.path)) {
       const base =
         (run.integrationBranch ? await git.mergeBase(worktree.path, 'HEAD', run.integrationBranch).catch(() => null) : null) ??
         worktree.baseCommit

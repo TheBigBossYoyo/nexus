@@ -61,7 +61,8 @@ export function createDemoScript(): FakeScript {
   const writer =
     (suffix: string): FakeScript =>
     async (spec, ctx) => {
-      const key = basename(spec.cwd)
+      // A task whose key clashes with an existing branch (e.g. `integration`) gets a short id suffix on its directory.
+      const key = basename(spec.cwd).replace(/-[0-9a-f]{8}$/, '')
       await ctx.emitText(`Working on ${key} in ${spec.cwd}`)
       await ctx.sleep(300)
       const target = join(spec.cwd, `${key}.txt`)
