@@ -1,0 +1,29 @@
+appId: dev.nexus.controlplane
+productName: NEXUS
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  # Only the Windows x64 runtime binary ships; other platform packages are not installed on Windows.
+  - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,linux}*/**"
+  - "!**/*.map"
+  - "!**/better-sqlite3/{deps,src}/**"
+asar: true
+# claude.exe must be a real file on disk to be spawned, and the SQLite binding must be loadable.
+asarUnpack:
+  - "**/node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**"
+  - "**/node_modules/better-sqlite3/**"
+# better-sqlite3 13 ships an N-API prebuild; no rebuild against Electron headers is needed.
+npmRebuild: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  artifactName: NEXUS-Setup-${version}.${ext}

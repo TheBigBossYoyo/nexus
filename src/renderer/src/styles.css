@@ -1,8 +1,125 @@
 @import 'tailwindcss';
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
+/* Tokens. Dark is the default; the light theme overrides the same variables under [data-theme='light']. */
+@theme {
+  --color-surface-0: #0b0d10;
+  --color-surface-1: #11141a;
+  --color-surface-2: #171b22;
+  --color-surface-3: #1f242d;
+  --color-border: #232934;
+  --color-border-strong: #343c4a;
+
+  --color-fg: #d7dce4;
+  --color-fg-muted: #9099a8;
+  --color-fg-faint: #6a7383;
+
+  --color-accent: #5b9dff;
+  --color-accent-fg: #07101f;
+
+  /* One semantic colour per state family. */
+  --color-tone-neutral: #7d8696;
+  --color-tone-active: #4da3ff;
+  --color-tone-waiting: #e5b13a;
+  --color-tone-review: #a78bfa;
+  --color-tone-success: #3fb97a;
+  --color-tone-danger: #f0555a;
+  --color-tone-warning: #f0883e;
+
+  --font-sans: system-ui, 'Segoe UI Variable Text', 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'JetBrains Mono', Menlo, monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --font-size: 13px;
+  --density: 1;
+  --row-h: calc(1.625rem * var(--density));
+  --pad-x: calc(0.5rem * var(--density));
+  --pad-y: calc(0.375rem * var(--density));
+}
+
+:root[data-density='comfortable'] {
+  --density: 1.25;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-surface-0: #f4f5f7;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f0f2f5;
+  --color-surface-3: #e5e8ed;
+  --color-border: #dcdfe5;
+  --color-border-strong: #c2c7d0;
+  --color-fg: #1b1f27;
+  --color-fg-muted: #4b5463;
+  --color-fg-faint: #7a8392;
+  --color-accent: #1f6feb;
+  --color-accent-fg: #ffffff;
+  --color-tone-neutral: #6b7483;
+  --color-tone-active: #1f6feb;
+  --color-tone-waiting: #b7791f;
+  --color-tone-review: #7c4dff;
+  --color-tone-success: #1a8a4f;
+  --color-tone-danger: #d1242f;
+  --color-tone-warning: #c4561a;
+}
+
+@layer base {
+  html {
+    font-size: var(--font-size);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background-color: var(--color-surface-0);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-border);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: 4px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+  button,
+  select,
+  input,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  [data-separator] {
+    background: var(--color-border);
+    transition: background 100ms;
+  }
+  [data-separator='hover'],
+  [data-separator='active'],
+  [data-separator='focus'] {
+    background: var(--color-accent);
+  }
 }

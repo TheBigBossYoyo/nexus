@@ -1,0 +1,56 @@
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_SETTINGS } from '@shared/settings'
+import {
+  buildMcpServer,
+  isSameSettings,
+  normalizeSettings,
+  validateSettings,
+} from '../../../src/renderer/src/views/settings/settingsForm'
+
+const clone = () => structuredClone(DEFAULT_SETTINGS)
+
+describe('settings form', () => {
+  it('accepts the defaults', () => {
+    expect(validateSettings(clone()).ok).toBe(true)
+  })
+
+  it('reports errors keyed by dotted path', () => {
+    const s = clone()
+    s.execution.maxIterations = 0
+    s.execution.maxParallelAgents = 99
+    const v = validateSettings(s)
+    expect(v.ok).toBe(false)
+    if (!v.ok) {
+      expect(Object.keys(v.errors)).toEqual(
+        expect.arrayContaining(['execution.maxIterations', 'execution.maxParallelAgents']),
+      )
+    }
+  })
+
+  it('normalizes free text and blank prefixes before validating', () => {
+    const s = clone()
+    s.permissions.safeCommandPrefixes = [' pnpm test ', '', '  ']
+    s.claude.executablePath = '  C:\\claude.exe '
+    const n = normalizeSettings(s)
+    expect(n.permissions.safeCommandPrefixes).toEqual(['pnpm test'])
+    expect(n.claude.executablePath).toBe('C:\\claude.exe')
+    expect(isSameSettings(n, clone())).toBe(false)
+    expect(isSameSettings(clone(), clone())).toBe(true)
+  })
+
+  it('adds MCP servers disabled and with no role access', () => {
+    const r = buildMcpServer({ name: 'github', type: 'stdio', command: 'npx', args: '-y\n\n pkg ', url: '' }, [])
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.server).toMatchObject({ name: 'github', enabled: false, roles: [], command: 'npx', args: ['-y', 'pkg'] })
+    }
+  })
+
+  it('rejects duplicate names, missing command/url and bad names', () => {
+    const existing = [{ name: 'gh', type: 'http' as const, url: 'https://x', enabled: false, roles: [] }]
+    expect(buildMcpServer({ name: 'GH', type: 'http', command: '', args: '', url: 'https://y' }, existing).ok).toBe(false)
+    expect(buildMcpServer({ name: 'a', type: 'stdio', command: ' ', args: '', url: '' }, []).ok).toBe(false)
+    expect(buildMcpServer({ name: 'a', type: 'sse', command: '', args: '', url: '' }, []).ok).toBe(false)
+    expect(buildMcpServer({ name: 'bad name', type: 'http', command: '', args: '', url: 'https://y' }, []).ok).toBe(false)
+  })
+})
