@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+release/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
+# Local NEXUS runtime data created by dev runs and tests
+.nexus-data/
