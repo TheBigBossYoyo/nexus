@@ -1,0 +1,663 @@
+import {
+  emptyMetrics,
+  HandoffSchema,
+  type Agent,
+  type AgentMetrics,
+  type AgentPurpose,
+  type AgentRole,
+  type AgentState,
+  type Handoff,
+  type ModelTier,
+  type Run,
+  type Task,
+} from '@shared/domain'
+import { newId, nowIso } from '@shared/ids'
+import { errorMessage } from '@shared/result'
+import type {
+  AgentSessionHandle,
+  ExternalMcpServer,
+  NexusToolHandlers,
+  SessionSpec,
+  ToolRequest,
+  TurnOutcome,
+  TurnResult,
+  UsageInfo,
+} from '@main/modules/agent-runtime/types'
+import { rolePrompt } from '@main/modules/context/prompts'
+import {
+  buildHandoffRequestPrompt,
+  buildResumeFromHandoffPrompt,
+  handoffJsonSchema,
+} from '@main/modules/context/context-builder'
+import {
+  createAuthorizer,
+  describeToolRequest,
+  summarizeToolInput,
+  toolsForRole,
+} from '@main/modules/policies'
+import { canTransition } from '@main/modules/state'
+import type { ApprovalService } from './approvals'
+import type { OrchestratorDeps } from './deps'
+import type { MemoryService } from './memory'
+import type { MessageService } from './messaging'
+
+export type StopReason = 'paused' | 'cancelled' | 'user_stop' | 'shutdown'
+
+/** Live-session registry for one unit of work (a task pipeline, the planner, the mission verifier). */
+export class SessionControl {
+  readonly handles = new Set<AgentSessionHandle>()
+  stopReason: StopReason | null = null
+
+  async stop(reason: StopReason): Promise<void> {
+    this.stopReason = reason
+    await Promise.allSettled([...this.handles].map((h) => h.stop()))
+  }
+
+  send(text: string): boolean {
+    for (const handle of this.handles) {
+      handle.send(text)
+      return true
+    }
+    return false
+  }
+}
+
+export interface AgentRunInput {
+  run: Run
+  task: Task | null
+  role: AgentRole
+  purpose: AgentPurpose
+  label: string
+  /** Working directory of the session. */
+  cwd: string
+  /** Directory the agent's writes are confined to (same as cwd for writing roles). */
+  worktreeRoot: string
+  projectRoot: string
+  prompt: string
+  outputSchema?: Record<string, unknown>
+  tier: ModelTier
+  control: SessionControl
+  /** Resume this SDK session (after pause, quota, or restart) instead of starting fresh. */
+  resumeSdkSessionId?: string
+  /** Allow handoff + fresh session when the per-session turn threshold is reached. */
+  allowRotation?: boolean
+  /** Called on agent activity; used to renew the task lease. */
+  onActivity?: () => void
+}
+
+export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped'
+
+export interface AgentRunResult {
+  agentId: string
+  outcome: AgentOutcome
+  text: string
+  structuredOutput: unknown
+  error: string | null
+  sdkSessionId: string | null
+  /** Set when the agent called report_blocker. */
+  blocker: { summary: string; evidence: string } | null
+}
+
+interface SessionResult {
+  outcome: AgentOutcome
+  result: TurnResult | null
+  error: string | null
+  sdkSessionId: string | null
+}
+
+const FILE_READ_TOOLS = new Set(['Read'])
+const FILE_WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+
+/** Runs one agent (one or more SDK sessions) and records everything observable about it. */
+export class AgentRunner {
+  constructor(
+    private readonly deps: OrchestratorDeps,
+    private readonly approvals: ApprovalService,
+    private readonly messages: MessageService,
+    private readonly memory: MemoryService,
+  ) {}
+
+  async run(input: AgentRunInput): Promise<AgentRunResult> {
+    const { repos, bus } = this.deps
+    const settings = repos.settings.get()
+    const config = input.run.config
+    const agent = bus.transaction(() =>
+      repos.agents.insert({
+        id: newId(),
+        runId: input.run.id,
+        taskId: input.task?.id ?? null,
+        role: input.role,
+        purpose: input.purpose,
+        label: input.label,
+        state: 'starting',
+        model: null,
+        activity: null,
+        metrics: emptyMetrics(),
+        error: null,
+        createdAt: nowIso(),
+        startedAt: nowIso(),
+        stoppedAt: null,
+      }),
+    )
+
+    const model = settings.models.tiers[input.tier] || undefined
+    const rotationTurns = input.allowRotation ? config.sessionRotationTurns : 0
+    let remainingTurns = config.maxTurnsPerAgent
+    let prompt = input.prompt
+    let resumeId = input.resumeSdkSessionId
+    let blocker: AgentRunResult['blocker'] = null
+    const priorUsage: UsageInfo[] = []
+    const files = { read: new Set<string>(), changed: new Set<string>() }
+
+    const base = this.buildSpec(input, agent, model, (b) => (blocker = b))
+    let last: SessionResult = { outcome: 'error', result: null, error: null, sdkSessionId: null }
+
+    try {
+      for (;;) {
+        const maxTurns = rotationTurns > 0 ? Math.min(rotationTurns, remainingTurns) : remainingTurns
+        const spec: SessionSpec = { ...base, prompt, maxTurns, resumeSessionId: resumeId }
+        last = await this.runSession(input, agent.id, spec, priorUsage, files)
+        resumeId = undefined
+        remainingTurns -= last.result?.numTurns ?? maxTurns
+        if (last.result) priorUsage.push(...last.result.usage)
+
+        const canRotate =
+          last.outcome === 'max_turns' &&
+          rotationTurns > 0 &&
+          remainingTurns > 0 &&
+          input.task !== null &&
+          !input.control.stopReason
+        if (!canRotate) break
+
+        // Session rotation: structured handoff, then a fresh session with minimal context.
+        const handoff = await this.requestHandoff(input, agent.id, base, last.sdkSessionId)
+        bus.emit({
+          runId: input.run.id,
+          taskId: input.task?.id ?? null,
+          agentId: agent.id,
+          type: 'agent.rotated',
+          payload: { fromSessionId: last.sdkSessionId, turns: last.result?.numTurns ?? maxTurns },
+        })
+        prompt = buildResumeFromHandoffPrompt({
+          task: input.task as Task,
+          handoff,
+          worktreePath: input.cwd,
+          branch: input.task?.branch ?? '',
+        }).prompt
+      }
+    } catch (e) {
+      last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId }
+    }
+
+    const failed = last.outcome !== 'success' && last.outcome !== 'stopped'
+    const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
+    this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
+    return {
+      agentId: agent.id,
+      outcome: last.outcome,
+      text: last.result?.text ?? '',
+      structuredOutput: last.result?.structuredOutput,
+      error,
+      sdkSessionId: last.sdkSessionId,
+      blocker,
+    }
+  }
+
+  private buildSpec(
+    input: AgentRunInput,
+    agent: Agent,
+    model: string | undefined,
+    onBlocker: (b: { summary: string; evidence: string }) => void,
+  ): Omit<SessionSpec, 'prompt' | 'maxTurns'> {
+    const { repos, bus } = this.deps
+    const settings = repos.settings.get()
+    const { run, task, role } = input
+    const allowNetworkTools = settings.permissions.allowNetworkTools
+
+    const servers = settings.mcp.servers.filter(
+      (s) => s.enabled && s.roles.includes(role) && run.config.enabledMcpServers.includes(s.name),
+    )
+    const mcpServers: Record<string, ExternalMcpServer> = {}
+    for (const s of servers) {
+      mcpServers[s.name] = { type: s.type, command: s.command, args: s.args, url: s.url }
+    }
+
+    const authorize = createAuthorizer({
+      role,
+      worktreeRoot: input.worktreeRoot,
+      projectRoot: input.projectRoot,
+      safeCommandPrefixes: [
+        ...settings.permissions.safeCommandPrefixes,
+        ...Object.values(run.config.checks).filter((c): c is string => typeof c === 'string'),
+      ],
+      allowNetworkTools,
+      allowedMcpServers: servers.map((s) => s.name),
+    })
+
+    const nexusTools: NexusToolHandlers = {
+      sendMessage: async (m) => {
+        const { recipients } = this.messages.send({
+          runId: run.id,
+          type: m.type,
+          severity: m.severity,
+          subject: m.subject,
+          body: m.body,
+          fromAgentId: agent.id,
+          fromTaskId: task?.id ?? null,
+          fromLabel: input.label,
+          toTask: m.toTask,
+          toRole: m.toRole,
+        })
+        return recipients.length > 0
+          ? `Message routed to: ${recipients.map((t) => t.key).join(', ')}`
+          : 'Message recorded. No open task matched the recipient; the user can see it.'
+      },
+      reportBlocker: async (b) => {
+        onBlocker(b)
+        this.messages.send({
+          runId: run.id,
+          type: 'blocker',
+          severity: 'high',
+          subject: b.summary,
+          body: b.evidence,
+          fromAgentId: agent.id,
+          fromTaskId: task?.id ?? null,
+          fromLabel: input.label,
+          toTask: null,
+          toRole: null,
+        })
+        return 'Blocker recorded. Finish your turn with a short summary; the task will be marked blocked.'
+      },
+      recordDecision: async (d) => {
+        bus.transaction(() => {
+          const decision = repos.decisions.insert({
+            id: newId(),
+            runId: run.id,
+            taskId: task?.id ?? null,
+            agentId: agent.id,
+            title: d.title,
+            decision: d.decision,
+            rationale: d.rationale,
+            createdAt: nowIso(),
+          })
+          bus.emit({
+            runId: run.id,
+            taskId: task?.id ?? null,
+            agentId: agent.id,
+            type: 'decision.recorded',
+            payload: { decisionId: decision.id, title: decision.title },
+          })
+        })
+        return 'Decision recorded.'
+      },
+      proposeMemory: async (m) => {
+        this.memory.propose({
+          run,
+          taskId: task?.id ?? null,
+          agentId: agent.id,
+          source: role,
+          title: m.title,
+          content: m.content,
+          evidence: m.evidence,
+          tags: m.tags,
+          filePaths: m.filePaths,
+        })
+        return 'Memory proposed. It becomes project memory once approved.'
+      },
+    }
+
+    return {
+      agentId: agent.id,
+      role,
+      cwd: input.cwd,
+      model,
+      systemPromptAppend: rolePrompt(role, input.purpose),
+      tools: toolsForRole(role, { allowNetworkTools }),
+      authorize,
+      requestApproval: (request, reason, risk) => this.requestToolApproval(input, agent.id, request, reason, risk),
+      outputSchema: input.outputSchema,
+      nexusTools,
+      mcpServers,
+      loadProjectSettings: run.config.respectProjectClaudeConfig,
+      subscriptionMode: run.config.subscriptionMode,
+    }
+  }
+
+  private async requestToolApproval(
+    input: AgentRunInput,
+    agentId: string,
+    request: ToolRequest,
+    reason: string,
+    risk: 'low' | 'medium' | 'high',
+  ): Promise<boolean> {
+    const described = describeToolRequest(request)
+    this.setState(agentId, 'waiting')
+    this.deps.bus.emit({
+      runId: input.run.id,
+      taskId: input.task?.id ?? null,
+      agentId,
+      type: 'agent.waiting',
+      payload: { reason: `approval: ${described.action}` },
+    })
+    const approved = await this.approvals.requestDecision({
+      runId: input.run.id,
+      taskId: input.task?.id ?? null,
+      agentId,
+      kind: 'tool',
+      action: described.action,
+      reason,
+      command: described.command,
+      requestedBy: input.label,
+      risk,
+    })
+    this.setState(agentId, 'working')
+    return approved
+  }
+
+  private async runSession(
+    input: AgentRunInput,
+    agentId: string,
+    spec: SessionSpec,
+    priorUsage: UsageInfo[],
+    files: { read: Set<string>; changed: Set<string> },
+  ): Promise<SessionResult> {
+    const { repos, bus, runtime, push } = this.deps
+    const runId = input.run.id
+    const taskId = input.task?.id ?? null
+    const ids = { runId, taskId, agentId }
+    const session = repos.sessions.insert({
+      id: newId(),
+      agentId,
+      sdkSessionId: spec.resumeSessionId ?? null,
+      model: spec.model ?? null,
+      state: 'active',
+      endReason: null,
+      handoff: null,
+      startedAt: nowIso(),
+      endedAt: null,
+    })
+
+    const handle = spec.resumeSessionId
+      ? runtime.resumeSession(spec, spec.resumeSessionId)
+      : runtime.startSession(spec)
+    input.control.handles.add(handle)
+    // A stop requested while the session was being created must still take effect.
+    if (input.control.stopReason) void handle.stop()
+
+    let result: TurnResult | null = null
+    let ended: { reason: string; error: string | null } = { reason: 'crashed', error: null }
+    let quota = false
+    const toolNames = new Map<string, string>()
+
+    const appendOutput = (kind: 'text' | 'system' | 'error', content: string): void => {
+      const row = repos.outputs.append(agentId, kind, content)
+      push({ kind: 'agent.output', agentId, runId, seq: row.seq, outputKind: kind, content })
+    }
+
+    try {
+      for await (const event of handle.events) {
+        input.onActivity?.()
+        switch (event.type) {
+          case 'session.started': {
+            repos.sessions.update(session.id, { sdkSessionId: event.sessionId, model: event.model })
+            repos.agents.update(agentId, { model: event.model })
+            this.setState(agentId, 'working')
+            bus.emit({
+              ...ids,
+              type: 'agent.started',
+              payload: { role: input.role, model: event.model, sessionId: event.sessionId },
+            })
+            break
+          }
+          case 'text': {
+            appendOutput('text', event.text)
+            bus.emit({ ...ids, type: 'agent.message', payload: { preview: event.text.slice(0, 200) } })
+            break
+          }
+          case 'text.delta':
+            push({ kind: 'agent.delta', agentId, runId, text: event.text })
+            break
+          case 'tool.started': {
+            toolNames.set(event.toolUseId, event.toolName)
+            const summary = summarizeToolInput(event.toolName, event.input)
+            bus.transaction(() => {
+              repos.toolEvents.insert({
+                id: newId(),
+                runId,
+                taskId,
+                agentId,
+                toolUseId: event.toolUseId,
+                toolName: event.toolName,
+                input: event.input,
+                status: 'started',
+                outputPreview: null,
+                startedAt: nowIso(),
+                completedAt: null,
+              })
+              this.bumpMetrics(agentId, event.toolName, event.input, files, summary)
+              bus.emit({
+                ...ids,
+                type: 'agent.tool.started',
+                payload: { toolUseId: event.toolUseId, toolName: event.toolName, summary },
+              })
+            })
+            break
+          }
+          case 'tool.completed': {
+            const toolName = toolNames.get(event.toolUseId) ?? 'unknown'
+            bus.transaction(() => {
+              const existing = repos.toolEvents.listByAgent(agentId).find((t) => t.toolUseId === event.toolUseId)
+              // A denied call also produces an error result; keep the more specific 'denied' status.
+              if (existing?.status !== 'denied') {
+                repos.toolEvents.complete(event.toolUseId, event.isError ? 'failed' : 'completed', event.outputPreview)
+              }
+              bus.emit({
+                ...ids,
+                type: 'agent.tool.completed',
+                payload: { toolUseId: event.toolUseId, toolName, isError: event.isError },
+              })
+            })
+            break
+          }
+          case 'tool.denied': {
+            bus.transaction(() => {
+              repos.toolEvents.complete(event.toolUseId, 'denied', event.reason)
+              bus.emit({
+                ...ids,
+                type: 'agent.tool.denied',
+                payload: { toolName: event.toolName, reason: event.reason },
+              })
+            })
+            break
+          }
+          case 'rate_limit': {
+            if (event.status === 'rejected') quota = true
+            bus.emit({
+              ...ids,
+              type: 'agent.rate_limited',
+              payload: { status: event.status, resetsAt: event.resetsAt, limitType: event.limitType },
+            })
+            break
+          }
+          case 'status':
+            repos.agents.update(agentId, { activity: event.status })
+            break
+          case 'turn.completed': {
+            result = event.result
+            this.recordUsage(input, agentId, [...priorUsage, ...event.result.usage], event.result.numTurns)
+            if (event.result.errors.length > 0) appendOutput('error', event.result.errors.join('\n'))
+            // Single-turn agents: let the process exit. Queued follow-ups still run before it does.
+            handle.end()
+            break
+          }
+          case 'session.ended':
+            ended = { reason: event.reason, error: event.error }
+            break
+        }
+      }
+    } finally {
+      input.control.handles.delete(handle)
+    }
+
+    const stopReason = input.control.stopReason
+    let outcome: AgentOutcome
+    if (stopReason) outcome = 'stopped'
+    else if (result) outcome = result.outcome
+    else if (quota) outcome = 'quota'
+    else outcome = 'crashed'
+    if (outcome === 'crashed' && ended.error) appendOutput('error', ended.error)
+
+    repos.sessions.update(session.id, {
+      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' ? 'ended' : 'failed',
+      endReason: stopReason ?? (outcome === 'success' ? 'completed' : outcome),
+      endedAt: nowIso(),
+    })
+    return { outcome, result, error: ended.error, sdkSessionId: handle.sessionId() }
+  }
+
+  /** Ask the exhausted session for a structured handoff; fall back to an empty one. */
+  private async requestHandoff(
+    input: AgentRunInput,
+    agentId: string,
+    base: Omit<SessionSpec, 'prompt' | 'maxTurns'>,
+    sdkSessionId: string | null,
+  ): Promise<Handoff> {
+    const empty: Handoff = {
+      completedWork: [],
+      commits: [],
+      filesChanged: [],
+      unresolvedIssues: [],
+      importantFindings: ['No handoff was available. Inspect `git log` and `git status` in the worktree to see prior progress.'],
+      nextSteps: ['Continue the task from the current state of the worktree.'],
+    }
+    if (!sdkSessionId) return empty
+    const spec: SessionSpec = {
+      ...base,
+      prompt: buildHandoffRequestPrompt(),
+      maxTurns: 3,
+      tools: [],
+      outputSchema: handoffJsonSchema,
+      nexusTools: undefined,
+      resumeSessionId: sdkSessionId,
+    }
+    const result = await this.runSession(input, agentId, spec, [], { read: new Set(), changed: new Set() })
+    const parsed = HandoffSchema.safeParse(result.result?.structuredOutput)
+    const handoff = parsed.success ? parsed.data : empty
+    const latest = this.deps.repos.sessions.latestForAgent(agentId)
+    if (latest) this.deps.repos.sessions.update(latest.id, { state: 'rotated', handoff })
+    return handoff
+  }
+
+  private bumpMetrics(
+    agentId: string,
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    files: { read: Set<string>; changed: Set<string> },
+    activity: string,
+  ): void {
+    const { repos } = this.deps
+    const agent = repos.agents.require(agentId)
+    const path = typeof toolInput['file_path'] === 'string' ? toolInput['file_path'] : toolInput['notebook_path']
+    if (typeof path === 'string') {
+      if (FILE_READ_TOOLS.has(toolName)) files.read.add(path.toLowerCase())
+      if (FILE_WRITE_TOOLS.has(toolName)) files.changed.add(path.toLowerCase())
+    }
+    const metrics: AgentMetrics = {
+      ...agent.metrics,
+      toolCalls: agent.metrics.toolCalls + 1,
+      commands: agent.metrics.commands + (SHELL_TOOLS.has(toolName) ? 1 : 0),
+      filesRead: files.read.size,
+      filesChanged: files.changed.size,
+    }
+    repos.agents.update(agentId, { metrics, activity: `${toolName}: ${activity}`.slice(0, 200) })
+  }
+
+  /** Usage is copied from what the SDK reports (cumulative per session); nothing is estimated. */
+  private recordUsage(input: AgentRunInput, agentId: string, usage: UsageInfo[], turns: number): void {
+    const { repos, bus } = this.deps
+    if (usage.length === 0) return
+    const sum = (pick: (u: UsageInfo) => number): number => usage.reduce((n, u) => n + pick(u), 0)
+    const inputTokens = sum((u) => u.inputTokens)
+    const outputTokens = sum((u) => u.outputTokens)
+    const costUsd = sum((u) => u.costUsd)
+    const agent = repos.agents.require(agentId)
+    bus.transaction(() => {
+      repos.agents.update(agentId, {
+        metrics: {
+          ...agent.metrics,
+          turns: agent.metrics.turns + turns,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens: sum((u) => u.cacheReadTokens),
+          costUsd,
+          contextWindow: usage[usage.length - 1]?.contextWindow ?? null,
+        },
+      })
+      for (const u of usage.slice(-1)) {
+        repos.usage.insert({
+          id: newId(),
+          runId: input.run.id,
+          agentId,
+          model: u.model,
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cacheReadTokens: u.cacheReadTokens,
+          cacheCreationTokens: u.cacheCreationTokens,
+          costUsd: u.costUsd,
+          contextWindow: u.contextWindow,
+          turns,
+          createdAt: nowIso(),
+        })
+      }
+      bus.emit({
+        runId: input.run.id,
+        taskId: input.task?.id ?? null,
+        agentId,
+        type: 'agent.usage',
+        payload: { inputTokens, outputTokens, costUsd },
+      })
+    })
+  }
+
+  private setState(agentId: string, to: AgentState): void {
+    const { repos, bus } = this.deps
+    const agent = repos.agents.require(agentId)
+    if (agent.state === to || !canTransition('agent', agent.state, to)) return
+    bus.transaction(() => {
+      repos.agents.update(agentId, { state: to })
+      bus.emit({
+        runId: agent.runId,
+        taskId: agent.taskId,
+        agentId,
+        type: 'agent.state_changed',
+        payload: { from: agent.state, to },
+      })
+    })
+  }
+
+  private finishAgent(agentId: string, to: 'stopped' | 'failed', error: string | null, reason: string): void {
+    const { repos, bus } = this.deps
+    const agent = repos.agents.require(agentId)
+    this.approvals.expire({ runId: agent.runId, agentId })
+    bus.transaction(() => {
+      // 'stopped' is only reachable through 'stopping' in the agent state machine.
+      if (to === 'stopped' && canTransition('agent', agent.state, 'stopping')) {
+        repos.agents.update(agentId, { state: 'stopping' })
+      }
+      repos.agents.update(agentId, { state: to, error, activity: null, stoppedAt: nowIso() })
+      bus.emit({
+        runId: agent.runId,
+        taskId: agent.taskId,
+        agentId,
+        type: 'agent.state_changed',
+        payload: { from: agent.state, to },
+      })
+      if (to === 'failed') {
+        bus.emit({ runId: agent.runId, taskId: agent.taskId, agentId, type: 'agent.failed', payload: { error: error ?? reason } })
+      } else {
+        bus.emit({ runId: agent.runId, taskId: agent.taskId, agentId, type: 'agent.stopped', payload: { reason } })
+      }
+    })
+  }
+}

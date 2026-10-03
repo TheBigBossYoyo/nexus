@@ -270,8 +270,7 @@ export type IpcResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: { code: string; message: string } }
 
-export const IPC_INVOKE_CHANNEL = 'nexus:invoke'
-export const IPC_PUSH_CHANNEL = 'nexus:push'
+export { IPC_INVOKE_CHANNEL, IPC_PUSH_CHANNEL } from './ipc-channels'
 
 /** The entire surface exposed to the renderer through contextBridge. */
 export interface NexusBridge {
