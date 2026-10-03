@@ -7,12 +7,14 @@ import {
   type AgentRole,
   type AgentState,
   type Handoff,
-  type ModelTier,
   type Run,
+  type Severity,
   type Task,
+  type ModelTier,
 } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage } from '@shared/result'
+import type { ContextPack } from '@shared/v2'
 import type {
   AgentSessionHandle,
   ExternalMcpServer,
@@ -35,17 +37,19 @@ import {
   summarizeToolInput,
   toolsForRole,
 } from '@main/modules/policies'
+import { packForPrompt } from '@main/modules/context/context-engine'
 import { canTransition } from '@main/modules/state'
 import type { ApprovalService } from './approvals'
 import type { GraphService } from './graph-service'
 import type { OrchestratorDeps } from './deps'
 import type { MemoryService } from './memory'
 import type { MessageService } from './messaging'
+import type { ModelRoutingService } from './routing'
 
 export type StopReason = 'paused' | 'cancelled' | 'user_stop' | 'shutdown'
 
 /** Gate and planning sessions never receive instructions meant for the agent doing the work. */
-const NON_WORKER_PURPOSES: ReadonlySet<AgentPurpose> = new Set<AgentPurpose>(['plan', 'review', 'verify'])
+const NON_WORKER_PURPOSES: ReadonlySet<AgentPurpose> = new Set<AgentPurpose>(['plan', 'review', 'verify', 'critique', 'synthesize', 'arbitrate'])
 
 interface RegisteredHandle {
   purpose: AgentPurpose
@@ -105,7 +109,10 @@ export interface AgentRunInput {
   projectRoot: string
   prompt: string
   outputSchema?: Record<string, unknown>
-  tier: ModelTier
+  /** Inputs of the model route beyond role, purpose and the task itself; see ModelRoutingService. */
+  routing?: { attempt?: number; repairCycle?: number; triggeringSeverity?: Severity | null; tierOverride?: ModelTier | null }
+  /** Why the agent receives this prompt; persisted with the agent's id once the agent exists. */
+  contextPack?: ContextPack
   control: SessionControl
   /** Resume this SDK session (after pause, quota, or restart) instead of starting fresh. */
   resumeSdkSessionId?: string
@@ -154,14 +161,22 @@ export class AgentRunner {
     private readonly messages: MessageService,
     private readonly memory: MemoryService,
     private readonly graph: GraphService,
+    private readonly routing: ModelRoutingService,
   ) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const { repos, bus } = this.deps
-    const settings = repos.settings.get()
     const config = input.run.config
-    const agent = bus.transaction(() =>
-      repos.agents.insert({
+    const route = this.routing.route({
+      run: input.run,
+      task: input.task,
+      role: input.role,
+      purpose: input.purpose,
+      ...input.routing,
+    })
+    // The agent, the reason for its model and the reason for its context are recorded together.
+    const agent = bus.transaction(() => {
+      const row = repos.agents.insert({
         id: newId(),
         runId: input.run.id,
         taskId: input.task?.id ?? null,
@@ -176,10 +191,33 @@ export class AgentRunner {
         createdAt: nowIso(),
         startedAt: nowIso(),
         stoppedAt: null,
-      }),
-    )
+      })
+      const decision = repos.routingDecisions.insert({
+        id: newId(),
+        runId: input.run.id,
+        taskId: input.task?.id ?? null,
+        agentId: row.id,
+        role: input.role,
+        purpose: input.purpose,
+        requestedPolicy: route.requestedPolicy,
+        resolvedPolicy: route.resolvedPolicy,
+        resolvedTier: route.resolvedTier,
+        resolvedModel: route.resolvedModel,
+        reasons: route.reasons,
+        createdAt: nowIso(),
+      })
+      bus.emit({
+        runId: input.run.id,
+        taskId: input.task?.id ?? null,
+        agentId: row.id,
+        type: 'routing.decided',
+        payload: { decisionId: decision.id, role: input.role, policy: route.resolvedPolicy, model: route.resolvedModel, reasons: route.reasons },
+      })
+      if (input.contextPack) this.recordPack(input, row.id, input.contextPack)
+      return row
+    })
 
-    const model = settings.models.tiers[input.tier] || undefined
+    const model = route.resolvedModel ?? undefined
     const rotationTurns = input.allowRotation ? config.sessionRotationTurns : 0
     let remainingTurns = config.maxTurnsPerAgent
     let prompt = input.prompt
@@ -221,6 +259,20 @@ export class AgentRunner {
           worktreePath: input.cwd,
           branch: input.task?.branch ?? '',
         }).prompt
+        this.recordPack(
+          input,
+          agent.id,
+          packForPrompt({
+            run: input.run,
+            task: input.task,
+            purpose: input.purpose,
+            prompt,
+            blocks: [
+              { section: 'Resuming task', sourceKind: 'handoff', title: 'Handoff from the rotated session', reason: 'The session reached its turn threshold and was rotated; the structured handoff replaces its history.', chars: JSON.stringify(handoff).length },
+              { section: 'Task', sourceKind: 'task', sourceId: input.task?.id ?? null, title: input.task?.title ?? '', reason: 'The task being continued.', chars: input.task?.description.length ?? 0 },
+            ],
+          }),
+        )
       }
     } catch (e) {
       last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId, turns: last.turns }
@@ -238,6 +290,20 @@ export class AgentRunner {
       sdkSessionId: last.sdkSessionId,
       blocker,
     }
+  }
+
+  /** Persist a pack for an agent and announce it. */
+  private recordPack(input: AgentRunInput, agentId: string, pack: ContextPack): void {
+    const { repos, bus } = this.deps
+    const stored = repos.contextPacks.insert({ ...pack, agentId })
+    const included = stored.entries.filter((e) => e.included).length
+    bus.emit({
+      runId: input.run.id,
+      taskId: input.task?.id ?? null,
+      agentId,
+      type: 'context.composed',
+      payload: { packId: stored.id, included, excluded: stored.entries.length - included, chars: stored.totalChars },
+    })
   }
 
   private buildSpec(

@@ -17,15 +17,18 @@ import type {
 } from '@shared/domain'
 import type { EventType, PushMessage, RunEvent } from '@shared/events'
 import { newId, nowIso } from '@shared/ids'
+import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
 import {
   completeWith,
   FakeAgentRuntime,
   scriptsByRole,
+  specPurpose,
   type FakeScript,
   type FakeSessionContext,
 } from '@main/modules/agent-runtime/fake-runtime'
 import { EventBus } from '@main/modules/events'
+import { createIpcHandlers, dispatchIpc } from '@main/modules/ipc/handlers'
 import { GitService, WorktreeManager } from '@main/modules/git'
 import { Orchestrator } from '@main/modules/orchestrator'
 import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
@@ -348,19 +351,48 @@ export const fileWorker: FakeScript = async (spec, ctx) => {
 export interface ScenarioScripts {
   /** Planner output; a function is called per planner session (0-based). */
   plan: MissionPlan | ((attempt: number) => unknown)
+  /** Consensus: output of the candidate planner with this label (default: `plan`). */
+  candidate?: (label: string) => unknown
+  /** Consensus: the synthesizer's output (default: `plan`). */
+  synthesis?: unknown
   worker?: FakeScript
   debugger?: FakeScript
   reviewer?: FakeScript
+  /** Dual review's second reviewer and (by default) the single reviewer of high-risk tasks; default: `reviewer`. */
+  securityReviewer?: FakeScript
+  /** Plan critic (default: no findings, prefers the first candidate). */
+  critic?: FakeScript
+  /** Finding arbiter (default: accepts every finding). */
+  arbiter?: FakeScript
   verifier?: FakeScript
   researcher?: FakeScript
 }
 
+/** Label of the candidate planner a consensus planner prompt was written for, null for any other prompt. */
+export function lensLabelOf(prompt: string): string | null {
+  return /You are (Planner [A-Z] \([a-z-]+\))\./.exec(prompt)?.[1] ?? null
+}
+
+/** Indexes of the findings listed in an arbiter prompt (`[0] ...`) with the title of each. */
+export function arbiterFindings(prompt: string): { index: number; title: string }[] {
+  return [...prompt.matchAll(/^\[(\d+)\] \(reported by [^)]*\)\n- \[\w+\/\w+\] (.+?)(?: \(\S+\))?$/gm)].map((m) => ({ index: Number(m[1]), title: m[2] ?? '' }))
+}
+
+export const defaultCritique = (prompt: string): unknown => ({
+  summary: 'The candidates are comparable.',
+  findings: [],
+  preferredCandidate: /^### (Planner [A-Z] \([a-z-]+\))/m.exec(prompt)?.[1] ?? 'all',
+})
+
 /** Role-dispatching script with sensible defaults: approving reviewer, passing verifier, file-writing worker and debugger. */
 export function scenarioScript(s: ScenarioScripts): FakeScript {
   let plannerCalls = 0
-  const planner: FakeScript = async (_spec, ctx) => {
-    const output = typeof s.plan === 'function' ? s.plan(plannerCalls) : s.plan
-    plannerCalls++
+  const planner: FakeScript = async (spec, ctx) => {
+    const lens = lensLabelOf(spec.prompt)
+    let output: unknown
+    if (specPurpose(spec) === 'synthesize') output = s.synthesis ?? (typeof s.plan === 'function' ? s.plan(plannerCalls++) : s.plan)
+    else if (lens && s.candidate) output = s.candidate(lens)
+    else output = typeof s.plan === 'function' ? s.plan(plannerCalls++) : s.plan
     await ctx.emitText('plan')
     await ctx.completeTurn({ text: 'plan', structuredOutput: output })
   }
@@ -368,14 +400,30 @@ export function scenarioScript(s: ScenarioScripts): FakeScript {
     await writeFiles(spec, ctx, { [`${keyOf(spec)}-fix.txt`]: 'fixed' })
     await ctx.completeTurn({ text: 'Applied a fix' })
   }
-  const reviewer = s.reviewer ?? completeWith({ text: 'review', structuredOutput: approvedReview })
+  const plainReviewer = s.reviewer ?? completeWith({ text: 'review', structuredOutput: approvedReview })
+  const critic: FakeScript = s.critic ?? (async (spec, ctx) => ctx.completeTurn({ text: 'critique', structuredOutput: defaultCritique(spec.prompt) }))
+  const arbiter: FakeScript =
+    s.arbiter ??
+    (async (spec, ctx) =>
+      ctx.completeTurn({
+        text: 'arbitration',
+        structuredOutput: { summary: 'All findings confirmed.', decisions: arbiterFindings(spec.prompt).map((f) => ({ findingIndex: f.index, accepted: true, reason: 'Confirmed.' })) },
+      }))
+  // The reviewer role also runs the plan critic and the finding arbiter.
+  const reviewer: FakeScript = async (spec, ctx) => {
+    const purpose = specPurpose(spec)
+    if (purpose === 'critique') return critic(spec, ctx)
+    if (purpose === 'arbitrate') return arbiter(spec, ctx)
+    return plainReviewer(spec, ctx)
+  }
+  const securityReviewer: FakeScript = s.securityReviewer ?? plainReviewer
   return scriptsByRole({
     planner,
     worker: s.worker ?? fileWorker,
     debugger: s.debugger ?? fixer,
     reviewer,
     // High-risk tasks are reviewed by the security reviewer role.
-    security_reviewer: reviewer,
+    security_reviewer: securityReviewer,
     verifier: s.verifier ?? completeWith({ text: 'verify', structuredOutput: passedVerification }),
     researcher: s.researcher ?? completeWith({ text: 'research notes' }),
   })
@@ -384,4 +432,28 @@ export function scenarioScript(s: ScenarioScripts): FakeScript {
 /** Sessions started by the fake runtime for a role. */
 export function sessionsOf(h: Harness, role: string): Harness['runtime']['sessions'] {
   return h.runtime.sessions.filter((s) => s.role === role)
+}
+
+// ───────────────────────────── ipc ─────────────────────────────
+
+/** Call an IPC channel through the real handlers and dispatcher; throws on an error result. */
+export async function ipc<C extends IpcChannel>(h: Harness, channel: C, input: IpcInput<C> = {} as IpcInput<C>): Promise<IpcOutputs[C]> {
+  const handlers = createIpcHandlers({
+    repos: h.repos,
+    git: h.git,
+    runtime: h.runtime,
+    orchestrator: h.orchestrator,
+    appInfo: async () => ({ version: 'test', dataDir: h.dir, dbPath: h.dbPath, worktreesDir: h.worktreesDir, platform: 'win32', gitVersion: 'test', sdkVersion: 'fake', isPackaged: false }),
+    pickDirectory: async () => null,
+    openDataDir: async () => undefined,
+    push: () => undefined,
+  })
+  const result = await dispatchIpc(handlers, channel, input)
+  if (!result.ok) throw new Error(`${channel} failed: ${result.error.message}`)
+  return result.value as IpcOutputs[C]
+}
+
+/** Review the `high` findings the scenario scripts raise: a convenience for dual-review scenarios. */
+export function reviewWith(findings: ReviewFinding[], summary = 'Review done.'): { summary: string; findings: ReviewFinding[] } {
+  return { summary, findings }
 }

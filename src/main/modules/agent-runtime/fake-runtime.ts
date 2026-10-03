@@ -72,6 +72,17 @@ export function scriptsByRole(
   return (spec, ctx) => (byRole[spec.role] ?? fallback)(spec, ctx)
 }
 
+/** The v0.2 session purposes a script cannot tell apart by role alone, read from the role policy text NEXUS appends. */
+export type FakeSessionPurpose = 'critique' | 'synthesize' | 'arbitrate'
+
+export function specPurpose(spec: Pick<SessionSpec, 'systemPromptAppend'>): FakeSessionPurpose | null {
+  const text = spec.systemPromptAppend
+  if (text.includes('Purpose: PLAN CRITIQUE')) return 'critique'
+  if (text.includes('Purpose: PLAN SYNTHESIS')) return 'synthesize'
+  if (text.includes('Purpose: FINDING ARBITRATION')) return 'arbitrate'
+  return null
+}
+
 /** A script that emits the text and completes one turn. */
 export function completeWith(result: { text: string; structuredOutput?: unknown; outcome?: TurnOutcome }): FakeScript {
   return async (_spec, ctx) => {

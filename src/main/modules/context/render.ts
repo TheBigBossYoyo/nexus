@@ -26,6 +26,8 @@ export const SECTION_LIMITS = {
   plan: 12_000,
   findings: 12_000,
   feedback: 6_000,
+  facts: 5_000,
+  evidence: 5_000,
 } as const
 
 export function truncate(text: string, max: number): string {
@@ -131,4 +133,53 @@ export function renderHandoff(h: Handoff): string | null {
   ]
   const parts = groups.filter(([, v]) => v.length > 0).map(([k, v]) => `${k}:\n${bullets(v)}`)
   return parts.length > 0 ? truncate(parts.join('\n\n'), SECTION_LIMITS.handoff) : null
+}
+
+/** Facts about a task's orchestration that the repository cannot show, read from durable NEXUS state. */
+export interface OrchestrationEvidence {
+  /** Messages sent by the task's agents (repair children included). */
+  messages: { type: string; to: string; subject: string; at: string }[]
+  decisions: { title: string; decision: string; at: string }[]
+  proposals: { type: string; status: string; reason: string; at: string }[]
+}
+
+const EVIDENCE_ITEMS = 25
+
+function evidenceGroup(title: string, items: string[]): string {
+  if (items.length === 0) return `${title}: none recorded.`
+  const shown = items.slice(0, EVIDENCE_ITEMS)
+  const more = items.length > shown.length ? `\n[... ${items.length - shown.length} more omitted ...]` : ''
+  return `${title}:\n${shown.join('\n')}${more}`
+}
+
+/**
+ * Orchestration evidence section. The verifier cannot see messages, decisions or graph proposals in the
+ * repository, so criteria about them are judged from these records, which are authoritative for that.
+ */
+export function renderOrchestrationEvidence(e: OrchestrationEvidence): string {
+  return truncate(
+    [
+      'These records come from the NEXUS database. They are authoritative for criteria about messaging, coordination, recorded decisions and plan changes, which the repository cannot show. Criteria about code and files must still be verified in the repository.',
+      evidenceGroup(
+        'Messages sent',
+        e.messages.map((m) => `- [${m.type}] to ${m.to}: ${m.subject} (${m.at})`),
+      ),
+      evidenceGroup(
+        'Decisions recorded',
+        e.decisions.map((d) => `- ${d.title}: ${d.decision} (${d.at})`),
+      ),
+      evidenceGroup(
+        'Graph proposals made',
+        e.proposals.map((p) => `- ${p.type} (${p.status}): ${p.reason} (${p.at})`),
+      ),
+    ].join('\n\n'),
+    SECTION_LIMITS.evidence,
+  )
+}
+
+/** The reviewer gets only what was sent, never why: subjects without bodies or reasoning. */
+export function renderSentMessages(messages: OrchestrationEvidence['messages']): string | null {
+  if (messages.length === 0) return null
+  const lines = messages.slice(0, EVIDENCE_ITEMS).map((m) => `- [${m.type}] to ${m.to}: ${m.subject}`)
+  return truncate(`Messages this task's agents sent through NEXUS (recorded by NEXUS, not visible in the diff):\n${lines.join('\n')}`, SECTION_LIMITS.evidence)
 }

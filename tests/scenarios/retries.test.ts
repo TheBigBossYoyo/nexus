@@ -27,12 +27,17 @@ describe('scenario: worker failure, retry, escalation and intervention', () => {
     expect(task.modelTierOverride).toBe('strongest')
 
     const settings = h.repos.settings.get()
-    // First retry keeps the tier, the second failure escalates to the strongest tier's model.
+    // The router promotes a repeated attempt one step (attempt 2), and the stored escalation after the
+    // second failure keeps the strongest tier for attempt 3.
     expect(sessionsOf(h, 'worker').map((s) => s.model)).toEqual([
       settings.models.tiers.balanced,
-      settings.models.tiers.balanced,
+      settings.models.tiers.strongest,
       settings.models.tiers.strongest,
     ])
+    const decisions = h.repos.routingDecisions.listByTask(task.id).filter((d) => d.role === 'worker')
+    expect(decisions.map((d) => d.resolvedPolicy)).toEqual(['BALANCED', 'STRONGEST', 'STRONGEST'])
+    expect(decisions[1]?.reasons.join(' ')).toMatch(/Attempt 2 after an earlier failure/)
+    expect(decisions[2]?.reasons.join(' ')).toMatch(/escalated to STRONGEST/)
     expect(h.eventsOfType(run.id, 'task.retry')).toHaveLength(2)
     const escalated = h.eventsOfType(run.id, 'task.escalated')
     expect(escalated).toHaveLength(1)

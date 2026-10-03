@@ -2,15 +2,17 @@ import { existsSync } from 'node:fs'
 import type { ZodType } from 'zod'
 import {
   ReviewOutputSchema,
+  SEVERITIES,
   TERMINAL_RUN_STATES,
   VerifierOutputSchema,
   WRITING_ROLES,
   type Agent,
   type AgentPurpose,
+  type AgentRole,
   type CommandResult,
-  type ModelTier,
   type ReviewFinding,
   type Run,
+  type Severity,
   type Task,
   type TaskError,
   type VerificationFailure,
@@ -18,21 +20,30 @@ import {
 } from '@shared/domain'
 import { newId, nowIso, shortId } from '@shared/ids'
 import { errorMessage } from '@shared/result'
+import { ArbiterOutputSchema, type ArbiterOutput, type ContextSourceKind } from '@shared/v2'
 import {
-  buildContextPack,
+  arbiterOutputJsonSchema,
+  buildArbiterPrompt,
   buildRepairPrompt,
   buildReviewPrompt,
   buildVerifierPrompt,
   reviewOutputJsonSchema,
   verifierOutputJsonSchema,
 } from '@main/modules/context/context-builder'
+import { packForPrompt, withBlock, type ComposedContext, type PromptBlock } from '@main/modules/context/context-engine'
 import type { DiffResult } from '@main/modules/git'
+import { applyArbitration, dedupeFindings } from '@main/modules/review'
 import { nextAttemptPlan, type FailureKind } from '@main/modules/scheduler'
 import { fingerprintFiles } from '@main/modules/intelligence'
 import { dependenciesOf } from '@main/modules/task-graph'
 import type { AgentOutcome, AgentRunResult, SessionControl } from './agent-runner'
+import { ARBITRATION_ARTIFACT } from './arbitration'
+import { composeForTask } from './context-source'
 import type { Core } from './core'
+import { gatherEvidence } from './evidence'
 import { renderMessage } from './messaging'
+import { recordTaskOutcome } from './outcomes'
+import { purposeFor } from './task-kind'
 
 export type Stage = 'implement' | 'checks' | 'review' | 'verification'
 
@@ -54,30 +65,40 @@ interface Failure {
   checkResults?: CommandResult[]
 }
 
+type ReviewOutcome = { status: 'approved'; summary: string } | { status: 'changes'; failure: Failure } | { status: 'halt' }
+
 type GateResult<T> = { status: 'ok'; value: T; agentId: string } | { status: 'halt' } | { status: 'failed'; error: string }
 
 const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown'])
 const SIGNIFICANT = new Set(['critical', 'high'])
 const HEARTBEAT_MS = 30_000
 
-export function purposeFor(task: Pick<Task, 'role' | 'kind'>): AgentPurpose {
-  if (task.kind === 'ask') return 'ask'
-  if (task.kind === 'synthesis') return 'synthesis'
-  switch (task.role) {
-    case 'worker':
-      return 'implement'
-    case 'debugger':
-      return 'diagnose'
-    case 'reviewer':
-    case 'security_reviewer':
-      return 'audit'
-    case 'verifier':
-      return 'verify'
-    case 'planner':
-    case 'architect':
-    case 'researcher':
-      return 'research'
+/** Dual review: what each of the two reviewers concentrates on. */
+const REVIEW_LENSES: Record<'reviewer' | 'security_reviewer', string> = {
+  reviewer: 'Concentrate on correctness: does the change satisfy every requirement and acceptance criterion, are the logic and edge cases right, do the tests exercise real behaviour.',
+  security_reviewer: 'Concentrate on security, concurrency and failure modes: injection and unsafe input handling, races and ordering, partial failure, error paths, resource leaks, and what happens when a dependency misbehaves.',
+}
+
+/** The most serious severity among findings, null for none. */
+function topSeverity(findings: readonly ReviewFinding[] | undefined): Severity | null {
+  let top: Severity | null = null
+  for (const f of findings ?? []) {
+    if (top === null || SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(top)) top = f.severity
   }
+  return top
+}
+
+/** How a repair prompt's sections map to context sources (the prompt itself is built by the stage prompt). */
+const REPAIR_SECTIONS: Record<string, { kind: ContextSourceKind; reason: string }> = {
+  'Repair request': { kind: 'failure', reason: 'States which gate the previous implementation failed.' },
+  Task: { kind: 'task', reason: 'The task being repaired.' },
+  'Acceptance criteria': { kind: 'criteria', reason: 'What the repair is judged against.' },
+  Failure: { kind: 'failure', reason: 'The failure to fix.' },
+  'Review findings': { kind: 'review_finding', reason: 'Significant review findings to address (accepted by the arbiter in a dual review).' },
+  'Failed criteria': { kind: 'failure', reason: 'Criteria the verifier could not confirm.' },
+  'Check results': { kind: 'failure', reason: 'Output of the failed or latest checks.' },
+  'Orchestration evidence': { kind: 'message', reason: 'Messages, decisions and graph proposals from the NEXUS database; the repository cannot show them.' },
+  Instructions: { kind: 'task', reason: 'How to carry out the repair.' },
 }
 
 function label(role: string, key: string): string {
@@ -110,6 +131,7 @@ export class TaskPipeline {
       const error: TaskError = { what: 'Task pipeline error', where: 'orchestrator', why: errorMessage(e), retryable: true }
       if (this.core.tryTaskState(taskId, 'failed', { error })) {
         bus.emit({ runId, taskId, type: 'task.failed', payload: error })
+        this.outcome(runId, taskId)
       }
     } finally {
       const task = repos.tasks.get(taskId)
@@ -303,26 +325,58 @@ export class TaskPipeline {
     bus.emit({ runId: run.id, taskId: task.id, type: 'task.started', payload: { attempt } })
     this.core.graph.clearYield(task.id)
 
-    // Messages (user instructions included) that arrived while no session could take them ride along on resume.
-    const prompt = resumeId
-      ? [
-          'Continue the task from where you stopped. Check `git status` and `git log` first to see what is already done.',
-          ...this.core.messages.takeForTask(task.id).map(renderMessage),
-        ].join('\n\n')
-      : [resume, this.contextFor(run, task, cwd, initial.error)].filter((p): p is string => p !== null).join('\n\n')
+    const purpose = purposeFor(task)
+    let composed: ComposedContext
+    if (resumeId) {
+      // Messages (user instructions included) that arrived while no session could take them ride along on resume.
+      const continueText = 'Continue the task from where you stopped. Check `git status` and `git log` first to see what is already done.'
+      const messages = this.core.messages.takeForTask(task.id)
+      const prompt = [continueText, ...messages.map(renderMessage)].join('\n\n')
+      composed = {
+        prompt,
+        pack: packForPrompt({
+          run,
+          task,
+          purpose,
+          prompt,
+          blocks: [
+            { section: 'Continue', sourceKind: 'handoff', title: 'Resume the interrupted session', reason: 'The previous session ended in a resumable way (pause, quota, restart); its own history is kept.', chars: continueText.length },
+            ...messages.map(
+              (m): PromptBlock => ({
+                section: 'Messages',
+                sourceKind: m.type === 'user_instruction' ? 'user_instruction' : 'message',
+                sourceId: m.id,
+                title: m.subject,
+                reason: 'Arrived while no session could take it.',
+                chars: m.body.length,
+              }),
+            ),
+          ],
+        }),
+      }
+    } else {
+      composed = composeForTask(this.core, run, task, purpose, cwd, initial.error)
+      if (resume) {
+        composed = withBlock(
+          composed,
+          { section: 'Resuming after a prerequisite', sourceKind: 'handoff', title: 'Prerequisite work merged', reason: 'The task yielded to a prerequisite it asked for; this is a fresh session after that merged.', chars: resume.length },
+          [resume, composed.prompt].join('\n\n'),
+        )
+      }
+    }
 
     let lastBeat = Date.now()
     const result = await this.core.agents.run({
       run,
       task,
       role: task.role,
-      purpose: purposeFor(task),
+      purpose,
       label: label(task.role, task.key),
       cwd,
       worktreeRoot: cwd,
       projectRoot,
-      prompt,
-      tier: this.tier(run, task),
+      prompt: composed.prompt,
+      contextPack: composed.pack,
       control,
       resumeSdkSessionId: resumeId,
       allowRotation: true,
@@ -369,6 +423,7 @@ export class TaskPipeline {
         const error: TaskError = { what: 'Agent stopped by user', where: label(task.role, task.key), why: null, retryable: true }
         if (this.core.tryTaskState(task.id, 'failed', { error })) {
           bus.emit({ runId: run.id, taskId: task.id, type: 'task.failed', payload: error })
+          this.outcome(run.id, task.id)
         }
       }
       return
@@ -399,6 +454,7 @@ export class TaskPipeline {
         bus.emit({ runId: run.id, taskId: task.id, type: 'task.failed', payload: { ...error, retryable: false } })
       }
     })
+    if (plan.action !== 'retry') this.outcome(run.id, task.id)
   }
 
   /**
@@ -418,6 +474,12 @@ export class TaskPipeline {
     return false
   }
 
+  /** 'dual' runs two reviewers and an arbiter; 'auto' (the default) does so for high-risk tasks only. */
+  private reviewIsDual(run: Run, task: Task): boolean {
+    const mode = run.config.reviewMode ?? 'auto'
+    return mode === 'dual' || (mode === 'auto' && task.risk === 'high')
+  }
+
   private async review(
     run: Run,
     task: Task,
@@ -426,22 +488,29 @@ export class TaskPipeline {
     checks: CommandResult[],
     attempt: number,
     control: SessionControl,
-  ): Promise<{ status: 'approved'; summary: string } | { status: 'changes'; failure: Failure } | { status: 'halt' }> {
+  ): Promise<ReviewOutcome> {
     const { repos, bus } = this.core.deps
     bus.emit({ runId: run.id, taskId: task.id, type: 'review.started', payload: { attempt } })
-    const security = task.risk === 'high'
     // The reviewer sees requirements, the diff and test output: never the implementer's reasoning.
-    const gate = await this.gate(run, task, worktree, control, {
-      role: security ? 'security_reviewer' : 'reviewer',
-      purpose: 'review',
-      prompt: buildReviewPrompt({
+    const promptFor = (lens?: string): string =>
+      buildReviewPrompt({
         task,
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
         patch: diff.patch,
         checkResults: checks,
         attempt,
-      }).prompt,
+        sentMessages: gatherEvidence(repos, run.id, task).messages,
+        ...(lens ? { lens } : {}),
+      }).prompt
+    if (this.reviewIsDual(run, task)) return this.reviewDual(run, task, worktree, diff, checks, attempt, control, promptFor)
+
+    const security = task.risk === 'high'
+    const role = security ? 'security_reviewer' : 'reviewer'
+    const gate = await this.gate(run, task, worktree, control, {
+      role,
+      purpose: 'review',
+      prompt: promptFor(),
       schema: ReviewOutputSchema,
       jsonSchema: reviewOutputJsonSchema,
     })
@@ -451,49 +520,8 @@ export class TaskPipeline {
     const output = gate.value
     const significant = output.findings.filter((f) => SIGNIFICANT.has(f.severity))
     const verdict = significant.length > 0 ? 'changes_requested' : 'approved'
-    bus.transaction(() => {
-      repos.reviews.insert({
-        id: newId(),
-        runId: run.id,
-        taskId: task.id,
-        agentId: gate.agentId,
-        attempt,
-        verdict,
-        summary: output.summary,
-        findings: output.findings,
-        createdAt: nowIso(),
-      })
-      for (const f of output.findings) {
-        bus.emit({
-          runId: run.id,
-          taskId: task.id,
-          agentId: gate.agentId,
-          type: 'review.finding',
-          payload: { severity: f.severity, title: f.title, file: f.file },
-        })
-      }
-      bus.emit({
-        runId: run.id,
-        taskId: task.id,
-        agentId: gate.agentId,
-        type: 'review.completed',
-        payload: { verdict, findings: output.findings.length },
-      })
-    })
-    for (const f of significant) {
-      this.core.messages.send({
-        runId: run.id,
-        type: 'review_finding',
-        severity: f.severity,
-        subject: f.title,
-        body: `${f.description}\n\nEvidence: ${f.evidence}${f.file ? `\nFile: ${f.file}` : ''}`,
-        fromAgentId: gate.agentId,
-        fromTaskId: null,
-        fromLabel: label(security ? 'security_reviewer' : 'reviewer', task.key),
-        toTask: task.id,
-        toRole: null,
-      })
-    }
+    this.persistReview(run, task, gate.agentId, output, attempt)
+    this.sendFindingMessages(run, task, significant, gate.agentId, label(role, task.key))
     if (verdict === 'approved') return { status: 'approved', summary: output.summary }
     return {
       status: 'changes',
@@ -506,6 +534,146 @@ export class TaskPipeline {
       },
     }
   }
+
+  /** One review row with its finding and completion events; the verdict follows the significant findings. */
+  private persistReview(run: Run, task: Task, agentId: string | null, output: { summary: string; findings: ReviewFinding[] }, attempt: number): string {
+    const { repos, bus } = this.core.deps
+    const verdict = output.findings.some((f) => SIGNIFICANT.has(f.severity)) ? 'changes_requested' : 'approved'
+    return bus.transaction(() => {
+      const row = repos.reviews.insert({
+        id: newId(),
+        runId: run.id,
+        taskId: task.id,
+        agentId,
+        attempt,
+        verdict,
+        summary: output.summary,
+        findings: output.findings,
+        createdAt: nowIso(),
+      })
+      for (const f of output.findings) {
+        bus.emit({ runId: run.id, taskId: task.id, agentId, type: 'review.finding', payload: { severity: f.severity, title: f.title, file: f.file } })
+      }
+      bus.emit({ runId: run.id, taskId: task.id, agentId, type: 'review.completed', payload: { verdict, findings: output.findings.length } })
+      return row.id
+    })
+  }
+
+  private sendFindingMessages(run: Run, task: Task, findings: readonly ReviewFinding[], agentId: string | null, fromLabel: string): void {
+    for (const f of findings) {
+      this.core.messages.send({
+        runId: run.id,
+        type: 'review_finding',
+        severity: f.severity,
+        subject: f.title,
+        body: `${f.description}\n\nEvidence: ${f.evidence}${f.file ? `\nFile: ${f.file}` : ''}`,
+        fromAgentId: agentId,
+        fromTaskId: null,
+        fromLabel,
+        toTask: task.id,
+        toRole: null,
+      })
+    }
+  }
+
+  /**
+   * Dual review: a correctness reviewer and a security/failure-mode reviewer run concurrently on the same
+   * inputs. Their findings are deduplicated; when any is significant, an arbiter checks each against the code
+   * and only the findings it accepts can request changes. All three records are persisted; the arbiter's
+   * decisions are kept as an 'arbitration' artifact (see arbitration.ts).
+   */
+  private async reviewDual(
+    run: Run,
+    task: Task,
+    worktree: Worktree,
+    diff: DiffResult,
+    checks: CommandResult[],
+    attempt: number,
+    control: SessionControl,
+    promptFor: (lens?: string) => string,
+  ): Promise<ReviewOutcome> {
+    const { repos, bus } = this.core.deps
+    const roles = ['reviewer', 'security_reviewer'] as const
+    const gates = await Promise.all(
+      roles.map((role) =>
+        this.gate(run, task, worktree, control, {
+          role,
+          purpose: 'review',
+          prompt: promptFor(REVIEW_LENSES[role]),
+          schema: ReviewOutputSchema,
+          jsonSchema: reviewOutputJsonSchema,
+        }),
+      ),
+    )
+    if (gates.some((g) => g.status === 'halt')) return { status: 'halt' }
+    const outputs: { role: AgentRole; agentId: string; summary: string; findings: ReviewFinding[] }[] = []
+    for (const [index, g] of gates.entries()) {
+      if (g.status === 'failed') throw new Error(`Review could not be completed: ${g.error}`)
+      if (g.status === 'ok') outputs.push({ role: roles[index] ?? 'reviewer', agentId: g.agentId, ...g.value })
+    }
+    for (const o of outputs) this.persistReview(run, task, o.agentId, o, attempt)
+
+    const deduped = dedupeFindings(outputs.map((o) => ({ reviewer: o.role, findings: o.findings })))
+    const summaries = outputs.map((o) => o.summary).join(' ')
+    if (!deduped.some((d) => SIGNIFICANT.has(d.finding.severity))) return { status: 'approved', summary: summaries }
+
+    const arbiter = await this.gate(run, task, worktree, control, {
+      role: 'reviewer',
+      purpose: 'arbitrate',
+      label: label('arbiter', task.key),
+      prompt: buildArbiterPrompt({ task, findings: deduped, diffStat: diffStat(diff), patch: diff.patch }).prompt,
+      schema: ArbiterOutputSchema,
+      jsonSchema: arbiterOutputJsonSchema,
+    })
+    if (arbiter.status === 'halt') return { status: 'halt' }
+    // Without a valid ruling applyArbitration's fail-safe decides: confident critical/high findings stay, the rest drop.
+    const ruling: ArbiterOutput =
+      arbiter.status === 'ok'
+        ? arbiter.value
+        : { summary: `The arbiter returned no valid decision (${arbiter.error}); the fail-safe rule applied: only high-confidence critical or high findings stand.`, decisions: [] }
+    const arbiterAgentId = arbiter.status === 'ok' ? arbiter.agentId : null
+    const { accepted, rejected } = applyArbitration(deduped, ruling.decisions)
+    const blocking = accepted.filter((f) => SIGNIFICANT.has(f.severity))
+    const verdict = blocking.length > 0 ? 'changes_requested' : 'approved'
+    bus.transaction(() => {
+      const row = repos.reviews.insert({
+        id: newId(),
+        runId: run.id,
+        taskId: task.id,
+        agentId: arbiterAgentId,
+        attempt,
+        verdict,
+        summary: ruling.summary,
+        findings: deduped.map((d) => d.finding),
+        createdAt: nowIso(),
+      })
+      repos.artifacts.insert({
+        id: newId(),
+        runId: run.id,
+        taskId: task.id,
+        agentId: arbiterAgentId,
+        kind: ARBITRATION_ARTIFACT,
+        title: row.id,
+        content: JSON.stringify(ruling),
+        createdAt: nowIso(),
+      })
+      bus.emit({ runId: run.id, taskId: task.id, agentId: arbiterAgentId, type: 'review.arbitrated', payload: { accepted: accepted.length, rejected: rejected.length } })
+      bus.emit({ runId: run.id, taskId: task.id, agentId: arbiterAgentId, type: 'review.completed', payload: { verdict, findings: deduped.length } })
+    })
+    this.sendFindingMessages(run, task, blocking, arbiterAgentId, label('reviewers', task.key))
+    if (verdict === 'approved') return { status: 'approved', summary: ruling.summary }
+    return {
+      status: 'changes',
+      failure: {
+        kind: 'review',
+        summary: `Review requested changes: ${blocking.length} significant finding(s) confirmed by the arbiter.`,
+        details: ruling.summary,
+        findings: blocking,
+        checkResults: checks,
+      },
+    }
+  }
+
 
   private async verify(
     run: Run,
@@ -528,6 +696,7 @@ export class TaskPipeline {
         diffStat: diffStat(diff),
         checkResults: checks,
         reviewSummary,
+        evidence: gatherEvidence(repos, run.id, task),
       }).prompt,
       schema: VerifierOutputSchema,
       jsonSchema: verifierOutputJsonSchema,
@@ -595,6 +764,8 @@ export class TaskPipeline {
     spec: {
       role: 'reviewer' | 'security_reviewer' | 'verifier'
       purpose: AgentPurpose
+      /** Defaults to the role's label. */
+      label?: string
       prompt: string
       schema: ZodType<T>
       jsonSchema: Record<string, unknown>
@@ -607,13 +778,12 @@ export class TaskPipeline {
         task,
         role: spec.role,
         purpose: spec.purpose,
-        label: label(spec.role, task.key),
+        label: spec.label ?? label(spec.role, task.key),
         cwd: worktree.path,
         worktreeRoot: worktree.path,
         projectRoot: this.core.project(run).rootPath,
         prompt: spec.prompt,
         outputSchema: spec.jsonSchema,
-        tier: run.config.modelPolicy[spec.role],
         control,
       })
       if (this.haltOutcome(run, result.outcome, control)) return { status: 'halt' }
@@ -646,13 +816,15 @@ export class TaskPipeline {
         this.core.setTaskState(parent.id, 'failed', { error })
         bus.emit({ runId: run.id, taskId: parent.id, type: 'task.failed', payload: { ...error, retryable: false } })
       })
+      this.outcome(run.id, parent.id)
       return false
     }
 
     this.host.setStage(parent.id, 'repair')
     const n = cycles + 1
-    // Second and later repairs escalate to the strongest model tier.
-    const tier: ModelTier | null = n >= 2 ? 'strongest' : null
+    // The router decides the escalation (a later repair is promoted, a serious finding forces the strongest policy).
+    const severity = topSeverity(failure.findings)
+    const tier = this.core.routing.repairTier(run, parent, n, severity)
     const child = bus.transaction(() => {
       this.core.setTaskState(parent.id, 'waiting', { repairCycles: n }, `repair ${n}: ${failure.kind}`)
       // Keys are unique per run and earlier children are kept as history, so the suffix counts the
@@ -691,6 +863,23 @@ export class TaskPipeline {
       return row
     })
 
+    const built = buildRepairPrompt({
+      task: parent,
+      failure: { kind: failure.kind, summary: failure.summary, details: failure.details },
+      findings: failure.findings,
+      failures: failure.failures,
+      checkResults: failure.checkResults,
+      evidence: gatherEvidence(repos, run.id, parent),
+    })
+    const instructions = this.core.messages.takeInstructions(parent.id)
+    const prompt = instructions.length === 0 ? built.prompt : [built.prompt, '## Instructions from the user', ...instructions.map((m) => `- ${m.body}`)].join('\n\n')
+    const blocks: PromptBlock[] = built.sections.map((section) => {
+      const source = REPAIR_SECTIONS[section.name] ?? { kind: 'failure' as const, reason: 'Part of the repair request.' }
+      return { section: section.name, sourceKind: source.kind, sourceId: parent.id, title: section.name, reason: source.reason, chars: section.chars }
+    })
+    for (const m of instructions) {
+      blocks.push({ section: 'Instructions from the user', sourceKind: 'user_instruction', sourceId: m.id, title: m.subject, reason: 'Instruction from the user, not yet delivered.', chars: m.body.length })
+    }
     const result = await this.core.agents.run({
       run,
       task: child,
@@ -700,17 +889,9 @@ export class TaskPipeline {
       cwd: worktree.path,
       worktreeRoot: worktree.path,
       projectRoot: this.core.project(run).rootPath,
-      prompt: this.withInstructions(
-        buildRepairPrompt({
-          task: parent,
-          failure: { kind: failure.kind, summary: failure.summary, details: failure.details },
-          findings: failure.findings,
-          failures: failure.failures,
-          checkResults: failure.checkResults,
-        }).prompt,
-        parent.id,
-      ),
-      tier: tier ?? run.config.modelPolicy.debugger,
+      prompt,
+      contextPack: packForPrompt({ run, task: child, purpose: 'diagnose', prompt, blocks }),
+      routing: { repairCycle: n, triggeringSeverity: severity },
       control,
       allowRotation: true,
     })
@@ -736,6 +917,7 @@ export class TaskPipeline {
       this.core.setTaskState(parent.id, 'failed', { error })
       bus.emit({ runId: run.id, taskId: parent.id, type: 'task.failed', payload: error })
     })
+    this.outcome(run.id, parent.id)
     return false
   }
 
@@ -846,21 +1028,16 @@ export class TaskPipeline {
         payload: { summary: (task.resultSummary ?? '').slice(0, 500) },
       })
     })
+    this.outcome(run.id, task.id)
   }
 
-  private tier(run: Run, task: Task): ModelTier {
-    return task.modelTierOverride ?? run.config.modelPolicy[task.role]
+  /** Record the empirical outcome of an implementing task that reached a final state. */
+  private outcome(runId: string, taskId: string): void {
+    recordTaskOutcome(this.core.deps, this.core.deps.repos.runs.require(runId), taskId, (line) => this.core.log(line))
   }
 
   private leaseExpiry(run: Run): string {
     return new Date(Date.now() + run.config.leaseMinutes * 60_000).toISOString()
-  }
-
-  /** The user's pending instructions for a task, appended to a prompt (and marked delivered with it). */
-  private withInstructions(prompt: string, taskId: string): string {
-    const instructions = this.core.messages.takeInstructions(taskId)
-    if (instructions.length === 0) return prompt
-    return [prompt, '## Instructions from the user', ...instructions.map((m) => `- ${m.body}`)].join('\n\n')
   }
 
   /**
@@ -890,51 +1067,6 @@ export class TaskPipeline {
     const session = repos.sessions.latestForAgent(agent.id)
     if (!session?.sdkSessionId || !session.endReason) return undefined
     return RESUMABLE_END_REASONS.has(session.endReason) ? session.sdkSessionId : undefined
-  }
-
-  /** The context pack: only what this task needs. */
-  private contextFor(run: Run, task: Task, cwd: string, previousError: TaskError | null): string {
-    const { repos } = this.core.deps
-    const tasks = repos.tasks.listByRun(run.id)
-    const deps = repos.dependencies.listByRun(run.id)
-    const upstreamIds = new Set(dependenciesOf(deps, task.id))
-    const upstream = tasks.filter((t) => upstreamIds.has(t.id))
-    const messages = this.core.messages.takeForTask(task.id)
-    return buildContextPack({
-      run,
-      task,
-      purpose: purposeFor(task),
-      missionCriteria: run.plan?.acceptanceCriteria ?? [],
-      dependencyOutputs: upstream
-        .filter((t) => t.state === 'completed' && t.resultSummary)
-        .map((t) => ({ key: t.key, title: t.title, summary: t.resultSummary ?? '' })),
-      // Decisions from upstream tasks and from architects; not every decision in the run.
-      decisions: repos.decisions
-        .listByRun(run.id)
-        .filter((d) => d.taskId === null || upstreamIds.has(d.taskId) || tasks.find((t) => t.id === d.taskId)?.role === 'architect'),
-      memory: this.core.memory.relevantFor(run, task),
-      messages: messages.filter((m) => m.type !== 'user_instruction'),
-      repo: {
-        worktreePath: cwd,
-        branch: task.branch ?? run.integrationBranch ?? run.baseBranch ?? '',
-        baseCommit: run.baseCommit ?? '',
-        projectName: this.core.project(run).name,
-        checks: run.config.checks,
-      },
-      extra: {
-        attempt: task.attempt,
-        userInstructions: messages.filter((m) => m.type === 'user_instruction').map((m) => m.body),
-        ...(previousError
-          ? {
-              failure: {
-                kind: 'checks' as const,
-                summary: `The previous attempt failed: ${previousError.what}. Diagnose why before continuing.`,
-                details: previousError.why ?? '',
-              },
-            }
-          : {}),
-      },
-    }).prompt
   }
 
   private async readOnlyCwd(run: Run): Promise<string> {

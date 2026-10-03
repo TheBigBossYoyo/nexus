@@ -423,8 +423,12 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     expect(revisions.map((r) => r.version)).toEqual([1])
     expect(revisions[0]?.snapshot.tasks).toHaveLength(2)
     expect(await value('graph.proposals', { runId: created.id })).toEqual([])
-    expect(await value('planning.candidates', { runId: created.id })).toEqual({ candidates: [], critiques: [] })
-    expect(await value('routing.list', { runId: created.id })).toEqual([])
+    // Consensus planning left its three candidates and the critique; every agent has one routing decision.
+    const planning = await value<{ candidates: { label: string; valid: boolean }[]; critiques: unknown[] }>('planning.candidates', { runId: created.id })
+    expect(planning.candidates.map((c) => c.valid)).toEqual([true, true, true])
+    expect(planning.critiques).toHaveLength(1)
+    const routed = await value<{ agentId: string | null }[]>('routing.list', { runId: created.id })
+    expect(routed.map((d) => d.agentId).sort()).toEqual(h.repos.agents.listByRun(created.id).map((a) => a.id).sort())
 
     // Project open refreshed the repository facts; they can be listed, searched and refreshed again.
     const now = new Date().toISOString()
@@ -439,7 +443,8 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     expect(await call('intelligence.refresh', { projectId: 'missing' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
 
     // Performance: outcomes aggregate by role/model/category with the sample size and threshold.
-    expect(await value('performance.summary', {})).toEqual({ stats: [], totalOutcomes: 0, minSamples: 5 })
+    // The finished run measured both of its tasks (alpha and beta ran on the same model).
+    expect(await value('performance.summary', {})).toMatchObject({ totalOutcomes: 2, minSamples: 5, stats: [{ role: 'worker', model: 'sonnet', category: 'implement', samples: 2, sufficient: false }] })
     const task = h.repos.tasks.listByRun(created.id)[0]
     h.repos.taskOutcomes.upsertForTask({
       id: 'o1', projectId: project.id, runId: created.id, taskId: task?.id ?? '', role: 'worker', model: 'fake-model', tier: 'balanced', category: 'implement',
@@ -447,7 +452,9 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
       humanInterventions: 0, elapsedMs: 1000, inputTokens: null, outputTokens: null, createdAt: now,
     })
     const summary = await value<{ stats: { samples: number; sufficient: boolean; role: string }[]; totalOutcomes: number; minSamples: number }>('performance.summary', { projectId: project.id })
-    expect(summary).toMatchObject({ totalOutcomes: 1, minSamples: 5, stats: [{ role: 'worker', samples: 1, sufficient: false }] })
+    // One outcome per task: the seeded row replaced the measured one of that task.
+    expect(summary).toMatchObject({ totalOutcomes: 2, minSamples: 5 })
+    expect(summary.stats.map((st) => [st.role, st.samples, st.sufficient])).toEqual([['worker', 1, false], ['worker', 1, false]])
     expect((await value<{ totalOutcomes: number }>('performance.summary', { projectId: 'other-project' })).totalOutcomes).toBe(0)
 
     // Planning recommendation uses the project's profile.
@@ -456,7 +463,7 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
 
     // Context packs need an owner id.
     expect(await call('context.packs', {})).toMatchObject({ ok: false, error: { code: 'invalid_input' } })
-    expect(await value('context.packs', { taskId: task?.id })).toEqual([])
+    expect((await value<{ taskId: string }[]>('context.packs', { taskId: task?.id })).map((p) => p.taskId)).toEqual([task?.id])
     expect(await value('context.packs', { agentId: 'nobody' })).toEqual([])
   })
 

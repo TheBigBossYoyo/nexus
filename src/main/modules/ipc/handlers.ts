@@ -15,7 +15,7 @@ import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
 import type { GitService } from '@main/modules/git'
-import { refreshProjectFacts, type Orchestrator } from '@main/modules/orchestrator'
+import { attachArbitration, refreshProjectFacts, type Orchestrator } from '@main/modules/orchestrator'
 import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
 import { aggregatePerformance } from '@main/modules/routing'
@@ -122,7 +122,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'tasks.instruct': ({ taskId, instruction }) => orchestrator.instruct(taskId, instruction),
     'tasks.resolveBlocker': ({ taskId, note }) => orchestrator.resolveBlocker(taskId, note),
     'tasks.diff': ({ taskId }) => queries.taskDiff(repos.tasks.require(taskId)),
-    'tasks.reviews': ({ taskId }) => repos.reviews.listByTask(taskId),
+    // The arbiter's decisions live in an 'arbitration' artifact (the reviews table has no column for them).
+    'tasks.reviews': ({ taskId }) => attachArbitration(repos.reviews.listByTask(taskId), repos.artifacts.listByTask(taskId)),
     'tasks.verifications': ({ taskId }) => repos.verifications.listByTask(taskId),
 
     'criteria.update': ({ criterionId, text }) => orchestrator.updateCriterion(criterionId, text),
@@ -147,7 +148,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       )
     },
     'events.list': ({ runId, afterSeq, limit }) => repos.events.listByRun(runId, afterSeq ?? 0, limit ?? 1000),
-    'reviews.list': ({ runId }) => repos.reviews.listByRun(runId),
+    'reviews.list': ({ runId }) => attachArbitration(repos.reviews.listByRun(runId), repos.artifacts.listByRun(runId)),
     'verifications.list': ({ runId }) => repos.verifications.listByRun(runId),
     'decisions.list': ({ runId }) => repos.decisions.listByRun(runId),
 

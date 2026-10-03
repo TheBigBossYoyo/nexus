@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { MissionPlan } from '@shared/domain'
-import { completeWith, scriptsByRole, type FakeScript } from './fake-runtime'
+import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fake-runtime'
 
 /**
  * Scripted agents for UI end-to-end tests (`NEXUS_FAKE_RUNTIME=1`, unpackaged builds only).
@@ -57,6 +57,7 @@ export function createDemoScript(): FakeScript {
   }
 
   let uiReviews = 0
+  let docsProposed = false
 
   const writer =
     (suffix: string): FakeScript =>
@@ -80,11 +81,88 @@ export function createDemoScript(): FakeScript {
           severity: null,
         })
       }
+      // The api worker notices the module deserves a short doc and adds it to the plan (plan revision v2).
+      if (key === 'api' && !docsProposed && ctx.nexusTools?.proposeGraphChange) {
+        docsProposed = true
+        await ctx.nexusTools.proposeGraphChange({
+          type: 'ADD_TASK',
+          reason: 'The API module needs a short doc that nothing in the plan covers.',
+          evidence: 'api.txt exists and no task writes documentation for it.',
+          changes: {
+            tasks: [
+              {
+                key: 'docs',
+                title: 'Document the API module',
+                description: 'Create docs.txt describing the API module.',
+                role: 'worker',
+                dependencies: [],
+                suggestedFiles: ['docs.txt'],
+                acceptanceCriteria: ['docs.txt exists'],
+                complexity: 'small',
+                risk: 'low',
+              },
+            ],
+            blocksProposer: false,
+          },
+        })
+      }
       await ctx.sleep(200)
       await ctx.completeTurn({ text: `Created ${key}.txt${suffix ? ' (repaired)' : ''}.` })
     }
 
+  /** Review output of the correctness / security reviewers: the first review of task `ui` requests changes. */
+  const reviewer: FakeScript = async (spec, ctx) => {
+    await ctx.sleep(150)
+    const purpose = specPurpose(spec)
+    if (purpose === 'critique') {
+      await ctx.completeTurn({
+        text: 'Critique ready.',
+        structuredOutput: {
+          summary: 'The candidates agree on the module split.',
+          findings: [{ candidate: 'all', severity: 'low', issue: 'No candidate adds documentation.', recommendation: 'Optional.' }],
+          preferredCandidate: 'Planner A (risk-first)',
+        },
+      })
+      return
+    }
+    if (purpose === 'arbitrate') {
+      // Accept every finding (the prompt lists them as "[index] ...").
+      const indexes = [...spec.prompt.matchAll(/^[(d+)] /gm)].map((m) => Number(m[1]))
+      await ctx.completeTurn({
+        text: 'Arbitration done.',
+        structuredOutput: { summary: 'Findings checked against the code.', decisions: indexes.map((findingIndex) => ({ findingIndex, accepted: true, reason: 'Confirmed in ui.txt.' })) },
+      })
+      return
+    }
+    const isUi = basename(spec.cwd) === 'ui'
+    if (isUi && uiReviews++ === 0) {
+      await ctx.completeTurn({
+        text: 'Changes requested.',
+        structuredOutput: {
+          summary: 'ui.txt is missing required content.',
+          findings: [
+            {
+              title: 'UI description is incomplete',
+              description: 'ui.txt only contains the module name.',
+              evidence: 'ui.txt has a single line.',
+              severity: 'high',
+              category: 'requirement_mismatch',
+              file: 'ui.txt',
+              lineStart: 1,
+              lineEnd: 1,
+              confidence: 'high',
+              suggestedCorrection: 'Describe the UI module.',
+            },
+          ],
+        },
+      })
+      return
+    }
+    await ctx.completeTurn({ text: 'Approved.', structuredOutput: { summary: 'No significant issues.', findings: [] } })
+  }
+
   return scriptsByRole({
+    // Planner sessions: the three consensus planners and the synthesizer all return the same plan.
     planner: async (_spec, ctx) => {
       await ctx.emitText('Inspecting the repository and drafting a plan.')
       await ctx.sleep(200)
@@ -92,34 +170,8 @@ export function createDemoScript(): FakeScript {
     },
     worker: writer(''),
     debugger: writer(' fixed'),
-    reviewer: async (spec, ctx) => {
-      await ctx.sleep(150)
-      const isUi = basename(spec.cwd) === 'ui'
-      if (isUi && uiReviews++ === 0) {
-        await ctx.completeTurn({
-          text: 'Changes requested.',
-          structuredOutput: {
-            summary: 'ui.txt is missing required content.',
-            findings: [
-              {
-                title: 'UI description is incomplete',
-                description: 'ui.txt only contains the module name.',
-                evidence: 'ui.txt has a single line.',
-                severity: 'high',
-                category: 'requirement_mismatch',
-                file: 'ui.txt',
-                lineStart: 1,
-                lineEnd: 1,
-                confidence: 'high',
-                suggestedCorrection: 'Describe the UI module.',
-              },
-            ],
-          },
-        })
-        return
-      }
-      await ctx.completeTurn({ text: 'Approved.', structuredOutput: { summary: 'No significant issues.', findings: [] } })
-    },
+    reviewer,
+    security_reviewer: reviewer,
     verifier: completeWith({
       text: 'Verified.',
       structuredOutput: { summary: 'All acceptance criteria are satisfied.', criteria: [], failures: [] },

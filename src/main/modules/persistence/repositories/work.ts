@@ -46,7 +46,8 @@ export class WorktreeRepository extends Table<Worktree> {
   }
 }
 
-const reviewCodec: Codec<Review> = {
+// `arbitration` is not a column: it is stored as an artifact and attached by the IPC layer.
+const storedReviewCodec: Codec<Omit<Review, 'arbitration'>> = {
   table: 'reviews',
   fields: {
     id: 'text',
@@ -60,6 +61,7 @@ const reviewCodec: Codec<Review> = {
     createdAt: 'text',
   },
 }
+const reviewCodec = storedReviewCodec as Codec<Review>
 
 export class ReviewRepository extends Table<Review> {
   constructor(db: Database) {

@@ -19,6 +19,7 @@ import { GraphService } from './graph-service'
 import type { OrchestratorDeps } from './deps'
 import { MemoryService } from './memory'
 import { MessageService } from './messaging'
+import { ModelRoutingService } from './routing'
 
 /** Active (non-paused) time of a run, which the mission duration limit is measured against. */
 interface ActiveTime {
@@ -49,13 +50,15 @@ export class Core {
   readonly memory: MemoryService
   readonly graph: GraphService
   readonly agents: AgentRunner
+  readonly routing: ModelRoutingService
 
   constructor(readonly deps: OrchestratorDeps) {
     this.approvals = new ApprovalService(deps)
     this.messages = new MessageService(deps)
     this.memory = new MemoryService(deps)
     this.graph = new GraphService(deps, this.approvals)
-    this.agents = new AgentRunner(deps, this.approvals, this.messages, this.memory, this.graph)
+    this.routing = new ModelRoutingService(deps)
+    this.agents = new AgentRunner(deps, this.approvals, this.messages, this.memory, this.graph, this.routing)
   }
 
   log(line: string): void {

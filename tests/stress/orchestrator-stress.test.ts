@@ -71,6 +71,12 @@ interface Scenario {
   cancelTask: string | null
   /** v0.2: the graph change this task's worker proposes in its first session that gets past the injected crash. */
   proposals: Map<string, ProposalKind>
+  /** v0.2: plan with three planners, a critic and a synthesizer (one candidate may be invalid). */
+  consensus: boolean
+  /** The weakest candidate planner returns an invalid plan, so the synthesis works from the other two. */
+  badCandidate: boolean
+  /** v0.2: every review is dual (second reviewer, deduplication, arbiter). */
+  dualReview: boolean
 }
 
 /**
@@ -106,12 +112,19 @@ function buildScenario(seed: number): Scenario {
   for (const key of keys) {
     if (pick(0.4)) proposals.set(key, PROPOSAL_KINDS[Math.floor(rng() * PROPOSAL_KINDS.length)] ?? 'ghost')
   }
+  // Drawn after everything else for the same reason.
+  const consensus = pick(0.35)
+  const badCandidate = pick(0.5)
+  const dualReview = pick(0.35)
   return {
     seed,
     tasks,
     ...base,
     cancelTask,
     proposals,
+    consensus,
+    badCandidate,
+    dualReview,
   }
 }
 
@@ -320,7 +333,26 @@ function buildScript(s: Scenario, obs: Observation, harness: () => Harness): Fak
     const fail = s.verifyFailOnce.has(key) && n === 0
     await ctx.completeTurn({ text: 'verify', structuredOutput: fail ? failedVerification() : passedVerification })
   }
-  return scenarioScript({ plan: plan(s.tasks), worker, debugger: fixer, reviewer, verifier })
+  /** Second reviewer of a dual review: repeats the first reviewer's finding (a duplicate to merge) or approves. */
+  const securityReviewer: FakeScript = async (spec, ctx) => {
+    const key = keyOf(spec).replace(/-[0-9a-f]{8}$/, '')
+    const n = nth(`review-b:${key}`)
+    await ctx.sleep(delay(`review-b:${key}:${n}`))
+    if (ctx.signal.aborted) return
+    const duplicate = s.rejectOnce.has(key) && n === 0 && hashed(s.seed, `dup:${key}`) < 0.5
+    await ctx.completeTurn({ text: 'review', structuredOutput: duplicate ? rejectedReview({ title: 'Input is not validated' }) : approvedReview })
+  }
+  // A candidate with an unknown dependency passes the schema and fails plan validation.
+  const brokenPlan = plan(s.tasks.map((t, i) => (i === 0 ? { ...t, dependencies: ['ghost-task'] } : t)))
+  return scenarioScript({
+    plan: plan(s.tasks),
+    worker,
+    debugger: fixer,
+    reviewer,
+    securityReviewer,
+    verifier,
+    candidate: (label) => (s.badCandidate && label.startsWith('Planner C') ? brokenPlan : plan(s.tasks)),
+  })
 }
 
 async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observation, headBefore: string): Promise<string[]> {
@@ -430,6 +462,33 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
     }
   }
 
+  // v0.2 routing and context: every agent has exactly one routing decision, every session that works on a task a pack.
+  const decisions = h.repos.routingDecisions.listByRun(run.id)
+  for (const agent of h.repos.agents.listByRun(run.id)) {
+    const own = decisions.filter((d) => d.agentId === agent.id)
+    if (own.length !== 1) problems.push(`agent ${agent.label} has ${own.length} routing decisions`)
+    else if (own[0]?.role !== agent.role || own[0]?.purpose !== agent.purpose) problems.push(`routing decision of ${agent.label} disagrees with the agent`)
+    const works = ['implement', 'diagnose', 'research', 'audit', 'ask', 'synthesis'].includes(agent.purpose)
+    if (works && h.repos.contextPacks.listByAgent(agent.id).length === 0) problems.push(`${agent.purpose} agent ${agent.label} has no context pack`)
+  }
+  if (decisions.length !== h.repos.agents.listByRun(run.id).length) problems.push('routing decisions and agents differ in number')
+  for (const pack of h.repos.contextPacks.listByRun(run.id)) {
+    if (pack.entries.filter((e) => !e.included).length > 30) problems.push(`pack ${pack.id} records more than 30 excluded entries`)
+    if (pack.entries.some((e) => e.reason.trim() === '')) problems.push(`pack ${pack.id} has an entry without a reason`)
+  }
+  // Consensus planning leaves its candidates; with a bad candidate exactly one of three is invalid.
+  const candidates = h.repos.planningCandidates.listByRun(run.id)
+  if (s.consensus) {
+    if (candidates.length !== 3) problems.push(`consensus planning persisted ${candidates.length} candidates`)
+    if (candidates.filter((c) => !c.valid).length !== (s.badCandidate ? 1 : 0)) problems.push('unexpected number of invalid candidates')
+    if (events.filter((e) => e.type === 'planning.synthesized').length !== 1) problems.push('consensus planning did not announce exactly one synthesis')
+  } else if (candidates.length > 0) problems.push('single planning left candidates')
+  // Dual review: a significant, accepted finding leaves an arbiter row whose arbitration is retrievable.
+  const reviewRows = h.repos.reviews.listByRun(run.id)
+  const arbiterRows = h.repos.artifacts.listByRun(run.id).filter((a) => a.kind === 'arbitration')
+  for (const a of arbiterRows) if (!reviewRows.some((r) => r.id === a.title)) problems.push('arbitration artifact without its review row')
+  if (!s.dualReview && arbiterRows.length > 0) problems.push('arbiter ran without dual review')
+
   if (h.repos.agents.listActive(run.id).length > 0) problems.push('agents still active after the run settled')
   if ((await git(h.repoDir, 'rev-parse', 'HEAD')) !== headBefore) problems.push('user HEAD moved')
   if ((await git(h.repoDir, 'status', '--porcelain')) !== '') problems.push('user working tree is dirty')
@@ -496,7 +555,9 @@ async function runSeed(seed: number): Promise<string[]> {
       }
     })
 
-    const run = await h.startRun({ overrides: { maxParallelAgents: s.maxParallel } })
+    const run = await h.startRun({
+      overrides: { maxParallelAgents: s.maxParallel, ...(s.consensus ? { planningMode: 'consensus' as const } : {}), ...(s.dualReview ? { reviewMode: 'dual' as const } : {}) },
+    })
     let problems: string[]
     try {
       // A requested pause is transient; wait for a state that is final for this scenario.

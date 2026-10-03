@@ -42,7 +42,9 @@ import {
 import { canPauseRun, deriveRunPhase, resumeTarget } from '@main/modules/state'
 import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
+import { ConsensusPlanner } from './consensus'
 import { Core } from './core'
+import { gatherEvidence } from './evidence'
 import type { OrchestratorDeps } from './deps'
 import type { InsertTaskSpec } from './graph-service'
 import { refreshProjectFacts } from './intelligence'
@@ -213,6 +215,27 @@ export class Orchestrator implements PipelineHost {
     const control = this.runControl(runId)
     let previousErrors: string[] | undefined
 
+    if ((run.config.planningMode ?? 'single') === 'consensus') {
+      const outcome = await new ConsensusPlanner(this.core).run({
+        run,
+        profile: project.profile,
+        projectRoot: project.rootPath,
+        control,
+        memory: this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] }),
+        ...(feedback ? { feedback } : {}),
+        ...(previousPlan ? { previousPlan } : {}),
+        validate: (r, output, error) => this.validatePlanOutput(r, output, error),
+        maxSynthesisAttempts: MAX_PLAN_ATTEMPTS,
+      })
+      if (outcome.status === 'halt') return
+      if (outcome.status === 'plan') {
+        await this.acceptPlan(runId, outcome.plan, 1)
+        return
+      }
+      // No candidate was valid: the single planner gets their errors and the normal repair loop.
+      previousErrors = outcome.errors
+    }
+
     for (let attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
       const prompt = buildPlannerPrompt({
         run,
@@ -233,7 +256,6 @@ export class Orchestrator implements PipelineHost {
         projectRoot: project.rootPath,
         prompt,
         outputSchema: missionPlanJsonSchema,
-        tier: run.config.modelPolicy.planner,
         control,
       })
       run = repos.runs.require(runId)
@@ -249,14 +271,7 @@ export class Orchestrator implements PipelineHost {
 
       const errors = this.validatePlanOutput(run, result.outcome === 'success' ? result.structuredOutput : undefined, result.error)
       if (errors.plan) {
-        this.materialize(run, errors.plan)
-        bus.emit({ runId, type: 'plan.proposed', payload: { taskCount: errors.plan.tasks.length, attempt } })
-        if (run.config.requirePlanApproval) {
-          this.core.setRunState(runId, 'awaiting_approval')
-          this.requestPlanApproval(repos.runs.require(runId))
-        } else {
-          await this.startExecution(runId)
-        }
+        await this.acceptPlan(runId, errors.plan, attempt)
         return
       }
       // Invalid plans are rejected in code and handed back to the planner to repair.
@@ -264,6 +279,20 @@ export class Orchestrator implements PipelineHost {
       bus.emit({ runId, type: 'plan.invalid', payload: { errors: errors.errors, attempt } })
     }
     this.failRun(runId, `The planner did not produce a valid plan after ${MAX_PLAN_ATTEMPTS} attempts: ${(previousErrors ?? []).join('; ')}`)
+  }
+
+  /** A validated plan becomes tasks; then the run waits for approval or starts. */
+  private async acceptPlan(runId: string, plan: MissionPlan, attempt: number): Promise<void> {
+    const { repos, bus } = this.deps
+    const run = repos.runs.require(runId)
+    this.materialize(run, plan)
+    bus.emit({ runId, type: 'plan.proposed', payload: { taskCount: plan.tasks.length, attempt } })
+    if (run.config.requirePlanApproval) {
+      this.core.setRunState(runId, 'awaiting_approval')
+      this.requestPlanApproval(repos.runs.require(runId))
+    } else {
+      await this.startExecution(runId)
+    }
   }
 
   private validatePlanOutput(run: Run, output: unknown, agentError: string | null): { plan?: MissionPlan; errors: string[] } {
@@ -713,9 +742,9 @@ export class Orchestrator implements PipelineHost {
             diffStat: stat || '(no changes)',
             checkResults: checks.commands,
             planSummary: run.plan?.summary,
+            evidence: gatherEvidence(repos, runId, null),
           }).prompt,
           outputSchema: verifierOutputJsonSchema,
-          tier: run.config.modelPolicy.verifier,
           control,
         })
         if (control.stopReason || repos.runs.require(runId).state !== 'verifying') return

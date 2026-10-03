@@ -6,6 +6,7 @@ import type {
   Handoff,
   MemoryEntry,
   Message,
+  ReviewFinding,
   Run,
   Task,
 } from '@shared/domain'
@@ -15,6 +16,7 @@ import {
   ReviewOutputSchema,
   VerifierOutputSchema,
 } from '@shared/domain'
+import { ArbiterOutputSchema, PlanCritiqueOutputSchema, type RepositoryFact } from '@shared/v2'
 import {
   SECTION_LIMITS,
   assemble,
@@ -26,9 +28,11 @@ import {
   renderTaskSpec,
   truncate,
 } from './render'
+import { renderFinding } from './stage-prompts'
 import type { PackSection } from './render'
 
 export * from './stage-prompts'
+export type { OrchestrationEvidence } from './render'
 export { SECTION_LIMITS, truncate } from './render'
 export type { PackSection } from './render'
 
@@ -41,6 +45,8 @@ export const missionPlanJsonSchema = toJsonSchema(MissionPlanSchema)
 export const reviewOutputJsonSchema = toJsonSchema(ReviewOutputSchema)
 export const verifierOutputJsonSchema = toJsonSchema(VerifierOutputSchema)
 export const handoffJsonSchema = toJsonSchema(HandoffSchema)
+export const planCritiqueJsonSchema = toJsonSchema(PlanCritiqueOutputSchema)
+export const arbiterOutputJsonSchema = toJsonSchema(ArbiterOutputSchema)
 
 export interface ContextPackInput {
   run: Run
@@ -50,6 +56,10 @@ export interface ContextPackInput {
   dependencyOutputs: { key: string; title: string; summary: string }[]
   decisions: Decision[]
   memory: MemoryEntry[]
+  /** v0.2: repository facts selected for the task. */
+  facts?: RepositoryFact[]
+  /** v0.2: significant findings of the task's latest review that this session must address. */
+  reviewFindings?: ReviewFinding[]
   messages: Message[]
   repo: {
     worktreePath: string
@@ -102,6 +112,18 @@ export function buildContextPack(input: ContextPackInput): {
       )
     : null
 
+  const facts = input.facts?.length
+    ? boundedList(
+        input.facts.map((f) => `- [${f.kind}] ${f.subject}: ${f.statement}`),
+        SECTION_LIMITS.facts,
+        'repository facts',
+      )
+    : null
+
+  const reviewFindings = input.reviewFindings?.length
+    ? boundedList(input.reviewFindings.map(renderFinding), SECTION_LIMITS.findings, 'findings')
+    : null
+
   const messages = input.messages.length
     ? boundedList(
         input.messages.map(
@@ -140,7 +162,9 @@ export function buildContextPack(input: ContextPackInput): {
     { name: 'Acceptance criteria', body: criteriaSection(task, input.missionCriteria) },
     { name: 'Results of dependency tasks', body: dependencies },
     { name: 'Relevant decisions', body: decisions },
+    { name: 'Repository intelligence', body: facts },
     { name: 'Project memory', body: memory },
+    { name: 'Review findings to address', body: reviewFindings },
     { name: 'Messages from other agents', body: messages },
     { name: 'Repository state', body: truncate(repoText, SECTION_LIMITS.repo) },
     { name: 'Attempt', body: attempt },

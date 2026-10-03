@@ -10,6 +10,8 @@ import type {
   Task,
   VerificationFailure,
 } from '@shared/domain'
+import type { PlanCritiqueOutput, RepositoryFact } from '@shared/v2'
+import type { DedupedFinding } from '@main/modules/review'
 import {
   SECTION_LIMITS,
   assemble,
@@ -19,10 +21,12 @@ import {
   renderCheckCommands,
   renderChecks,
   renderHandoff,
+  renderOrchestrationEvidence,
+  renderSentMessages,
   renderTaskSpec,
   truncate,
 } from './render'
-import type { PackSection } from './render'
+import type { OrchestrationEvidence, PackSection } from './render'
 
 type Pack = { prompt: string; sections: PackSection[] }
 type TaskSpec = Pick<Task, 'key' | 'title' | 'description' | 'suggestedFiles' | 'acceptanceCriteria'>
@@ -71,6 +75,8 @@ export interface PlannerPromptInput {
   feedback?: string
   previousErrors?: string[]
   previousPlan?: MissionPlan
+  /** Consensus mode: this planner's own brief. It never sees another planner's output. */
+  lens?: { label: string; guidance: string }
 }
 
 export function buildPlannerPrompt(input: PlannerPromptInput): Pack {
@@ -107,6 +113,7 @@ export function buildPlannerPrompt(input: PlannerPromptInput): Pack {
     { name: 'Request', body: truncate(run.prompt, SECTION_LIMITS.task) },
     { name: 'Mode', body: modeGuidance },
     { name: 'Limits', body: limits },
+    { name: 'Planning lens', body: input.lens ? `You are ${input.lens.label}. ${input.lens.guidance}` : null },
     { name: 'Project profile', body: renderProfile(input.profile) },
     { name: 'Project memory', body: memory },
     { name: 'Plan revision', body: revision },
@@ -128,6 +135,10 @@ export interface ReviewPromptInput {
   patch: string
   checkResults: CommandResult[]
   attempt: number
+  /** Dual review: this reviewer's focus. */
+  lens?: string
+  /** Messages the task's agents sent (type, recipient, subject); never their reasoning. */
+  sentMessages?: OrchestrationEvidence['messages']
 }
 
 /**
@@ -141,6 +152,8 @@ export function buildReviewPrompt(input: ReviewPromptInput): Pack {
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
     { name: 'Check results', body: renderChecks(input.checkResults) },
+    { name: 'Orchestration records', body: input.sentMessages ? renderSentMessages(input.sentMessages) : null },
+    { name: 'Review focus', body: input.lens ?? null },
     {
       name: 'Instructions',
       body: `Review attempt ${input.attempt}. Review the change in the current working directory against the requirements. Read the surrounding code, not only the patch. Return findings with evidence; return an empty findings list if you find no concrete defect.`,
@@ -156,6 +169,7 @@ export interface VerifierPromptInput {
   diffStat: string
   checkResults: CommandResult[]
   reviewSummary?: string
+  evidence?: OrchestrationEvidence
 }
 
 export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
@@ -164,6 +178,7 @@ export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
     { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria) },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Check results', body: renderChecks(input.checkResults) },
+    { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Review summary',
       body: input.reviewSummary ? truncate(input.reviewSummary, SECTION_LIMITS.findings) : null,
@@ -181,6 +196,7 @@ export interface MissionVerifierPromptInput {
   diffStat: string
   checkResults: CommandResult[]
   planSummary?: string
+  evidence?: OrchestrationEvidence
 }
 
 /** Final acceptance of the whole mission on the integration branch (the current working directory). */
@@ -199,6 +215,7 @@ export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): P
     },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Check results', body: renderChecks(input.checkResults) },
+    { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Instructions',
       body: 'Verify every mission acceptance criterion against the integrated code. Run the project checks yourself. Return one entry per criterion with evidence and list a failure for each that did not pass.',
@@ -214,9 +231,10 @@ export interface RepairPromptInput {
   findings?: ReviewFinding[]
   failures?: VerificationFailure[]
   checkResults?: CommandResult[]
+  evidence?: OrchestrationEvidence
 }
 
-function renderFinding(f: ReviewFinding): string {
+export function renderFinding(f: ReviewFinding): string {
   const where = f.file ? ` (${f.file}${f.lineStart !== null ? `:${f.lineStart}` : ''})` : ''
   const fix = f.suggestedCorrection ? `\n  Suggested correction: ${f.suggestedCorrection}` : ''
   return `- [${f.severity}/${f.category}] ${f.title}${where}\n  ${f.description}\n  Evidence: ${f.evidence}${fix}`
@@ -251,6 +269,7 @@ export function buildRepairPrompt(input: RepairPromptInput): Pack {
         : null,
     },
     { name: 'Check results', body: input.checkResults ? renderChecks(input.checkResults) : null },
+    { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Instructions',
       body: 'Diagnose the root cause of each issue before changing code. Confirm a finding against the code first; if one is wrong, say why in your summary instead of changing correct code. Add or update tests for what you fix, re-run the relevant checks, and finish with a concise summary.',
@@ -312,6 +331,115 @@ export function buildAuditSynthesisPrompt(input: AuditSynthesisInput): Pack {
     {
       name: 'Instructions',
       body: 'Synthesize the reports into one prioritized audit: deduplicate overlapping findings, resolve contradictions by checking the code, and drop claims you cannot confirm. Order by severity; for each finding give evidence (file and line), impact, and a recommended fix. End with a short overall assessment. This is read-only: do not modify any file.',
+    },
+  ])
+}
+
+// ───────────────────────────── consensus planning ─────────────────────────────
+
+export interface CandidatePlan {
+  label: string
+  plan: MissionPlan
+}
+
+const planJson = (plan: MissionPlan): string => truncate(JSON.stringify(plan, null, 1), SECTION_LIMITS.plan)
+
+function renderCandidates(candidates: readonly CandidatePlan[]): string {
+  return candidates.map((c) => `### ${c.label}\n${planJson(c.plan)}`).join('\n\n')
+}
+
+export interface CriticPromptInput {
+  run: Run
+  profile: ProjectProfile
+  candidates: readonly CandidatePlan[]
+}
+
+/** The critic sees only the structured candidate plans and the project profile: never a planner's transcript. */
+export function buildCriticPrompt(input: CriticPromptInput): Pack {
+  return assemble([
+    { name: 'Request', body: truncate(input.run.prompt, SECTION_LIMITS.task) },
+    { name: 'Mode', body: MODE_GUIDANCE[input.run.mode] },
+    { name: 'Project profile', body: renderProfile(input.profile) },
+    { name: 'Candidate plans', body: renderCandidates(input.candidates) },
+    {
+      name: 'Instructions',
+      body: 'Critique the candidate plans against the repository and the request. Return findings that name the candidate they are about (use its exact label, or "all"), and name the candidate the synthesis should start from in preferredCandidate.',
+    },
+  ])
+}
+
+export interface SynthesizerPromptInput {
+  run: Run
+  profile: ProjectProfile
+  candidates: readonly CandidatePlan[]
+  critique: PlanCritiqueOutput | null
+  /** Repository facts selected for the request (non-stale). */
+  facts: readonly RepositoryFact[]
+  previousErrors?: string[]
+}
+
+export function buildSynthesizerPrompt(input: SynthesizerPromptInput): Pack {
+  const critique = input.critique
+    ? [
+        `Summary: ${input.critique.summary}`,
+        `Preferred candidate: ${input.critique.preferredCandidate}`,
+        input.critique.findings.length > 0
+          ? boundedList(
+              input.critique.findings.map(
+                (f) => `- [${f.severity}] ${f.candidate}: ${f.issue}${f.recommendation ? ` Recommendation: ${f.recommendation}` : ''}`,
+              ),
+              SECTION_LIMITS.findings,
+              'critique findings',
+            )
+          : 'No findings.',
+      ].join('\n')
+    : 'No critique is available; judge the candidates yourself.'
+  const facts = input.facts.length
+    ? boundedList(
+        input.facts.map((f) => `- [${f.kind}] ${f.subject}: ${f.statement}`),
+        SECTION_LIMITS.facts,
+        'repository facts',
+      )
+    : null
+  const errors = input.previousErrors?.length
+    ? `The previous synthesized plan was rejected for these reasons. Fix every one:\n${bullets(input.previousErrors)}`
+    : null
+  return assemble([
+    { name: 'Request', body: truncate(input.run.prompt, SECTION_LIMITS.task) },
+    { name: 'Mode', body: MODE_GUIDANCE[input.run.mode] },
+    { name: 'Project profile', body: renderProfile(input.profile) },
+    { name: 'Repository constraints', body: facts },
+    { name: 'Candidate plans', body: renderCandidates(input.candidates) },
+    { name: 'Critique', body: critique },
+    { name: 'Plan validation errors', body: errors },
+    {
+      name: 'Instructions',
+      body: 'Produce the single final MissionPlan: start from the preferred candidate, fix the critique findings, drop duplicated or conflicting tasks, and respect the repository constraints. Return only the MissionPlan.',
+    },
+  ])
+}
+
+// ───────────────────────────── finding arbitration ─────────────────────────────
+
+export interface ArbiterPromptInput {
+  task: TaskSpec
+  findings: readonly DedupedFinding[]
+  diffStat: string
+  patch: string
+}
+
+/** The arbiter gets the deduplicated findings with indexes and the diff, and rules on each index. */
+export function buildArbiterPrompt(input: ArbiterPromptInput): Pack {
+  const findings = input.findings.map((d, i) => `[${i}] (reported by ${d.reportedBy.join(', ')})\n${renderFinding(d.finding)}`)
+  return assemble([
+    { name: 'Requirements', body: renderTaskSpec(input.task) },
+    { name: 'Acceptance criteria', body: criteriaSection(input.task, []) },
+    { name: 'Findings to arbitrate', body: boundedList(findings, SECTION_LIMITS.findings, 'findings') },
+    { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
+    { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
+    {
+      name: 'Instructions',
+      body: 'Decide every finding by its index: read the code it refers to, confirm or refute it, and return one decision per index with accepted true or false and a reason. Only critical and high findings can block the change, so be strict about them.',
     },
   ])
 }

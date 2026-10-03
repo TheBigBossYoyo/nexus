@@ -80,4 +80,12 @@ export class MemoryService {
       limit: settings.maxEntriesPerContext,
     })
   }
+
+  /** Approved entries in scope that a relevance search did not select (recorded as excluded in the context pack). */
+  unselectedFor(run: Run, selected: readonly MemoryEntry[]): MemoryEntry[] {
+    const { repos } = this.deps
+    if (!repos.settings.get().memory.enabled) return []
+    const chosen = new Set(selected.map((m) => m.id))
+    return repos.memory.list({ projectId: run.projectId, runId: run.id, status: 'approved', limit: 100 }).filter((m) => !chosen.has(m.id))
+  }
 }
