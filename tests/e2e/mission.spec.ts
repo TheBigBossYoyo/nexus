@@ -66,9 +66,10 @@ test.describe('mission happy path', () => {
       const summary = await invoke(page, 'runs.summary', { runId })
       const detailData = await invoke(page, 'runs.get', { runId })
       const keys = detailData.tasks.map((t) => t.key).sort()
-      expect(keys).toEqual(['api', 'integration', 'ui', 'ui-fix1'])
-      expect(summary.tasksTotal).toBe(4)
-      expect(summary.tasksCompleted).toBe(4)
+      // `docs` is added mid-run by the api worker's graph-change proposal (plan v2).
+      expect(keys).toEqual(['api', 'docs', 'integration', 'ui', 'ui-fix1'])
+      expect(summary.tasksTotal).toBe(5)
+      expect(summary.tasksCompleted).toBe(5)
       expect(summary.tasksFailed).toBe(0)
       await expect(page.getByTestId('stat-tasks')).toContainText(`${summary.tasksCompleted}/${summary.tasksTotal}`)
       await expect(page.getByTestId('stat-reviews')).toContainText(`${summary.reviewsApproved}/${summary.reviewsTotal}`)
@@ -76,9 +77,31 @@ test.describe('mission happy path', () => {
 
       // Every task node reached completed.
       await page.getByTestId('stage-tab-graph').click()
-      for (const key of ['api', 'ui', 'integration', 'ui-fix1']) {
+      for (const key of ['api', 'ui', 'integration', 'ui-fix1', 'docs']) {
         await expect(page.getByTestId(`task-node-${key}`)).toHaveAttribute('data-state', 'completed')
       }
+
+      // v0.2: the proposal produced a second graph revision, shown in the header and the plan inspector.
+      const revisions = await invoke(page, 'graph.revisions', { runId })
+      expect(revisions.map((r) => r.version)).toEqual([1, 2])
+      const proposals = await invoke(page, 'graph.proposals', { runId })
+      expect(proposals.map((p) => [p.type, p.status])).toEqual([['ADD_TASK', 'applied']])
+      await expect(page.getByTestId('plan-version')).toContainText('2')
+      await expect(page.getByTestId('task-revision-docs')).toBeVisible()
+      await page.getByTestId('stage-tab-plan').click()
+      await expect(page.getByTestId('plan-inspector')).toBeVisible()
+      await expect(page.getByTestId('revision-item')).toHaveCount(2)
+      await expect(page.getByTestId('proposal').first()).toContainText('ADD_TASK')
+      await screenshot(page, '4-plan-inspector')
+      await page.getByTestId('stage-tab-graph').click()
+
+      // v0.2: every agent has a routing decision; implementing agents have a persisted context pack.
+      const routing = await invoke(page, 'routing.list', { runId })
+      expect(routing.length).toBe(detailData.agents.length)
+      const apiTask = detailData.tasks.find((t) => t.key === 'api')
+      const packs = await invoke(page, 'context.packs', { taskId: apiTask?.id ?? '' })
+      expect(packs.length).toBeGreaterThan(0)
+      expect(packs[0]?.entries.every((e) => e.reason.length > 0)).toBe(true)
 
       // A review happened: changes were requested, then a later review approved.
       const reviews = await invoke(page, 'reviews.list', { runId })
@@ -112,6 +135,19 @@ test.describe('mission happy path', () => {
       expect(worker).toBeTruthy()
       if (worker) await page.getByTestId(`agent-row-${worker.id}`).click()
       await expect(page.getByTestId('agent-output')).toContainText('Working on')
+
+      // v0.2 views render from durable data.
+      await page.getByTestId('nav-performance').click()
+      await expect(page.getByTestId('performance-view')).toBeVisible()
+      const perf = await invoke(page, 'performance.summary', {})
+      expect(perf.totalOutcomes).toBeGreaterThan(0)
+      await expect(page.getByTestId('performance-table')).toBeVisible()
+      await expect(page.getByTestId('insufficient-badge').first()).toBeVisible()
+      await screenshot(page, '5-performance')
+      await page.getByTestId('nav-intelligence').click()
+      await expect(page.getByTestId('intelligence-view')).toBeVisible()
+      await expect(page.getByTestId('intelligence-fact').first()).toBeVisible()
+      await screenshot(page, '6-intelligence')
 
       // Git: the integration branch has all three files, the user's working tree has none.
       const branch = detailData.run.integrationBranch

@@ -32,7 +32,10 @@ export function createRepo(): string {
   git(root, 'config', 'user.email', 'e2e@example.invalid')
   git(root, 'config', 'commit.gpgsign', 'false')
   writeFileSync(join(root, 'README.md'), '# Scratch project\n')
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'scratch', version: '1.0.0' }, null, 2) + '\n')
+  // An entry point and a source file give repository intelligence something to find.
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'scratch', version: '1.0.0', main: 'src/index.js' }, null, 2) + '\n')
+  mkdirSync(join(root, 'src'))
+  writeFileSync(join(root, 'src', 'index.js'), "module.exports = { name: 'scratch' }\n")
   git(root, 'add', '-A')
   git(root, 'commit', '-m', 'Initial commit')
   return root
