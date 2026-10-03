@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { PRESETS, RUN_MODES, type Preset, type Project, type RunMode } from '@shared/domain'
 import { presetMaxAgents } from '@shared/settings'
-import { useCreateRun, useSettings } from '../../lib/queries'
+import type { PlanningMode, ReviewMode } from '@shared/v2'
+import { useCreateRun, usePlanningRecommendation, useSettings } from '../../lib/queries'
+import { useDebounced } from '../../lib/useDebounced'
 import { useUiStore } from '../../store/ui'
 import { Button, Field, NumberField, Notice, Panel, Select, Textarea, Toggle } from '../../components/ui'
 import {
@@ -9,12 +11,23 @@ import {
   DIRTY_REPO_WARNING,
   MAXIMUM_PRESET_WARNING,
   MODE_INFO,
+  PLANNING_MODE_INFO,
   PRESET_INFO,
+  REVIEW_MODE_INFO,
   validateMission,
   type MissionDraft,
 } from './mission'
 
 const MODE_OPTIONS = RUN_MODES.map((m) => ({ value: m, label: m.toUpperCase() }))
+const PLANNING_OPTIONS: { value: PlanningMode; label: string }[] = [
+  { value: 'single', label: 'SINGLE' },
+  { value: 'consensus', label: 'CONSENSUS' },
+]
+const REVIEW_OPTIONS: { value: ReviewMode; label: string }[] = [
+  { value: 'auto', label: 'AUTO' },
+  { value: 'standard', label: 'STANDARD' },
+  { value: 'dual', label: 'DUAL' },
+]
 const PRESET_OPTIONS = PRESETS.map((p) => ({ value: p, label: p.toUpperCase() }))
 
 export function MissionComposer({ project }: { project: Project }) {
@@ -28,7 +41,11 @@ export function MissionComposer({ project }: { project: Project }) {
   const [maxAgentsChoice, setMaxAgentsChoice] = useState<number | null>(null)
   const [approvalChoice, setApprovalChoice] = useState<boolean | null>(null)
   const [iterationsChoice, setIterationsChoice] = useState<number | null>(null)
+  const [planningMode, setPlanningMode] = useState<PlanningMode>('single')
+  const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
   const [submitted, setSubmitted] = useState(false)
+  const debouncedPrompt = useDebounced(prompt.trim(), 600)
+  const recommendation = usePlanningRecommendation(project.id, mode === 'ask' ? '' : debouncedPrompt)
 
   const preset = presetChoice ?? settings?.execution.defaultPreset ?? 'balanced'
   const presetAgents = settings ? presetMaxAgents(preset, settings) : null
@@ -44,6 +61,8 @@ export function MissionComposer({ project }: { project: Project }) {
     maxAgents: maxAgentsChoice,
     requirePlanApproval,
     maxIterations,
+    planningMode,
+    reviewMode,
   }
   const problem = validateMission(draft)
   const dirty = project.profile?.dirty === true
@@ -105,6 +124,45 @@ export function MissionComposer({ project }: { project: Project }) {
             )}
           </Field>
         </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Planning" hint={PLANNING_MODE_INFO[planningMode]}>
+            {(id) => (
+              <Select id={id} value={planningMode} onChange={setPlanningMode} options={PLANNING_OPTIONS} data-testid="planning-mode-select" />
+            )}
+          </Field>
+          <Field label="Review" hint={REVIEW_MODE_INFO[reviewMode]}>
+            {(id) => <Select id={id} value={reviewMode} onChange={setReviewMode} options={REVIEW_OPTIONS} data-testid="review-mode-select" />}
+          </Field>
+        </div>
+
+        {recommendation.data ? (
+          <div className="flex flex-col gap-0.5 border-l-2 border-accent bg-surface-2 px-2.5 py-1.5" data-testid="planning-recommendation">
+            <div className="flex items-center gap-2">
+              <span className="text-fg-muted">Recommended planning mode:</span>
+              <span className="font-mono">{recommendation.data.mode.toUpperCase()}</span>
+              {recommendation.data.mode !== planningMode ? (
+                <button
+                  type="button"
+                  className="text-accent hover:underline"
+                  onClick={() => setPlanningMode(recommendation.data.mode)}
+                  data-testid="planning-use-recommended"
+                >
+                  Use it
+                </button>
+              ) : (
+                <span className="text-fg-faint">selected</span>
+              )}
+            </div>
+            {recommendation.data.reasons.length > 0 ? (
+              <ul className="m-0 list-disc pl-5 text-fg-muted">
+                {recommendation.data.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         {preset === 'maximum' ? (
           <Notice tone="warning" title="Subscription usage" data-testid="maximum-warning">

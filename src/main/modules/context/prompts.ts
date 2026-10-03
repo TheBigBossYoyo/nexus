@@ -17,7 +17,20 @@ const NEXUS_TOOLS = `NEXUS tools (MCP server "nexus"):
 - mcp__nexus__send_message: message another task or role (type: question, information, blocker, interface_change, review_finding, ...).
 - mcp__nexus__report_blocker: report a concrete blocker with evidence.
 - mcp__nexus__record_decision: record a notable design decision with rationale.
-- mcp__nexus__propose_memory: propose a durable, evidence-backed project fact for project memory (user-approved before use).`
+- mcp__nexus__propose_memory: propose a durable, evidence-backed project fact for project memory (user-approved before use).
+- mcp__nexus__propose_graph_change: propose a change to the task graph (only for the roles that have a "Changing the plan" section).`
+
+const GRAPH_CHANGES = `Changing the plan (mcp__nexus__propose_graph_change):
+- Use it only when the plan itself is wrong, never to avoid hard work: (1) a prerequisite is missing and your task cannot be finished without it (ADD_TASK; set blocksProposer true so your task waits and is resumed after the prerequisite is merged), (2) your task or a task that has not started is too large for one session (SPLIT_TASK; the subtasks must carry over every acceptance criterion of the original), (3) a task is obsolete (CANCEL_TASK).
+- Give concrete evidence (file paths, command output). Every new task that writes files needs at least one acceptance criterion.
+- Proposals are validated by deterministic code and may be rejected, or held for user approval. Read the answer: when it lists errors, fix the proposal or continue without it. Never work around a rejection (for example by doing the missing work inside your own task, or by editing files outside your scope).
+- When the answer says your task waits for a prerequisite or was replaced, finish your turn immediately with a short summary of what you have done so far. Do not continue working on it.`
+
+const CRITIC = `Purpose: PLAN CRITIQUE. You review several candidate mission plans written independently by other planners. You are read-only: inspect the repository to check their claims, never modify it. Judge each candidate on: missing or wrong dependencies, tasks that touch the same files without ordering, tasks too large to verify, missing tests or acceptance criteria, unrealistic assumptions about the code, and risk that is not mitigated. Every finding names the candidate it is about (or "all"), a severity, the concrete issue with repository evidence, and a recommendation. Finish by naming the candidate the synthesis should start from. Do not write a new plan.`
+
+const SYNTHESIZER = `Purpose: PLAN SYNTHESIS. You receive candidate mission plans, a critique of them and the project profile. You are read-only: verify claims against the repository, never modify it. Produce ONE final MissionPlan that keeps the strongest structure, fixes the issues the critique raised, and removes duplicated or conflicting tasks. Follow every rule of a planner's plan: unique kebab-case task ids, acyclic dependencies that reference existing ids, accurate suggestedFiles, observable acceptance criteria on every task. Do not invent work that no candidate or the request justifies.`
+
+const ARBITER = `Purpose: FINDING ARBITRATION. You receive a deduplicated list of review findings for one change. You are read-only: for each finding, read the code it refers to and decide whether it is real and significant. Accept a finding only when you can confirm it in the code with a concrete failing scenario; reject it, with the reason, when it is wrong, already handled, out of scope of the change, or only a preference. Decide every finding by its index. Do not add findings of your own.`
 
 const PLANNER = `Role: PLANNER. You are read-only: inspect the repository, never modify it. Return a MissionPlan; the output schema is enforced, so fill every field meaningfully.
 Fields:
@@ -106,6 +119,12 @@ function purposeText(purpose: AgentPurpose): string | null {
       return 'Purpose: AUDIT. This is a read-only audit. Do not modify any file.'
     case 'ask':
       return 'Purpose: ASK. Answer the question from repository evidence. Do not modify any file.'
+    case 'critique':
+      return CRITIC
+    case 'synthesize':
+      return SYNTHESIZER
+    case 'arbitrate':
+      return ARBITER
     case 'plan':
     case 'implement':
     case 'diagnose':
@@ -118,9 +137,15 @@ function purposeText(purpose: AgentPurpose): string | null {
   }
 }
 
+/** Roles doing the work of a task may propose graph changes; planners, reviewers and verifiers may not. */
+export function canProposeGraphChange(role: AgentRole, purpose: AgentPurpose): boolean {
+  const roleOk = role === 'worker' || role === 'debugger' || role === 'architect' || role === 'researcher'
+  return roleOk && (purpose === 'implement' || purpose === 'diagnose' || purpose === 'research')
+}
+
 /** Role policy appended to the runtime's base system prompt. */
 export function rolePrompt(role: AgentRole, purpose: AgentPurpose): string {
-  return [roleText(role), purposeText(purpose), PRINCIPLES, NEXUS_TOOLS, ENVIRONMENT]
+  return [roleText(role), purposeText(purpose), canProposeGraphChange(role, purpose) ? GRAPH_CHANGES : null, PRINCIPLES, NEXUS_TOOLS, ENVIRONMENT]
     .filter((s): s is string => s !== null)
     .join('\n\n')
 }

@@ -7,6 +7,7 @@ import { Badge, Button, ConfirmDialog, StatusBadge, StopIcon, Tabs, type TabItem
 import { FilesTab } from './FilesTab'
 import { MessagesTab } from './MessagesTab'
 import { OutputTab } from './OutputTab'
+import { RoutingBadge } from './RoutingSection'
 import { TaskTab } from './TaskTab'
 import { ToolsTab } from './ToolsTab'
 import { UsageTab } from './UsageTab'
@@ -37,6 +38,7 @@ export function AgentDetail({ agent }: { agent: Agent }) {
         <StatusBadge status={agentStatus(agent.state)} />
         <Badge mono>{agent.role}</Badge>
         {agent.model ? <Badge mono>{agent.model}</Badge> : null}
+        <RoutingBadge agent={agent} />
         <span className="min-w-0 flex-1 truncate text-fg-muted">{agent.activity ?? ''}</span>
         <Button
           size="sm"

@@ -7,6 +7,7 @@ import { ErrorBoundary } from '../../app/ErrorBoundary'
 import { TaskGraph } from './graph/TaskGraph'
 import { TaskInspector } from './inspector/TaskInspector'
 import { MissionHeader } from './MissionHeader'
+import { PlanInspector } from './PlanInspector'
 import { PlanPanel, PlannerActivity } from './PlanPanel'
 import { RunsList } from './RunsList'
 import { RunProvider, useEventStream, useRunCtx, type BottomTab, type StageView } from './runContext'
@@ -35,24 +36,26 @@ const BOTTOM_ITEMS: readonly TabItem<BottomTab>[] = (
   ] as const
 ).map(([id, label]) => ({ id, label, testId: `bottom-tab-${id}` }))
 
-const STAGE_ITEMS: readonly TabItem<StageView>[] = [
-  { id: 'overview', label: 'Overview', testId: 'stage-tab-overview' },
-  { id: 'graph', label: 'Task graph', testId: 'stage-tab-graph' },
-]
+const OVERVIEW_ITEM: TabItem<StageView> = { id: 'overview', label: 'Overview', testId: 'stage-tab-overview' }
+const GRAPH_ITEM: TabItem<StageView> = { id: 'graph', label: 'Task graph', testId: 'stage-tab-graph' }
+const PLAN_ITEM: TabItem<StageView> = { id: 'plan', label: 'Plan inspector', testId: 'stage-tab-plan' }
 
 function Stage({ choice, onChoose }: { choice: StageView | null; onChoose: (v: StageView) => void }) {
   const { detail } = useRunCtx()
   const state = detail.run.state
   const hasOverview = state === 'planning' || state === 'awaiting_approval' || state === 'completed'
-  const view: StageView = hasOverview ? (choice ?? 'overview') : 'graph'
+  const view: StageView = choice === 'plan' ? 'plan' : hasOverview ? (choice ?? 'overview') : 'graph'
+  const stageItems = hasOverview ? [OVERVIEW_ITEM, GRAPH_ITEM, PLAN_ITEM] : [GRAPH_ITEM, PLAN_ITEM]
   const selectedTaskId = useUiStore((s) => s.taskId)
   const selectTask = useUiStore((s) => s.selectTask)
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="run-stage" data-stage={view}>
-      {hasOverview ? <Tabs tabs={STAGE_ITEMS} active={view} onChange={onChoose} className="bg-surface-1 px-1" /> : null}
+      <Tabs tabs={stageItems} active={view} onChange={onChoose} className="bg-surface-1 px-1" />
       <div className="flex min-h-0 flex-1 flex-col">
-        {view === 'overview' ? (
+        {view === 'plan' ? (
+          <PlanInspector />
+        ) : view === 'overview' ? (
           state === 'planning' ? (
             <PlannerActivity />
           ) : state === 'awaiting_approval' ? (

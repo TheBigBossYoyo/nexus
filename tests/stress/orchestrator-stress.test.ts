@@ -99,6 +99,9 @@ function buildScenario(seed: number): Scenario {
 interface Observation {
   violations: string[]
   maxActiveWriters: number
+  /** Tasks whose injected crash actually fired (a pause can stop the session before it does). */
+  crashed: Set<string>
+  rejected: Set<string>
 }
 
 function buildScript(s: Scenario, obs: Observation): FakeScript {
@@ -135,7 +138,12 @@ function buildScript(s: Scenario, obs: Observation): FakeScript {
     const n = nth(`worker:${key}`)
     await writing(key, async () => {
       await ctx.sleep(delay(`worker:${key}:${n}`))
-      if (s.crashOnce.has(key) && n === 0) ctx.fail(`injected crash in ${key}`)
+      // A pause or cancel stops the session mid-sleep; a stopped session injects nothing.
+      if (ctx.signal.aborted) return
+      if (s.crashOnce.has(key) && n === 0) {
+        obs.crashed.add(key)
+        ctx.fail(`injected crash in ${key}`)
+      }
       await writeFiles(spec, ctx, { [`${key}.txt`]: `${key} attempt ${n}` })
       if (s.messengers.has(key) && ctx.nexusTools) {
         await ctx.nexusTools.sendMessage({ type: 'interface_change', subject: `${key} changed`, body: 'details', toTask: null, toRole: null, severity: null })
@@ -157,7 +165,9 @@ function buildScript(s: Scenario, obs: Observation): FakeScript {
     const key = keyOf(spec).replace(/-[0-9a-f]{8}$/, '')
     const n = nth(`review:${key}`)
     await ctx.sleep(delay(`review:${key}:${n}`))
+    if (ctx.signal.aborted) return
     const reject = s.rejectOnce.has(key) && n === 0
+    if (reject) obs.rejected.add(key)
     await ctx.completeTurn({ text: 'review', structuredOutput: reject ? rejectedReview() : approvedReview })
   }
   const verifier: FakeScript = async (spec, ctx) => {
@@ -222,12 +232,12 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
 
   // Injected faults must have produced their recovery path.
   if (!cancelTookEffect) {
-    for (const key of s.rejectOnce) {
+    for (const key of obs.rejected) {
       const t = planned.find((x) => x.key === key)
       if (t && !h.repos.reviews.listByTask(t.id).some((r) => r.verdict === 'changes_requested')) problems.push(`rejected review of ${key} was not recorded`)
       if (t && !tasks.some((c) => c.parentTaskId === t.id)) problems.push(`no repair task was created for ${key}`)
     }
-    for (const key of s.crashOnce) {
+    for (const key of obs.crashed) {
       const t = planned.find((x) => x.key === key)
       if (t && t.attempt < 2) problems.push(`crashed task ${key} was not retried (attempt ${t.attempt})`)
     }
@@ -253,7 +263,7 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
 
 async function runSeed(seed: number): Promise<string[]> {
   const s = buildScenario(seed)
-  const obs: Observation = { violations: [], maxActiveWriters: 0 }
+  const obs: Observation = { violations: [], maxActiveWriters: 0, crashed: new Set(), rejected: new Set() }
   const h = await createHarness({ script: buildScript(s, obs) })
   try {
     const headBefore = await git(h.repoDir, 'rev-parse', 'HEAD')

@@ -37,6 +37,19 @@ export const qk = {
   verifications: (runId: string) => ['verifications', runId] as const,
   decisions: (runId: string) => ['decisions', runId] as const,
   approvals: () => ['approvals', 'pending'] as const,
+  graphRevisions: (runId: string) => ['graph', 'revisions', runId] as const,
+  graphProposals: (runId: string) => ['graph', 'proposals', runId] as const,
+  planningCandidates: (runId: string) => ['planning', 'candidates', runId] as const,
+  planningRecommend: (projectId: string, prompt: string) => ['planning', 'recommend', projectId, prompt] as const,
+  routing: (runId: string) => ['routing', runId] as const,
+  performanceRoot: () => ['performance'] as const,
+  performance: (projectId: string | null) => ['performance', projectId ?? 'all'] as const,
+  intelligenceRoot: () => ['intelligence'] as const,
+  intelligence: (projectId: string, query: string, includeStale: boolean) =>
+    ['intelligence', projectId, { query, includeStale }] as const,
+  contextRoot: () => ['context'] as const,
+  contextPacks: (filter: { taskId?: string | null; agentId?: string | null }) =>
+    ['context', 'packs', { taskId: filter.taskId ?? null, agentId: filter.agentId ?? null }] as const,
   memoryRoot: () => ['memory'] as const,
   memory: (filter: MemoryFilter) =>
     ['memory', 'list', { projectId: filter.projectId ?? null, scope: filter.scope ?? null, query: filter.query ?? '' }] as const,
@@ -119,6 +132,36 @@ export const useVerifications = (runId: string | null) =>
   useRead(qk.verifications(runId ?? ''), 'verifications.list', { runId: runId ?? '' }, runId !== null)
 export const useDecisions = (runId: string | null) =>
   useRead(qk.decisions(runId ?? ''), 'decisions.list', { runId: runId ?? '' }, runId !== null)
+export const useGraphRevisions = (runId: string | null) =>
+  useRead(qk.graphRevisions(runId ?? ''), 'graph.revisions', { runId: runId ?? '' }, runId !== null)
+export const useGraphProposals = (runId: string | null) =>
+  useRead(qk.graphProposals(runId ?? ''), 'graph.proposals', { runId: runId ?? '' }, runId !== null)
+export const usePlanningCandidates = (runId: string | null) =>
+  useRead(qk.planningCandidates(runId ?? ''), 'planning.candidates', { runId: runId ?? '' }, runId !== null)
+export const usePlanningRecommendation = (projectId: string | null, prompt: string) =>
+  useRead(
+    qk.planningRecommend(projectId ?? '', prompt),
+    'planning.recommend',
+    { projectId: projectId ?? '', prompt },
+    projectId !== null && prompt.trim().length > 0,
+  )
+export const useRoutingDecisions = (runId: string | null) =>
+  useRead(qk.routing(runId ?? ''), 'routing.list', { runId: runId ?? '' }, runId !== null)
+export const usePerformanceSummary = (projectId: string | null = null) =>
+  useRead(qk.performance(projectId), 'performance.summary', projectId ? { projectId } : {})
+export const useIntelligence = (projectId: string | null, opts: { query?: string; includeStale?: boolean } = {}) => {
+  const query = opts.query?.trim() ?? ''
+  const includeStale = opts.includeStale ?? false
+  const input: IpcInput<'intelligence.list'> = { projectId: projectId ?? '', includeStale }
+  if (query) input.query = query
+  return useRead(qk.intelligence(projectId ?? '', query, includeStale), 'intelligence.list', input, projectId !== null)
+}
+export const useContextPacks = (filter: { taskId?: string | null; agentId?: string | null }) => {
+  const input: IpcInput<'context.packs'> = {}
+  if (filter.taskId) input.taskId = filter.taskId
+  if (filter.agentId) input.agentId = filter.agentId
+  return useRead(qk.contextPacks(filter), 'context.packs', input, Boolean(filter.taskId || filter.agentId))
+}
 export const usePendingApprovals = () => useRead(qk.approvals(), 'approvals.pending', {})
 export const useMemory = (filter: MemoryFilter = {}) => {
   const input: IpcInput<'memory.list'> = {}
@@ -208,3 +251,6 @@ export const useSetMemoryStatus = () =>
   useWrite('memory.setStatus', (qc) => void qc.invalidateQueries({ queryKey: qk.memoryRoot() }))
 export const useDeleteMemory = () =>
   useWrite('memory.delete', (qc) => void qc.invalidateQueries({ queryKey: qk.memoryRoot() }))
+
+export const useRefreshIntelligence = () =>
+  useWrite('intelligence.refresh', (qc) => void qc.invalidateQueries({ queryKey: qk.intelligenceRoot() }))

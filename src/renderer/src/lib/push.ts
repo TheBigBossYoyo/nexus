@@ -29,6 +29,8 @@ export function keysForEvent(event: RunEvent): Key[] {
     case 'task':
       keys.push(qk.run(runId), qk.runSummary(runId))
       if (taskId) keys.push(qk.taskDiff(taskId))
+      // Finished tasks write outcome rows that feed the Performance view.
+      if (event.type === 'task.completed' || event.type === 'task.failed') keys.push(qk.performanceRoot())
       break
     case 'agent':
       keys.push(qk.run(runId))
@@ -62,6 +64,21 @@ export function keysForEvent(event: RunEvent): Key[] {
       break
     case 'decision':
       keys.push(qk.decisions(runId))
+      break
+    case 'graph':
+      keys.push(qk.run(runId), qk.runSummary(runId), qk.graphRevisions(runId), qk.graphProposals(runId), qk.approvals())
+      break
+    case 'planning':
+      keys.push(qk.planningCandidates(runId), qk.run(runId))
+      break
+    case 'routing':
+      keys.push(qk.routing(runId))
+      break
+    case 'intelligence':
+      keys.push(qk.intelligenceRoot())
+      break
+    case 'context':
+      keys.push(qk.contextRoot())
       break
     default:
       // criterion.*, user.* and anything added later: refresh the run itself.

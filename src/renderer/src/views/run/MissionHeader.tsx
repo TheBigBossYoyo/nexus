@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
-import { Badge, Button, BranchIcon, ConfirmDialog, PauseIcon, PlayIcon, PlusIcon, StatusBadge, StopIcon, TrashIcon } from '../../components/ui'
+import { Badge, Button, StatusDot, BranchIcon, ConfirmDialog, PauseIcon, PlayIcon, PlusIcon, StatusBadge, StopIcon, TrashIcon } from '../../components/ui'
 import { formatSpan } from '../../lib/format'
-import { useCleanupRun } from '../../lib/queries'
-import { runStatus } from '../../lib/status'
+import { useCleanupRun, useGraphRevisions } from '../../lib/queries'
+import { deriveHealth, planVersion } from '../../lib/v2logic'
+import { TONE_CLASSES, runStatus } from '../../lib/status'
 import { useUiStore } from '../../store/ui'
 import { useRunControls } from '../../app/useRunControls'
 import { AddTaskDialog } from './AddTaskDialog'
@@ -29,6 +30,10 @@ export function MissionHeader() {
   const longPrompt = run.prompt.length > PROMPT_COLLAPSED_CHARS
   const prompt = expanded || !longPrompt ? run.prompt : `${run.prompt.slice(0, PROMPT_COLLAPSED_CHARS).trimEnd()}…`
   const pauseDetail = run.state === 'paused' ? pauseDetailFromEvents(events) : null
+  const revisions = useGraphRevisions(run.id)
+  const version = planVersion(revisions.data ?? [])
+  const activeAgents = detail.agents.filter((a) => a.state === 'starting' || a.state === 'working').length
+  const health = deriveHealth(run, tasks, detail.pendingApprovals)
   const cleanable = finished && worktrees.some((w) => w.state !== 'removed')
 
   return (
@@ -92,6 +97,28 @@ export function MissionHeader() {
             </Button>
           ) : null}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 font-mono text-[0.9em] text-fg-muted" data-testid="run-meta">
+        <span data-testid="plan-version" title="Latest graph revision; v1 is the approved plan">
+          plan v{version}
+        </span>
+        <span data-testid="planning-mode">planning {(run.config.planningMode ?? 'single').toUpperCase()}</span>
+        <span data-testid="review-mode">review {(run.config.reviewMode ?? 'auto').toUpperCase()}</span>
+        <span data-testid="active-agents">
+          agents {activeAgents}/{run.config.maxParallelAgents} active
+        </span>
+        <span data-testid="run-phase">phase {run.state.replace(/_/g, ' ')}</span>
+        <span
+          className="inline-flex items-center gap-1.5"
+          data-testid="run-health"
+          data-health={health.level}
+          title={health.reasons.length > 0 ? health.reasons.join(', ') : 'No failed or blocked tasks, no pending approvals'}
+        >
+          <StatusDot tone={health.tone} />
+          <span className={TONE_CLASSES[health.tone].text}>{health.label}</span>
+          {health.reasons.length > 0 ? <span className="text-fg-faint">{health.reasons.join(' · ')}</span> : null}
+        </span>
       </div>
 
       <div className="flex items-start gap-2">

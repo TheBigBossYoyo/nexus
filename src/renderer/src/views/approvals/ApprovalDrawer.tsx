@@ -31,6 +31,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
   const task = run?.tasks.find((t) => t.id === approval.taskId) ?? null
   const agent = run?.agents.find((a) => a.id === approval.agentId) ?? null
   const isPlan = approval.kind === 'plan'
+  const isGraph = approval.kind === 'graph'
 
   const submit = (approve: boolean) =>
     resolve.mutate({ approvalId: approval.id, approve, ...(note.trim() ? { note: note.trim() } : {}) })
@@ -50,7 +51,20 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
         <Badge mono>{approval.kind}</Badge>
         <TimeAgo iso={approval.createdAt} className="ml-auto text-fg-faint" />
       </div>
-      <div className="text-fg-muted">{approval.reason}</div>
+      {isGraph ? (
+        <div className="flex flex-col gap-1 border-l-2 border-tone-review bg-surface-2 px-2.5 py-1.5" data-testid="approval-graph-change">
+          <div className="text-[0.8rem] font-semibold uppercase tracking-wider text-tone-review">Proposed plan change</div>
+          <div className="whitespace-pre-wrap break-words">{approval.reason}</div>
+          {approval.command ? (
+            <div className="whitespace-pre-wrap break-words font-mono text-[0.9em] text-fg-muted" data-testid="approval-graph-summary">
+              {approval.command}
+            </div>
+          ) : null}
+          <div className="text-fg-faint">Approving applies it to the task graph as a new plan revision; denying leaves the graph unchanged.</div>
+        </div>
+      ) : (
+        <div className="text-fg-muted">{approval.reason}</div>
+      )}
       {isPlan ? (
         <div className="text-fg-muted">
           The plan is reviewed in the run view.{' '}
@@ -58,7 +72,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
             Open plan panel
           </button>
         </div>
-      ) : approval.command ? (
+      ) : isGraph ? null : approval.command ? (
         <CodeBlock>{approval.command}</CodeBlock>
       ) : null}
       <dl className="m-0 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[0.88rem]">

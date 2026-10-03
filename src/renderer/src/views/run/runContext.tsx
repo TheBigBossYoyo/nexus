@@ -5,7 +5,7 @@ import type { RunEvent } from '@shared/events'
 import { useEvents } from '../../lib/queries'
 import { mergeEvents } from './eventText'
 
-export type StageView = 'overview' | 'graph'
+export type StageView = 'overview' | 'graph' | 'plan'
 
 export const BOTTOM_TABS = [
   'timeline',

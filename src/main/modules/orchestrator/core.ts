@@ -15,6 +15,7 @@ import { runCommandLine } from '@main/modules/process'
 import { assertTransition, canPauseRun, canTransition } from '@main/modules/state'
 import { AgentRunner } from './agent-runner'
 import { ApprovalService } from './approvals'
+import { GraphService } from './graph-service'
 import type { OrchestratorDeps } from './deps'
 import { MemoryService } from './memory'
 import { MessageService } from './messaging'
@@ -46,13 +47,15 @@ export class Core {
   readonly approvals: ApprovalService
   readonly messages: MessageService
   readonly memory: MemoryService
+  readonly graph: GraphService
   readonly agents: AgentRunner
 
   constructor(readonly deps: OrchestratorDeps) {
     this.approvals = new ApprovalService(deps)
     this.messages = new MessageService(deps)
     this.memory = new MemoryService(deps)
-    this.agents = new AgentRunner(deps, this.approvals, this.messages, this.memory)
+    this.graph = new GraphService(deps, this.approvals)
+    this.agents = new AgentRunner(deps, this.approvals, this.messages, this.memory, this.graph)
   }
 
   log(line: string): void {

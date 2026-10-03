@@ -1,0 +1,7 @@
+export { analyzeRepository } from './analyze'
+export type { AnalyzeInput, AnalyzedFact } from './analyze'
+export { FINGERPRINT_FILE_CAP, findStaleFacts, fingerprintFiles } from './fingerprint'
+export { refreshIntelligence } from './refresh'
+export type { FactStore, RefreshInput, RefreshResult } from './refresh'
+export { selectFactsForTask } from './select'
+export type { SelectedFact, TaskForSelection } from './select'

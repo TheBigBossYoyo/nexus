@@ -81,6 +81,17 @@ export interface EventPayloads {
   'decision.recorded': { decisionId: string; title: string }
   'criterion.updated': { criterionId: string; status: string }
   'user.intervention': { action: string; detail?: string }
+
+  'graph.proposed': { proposalId: string; type: string; proposedBy: string }
+  'graph.revised': { proposalId: string | null; revisionId: string; version: number; summary: string }
+  'graph.rejected': { proposalId: string; errors: string[] }
+  'planning.candidate': { candidateId: string; label: string; valid: boolean }
+  'planning.critique': { critiqueId: string; findings: number; preferred: string }
+  'planning.synthesized': { candidates: number; validCandidates: number }
+  'routing.decided': { decisionId: string; role: string; policy: string; model: string | null; reasons: string[] }
+  'intelligence.refreshed': { facts: number; stale: number }
+  'context.composed': { packId: string; included: number; excluded: number; chars: number }
+  'review.arbitrated': { accepted: number; rejected: number }
 }
 
 export type EventType = keyof EventPayloads

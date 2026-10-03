@@ -11,6 +11,8 @@ const VIEW_ITEMS: { view: View; label: string; keys: string }[] = [
   { view: 'agents', label: 'Go to Agents', keys: 'Ctrl 3' },
   { view: 'memory', label: 'Go to Memory', keys: 'Ctrl 4' },
   { view: 'settings', label: 'Go to Settings', keys: 'Ctrl 5' },
+  { view: 'performance', label: 'Go to Performance', keys: 'Ctrl 6' },
+  { view: 'intelligence', label: 'Go to Repository Intelligence', keys: 'Ctrl 7' },
   { view: 'auth', label: 'Go to Authentication', keys: '' },
 ]
 

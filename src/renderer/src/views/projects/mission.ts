@@ -1,5 +1,6 @@
 import type { Preset, RunMode } from '@shared/domain'
 import { ipcInputs, type IpcInput } from '@shared/ipc'
+import type { PlanningMode, ReviewMode } from '@shared/v2'
 
 export const MODE_INFO: Record<RunMode, string> = {
   ask: 'Answers a question with one read-only researcher task. No planner, worktree, review or verification; works outside Git.',
@@ -11,6 +12,18 @@ export const MODE_INFO: Record<RunMode, string> = {
     'Read-only review: parallel reviewer tasks plus one synthesis task. Plans with writing roles are rejected, so nothing is modified. Works outside Git.',
   mission: 'Planner is told to decompose a large request into features with implementation and test tasks and a final integration check. Same pipeline as BUILD.',
   loop: 'Planner is told to write objectively checkable criteria. Max iterations below bounds the repair rounds, which every mode shares; there is no separate outer loop.',
+}
+
+export const PLANNING_MODE_INFO: Record<PlanningMode, string> = {
+  single: 'One planner session produces the plan.',
+  consensus:
+    'Three planners with different lenses (risk-first, parallelism-first, minimal-change) plan independently, a critic reviews the plans and a synthesizer writes the final one. Uses more agent sessions.',
+}
+
+export const REVIEW_MODE_INFO: Record<ReviewMode, string> = {
+  auto: 'Dual review for high-risk tasks, standard review otherwise.',
+  standard: 'One reviewer checks each task.',
+  dual: 'Two reviewers with different lenses run concurrently, findings are deduplicated, and an arbiter accepts or rejects each significant finding against the code. Only accepted findings can request changes.',
 }
 
 export const PRESET_INFO: Record<Preset, string> = {
@@ -34,6 +47,9 @@ export interface MissionDraft {
   maxAgents: number | null
   requirePlanApproval: boolean
   maxIterations: number
+  /** Omitted from the request when undefined (main applies its defaults). */
+  planningMode?: PlanningMode
+  reviewMode?: ReviewMode
 }
 
 export function buildCreateRunInput(d: MissionDraft): IpcInput<'runs.create'> {
@@ -45,6 +61,8 @@ export function buildCreateRunInput(d: MissionDraft): IpcInput<'runs.create'> {
     requirePlanApproval: d.requirePlanApproval,
   }
   if (d.maxAgents !== null) input.maxParallelAgents = d.maxAgents
+  if (d.planningMode !== undefined) input.planningMode = d.planningMode
+  if (d.reviewMode !== undefined) input.reviewMode = d.reviewMode
   if (d.mode === 'loop') input.maxIterations = d.maxIterations
   return input
 }

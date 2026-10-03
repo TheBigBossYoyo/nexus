@@ -52,3 +52,13 @@ describe('preset copy', () => {
     expect(MAXIMUM_PRESET_WARNING).not.toMatch(/strongest/i)
   })
 })
+
+describe("mission v0.2 options", () => {
+  it("passes planning and review mode only when chosen", () => {
+    const input = buildCreateRunInput({ ...base, planningMode: "consensus", reviewMode: "dual" })
+    expect(input.planningMode).toBe("consensus")
+    expect(input.reviewMode).toBe("dual")
+    expect(validateMission({ ...base, planningMode: "single", reviewMode: "auto" })).toBeNull()
+    expect(buildCreateRunInput(base).planningMode).toBeUndefined()
+  })
+})

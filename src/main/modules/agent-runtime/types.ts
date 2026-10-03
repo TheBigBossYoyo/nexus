@@ -38,6 +38,8 @@ export interface NexusToolHandlers {
     tags: string[]
     filePaths: string[]
   }): Promise<string>
+  /** v0.2: propose a task-graph change. The input is validated by the orchestrator, never trusted. */
+  proposeGraphChange?(input: unknown): Promise<string>
 }
 
 export interface ExternalMcpServer {

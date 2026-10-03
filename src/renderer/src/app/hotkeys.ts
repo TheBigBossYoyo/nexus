@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { useUiStore, type View } from '../store/ui'
 
-export const NUMBERED_VIEWS: readonly View[] = ['projects', 'run', 'agents', 'memory', 'settings']
+export const NUMBERED_VIEWS: readonly View[] = ['projects', 'run', 'agents', 'memory', 'settings', 'performance', 'intelligence']
 
-/** Ctrl+K palette, Ctrl+1..5 views, Esc closes the palette and drawers. */
+/** Ctrl+K palette, Ctrl+1..7 views, Esc closes the palette and drawers. */
 export function useHotkeys(): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

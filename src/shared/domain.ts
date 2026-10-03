@@ -131,7 +131,7 @@ export type Complexity = z.infer<typeof ComplexitySchema>
 
 export type PauseReason = 'user' | 'quota' | 'recovery'
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired'
-export type ApprovalKind = 'plan' | 'tool' | 'git' | 'task' | 'merge'
+export type ApprovalKind = 'plan' | 'tool' | 'git' | 'task' | 'merge' | 'graph'
 export type MemoryScope = 'global' | 'project' | 'run'
 export type MemoryStatus = 'proposed' | 'approved' | 'rejected'
 export type WorktreeState = 'active' | 'merged' | 'removed' | 'orphaned'
@@ -276,6 +276,10 @@ export interface RunConfig {
   /** Minutes before a task lease expires without a heartbeat. */
   leaseMinutes: number
   enabledMcpServers: string[]
+  /** v0.2. Absent on runs created by v0.1; treat as 'single'. */
+  planningMode?: 'single' | 'consensus'
+  /** v0.2. Absent on runs created by v0.1; treat as 'auto'. */
+  reviewMode?: 'standard' | 'dual' | 'auto'
 }
 
 export interface Run {
@@ -360,6 +364,10 @@ export type AgentPurpose =
   | 'audit'
   | 'synthesis'
   | 'ask'
+  /** v0.2: plan critic, plan synthesizer, finding arbiter. */
+  | 'critique'
+  | 'synthesize'
+  | 'arbitrate'
 
 export interface AgentMetrics {
   turns: number

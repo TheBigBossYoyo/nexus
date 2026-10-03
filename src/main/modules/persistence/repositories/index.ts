@@ -10,6 +10,16 @@ import { DependencyRepository, ProjectRepository, RunRepository, TaskRepository 
 import { EventRepository, SettingsRepository } from './events-settings'
 import { MemoryRepository } from './memory'
 import {
+  ContextPackRepository,
+  FactRepository,
+  GraphProposalRepository,
+  GraphRevisionRepository,
+  PlanningCandidateRepository,
+  PlanningCritiqueRepository,
+  RoutingDecisionRepository,
+  TaskOutcomeRepository,
+} from './v2'
+import {
   ApprovalRepository,
   ArtifactRepository,
   CriterionRepository,
@@ -41,6 +51,14 @@ export interface Repositories {
   usage: UsageRepository
   artifacts: ArtifactRepository
   settings: SettingsRepository
+  graphRevisions: GraphRevisionRepository
+  graphProposals: GraphProposalRepository
+  planningCandidates: PlanningCandidateRepository
+  planningCritiques: PlanningCritiqueRepository
+  routingDecisions: RoutingDecisionRepository
+  taskOutcomes: TaskOutcomeRepository
+  facts: FactRepository
+  contextPacks: ContextPackRepository
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -67,6 +85,14 @@ export function createRepositories(db: Database): Repositories {
     usage: new UsageRepository(db),
     artifacts: new ArtifactRepository(db),
     settings: new SettingsRepository(db),
+    graphRevisions: new GraphRevisionRepository(db),
+    graphProposals: new GraphProposalRepository(db),
+    planningCandidates: new PlanningCandidateRepository(db),
+    planningCritiques: new PlanningCritiqueRepository(db),
+    routingDecisions: new RoutingDecisionRepository(db),
+    taskOutcomes: new TaskOutcomeRepository(db),
+    facts: new FactRepository(db),
+    contextPacks: new ContextPackRepository(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }
@@ -94,5 +120,17 @@ export type {
   WorktreeRepository,
 }
 export type { MemoryFilter } from './memory'
+export type {
+  ContextPackRepository,
+  FactRepository,
+  GraphProposalRepository,
+  GraphRevisionRepository,
+  PlanningCandidateRepository,
+  PlanningCritiqueRepository,
+  RoutingDecisionRepository,
+  TaskOutcomeRepository,
+  FactListOptions,
+  FactSearchOptions,
+} from './v2'
 export type { MessageRecipient } from './agents'
 export { toFtsQuery } from './memory'

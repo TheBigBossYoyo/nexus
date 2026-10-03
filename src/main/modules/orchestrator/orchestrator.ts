@@ -13,7 +13,6 @@ import {
   type Complexity,
   type Message,
   type MissionPlan,
-  type PlannedTask,
   type Preset,
   type Run,
   type RunConfig,
@@ -21,7 +20,6 @@ import {
   type RunState,
   type Task,
   type TaskError,
-  type TaskKind,
   type Worktree,
 } from '@shared/domain'
 import type { RecoverableRun } from '@shared/ipc'
@@ -46,8 +44,11 @@ import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { Core } from './core'
 import type { OrchestratorDeps } from './deps'
+import type { InsertTaskSpec } from './graph-service'
+import { refreshProjectFacts } from './intelligence'
 import { renderMessage } from './messaging'
 import { TaskPipeline, type PipelineHost, type Stage } from './pipeline'
+import { kindFor } from './task-kind'
 
 const ACTIVE_RUN_STATES: readonly RunState[] = ['executing', 'testing', 'reviewing', 'verifying', 'repairing']
 const MAX_PLAN_ATTEMPTS = 3
@@ -79,25 +80,6 @@ interface ActivePipeline {
   done: Promise<void>
 }
 
-function kindFor(mode: RunMode, task: PlannedTask): TaskKind {
-  if (mode === 'audit') return task.dependencies.length > 0 ? 'synthesis' : 'audit'
-  switch (task.role) {
-    case 'worker':
-      return 'implement'
-    case 'debugger':
-      return 'repair'
-    case 'architect':
-      return 'design'
-    case 'reviewer':
-    case 'security_reviewer':
-    case 'verifier':
-      return 'audit'
-    case 'planner':
-    case 'researcher':
-      return 'research'
-  }
-}
-
 /**
  * The control plane. All scheduling decisions are made here in deterministic code from durable
  * state; agents never hold orchestration state.
@@ -121,6 +103,16 @@ export class Orchestrator implements PipelineHost {
     this.pipeline = new TaskPipeline(this.core, this)
     this.core.messages.setLiveDelivery((taskId, message) => this.deliverLive(taskId, message))
     this.core.approvals.onResolved((approval) => this.onApprovalResolved(approval))
+    this.core.graph.bind({
+      setTaskState: (...args) => this.core.setTaskState(...args),
+      tryTaskState: (...args) => this.core.tryTaskState(...args),
+      insertTask: (run, spec) => this.insertTask(run, spec),
+      requestTick: (runId) => this.requestTick(runId),
+      stopTaskPipeline: (taskId) => {
+        const pipeline = this.active.get(taskId) ?? this.activeForChild(taskId)
+        void pipeline?.control.stop('cancelled')
+      },
+    })
   }
 
   // ───────────────────────────── run creation and planning ─────────────────────────────
@@ -190,11 +182,27 @@ export class Orchestrator implements PipelineHost {
           },
         ],
       })
-      this.background(run.id, () => this.startExecution(run.id))
+      this.background(run.id, async () => {
+        if (await this.refreshFacts(run.id)) await this.startExecution(run.id)
+      })
     } else {
-      this.background(run.id, () => this.plan(run.id))
+      this.background(run.id, async () => {
+        if (await this.refreshFacts(run.id)) await this.plan(run.id)
+      })
     }
     return repos.runs.require(run.id)
+  }
+
+  /**
+   * Refresh the project's repository facts before the run plans or executes. A failure is logged and
+   * never blocks the run. Resolves false when the run left 'planning' meanwhile (cancelled, paused).
+   */
+  private async refreshFacts(runId: string): Promise<boolean> {
+    const { repos, bus } = this.deps
+    const run = repos.runs.require(runId)
+    const result = await refreshProjectFacts(this.deps, this.core.project(run), (line) => this.core.log(line))
+    if (result) bus.emit({ runId, type: 'intelligence.refreshed', payload: result })
+    return repos.runs.require(runId).state === 'planning'
   }
 
   private async plan(runId: string, feedback?: string, previousPlan?: MissionPlan): Promise<void> {
@@ -374,6 +382,8 @@ export class Orchestrator implements PipelineHost {
     bus.transaction(() => {
       for (const criterion of repos.criteria.listByRun(runId)) repos.criteria.delete(criterion.id)
       for (const task of repos.tasks.listByRun(runId)) repos.tasks.delete(task.id)
+      // The superseded plan never ran; the replanned one starts its history again at version 1.
+      for (const revision of repos.graphRevisions.listByRun(runId)) repos.graphRevisions.delete(revision.id)
       this.core.setRunState(runId, 'planning', { plan: null })
       bus.emit({ runId, type: 'plan.rejected', payload: { feedback } })
       bus.emit({ runId, type: 'user.intervention', payload: { action: 'replan', detail: feedback } })
@@ -392,6 +402,8 @@ export class Orchestrator implements PipelineHost {
       this.core.setRunState(runId, 'executing', { startedAt: nowIso() })
       this.core.markRunActive(runId, true)
       bus.emit({ runId, type: 'run.started', payload: {} })
+      // Version 1 of the graph is the approved plan (a no-op when the history already began).
+      this.core.graph.ensureBaseline(runId)
     })
     this.requestTick(runId)
   }
@@ -659,6 +671,7 @@ export class Orchestrator implements PipelineHost {
       return
     }
     if (tasks.every((t) => t.state === 'cancelled')) {
+      this.closeProposals(runId, 'The run ended before this proposal was decided.')
       bus.transaction(() => {
         this.core.setRunState(runId, 'cancelled')
         bus.emit({ runId, type: 'run.cancelled', payload: {} })
@@ -780,14 +793,22 @@ export class Orchestrator implements PipelineHost {
     }
 
     const completed = tasks.filter((t) => t.state === 'completed').length
+    this.closeProposals(runId, 'The run completed before this proposal was decided.')
     bus.transaction(() => {
       this.core.setRunState(runId, 'completed')
       bus.emit({ runId, type: 'run.completed', payload: { summary: `${completed}/${tasks.length} tasks completed and verified.` } })
     })
   }
 
+  /** Pending graph approvals die with the run: nothing could ever apply them. */
+  private closeProposals(runId: string, why: string): void {
+    this.core.approvals.expire({ runId })
+    this.core.graph.expireAwaiting(runId, why)
+  }
+
   private failRun(runId: string, error: string): void {
     const { bus } = this.deps
+    this.closeProposals(runId, 'The run failed before this proposal was decided.')
     bus.transaction(() => {
       this.core.setRunState(runId, 'failed', { error })
       bus.emit({ runId, type: 'run.failed', payload: { error } })
@@ -841,7 +862,7 @@ export class Orchestrator implements PipelineHost {
         }
       }
     })
-    this.core.approvals.expire({ runId })
+    this.closeProposals(runId, 'The run was cancelled before this proposal was decided.')
     await this.stopRunSessions(runId, 'cancelled')
     return repos.runs.require(runId)
   }
@@ -893,6 +914,7 @@ export class Orchestrator implements PipelineHost {
     // A repair child runs its debugger under the parent's pipeline control.
     const pipeline = this.active.get(taskId) ?? this.activeForChild(taskId)
     bus.transaction(() => {
+      this.core.graph.ensureBaseline(task.runId)
       this.core.setTaskState(taskId, 'cancelled')
       bus.emit({ runId: task.runId, taskId, type: 'task.cancelled', payload: {} })
       bus.emit({ runId: task.runId, taskId, type: 'user.intervention', payload: { action: 'cancel_task' } })
@@ -906,6 +928,7 @@ export class Orchestrator implements PipelineHost {
           bus.emit({ runId: task.runId, taskId: parent.id, type: 'task.failed', payload: error })
         }
       }
+      this.core.graph.recordIntervention(task.runId, `User cancelled task ${task.key}`)
     })
     await pipeline?.control.stop('cancelled')
     this.requestTick(task.runId)
@@ -915,9 +938,12 @@ export class Orchestrator implements PipelineHost {
   setPriority(taskId: string, priority: number): Task {
     const { repos, bus } = this.deps
     const task = bus.transaction(() => {
+      const before = repos.tasks.require(taskId)
+      this.core.graph.ensureBaseline(before.runId)
       const updated = repos.tasks.update(taskId, { priority })
       bus.emit({ runId: updated.runId, taskId, type: 'task.updated', payload: { fields: ['priority'] } })
       bus.emit({ runId: updated.runId, taskId, type: 'user.intervention', payload: { action: 'set_priority', detail: String(priority) } })
+      this.core.graph.recordIntervention(updated.runId, `User set priority of ${updated.key} from ${before.priority} to ${priority}`)
       return updated
     })
     this.requestTick(task.runId)
@@ -936,6 +962,7 @@ export class Orchestrator implements PipelineHost {
       if (!tasks.some((t) => t.id === dep)) throw new NexusError('invalid_input', `Unknown dependency ${dep}`)
     }
     const task = bus.transaction(() => {
+      this.core.graph.ensureBaseline(run.id)
       const n = tasks.filter((t) => t.key.startsWith('user-task-')).length + 1
       const row = this.insertTask(run, {
         key: `user-task-${n}`,
@@ -956,16 +983,14 @@ export class Orchestrator implements PipelineHost {
       bus.emit({ runId: run.id, taskId: row.id, type: 'user.intervention', payload: { action: 'add_task' } })
       // Tasks added before plan approval stay drafts and are released with the rest of the plan.
       if (run.state !== 'planning' && run.state !== 'awaiting_approval') this.core.setTaskState(row.id, 'ready')
+      this.core.graph.recordIntervention(run.id, `User added task ${row.key}: ${row.title}`)
       return repos.tasks.require(row.id)
     })
     this.requestTick(run.id)
     return task
   }
 
-  private insertTask(
-    run: Run,
-    spec: Pick<Task, 'key' | 'title' | 'description' | 'role' | 'kind' | 'suggestedFiles' | 'acceptanceCriteria' | 'complexity' | 'modelTierOverride'>,
-  ): Task {
+  private insertTask(run: Run, spec: InsertTaskSpec): Task {
     const { repos, bus } = this.deps
     const task = repos.tasks.insert({
       ...spec,
@@ -973,7 +998,7 @@ export class Orchestrator implements PipelineHost {
       runId: run.id,
       state: 'draft',
       priority: 0,
-      risk: 'medium',
+      risk: spec.risk ?? 'medium',
       parallelizable: true,
       requiresApproval: false,
       approvalGranted: false,
@@ -1066,6 +1091,8 @@ export class Orchestrator implements PipelineHost {
       } else {
         void this.cancelRun(run.id)
       }
+    } else if (approval.kind === 'graph') {
+      this.core.graph.onApprovalResolved(approval)
     } else if (approval.kind === 'task' && approval.taskId) {
       // A stale request (the task already started, finished or was cancelled) must not change it.
       const task = repos.tasks.get(approval.taskId)

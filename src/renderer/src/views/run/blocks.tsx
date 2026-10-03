@@ -4,6 +4,7 @@ import { Badge, Button, CodeBlock, Input } from '../../components/ui'
 import { formatDateTime, formatDuration } from '../../lib/format'
 import { severityStatus, type Tone } from '../../lib/status'
 import { useUpdateCriterion } from '../../lib/queries'
+import { readArbitration } from '../../lib/v2logic'
 import { FindingCard } from './FindingCard'
 import { sortFindings } from './diffModel'
 import { clockTime, clockTimeSeconds } from './runContext'
@@ -34,6 +35,33 @@ export function CommandBlock({ result, at }: { result: CommandResult; at: string
   )
 }
 
+/** What the finding arbiter decided, when this review went through it. Renders nothing otherwise. */
+function ArbitrationBlock({ review }: { review: Review }) {
+  const arb = readArbitration(review)
+  if (!arb) return null
+  return (
+    <div className="flex flex-col gap-1 border bg-surface-2 p-2" data-testid="review-arbitration">
+      <div className="flex items-center gap-2">
+        <span className="text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">Arbiter</span>
+        <Badge tone="success">{arb.accepted} accepted</Badge>
+        <Badge tone={arb.rejected > 0 ? 'warning' : 'neutral'}>{arb.rejected} rejected</Badge>
+      </div>
+      {arb.summary ? <div className="whitespace-pre-wrap break-words text-fg-muted">{arb.summary}</div> : null}
+      <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        {arb.decisions.map((d, i) => (
+          <li key={i} className="flex gap-2" data-testid="arbiter-decision" data-accepted={d.accepted ? 'true' : 'false'}>
+            <Badge tone={d.accepted ? 'success' : 'warning'}>{d.accepted ? 'accepted' : 'rejected'}</Badge>
+            <div className="min-w-0">
+              <div className="font-medium">{d.findingTitle ?? `Finding #${d.findingIndex + 1}`}</div>
+              <div className="whitespace-pre-wrap break-words text-fg-muted">{d.reason}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function ReviewCard({ review, label }: { review: Review; label?: string }) {
   const approved = review.verdict === 'approved'
   return (
@@ -45,6 +73,7 @@ export function ReviewCard({ review, label }: { review: Review; label?: string }
         <span className="ml-auto text-fg-faint">{formatDateTime(review.createdAt)}</span>
       </div>
       <p className="m-0 whitespace-pre-wrap break-words">{review.summary}</p>
+      <ArbitrationBlock review={review} />
       {review.findings.length === 0 ? (
         <div className="text-fg-faint">No findings.</div>
       ) : (

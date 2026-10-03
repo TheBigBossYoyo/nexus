@@ -3,6 +3,7 @@ import { useAgentDetail } from '../../lib/queries'
 import { DASH, formatCost, formatCount, formatDateTime, formatTokens } from '../../lib/format'
 import { Badge, ErrorNote, KeyValue, Loading } from '../../components/ui'
 import { agentElapsed } from './agentLogic'
+import { RoutingSection } from './RoutingSection'
 import { useNow } from './useNow'
 
 const HANDOFF_SECTIONS: { key: keyof Handoff; label: string }[] = [
@@ -87,6 +88,7 @@ export function UsageTab({ agent }: { agent: Agent }) {
         {DASH} means the runtime has not reported that value. Token counts are the latest report from the runtime. Cost is
         the runtime's own list-price estimate, not an invoice: with a Claude subscription it is not what you are charged.
       </p>
+      <RoutingSection agent={agent} />
       <section>
         <h3 className="m-0 mb-1 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">Sessions · {sessions.length}</h3>
         {query.isError ? <ErrorNote error={query.error} /> : null}

@@ -7,7 +7,9 @@ import {
   AgentsIcon,
   Button,
   FolderIcon,
+  IntelligenceIcon,
   MemoryIcon,
+  PerformanceIcon,
   PlusIcon,
   RunsIcon,
   SettingsIcon,
@@ -22,6 +24,8 @@ const NAV: { view: View; label: string; icon: ReactNode; shortcut: string }[] = 
   { view: 'agents', label: 'Agents', icon: <AgentsIcon />, shortcut: '3' },
   { view: 'memory', label: 'Memory', icon: <MemoryIcon />, shortcut: '4' },
   { view: 'settings', label: 'Settings', icon: <SettingsIcon />, shortcut: '5' },
+  { view: 'performance', label: 'Performance', icon: <PerformanceIcon />, shortcut: '6' },
+  { view: 'intelligence', label: 'Intelligence', icon: <IntelligenceIcon />, shortcut: '7' },
 ]
 
 function RecentRuns() {

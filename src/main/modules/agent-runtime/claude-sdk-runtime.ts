@@ -16,9 +16,10 @@ import type {
 import { z } from 'zod'
 import { API_KEY_WARNING } from '@shared/auth'
 import type { AuthStatus, ModelOption } from '@shared/auth'
-import { AgentRoleSchema, MessageTypeSchema, SeveritySchema } from '@shared/domain'
+import { AgentRoleSchema, ComplexitySchema, MessageTypeSchema, RiskSchema, SeveritySchema } from '@shared/domain'
 import { nowIso } from '@shared/ids'
 import { NexusError, errorMessage } from '@shared/result'
+import { ProposalTypeSchema } from '@shared/v2'
 import { AsyncQueue } from './async-queue'
 import { createTranslatorState, translateSdkMessage } from './translate'
 import type {
@@ -308,10 +309,51 @@ async function guarded(run: () => Promise<string>) {
   }
 }
 
+/**
+ * Shape shown to the model for `propose_graph_change`. Deliberately lenient: the orchestrator
+ * validates the real contract (GraphProposalInputSchema) and answers with precise errors, which
+ * is more useful to the agent than a transport-level schema failure.
+ */
+const proposedTaskShape = z.object({
+  key: z.string().describe('lowercase kebab-case, unique in the run'),
+  title: z.string(),
+  description: z.string(),
+  role: AgentRoleSchema,
+  dependencies: z.array(z.string()).optional().describe('keys of existing tasks or of other tasks in this proposal'),
+  suggestedFiles: z.array(z.string()).optional(),
+  acceptanceCriteria: z.array(z.string()).optional().describe('required for roles that write files'),
+  complexity: ComplexitySchema.optional(),
+  risk: RiskSchema.optional(),
+})
+
+const graphChangeShape = {
+  type: ProposalTypeSchema,
+  reason: z.string(),
+  evidence: z.string().describe('concrete repository evidence: file paths, command output'),
+  changes: z.object({
+    tasks: z.array(proposedTaskShape).optional().describe('ADD_TASK, SPLIT_TASK (the subtasks), REPLAN (replacement open tasks)'),
+    targetTask: z.string().nullish().describe('key of the task acted on (SPLIT_TASK, CANCEL_TASK, REPRIORITIZE, *_DEPENDENCY)'),
+    dependsOn: z.string().nullish().describe('key of the prerequisite (ADD_DEPENDENCY, REMOVE_DEPENDENCY)'),
+    blocksProposer: z.boolean().optional().describe('ADD_TASK: your own task waits for the new tasks and resumes later'),
+    priority: z.number().nullish().describe('REPRIORITIZE: integer -100..100'),
+  }),
+}
+
 export function createNexusMcpServer(handlers: NexusToolHandlers): McpServerConfig {
+  const propose = handlers.proposeGraphChange?.bind(handlers)
   return createSdkMcpServer({
     name: 'nexus',
     tools: [
+      ...(propose
+        ? [
+            tool(
+              'propose_graph_change',
+              'Propose a change to the task graph (add a missing prerequisite, split a task that is too large, cancel an obsolete task, rewire dependencies). NEXUS validates the proposal and may reject it with reasons; never work around a rejection.',
+              graphChangeShape,
+              (a) => guarded(() => propose(a)),
+            ),
+          ]
+        : []),
       tool(
         'send_message',
         'Send a message to another task or role in this run (question, handoff, finding, warning).',

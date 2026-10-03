@@ -3,14 +3,17 @@ import type { Task } from '@shared/domain'
 import { Badge, EmptyState, ErrorNote, Loading, StatusBadge, Tabs, type TabItem } from '../../../components/ui'
 import { formatDateTime, formatDuration } from '../../../lib/format'
 import { agentStatus } from '../../../lib/status'
-import { useMessages, useTaskDiff, useTaskReviews, useTaskVerifications } from '../../../lib/queries'
+import { useContextPacks, useMessages, useTaskDiff, useTaskReviews, useTaskVerifications } from '../../../lib/queries'
+import { groupPackSections } from '../../../lib/v2logic'
 import { useUiStore } from '../../../store/ui'
 import { CommandBlock, CriteriaList, MessageRow, ReviewCard, VerificationCard } from '../blocks'
 import { DiffView } from '../DiffView'
-import { useRunCtx } from '../runContext'
+import { describeEvent, eventTone } from '../eventText'
+import { clockTimeSeconds, useRunCtx } from '../runContext'
+import { StatusDot } from '../../../components/ui'
 import { OverviewTab } from './OverviewTab'
 
-export const INSPECTOR_TABS = ['overview', 'criteria', 'agents', 'diff', 'checks', 'review', 'verification', 'messages'] as const
+export const INSPECTOR_TABS = ['overview', 'criteria', 'agents', 'diff', 'checks', 'review', 'verification', 'messages', 'context', 'history'] as const
 export type InspectorTab = (typeof INSPECTOR_TABS)[number]
 
 const LABELS: Record<InspectorTab, string> = {
@@ -22,6 +25,8 @@ const LABELS: Record<InspectorTab, string> = {
   review: 'Review',
   verification: 'Verification',
   messages: 'Messages',
+  context: 'Context',
+  history: 'History',
 }
 
 const TAB_ITEMS: readonly TabItem<InspectorTab>[] = INSPECTOR_TABS.map((id) => ({
@@ -203,6 +208,81 @@ function MessagesTab({ task }: { task: Task }) {
   )
 }
 
+function ContextTab({ task }: { task: Task }) {
+  const { agentsById } = useRunCtx()
+  const query = useContextPacks({ taskId: task.id })
+  return (
+    <div className="flex flex-col gap-3 p-3" data-testid="inspector-context">
+      <QueryBody query={query} empty={(p) => (p.length === 0 ? 'No context was composed for this task yet. Packs are recorded when an agent session starts.' : null)}>
+        {(packs) =>
+          [...packs]
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+            .map((pack) => {
+              const agent = pack.agentId ? agentsById.get(pack.agentId) : undefined
+              const sections = groupPackSections(pack)
+              return (
+                <article key={pack.id} className="flex flex-col gap-2 border bg-surface-1 p-2" data-testid="context-pack">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge mono>{pack.purpose}</Badge>
+                    <span className="font-medium">{agent?.label ?? (pack.agentId ? 'agent' : 'no agent')}</span>
+                    <span className="font-mono text-[0.88em] text-fg-muted">{pack.totalChars.toLocaleString()} chars</span>
+                    <span className="ml-auto text-fg-faint">{formatDateTime(pack.createdAt)}</span>
+                  </div>
+                  {sections.length === 0 ? <div className="text-fg-faint">The pack has no entries.</div> : null}
+                  {sections.map((s) => (
+                    <section key={s.section} className="flex flex-col gap-0.5" data-testid="context-section" data-section={s.section}>
+                      <h4 className="m-0 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">
+                        {s.section}
+                        <span className="ml-1.5 font-mono font-normal normal-case tracking-normal text-fg-faint">
+                          {s.includedCount} included{s.excludedCount > 0 ? `, ${s.excludedCount} excluded` : ''}, {s.includedChars.toLocaleString()} chars
+                        </span>
+                      </h4>
+                      <ul className="m-0 flex list-none flex-col p-0">
+                        {s.entries.map((e) => (
+                          <li
+                            key={e.id}
+                            className={`flex flex-col gap-0.5 border-b py-1 ${e.included ? '' : 'opacity-70'}`}
+                            data-testid="context-entry"
+                            data-included={e.included ? 'true' : 'false'}
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Badge tone={e.included ? 'success' : 'neutral'}>{e.included ? 'included' : 'excluded'}</Badge>
+                              <span className="min-w-0 break-words font-medium">{e.title}</span>
+                              <span className="font-mono text-[0.85em] text-fg-faint">{e.sourceKind.replace(/_/g, ' ')}</span>
+                              <span className="ml-auto font-mono text-[0.85em] text-fg-faint">{e.chars.toLocaleString()} chars</span>
+                            </div>
+                            <div className="whitespace-pre-wrap break-words text-fg-muted">{e.reason}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </article>
+              )
+            })
+        }
+      </QueryBody>
+    </div>
+  )
+}
+
+function HistoryTab({ task }: { task: Task }) {
+  const { events } = useRunCtx()
+  const mine = useMemo(() => events.filter((e) => e.taskId === task.id), [events, task.id])
+  if (mine.length === 0) return <div className="p-3 text-fg-muted" data-testid="inspector-history">No events recorded for this task yet.</div>
+  return (
+    <ol className="m-0 list-none p-0" data-testid="inspector-history">
+      {mine.map((e) => (
+        <li key={e.seq} className="flex items-baseline gap-2 border-b px-3 py-1" data-testid="history-row" data-type={e.type}>
+          <span className="shrink-0 font-mono text-[0.88em] text-fg-faint">{clockTimeSeconds(e.createdAt)}</span>
+          <StatusDot tone={eventTone(e)} />
+          <span className="min-w-0 flex-1 break-words">{describeEvent(e)}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 export function TaskInspector({ task }: { task: Task | null }) {
   const stored = useUiStore((s) => s.inspectorTab)
   const setTab = useUiStore((s) => s.setInspectorTab)
@@ -227,6 +307,8 @@ export function TaskInspector({ task }: { task: Task | null }) {
         {tab === 'review' ? <ReviewTab task={task} /> : null}
         {tab === 'verification' ? <VerificationTab task={task} /> : null}
         {tab === 'messages' ? <MessagesTab task={task} /> : null}
+        {tab === 'context' ? <ContextTab task={task} /> : null}
+        {tab === 'history' ? <HistoryTab task={task} /> : null}
       </div>
     </div>
   )

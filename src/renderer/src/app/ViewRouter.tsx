@@ -6,6 +6,8 @@ import { AgentsView } from '../views/agents/AgentsView'
 import { MemoryView } from '../views/memory/MemoryView'
 import { SettingsView } from '../views/settings/SettingsView'
 import { AuthView } from '../views/auth/AuthView'
+import { PerformanceView } from '../views/performance/PerformanceView'
+import { IntelligenceView } from '../views/intelligence/IntelligenceView'
 import { ErrorBoundary } from './ErrorBoundary'
 
 function renderView(view: View) {
@@ -20,6 +22,10 @@ function renderView(view: View) {
       return <MemoryView />
     case 'settings':
       return <SettingsView />
+    case 'performance':
+      return <PerformanceView />
+    case 'intelligence':
+      return <IntelligenceView />
     case 'auth':
       return <AuthView />
     default:

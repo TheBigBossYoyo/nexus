@@ -23,7 +23,7 @@ import type {
   TurnResult,
   UsageInfo,
 } from '@main/modules/agent-runtime/types'
-import { rolePrompt } from '@main/modules/context/prompts'
+import { canProposeGraphChange, rolePrompt } from '@main/modules/context/prompts'
 import {
   buildHandoffRequestPrompt,
   buildResumeFromHandoffPrompt,
@@ -37,6 +37,7 @@ import {
 } from '@main/modules/policies'
 import { canTransition } from '@main/modules/state'
 import type { ApprovalService } from './approvals'
+import type { GraphService } from './graph-service'
 import type { OrchestratorDeps } from './deps'
 import type { MemoryService } from './memory'
 import type { MessageService } from './messaging'
@@ -152,6 +153,7 @@ export class AgentRunner {
     private readonly approvals: ApprovalService,
     private readonly messages: MessageService,
     private readonly memory: MemoryService,
+    private readonly graph: GraphService,
   ) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -339,6 +341,14 @@ export class AgentRunner {
         })
         return 'Memory proposed. It becomes project memory once approved.'
       },
+      // Work-doing sessions only: planners, reviewers and verifiers never change the graph.
+      ...(task && canProposeGraphChange(role, input.purpose)
+        ? {
+            proposeGraphChange: async (raw: unknown) =>
+              // A repair attempt has no task of its own to wait or be replaced: it cannot yield.
+              this.graph.propose(run, { agentId: agent.id, label: input.label, taskId: task.parentTaskId ? null : task.id }, raw).message,
+          }
+        : {}),
     }
 
     return {

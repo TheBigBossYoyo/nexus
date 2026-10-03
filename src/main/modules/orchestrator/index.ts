@@ -2,3 +2,6 @@ export { Orchestrator, type AddTaskInput, type CreateRunInput } from './orchestr
 export { Core } from './core'
 export type { OrchestratorDeps } from './deps'
 export { SessionControl } from './agent-runner'
+export { GraphService, MAX_PROPOSALS_PER_AGENT } from './graph-service'
+export type { GraphHost, ProposeResult, Proposer } from './graph-service'
+export { refreshProjectFacts } from './intelligence'

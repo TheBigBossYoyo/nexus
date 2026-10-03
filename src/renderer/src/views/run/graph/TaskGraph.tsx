@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import '../run.css'
 import { EmptyState } from '../../../components/ui'
-import { useSettings } from '../../../lib/queries'
+import { useGraphRevisions, useSettings } from '../../../lib/queries'
+import { addedInRevision, cancelledInRevision, highlightRevision, sortRevisions } from '../../../lib/v2logic'
+import { RevisionBar } from './RevisionBar'
 import { latestAgentOf, useRunCtx } from '../runContext'
 import { TaskNode, type TaskFlowNode } from './TaskNode'
 import { buildGraphModel, isEdgeSatisfied, layoutGraph, type Position } from './graphModel'
@@ -29,9 +31,24 @@ function FitOnce({ hasNodes }: { hasNodes: boolean }) {
   return null
 }
 
-function GraphInner({ selectedTaskId, onSelect }: { selectedTaskId: string | null; onSelect: (taskId: string) => void }) {
+function GraphInner({
+  selectedTaskId,
+  onSelect,
+  revisionVersion,
+}: {
+  selectedTaskId: string | null
+  onSelect: (taskId: string) => void
+  revisionVersion: number | null
+}) {
   const { detail, tasksById } = useRunCtx()
   const { tasks, dependencies, agents, pendingApprovals } = detail
+  const revisions = useGraphRevisions(detail.run.id).data
+  const addedIn = useMemo(() => addedInRevision(revisions ?? []), [revisions])
+  const cancelledIn = useMemo(() => cancelledInRevision(revisions ?? []), [revisions])
+  const highlight = useMemo(
+    () => (revisionVersion === null ? null : highlightRevision(revisions ?? [], revisionVersion)),
+    [revisions, revisionVersion],
+  )
   const colorMode = useSettings().data?.appearance.theme === 'light' ? 'light' : 'dark'
 
   const model = useMemo(() => buildGraphModel(tasks, dependencies), [tasks, dependencies])
@@ -55,9 +72,20 @@ function GraphInner({ selectedTaskId, onSelect }: { selectedTaskId: string | nul
         agent: latestAgentOf(agents, task.id),
         needsApproval: approvalTasks.has(task.id) || (task.requiresApproval && !task.approvalGranted && task.state === 'blocked'),
         selected: task.id === selectedTaskId,
+        addedInVersion: task.kind === 'repair' ? null : (addedIn.get(task.id) ?? null),
+        cancelledInVersion: task.state === 'cancelled' ? (cancelledIn.get(task.id) ?? null) : null,
+        highlight: highlight
+          ? highlight.added.has(task.id)
+            ? 'added'
+            : highlight.changed.has(task.id)
+              ? 'changed'
+              : highlight.removed.has(task.id)
+                ? 'removed'
+                : null
+          : null,
       },
     }))
-  }, [tasks, agents, pendingApprovals, positions, selectedTaskId])
+  }, [tasks, agents, pendingApprovals, positions, selectedTaskId, addedIn, cancelledIn, highlight])
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -102,6 +130,8 @@ function GraphInner({ selectedTaskId, onSelect }: { selectedTaskId: string | nul
 
 export function TaskGraph({ selectedTaskId, onSelect }: { selectedTaskId: string | null; onSelect: (taskId: string) => void }) {
   const { detail } = useRunCtx()
+  const revisions = useGraphRevisions(detail.run.id).data
+  const [revisionVersion, setRevisionVersion] = useState<number | null>(null)
   if (detail.tasks.length === 0) {
     return (
       <EmptyState title="No tasks yet" className="h-full">
@@ -110,10 +140,15 @@ export function TaskGraph({ selectedTaskId, onSelect }: { selectedTaskId: string
     )
   }
   return (
-    <div className="h-full w-full" data-testid="task-graph">
-      <ReactFlowProvider>
-        <GraphInner selectedTaskId={selectedTaskId} onSelect={onSelect} />
-      </ReactFlowProvider>
+    <div className="flex h-full w-full flex-col" data-testid="task-graph">
+      {sortRevisions(revisions ?? []).length > 1 ? (
+        <RevisionBar revisions={revisions ?? []} version={revisionVersion} onChange={setRevisionVersion} />
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <ReactFlowProvider>
+          <GraphInner selectedTaskId={selectedTaskId} onSelect={onSelect} revisionVersion={revisionVersion} />
+        </ReactFlowProvider>
+      </div>
     </div>
   )
 }

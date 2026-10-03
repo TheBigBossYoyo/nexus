@@ -25,8 +25,14 @@ export function runMigrations(db: Database, migrations: readonly Migration[] = M
     const insert = db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
     for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
       if (m.version <= current) continue
-      db.exec(m.sql)
-      insert.run(m.version, m.name, nowIso())
+      try {
+        db.exec(m.sql)
+        insert.run(m.version, m.name, nowIso())
+      } catch (e) {
+        throw new NexusError('database', `Migration ${m.version} (${m.name}) failed: ${errorMessage(e)}`, {
+          version: m.version,
+        })
+      }
     }
   })()
 }

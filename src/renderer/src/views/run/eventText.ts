@@ -1,7 +1,7 @@
 import type { EventPayloads, EventType, RunEvent } from '@shared/events'
 import type { Tone } from '../../lib/status'
 
-export const EVENT_CATEGORIES = ['run', 'task', 'agent', 'git', 'review', 'verification', 'approval'] as const
+export const EVENT_CATEGORIES = ['run', 'task', 'agent', 'git', 'review', 'verification', 'approval', 'graph'] as const
 export type EventCategory = (typeof EVENT_CATEGORIES)[number]
 
 export function eventCategory(type: EventType): EventCategory {
@@ -21,8 +21,12 @@ export function eventCategory(type: EventType): EventCategory {
       return 'verification'
     case 'approval':
       return 'approval'
+    case 'graph':
+    case 'planning':
+    case 'routing':
+      return 'graph'
     default:
-      // run, plan, user, decision, criterion, memory
+      // run, plan, user, decision, criterion, memory, intelligence, context
       return 'run'
   }
 }
@@ -106,6 +110,18 @@ const RENDER: Renderers = {
   'memory.promoted': () => 'Memory promoted',
   'decision.recorded': (p) => `Decision recorded: ${trunc(p.title)}`,
   'criterion.updated': (p) => `Criterion marked ${p.status}`,
+  'graph.proposed': (p) => `Graph change proposed by ${p.proposedBy}: ${p.type.replace(/_/g, ' ').toLowerCase()}`,
+  'graph.revised': (p) => `Plan revised to v${p.version}: ${trunc(p.summary)}`,
+  'graph.rejected': (p) => `Graph change rejected: ${trunc(p.errors.join('; '))}`,
+  'planning.candidate': (p) => `Candidate plan ${p.label}: ${p.valid ? 'valid' : 'invalid'}`,
+  'planning.critique': (p) => `Plan critique: ${plural(p.findings, 'finding')}, prefers ${p.preferred}`,
+  'planning.synthesized': (p) => `Plan synthesized from ${p.validCandidates} valid of ${plural(p.candidates, 'candidate')}`,
+  'routing.decided': (p) =>
+    `Model routing: ${p.role} → ${p.policy}${p.model ? ` (${p.model})` : ' (runtime default)'}${p.reasons.length > 0 ? `: ${trunc(p.reasons.join('; '))}` : ''}`,
+  'intelligence.refreshed': (p) => `Repository intelligence refreshed: ${plural(p.facts, 'fact')}, ${p.stale} stale`,
+  'context.composed': (p) =>
+    `Context composed: ${p.included} included, ${p.excluded} excluded, ${p.chars.toLocaleString()} chars`,
+  'review.arbitrated': (p) => `Findings arbitrated: ${p.accepted} accepted, ${p.rejected} rejected`,
   'user.intervention': (p) => `User: ${p.action}${p.detail ? ` (${trunc(p.detail)})` : ''}`,
 }
 
@@ -123,6 +139,7 @@ const DANGER: ReadonlySet<EventType> = new Set<EventType>([
   'verification.failed',
   'approval.denied',
   'plan.invalid',
+  'graph.rejected',
 ])
 
 export function eventTone(event: RunEvent): Tone {

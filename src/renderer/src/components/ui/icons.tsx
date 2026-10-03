@@ -153,3 +153,19 @@ export const FileIcon = (p: IconProps) => (
     <path d="M3.5 1.8h5.2l3.8 3.8v8.6h-9zM8.5 1.8v4h4" />
   </Svg>
 )
+export const PerformanceIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2 13.5h12" />
+    <rect x="3" y="8" width="2.2" height="5.5" />
+    <rect x="6.9" y="4.5" width="2.2" height="9" />
+    <rect x="10.8" y="6.5" width="2.2" height="7" />
+  </Svg>
+)
+export const IntelligenceIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="3.5" r="1.6" />
+    <circle cx="3.5" cy="12" r="1.6" />
+    <circle cx="12.5" cy="12" r="1.6" />
+    <path d="M7.2 5l-3 5.6M8.8 5l3 5.6M5.1 12h5.8" />
+  </Svg>
+)

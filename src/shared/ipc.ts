@@ -24,6 +24,16 @@ import {
 } from './domain'
 import type { AuthStatus, ModelOption } from './auth'
 import type { PushMessage, RunEvent } from './events'
+import type {
+  ContextPack,
+  GraphProposal,
+  GraphRevision,
+  PerformanceStat,
+  PlanningCandidate,
+  PlanningCritique,
+  RepositoryFact,
+  RoutingDecision,
+} from './v2'
 import { SettingsSchema, type Settings } from './settings'
 
 const Id = z.string().min(1).max(64)
@@ -134,6 +144,8 @@ export const ipcInputs = {
       maxIterations: z.number().int().min(1).max(50).optional(),
       maxDurationMinutes: z.number().int().min(1).max(1440).optional(),
       requirePlanApproval: z.boolean().optional(),
+      planningMode: z.enum(['single', 'consensus']).optional(),
+      reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
     })
     .strict(),
   'runs.approvePlan': z.object({ runId: Id }).strict(),
@@ -207,6 +219,17 @@ export const ipcInputs = {
     .strict(),
   'memory.setStatus': z.object({ memoryId: Id, status: z.enum(['approved', 'rejected']) }).strict(),
   'memory.delete': z.object({ memoryId: Id }).strict(),
+
+  // v0.2
+  'graph.revisions': z.object({ runId: Id }).strict(),
+  'graph.proposals': z.object({ runId: Id }).strict(),
+  'planning.candidates': z.object({ runId: Id }).strict(),
+  'planning.recommend': z.object({ projectId: Id, prompt: z.string().max(20_000) }).strict(),
+  'routing.list': z.object({ runId: Id }).strict(),
+  'performance.summary': z.object({ projectId: Id.optional() }).strict(),
+  'intelligence.list': z.object({ projectId: Id, query: z.string().max(500).optional(), includeStale: z.boolean().optional() }).strict(),
+  'intelligence.refresh': z.object({ projectId: Id }).strict(),
+  'context.packs': z.object({ taskId: Id.optional(), agentId: Id.optional() }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -264,6 +287,15 @@ export interface IpcOutputs {
   'memory.add': MemoryEntry
   'memory.setStatus': MemoryEntry
   'memory.delete': null
+  'graph.revisions': GraphRevision[]
+  'graph.proposals': GraphProposal[]
+  'planning.candidates': { candidates: PlanningCandidate[]; critiques: PlanningCritique[] }
+  'planning.recommend': { mode: 'single' | 'consensus'; reasons: string[] }
+  'routing.list': RoutingDecision[]
+  'performance.summary': { stats: PerformanceStat[]; totalOutcomes: number; minSamples: number }
+  'intelligence.list': RepositoryFact[]
+  'intelligence.refresh': { facts: number; stale: number }
+  'context.packs': ContextPack[]
 }
 
 export type IpcResult<T> =

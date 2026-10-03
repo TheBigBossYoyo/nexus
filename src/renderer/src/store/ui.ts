@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
 /** Ephemeral UI state only. Server data lives in the TanStack Query cache. */
-export type View = 'projects' | 'run' | 'agents' | 'memory' | 'settings' | 'auth'
-export const VIEWS: readonly View[] = ['projects', 'run', 'agents', 'memory', 'settings', 'auth']
+export type View = 'projects' | 'run' | 'agents' | 'memory' | 'settings' | 'performance' | 'intelligence' | 'auth'
+export const VIEWS: readonly View[] = ['projects', 'run', 'agents', 'memory', 'settings', 'performance', 'intelligence', 'auth']
 
 export type Drawer = 'approvals' | null
 export type PanelLayout = Record<string, number>
