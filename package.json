@@ -18,6 +18,7 @@
     "test:integration": "vitest run --project integration",
     "test:e2e": "electron-vite build && playwright test",
     "smoke:claude": "vitest run -c vitest.smoke.config.ts",
+    "stress": "vitest run -c vitest.stress.config.ts",
     "package": "electron-vite build && electron-builder --win nsis"
   },
   "dependencies": {
