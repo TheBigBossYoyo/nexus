@@ -9,6 +9,7 @@ import {
 import { DependencyRepository, ProjectRepository, RunRepository, TaskRepository } from './core'
 import { EventRepository, SettingsRepository } from './events-settings'
 import { MemoryRepository } from './memory'
+import { CheckpointRepository, OvernightRepository, PowerAuditRepository } from './overnight'
 import {
   ContextPackRepository,
   FactRepository,
@@ -59,6 +60,9 @@ export interface Repositories {
   taskOutcomes: TaskOutcomeRepository
   facts: FactRepository
   contextPacks: ContextPackRepository
+  overnight: OvernightRepository
+  powerAudit: PowerAuditRepository
+  checkpoints: CheckpointRepository
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -93,6 +97,9 @@ export function createRepositories(db: Database): Repositories {
     taskOutcomes: new TaskOutcomeRepository(db),
     facts: new FactRepository(db),
     contextPacks: new ContextPackRepository(db),
+    overnight: new OvernightRepository(db),
+    powerAudit: new PowerAuditRepository(db),
+    checkpoints: new CheckpointRepository(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }
@@ -119,6 +126,7 @@ export type {
   VerificationRepository,
   WorktreeRepository,
 }
+export type { CheckpointRepository, OvernightRepository, PowerAuditRepository } from './overnight'
 export type { MemoryFilter } from './memory'
 export type {
   ContextPackRepository,

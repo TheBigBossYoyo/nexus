@@ -6,6 +6,10 @@ import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fak
 /**
  * Scripted agents for UI end-to-end tests (`NEXUS_FAKE_RUNTIME=1`, unpackaged builds only).
  * No Claude usage. The first review of task `ui` requests changes so the repair loop is exercised.
+ *
+ * A marker in the mission text selects how the mission goes, so UI tests can reach every way an
+ * overnight run ends: `[demo:stall]` (workers never finish), `[demo:quota]` (a worker hits a usage
+ * limit that reports no reset time), `[demo:fail]` (the planner never returns a valid plan).
  */
 export function createDemoScript(): FakeScript {
   const plan: MissionPlan = {
@@ -58,6 +62,8 @@ export function createDemoScript(): FakeScript {
 
   let uiReviews = 0
   let docsProposed = false
+  let behaviour: 'normal' | 'stall' | 'quota' | 'fail' = 'normal'
+  let quotaHit = false
 
   const writer =
     (suffix: string): FakeScript =>
@@ -65,6 +71,17 @@ export function createDemoScript(): FakeScript {
       // A task whose key clashes with an existing branch (e.g. `integration`) gets a short id suffix on its directory.
       const key = basename(spec.cwd).replace(/-[0-9a-f]{8}$/, '')
       await ctx.emitText(`Working on ${key} in ${spec.cwd}`)
+      if (behaviour === 'stall') {
+        // Until the session is stopped (a pause, the mission deadline, or the app closing).
+        await ctx.sleep(60 * 60_000)
+        return
+      }
+      if (behaviour === 'quota' && !quotaHit) {
+        quotaHit = true
+        await ctx.rateLimit({ status: 'rejected', resetsAt: null, limitType: 'five_hour' })
+        await ctx.completeTurn({ text: 'Usage limit reached.', outcome: 'quota' })
+        return
+      }
       await ctx.sleep(300)
       const target = join(spec.cwd, `${key}.txt`)
       await ctx.useTool('Write', { file_path: target, content: `${key}${suffix}` }, async () => {
@@ -163,9 +180,15 @@ export function createDemoScript(): FakeScript {
 
   return scriptsByRole({
     // Planner sessions: the three consensus planners and the synthesizer all return the same plan.
-    planner: async (_spec, ctx) => {
+    planner: async (spec, ctx) => {
+      const marker = /\[demo:(stall|quota|fail)\]/.exec(spec.prompt)?.[1]
+      if (marker === 'stall' || marker === 'quota' || marker === 'fail') behaviour = marker
       await ctx.emitText('Inspecting the repository and drafting a plan.')
       await ctx.sleep(200)
+      if (behaviour === 'fail') {
+        await ctx.completeTurn({ text: 'No plan.', structuredOutput: { summary: '' } })
+        return
+      }
       await ctx.completeTurn({ text: 'Plan ready.', structuredOutput: plan })
     },
     worker: writer(''),

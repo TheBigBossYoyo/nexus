@@ -10,7 +10,7 @@ import {
 } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
 import type { Database } from '../database'
-import { Table, guard, prepare, type Codec, type SqlValue } from '../table'
+import { Table, decode, guard, prepare, type Codec, type Row, type SqlValue } from '../table'
 
 const agentCodec: Codec<Agent> = {
   table: 'agents',
@@ -104,6 +104,15 @@ const messageCodec: Codec<Message> = {
   },
 }
 
+export type MessageMeta = Omit<Message, 'body'>
+
+const { body: _body, ...metaFields } = messageCodec.fields as Record<string, 'text'>
+void _body
+const messageMetaCodec = { table: messageCodec.table, fields: metaFields } as unknown as Codec<MessageMeta>
+const META_COLUMNS = Object.keys(metaFields)
+  .map((k) => `"${k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())}"`)
+  .join(', ')
+
 export interface MessageRecipient {
   taskId: string
   deliveredAt: string | null
@@ -148,6 +157,37 @@ export class MessageRepository extends Table<Message> {
     })()
   }
 
+  /** Every message of the run without its body (bodies can be large; evidence needs headers only). */
+  listMetaByRun(runId: string): MessageMeta[] {
+    const rows = prepare(this.db, `SELECT ${META_COLUMNS} FROM agent_messages WHERE run_id = ? ORDER BY created_at, rowid`).all(runId) as Row[]
+    return rows.map((r) => decode(messageMetaCodec, r))
+  }
+
+  /** The first `max` characters of each message body, by id. */
+  excerpts(messageIds: readonly string[], max: number): Map<string, string> {
+    const out = new Map<string, string>()
+    for (let i = 0; i < messageIds.length; i += 500) {
+      const chunk = messageIds.slice(i, i + 500)
+      const rows = prepare(
+        this.db,
+        `SELECT id, substr(body, 1, ?) AS body FROM agent_messages WHERE id IN (${chunk.map(() => '?').join(',')})`,
+      ).all(max, ...chunk) as { id: string; body: string }[]
+      for (const r of rows) out.set(r.id, r.body)
+    }
+    return out
+  }
+
+  /** message id -> task ids it was routed to, for the whole run in one query. */
+  recipientsByRun(runId: string): Map<string, string[]> {
+    const rows = prepare(
+      this.db,
+      'SELECT r.message_id, r.task_id FROM message_recipients r JOIN agent_messages m ON m.id = r.message_id WHERE m.run_id = ?',
+    ).all(runId) as { message_id: string; task_id: string }[]
+    const out = new Map<string, string[]>()
+    for (const r of rows) out.set(r.message_id, [...(out.get(r.message_id) ?? []), r.task_id])
+    return out
+  }
+
   listRecipients(messageId: string): MessageRecipient[] {
     const rows = prepare(this.db, 'SELECT task_id, delivered_at FROM message_recipients WHERE message_id = ? ORDER BY task_id').all(
       messageId,
@@ -164,6 +204,12 @@ const outputCodec: Codec<AgentOutput> = {
 export class OutputRepository extends Table<AgentOutput> {
   constructor(db: Database) {
     super(db, outputCodec, 'agent output')
+  }
+
+  /** The agent's latest visible text item, or null. */
+  lastText(agentId: string): string | null {
+    const row = prepare(this.db, "SELECT content FROM agent_output WHERE agent_id = ? AND kind = 'text' ORDER BY seq DESC LIMIT 1").get(agentId) as { content: string } | undefined
+    return row?.content ?? null
   }
 
   /** Appends a transcript item with the agent's next seq (1-based, gapless per agent). */

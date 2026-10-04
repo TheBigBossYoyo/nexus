@@ -130,6 +130,57 @@ Pending tool approvals are expired when the agent ends, the run is cancelled, or
 Restricted roles: for roles that are not `worker` or `debugger`, any sub-command whose kind is not allowed
 for the role (see the role table) is denied outright, and redirection to files counts as not read-only.
 
+### Command classes (0.2.1)
+
+`classifyCommand` also returns `commandClass` (the most severe class seen) and `classes` (all of them), derived
+from the parsed executable and arguments, not from string prefixes. The existing `level`/`risk` fields are
+unchanged in meaning.
+
+| Class | Examples | Writing roles in their worktree |
+| --- | --- | --- |
+| `SAFE_READ` | `git status/diff/log/show`, `pnpm test/lint/typecheck`, `ls`, `rg` | allowed |
+| `SAFE_PROJECT_WRITE` | `mkdir`, `touch`, file redirection or `rm` of a file inside the worktree, plain `pnpm install` | allowed |
+| `GIT_LOCAL` | `git add`, `git commit` (plain, `--amend`, `-F file`, `-F -` with a quoted heredoc, `-m "$(cat <<'EOF' ... EOF)"`), `git branch`, `git worktree list/add`, `git stash`, `git switch/checkout`, `git merge`, `git tag` | allowed |
+| `NETWORK` | `git push/fetch/pull/clone`, `curl`, `npm/pnpm publish`, `docker push`, `gh` | approval |
+| `SYSTEM_CHANGE` | registry writes, services, `schtasks`, `powercfg`, global installs, machine env vars, `sudo` | approval |
+| `DESTRUCTIVE` | `git reset --hard`, `git clean -fd`, `git push --force`, `git branch -D`, `git worktree remove/prune`, `git rebase`, `rm`/`Remove-Item` outside the worktree or recursive | approval |
+| `UNKNOWN` | anything unrecognised | unchanged from 0.2.0 (not gated for writing roles; denied for restricted roles) |
+
+Heredoc commit messages: Claude's habitual `git commit -m "$(cat <<'EOF' ... EOF\n)"` used to be parsed as shell,
+so prose in the message (`<noreply@...>` trailers, paths, `$TOKEN`, "rm -rf") raised approval requests that were
+denied in unattended runs. The message body is now treated as inert text, but only when the whole substitution is a
+single `cat` reading a heredoc with a quoted delimiter, nothing else is on the opener line, the terminator is a line
+of its own, the substitution closes right after it, and it is the value of `-m` on `git commit`. An unquoted
+delimiter (the body would expand), extra commands, pipes, nested substitutions or any other host command fall back to
+ordinary analysis, so a smuggled command is still classified and gated.
+
+Power commands are forbidden for every role, not approval-gated: `shutdown`, `psshutdown`, `Stop-Computer`,
+`Restart-Computer`, `rundll32 powrprof.dll,SetSuspendState`, `wmic os ... shutdown/reboot`, `Invoke-WmiMethod -Name
+Shutdown`, `Win32Shutdown`, `systemctl poweroff/reboot/suspend` and similar are denied with no approval path, including
+through `cmd /c`, `powershell -Command`, `bash -c`, `Start-Process`, `&`/call operator, `Invoke-Expression`,
+`schtasks /tr`, `sudo`, full paths and `.exe` suffixes. Detection works on parsed executables and launcher
+arguments; a command that is built dynamically at run time (for example from a variable) is still approval-gated as
+uninspectable but cannot be proven to be a power command.
+
+Hardening (0.2.1 audit): command words are matched after undoing trivial obfuscation (`shut^down`, `sh\utdown`,
+`'shut''down'`, `"shut"+"down"`, `%COMSPEC% /c`), inline interpreter code (`node -e`, `python -c`, `perl -e`,
+`ruby -e`, `php -r`, `awk`) is scanned for power names and APIs, PowerShell/.NET/COM spawn calls
+(`[Diagnostics.Process]::Start`, `WScript.Shell.Run`, `Shell.Application`) combined with a power name are forbidden,
+and `pnpm exec`/`npx`/`busybox <power command>` is forbidden. A command word that is a variable or command
+substitution in bash (`$s /s`, `$(echo x) /s`) and `& $x` in PowerShell need approval (high). `rundll32` always needs
+approval. `git config` writing a key that makes git run programs (`alias.*`, `core.editor/fsmonitor/hooksPath/sshCommand/pager`,
+`credential.*`, `include*`, `url.*`, `filter.*`, `diff.*`, `merge.*`, `gpg.*`, `sequence.*` ...) needs approval in every
+scope; reads and harmless keys are unchanged. `git -C/--git-dir/--work-tree` must resolve inside the worktree and may
+not be computed at run time, and assigning or exporting any `GIT_*` variable needs approval. Any command text that
+names `nexus.db` (including `-wal`/`-shm`) or `overnight.key` is forbidden for every role, except inside a `git commit`
+message.
+
+This is a best-effort lexical filter, not an OS sandbox. A writing agent can run code it wrote (tests, scripts), so a
+determined or prompt-injected agent could still run a power command, or abort a failsafe with `shutdown /a`, from its
+own program; a script written in one command and run in another is not caught. NEXUS's guarantee is narrower and
+holds regardless: no NEXUS mechanism (tool, message, proposal, IPC) gives an agent the power controller or the stored
+authorization, and the plain and commonly obfuscated command forms above are refused.
+
 ## Subscription-mode environment sanitization
 
 `buildAgentEnv` copies the NEXUS process environment for the agent, removing `ANTHROPIC_API_KEY` and

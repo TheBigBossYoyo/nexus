@@ -36,6 +36,21 @@ Factual log. Test and build status lives in TEST_STATUS.md.
 
 Open items for v0.2 are in `docs/OVERNIGHT_BLOCKERS.md` and `docs/OVERNIGHT_FINAL_REPORT.md`.
 
+## v0.2.1 (2026-10-04)
+
+| Area | What exists |
+|---|---|
+| Overnight Mode | `OvernightSupervisor` (main process): run-level authorization, failsafe armed before any agent, deadline, quota wait, watchdog, budgets, checkpoints, idempotent finalization with the report saved before any power action, recovery |
+| Power control | `PowerController` interface, `WindowsPowerController` (argument arrays, no shell), `FakePowerController` for every automated test, `pnpm smoke:power` |
+| Authorization | Composer confirmation plus a native main-process dialog; sealed (HMAC) authorization and policy in `overnight_runs`; power audit log |
+| Lifecycle | Tray icon, hide to tray, quit question during an overnight run, keep-awake request, off-screen window for automated launches |
+| Evidence | `TaskEvidenceBuilder` as the single source of reviewer, verifier and repair evidence, including decision text and the agent's reported result |
+| Shell policy | Command classes; heredoc commits and in-worktree heredoc file writes allowed; power commands, the NEXUS database, exec-capable `git config` keys and Git redirection outside the worktree refused or gated; project scripts as verification commands |
+| Persistence | Migration 003 (`overnight_runs`, `power_audit`, `run_checkpoints`), additive |
+| Real-runtime gates | Dynamic graph proposal and session rotation proven with real Claude sessions (`docs/acceptance/`) |
+
+The release record is `docs/V0_2_1_RELEASE_REPORT.md`.
+
 ## Known failures and open items (v0.1 record)
 
 - One intermittent scenario failure has no established cause (TEST_STATUS.md, item 3).

@@ -14,7 +14,18 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [TASK_LIFECYCLE](docs/TASK_LIFECYCLE.md), [AGENT_RUNTIME](docs/AGENT_RUNTIME.md),
 [GIT_WORKTREES](docs/GIT_WORKTREES.md), [SECURITY](docs/SECURITY.md), [RECOVERY](docs/RECOVERY.md),
 [AUTHENTICATION](docs/AUTHENTICATION.md), [TESTING](docs/TESTING.md),
-[V0_2_DESIGN](docs/V0_2_DESIGN.md).
+[V0_2_DESIGN](docs/V0_2_DESIGN.md), [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md).
+
+## What's new in 0.2.1
+
+| Feature | What it does | Where to read more |
+|---|---|---|
+| Overnight Mode | An unattended MISSION run with a wall-clock deadline and an end-of-run power action (shut down, sleep, hibernate or none) that you authorize for that run, in the composer and in a native Windows dialog. NEXUS itself performs the action, from deterministic main-process code, after the agents are stopped and the final report is saved. A Windows shutdown timer is armed as a failsafe before any agent starts. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Power controller | `WindowsPowerController` runs `System32\shutdown.exe` (and Windows PowerShell for sleep) with argument arrays, no shell and fixed messages. Only the overnight supervisor holds it. Agents have no path to it, and power commands in an agent's shell are refused for every role. | [SECURITY](docs/SECURITY.md) |
+| Tray and background | Closing the window during an overnight run asks whether to hide to the tray; the mission continues in the main process. The tray icon exists only while an overnight run is live. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Quota waiting | In an overnight run, a usage limit whose reset time falls inside the mission time is waited out (`QUOTA_PAUSED`) and the run resumes by itself; otherwise the run ends as quota exhausted, which is not a failure. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Evidence builder | One `TaskEvidenceBuilder` assembles everything reviewers, verifiers and debuggers are told that the repository cannot show: check results, commits, changed files, reviews, repair history, dependency handoffs, graph revisions, messages sent and received, decisions with their text, and the result the agent reported. Agent-written text is quoted and labelled. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Command classes | Shell commands are classified (`SAFE_READ`, `SAFE_PROJECT_WRITE`, `GIT_LOCAL`, `NETWORK`, `SYSTEM_CHANGE`, `DESTRUCTIVE`, `UNKNOWN`). Heredoc commit messages and `cat > file <<'EOF'` inside the worktree no longer need approval; `git config` of keys that can run code, Git redirected outside the worktree, and the NEXUS database are gated or refused. The project's own package scripts count as verification commands for reviewers and verifiers. | [SECURITY](docs/SECURITY.md) |
 
 ## What's new in 0.2
 
@@ -122,6 +133,7 @@ All modes share the same engine. What the code does differently per mode:
 | REPAIR | Planner guidance only: reproduce, diagnose, fix, regression test. |
 | AUDIT | Planner guidance (parallel read-only review tasks, then one synthesis task depending on all of them) plus code rules: a plan containing a `worker` or `debugger` task is rejected and sent back to the planner; tasks with dependencies get kind `synthesis`, the others `audit`; adding a task with a writing role later is refused. Works outside Git. No merges happen because no task writes. |
 | MISSION | Planner guidance only: features with implementation and test tasks, architect tasks first where interfaces must be settled, final integration verification task. |
+| OVERNIGHT | Not a separate engine mode: the composer starts a MISSION run through `overnight.start`, without plan approval, attached to an overnight record (policy, authorization, failsafe). See [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md). |
 | LOOP | Planner guidance only: objectively checkable mission criteria, first iteration planned as concrete tasks. The composer also sends a `maxIterations` override for LOOP. There is no separate outer loop for LOOP: iteration bounds are the repair bounds that apply to every mode (see [ORCHESTRATION](docs/ORCHESTRATION.md)). |
 
 So BUILD, SWARM, REPAIR, MISSION and LOOP differ only in the planner prompt (and the `maxIterations`
@@ -220,6 +232,9 @@ This is Electron's `userData` directory; the exact path is reported by the app (
 | `pnpm test:e2e` | `electron-vite build && playwright test` (Electron UI tests, see [TESTING](docs/TESTING.md)) |
 | `pnpm stress` | `vitest run -c vitest.stress.config.ts`: seeded orchestration stress campaign with scripted agents (no Claude usage). See [TESTING](docs/TESTING.md). |
 | `pnpm smoke:claude` | Manual test against the real Claude runtime. Consumes Claude usage. |
+| `pnpm smoke:power` | Manual test of the real `WindowsPowerController`: schedules a Windows shutdown one hour away, checks it was accepted, aborts it at once and checks nothing is left armed. Never part of `pnpm test`. |
+| `pnpm accept:proposal` | `node scripts/dynamic-proposal-acceptance.mjs` (real Claude, see below) |
+| `pnpm accept:rotation` | `node scripts/session-rotation-acceptance.mjs` (real Claude, see below) |
 | `pnpm package` | `electron-vite build && electron-builder --win nsis` |
 
 Automated tests never call the real Claude API; they use `FakeAgentRuntime`.
@@ -232,7 +247,12 @@ with the **real Claude runtime**, consumes Claude usage, and writes evidence to 
 | `node scripts/adversarial-mission.mjs [path-to-NEXUS.exe]` | Four tasks (three modules and a report task that depends on them), fast-tier workers, a controlled app restart mid-run. Uses the default planning and review modes. |
 | `node scripts/v02-acceptance-mission.mjs [path-to-NEXUS.exe]` | The same mission with `planningMode: consensus` and `reviewMode: dual`, plus a repository convention that needs a task no one planned, to provoke a graph proposal. Also restarts the app mid-run. |
 
-Without an argument both launch the dev build (run `pnpm build` first). `scripts/acceptance-mission.mjs` is the
+| `node scripts/dynamic-proposal-acceptance.mjs [path-to-NEXUS.exe]` | A CSV export whose contract is only readable after a worker runs `npm run generate-schema` (it is packed in a vendor bundle a read-only planner cannot unpack). The contract demands a module no task of the plan delivers; the gate is a real `ADD_TASK` proposal, a graph revision, the new task executed and the original task resumed. |
+| `node scripts/session-rotation-acceptance.mjs [path-to-NEXUS.exe\|-] [turns]` | One worker task with a low rotation threshold (`sessionRotationTurns`, default 8 here): the gate is a real session rotated with a structured handoff and a second real session finishing the task. |
+| `node scripts/packaged-validation.mjs <NEXUS.exe> <db-dir>...` | No Claude usage. Launches a packaged or installed build on copies of existing databases and checks the schema upgrade, old runs, auth status, project opening and the Overnight UI. |
+
+These launch the window off-screen (`NEXUS_WINDOW_OFFSCREEN=1`); set `NEXUS_ACCEPT_SHOW=1` to see it.
+Without an argument the first two and the acceptance scripts launch the dev build (run `pnpm build` first). `scripts/acceptance-mission.mjs` is the
 earlier single-mission acceptance script.
 
 ## Current limitations
@@ -264,6 +284,28 @@ earlier single-mission acceptance script.
   is whatever the model produces. A passing verification means the verifier agent judged the criteria
   met, not that the software is correct.
 - Single window, single instance.
+
+### Limitations of 0.2.1 features
+
+- Overnight Mode needs Windows. Real sleep and hibernate have not been executed on a real machine, and no real
+  shutdown was allowed to complete during development; the shutdown timer was exercised by `pnpm smoke:power` only.
+- The failsafe is a Windows shutdown timer, and Windows closes applications without waiting whenever a timed
+  shutdown fires, whether or not "force close" is ticked. A normal (non-forced) final shutdown can be stopped by an
+  application with unsaved data; the PC then stays on.
+- The agent shell policy is a lexical filter, not an operating-system sandbox. Plain and commonly obfuscated power
+  commands are refused for every role, but a worker can run code it wrote, so a prompt-injected worker could still
+  power the machine off or abort the failsafe through its own program. NEXUS guarantees only that none of its own
+  mechanisms gives an agent the power controller or a valid authorization.
+- The overnight authorization is sealed with a key kept encrypted for the Windows user. Code running as the same
+  user with enough effort could recompute it; the seal defends against edits of the database, not against a
+  compromised user account.
+- Only one overnight run at a time. An overnight run always uses MISSION mode and skips plan approval.
+- After NEXUS was not running for more than 10 minutes, or Windows restarted, an overnight run is ended without a
+  power action on the next launch and has to be resumed by hand as a normal run.
+- Budgets cover agent sessions and repair tasks. There are no token or cost limits.
+- Checkpoints are a record for inspection; recovery reads the live tables, not the checkpoints.
+- The cause of the one-off "run ended paused" scenario failure seen in 0.1 is still not proven.
+- A rotated session is marked on the handoff session row, not on the session that reached its turn limit.
 
 ### Limitations of 0.2 features
 

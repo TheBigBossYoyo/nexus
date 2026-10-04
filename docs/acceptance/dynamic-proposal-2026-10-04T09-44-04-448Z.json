@@ -1,0 +1,642 @@
+{
+  "kind": "dynamic-graph-proposal",
+  "startedAt": "2026-10-04T09:32:57.022Z",
+  "executable": "dev build",
+  "mission": "Implement CSV analytics export.\nPlan this as a single implementation task for the export (with its tests). Generating and reading the contract is the first step of that task, not a task of its own.\nAdd src/export.js exporting `exportCsv(records)`, which returns CSV text for analytics records like the ones in src/records.js, with node:test tests in test/export.test.js.\nThe output must conform to the project export contract. The contract is generated: run `npm run generate-schema` and follow generated/export-contract.json exactly.\nFollow docs/CONVENTIONS.md. `npm test` must pass.",
+  "hiddenPrerequisite": "src/normalize.js (only named inside the packed contract)",
+  "app": {
+    "version": "0.2.1",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "planV1": {
+    "summary": "Add src/export.js exporting `exportCsv(records)` plus node:test tests in test/export.test.js, as one implementation task. The task's first step is running `npm run generate-schema` and reading generated/export-contract.json, which is binding (docs/CONVENTIONS.md line 5). The contract's contents are not known at planning time: generated/ does not exist in the checkout, vendor/export-contract.bundle is a packed binary, and the planner role is read-only so I did not run the generator. The plan therefore fixes no column, ordering, normalisation, quoting or line-ending rules; the worker must take them from the generated contract.",
+    "assumptions": [
+      "The contract content is unverified: generated/ is absent (ls: 'cannot access generated') and gitignored (.gitignore line 1), and I could not run the generator as a read-only planner. Every format detail of the CSV is deferred to the generated file.",
+      "`npm run generate-schema` (node scripts/generate-contract.mjs) works on this machine with the installed Node; it only uses node:zlib and node:fs and writes generated/export-contract.json. Not executed during planning.",
+      "The contract can be satisfied with a single new module, src/export.js. If it requires another module (e.g. a shared normalisation helper), docs/CONVENTIONS.md line 6 forbids writing it inside this task; it must become its own task.",
+      "Input records have the shape shown in src/records.js (id, customer, amount, currency, timestamp), with messy values (padded whitespace, a combining character, string and numeric amounts, lower-case currency, non-UTC offset) that the contract presumably says how to normalise.",
+      "Bad input to exportCsv (e.g. a non-array, or whatever else the contract defines as invalid) throws TypeError, per docs/CONVENTIONS.md line 7.",
+      "generated/ and vendor/export-contract.bundle are not committed or edited (docs/CONVENTIONS.md line 4, vendor/README.md)."
+    ],
+    "acceptanceCriteria": [
+      "src/export.js exists, is plain ESM with no dependencies, and exports a function `exportCsv(records)` that returns a CSV string.",
+      "The output of `exportCsv` conforms to every rule in generated/export-contract.json as produced by `npm run generate-schema` (columns, order, header, delimiter, quoting, line endings, value normalisation, row ordering and any other rule it states).",
+      "test/export.test.js exists, uses node:test, and covers the contract rules including the SAMPLE records from src/records.js and TypeError on bad input.",
+      "`npm test` exits 0, with both test/records.test.js and test/export.test.js passing.",
+      "No files other than src/export.js and test/export.test.js are added or modified in git; generated/ stays untracked and vendor/ is untouched."
+    ],
+    "tasks": [
+      {
+        "id": "implement-export-csv",
+        "title": "Implement exportCsv per the generated export contract, with tests",
+        "description": "Repository: analytics-kit, plain ESM JavaScript (package.json has \"type\": \"module\"), no dependencies, tests run with `npm test` (`node --test`). Platform is native Windows; use PowerShell-compatible commands.\n\nStep 1 (mandatory, before writing any code): run `npm run generate-schema`. This runs scripts/generate-contract.mjs, which unpacks vendor/export-contract.bundle into generated/export-contract.json. Read that file in full. It is the binding export contract (docs/CONVENTIONS.md) and its contents were NOT available when this plan was written, so nothing here describes the CSV format: take columns, column order, header, delimiter, quoting/escaping, line endings, trailing newline, row ordering, value normalisation (whitespace, Unicode, numbers, currency, timestamps), empty-input behaviour and any other rule from the contract, and follow it exactly. Do not guess or fall back to generic CSV defaults where the contract is specific. If the generator fails or the contract is ambiguous or self-contradictory, report a blocker with the command output rather than inventing rules.\n\nStep 2: create src/export.js exporting the named function `exportCsv(records)`, which returns the CSV text for an array of analytics records shaped like SAMPLE in src/records.js (fields id, customer, amount, currency, timestamp; note the sample deliberately contains padded/repeated whitespace in customer, a combining accent character, amount as both string and number, lower-case currency and a non-UTC timestamp offset). Errors thrown for bad input must be TypeError. Match the style of the existing code (no semicolons, single quotes, short comment at top of file).\n\nStep 3: create test/export.test.js using node:test and node:assert/strict (same style as test/records.test.js). Derive expected values from the contract rules, not from whatever the implementation happens to output. Cover: the exact output for SAMPLE from src/records.js, each normalisation/quoting/ordering rule in the contract, empty input, and TypeError for bad input.\n\nStep 4: run `npm test` and confirm it passes.\n\nConstraints from docs/CONVENTIONS.md: create only src/export.js and test/export.test.js. If the contract turns out to require a module that this task does not name (for example a separate helper module mandated by the contract), do NOT write it inside this task; stop and report it so it can be added to the plan as its own task with its own tests. Never edit vendor/export-contract.bundle, never commit generated/ (it is gitignored), do not modify src/records.js, test/records.test.js, package.json or the generator script, and add no dependencies.\n\nIn your result, summarise the contract rules you implemented so a verifier can check them against generated/export-contract.json.",
+        "role": "worker",
+        "dependencies": [],
+        "parallelizable": false,
+        "suggestedFiles": [
+          "src/export.js",
+          "test/export.test.js"
+        ],
+        "acceptanceCriteria": [
+          "`npm run generate-schema` was run and generated/export-contract.json exists locally (untracked).",
+          "src/export.js exports `exportCsv(records)` returning a CSV string that satisfies every rule in generated/export-contract.json; a verifier regenerating the contract can confirm each rule against the output for SAMPLE from src/records.js.",
+          "Bad input to `exportCsv` throws TypeError.",
+          "test/export.test.js uses node:test, asserts the exact expected CSV for SAMPLE and covers each contract rule, empty input and the TypeError case.",
+          "`npm test` exits 0 with test/records.test.js and test/export.test.js passing.",
+          "`git status` shows only src/export.js and test/export.test.js as new; no changes under vendor/, scripts/, package.json or existing src/test files, and generated/ is not tracked.",
+          "The task result lists the contract rules that were implemented."
+        ],
+        "complexity": "medium",
+        "risk": "medium",
+        "requiresApproval": false
+      }
+    ],
+    "risks": [
+      {
+        "description": "The contract content is unknown at planning time, so the plan cannot state the CSV format; a worker might fill gaps with generic CSV assumptions (comma, LF, input order) that contradict the contract.",
+        "mitigation": "The task makes generating and fully reading generated/export-contract.json the mandatory first step, forbids guessing, and requires the worker to list the implemented rules so the verifier can check them against a freshly generated contract."
+      },
+      {
+        "description": "The contract may require a module beyond src/export.js; docs/CONVENTIONS.md line 6 forbids writing it inside this task, so the single-task plan could be insufficient.",
+        "mitigation": "The task instructs the worker to stop and report this rather than write the extra module, so it can be added as its own task with tests that this task then depends on."
+      },
+      {
+        "description": "`npm run generate-schema` could fail (corrupt bundle, Node version), leaving no contract to follow.",
+        "mitigation": "The worker reports a blocker with the command output instead of proceeding without the contract; the bundle and generator must not be edited."
+      },
+      {
+        "description": "Tests could be written to mirror the implementation's output rather than the contract, hiding non-conformance.",
+        "mitigation": "Acceptance criteria require expected values derived from the contract rules and an exact expected CSV for SAMPLE, verified independently against the generated contract."
+      },
+      {
+        "description": "generated/ or node_modules/ could be committed by accident, or the vendor bundle modified.",
+        "mitigation": "generated/ and node_modules/ are already in .gitignore; the acceptance criteria require git status to show only the two new files."
+      }
+    ]
+  },
+  "finishedAt": "2026-10-04T09:44:04.028Z",
+  "runId": "86970465-e812-400b-9933-f0d942b2a59c",
+  "runState": "completed",
+  "runError": null,
+  "baseCommit": "1b1058f7cdd4cd0063e459e9b07e48d3f40c277f",
+  "integrationBranch": "nexus/86970465/integration",
+  "plannerTools": [
+    {
+      "tool": "Bash",
+      "status": "denied",
+      "input": "{\"command\":\"cd \\\"C:/Users/user/AppData/Local/Temp/nexus-dyn-repo-MKjPi2\\\" && git ls-files && for f in $(git ls-files | grep -v '^vendor/'); do echo \\\"=== $f\\\"; cat -n \\\"$f\\\"; done\",\"description\":\"L"
+    },
+    {
+      "tool": "Bash",
+      "status": "completed",
+      "input": "{\"command\":\"git ls-files\",\"description\":\"List tracked files\"}"
+    },
+    {
+      "tool": "Bash",
+      "status": "completed",
+      "input": "{\"command\":\"cat -n .gitignore README.md docs/CONVENTIONS.md package.json scripts/generate-contract.mjs src/records.js test/records.test.js vendor/README.md vendor/export-contract.bundle\",\"description\""
+    },
+    {
+      "tool": "Bash",
+      "status": "failed",
+      "input": "{\"command\":\"ls -la . generated\",\"description\":\"List root and generated directory\"}"
+    },
+    {
+      "tool": "StructuredOutput",
+      "status": "completed",
+      "input": "{\"summary\":\"Add src/export.js exporting `exportCsv(records)` plus node:test tests in test/export.test.js, as one implementation task. The task's first step is running `npm run generate-schema` and rea"
+    }
+  ],
+  "planV1TaskKeys": [
+    "implement-export-csv"
+  ],
+  "planV1MentionsNormalization": false,
+  "tasks": [
+    {
+      "key": "implement-export-csv",
+      "role": "worker",
+      "kind": "implement",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0,
+      "startedAt": "2026-10-04T09:33:56.527Z",
+      "finishedAt": "2026-10-04T09:43:08.126Z",
+      "error": null
+    },
+    {
+      "key": "implement-normalize",
+      "role": "worker",
+      "kind": "implement",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 1,
+      "startedAt": "2026-10-04T09:34:22.608Z",
+      "finishedAt": "2026-10-04T09:40:51.727Z",
+      "error": null
+    },
+    {
+      "key": "implement-normalize-fix1",
+      "role": "debugger",
+      "kind": "repair",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0,
+      "startedAt": "2026-10-04T09:37:08.710Z",
+      "finishedAt": "2026-10-04T09:38:34.574Z",
+      "error": null
+    }
+  ],
+  "dependencies": [
+    {
+      "task": "implement-export-csv",
+      "dependsOn": "implement-normalize"
+    }
+  ],
+  "proposals": [
+    {
+      "id": "296a3d80-0190-4abb-b8cd-4ecde69ec997",
+      "type": "ADD_TASK",
+      "status": "rejected",
+      "proposedBy": "Worker/implement-export-csv",
+      "proposedByAgentId": "594998ef-fe29-4bdd-bac4-6d9f7a2aa8d5",
+      "task": "implement-export-csv",
+      "reason": "The binding export contract mandates a separate src/normalize.js (normalizeRecord) that does not exist; CONVENTIONS.md forbids writing it inside the export task.",
+      "evidence": "generated/export-contract.json prerequisites[0]: module src/normalize.js, status MISSING, 'must be merged before src/export.js is completed'; ls src shows only records.js.",
+      "changes": {
+        "tasks": [],
+        "targetTask": null,
+        "dependsOn": null,
+        "blocksProposer": false,
+        "priority": null
+      },
+      "rejectionReason": "changes.tasks.0.dependencies: Invalid input: expected array, received undefined",
+      "revisionId": null,
+      "createdAt": "2026-10-04T09:34:09.664Z",
+      "resolvedAt": "2026-10-04T09:34:09.664Z"
+    },
+    {
+      "id": "0ade3ac3-8729-4aff-b1f5-2acd2b7f565c",
+      "type": "ADD_TASK",
+      "status": "applied",
+      "proposedBy": "Worker/implement-export-csv",
+      "proposedByAgentId": "594998ef-fe29-4bdd-bac4-6d9f7a2aa8d5",
+      "task": "implement-export-csv",
+      "reason": "The binding export contract mandates a separate src/normalize.js (normalizeRecord) that does not exist; CONVENTIONS.md forbids writing it inside the export task.",
+      "evidence": "generated/export-contract.json prerequisites[0]: module src/normalize.js, status MISSING, 'must be merged before src/export.js is completed'; src contains only records.js.",
+      "changes": {
+        "tasks": [
+          {
+            "key": "implement-normalize",
+            "title": "Implement src/normalize.js normalizeRecord with tests",
+            "description": "Run npm run generate-schema and read generated/export-contract.json prerequisites[0]. Create src/normalize.js exporting normalizeRecord(record) returning {id, customer, amount_minor, currency, day}: customer NFC, trimmed, internal whitespace runs collapsed to one space; amount (number or decimal string, major units) -> integer minor units (amount_minor), rounded half away from zero, non-finite/non-numeric throws TypeError; currency upper-cased, anything not three ASCII letters throws TypeError; day = UTC date YYYY-MM-DD of ISO timestamp, invalid throws TypeError. Create test/normalize.test.js (node:test, node:assert/strict). Style: no semicolons, single quotes, top comment. Only these two files; avoid float errors for decimal strings (e.g. 1.005).",
+            "role": "worker",
+            "dependencies": [],
+            "suggestedFiles": [
+              "src/normalize.js",
+              "test/normalize.test.js"
+            ],
+            "acceptanceCriteria": [
+              "src/normalize.js exports normalizeRecord per contract rules",
+              "test/normalize.test.js covers each rule incl. SAMPLE records and TypeError cases",
+              "npm test exits 0",
+              "only src/normalize.js and test/normalize.test.js added"
+            ],
+            "complexity": "small",
+            "risk": "low"
+          }
+        ],
+        "targetTask": null,
+        "dependsOn": null,
+        "blocksProposer": true,
+        "priority": null
+      },
+      "rejectionReason": null,
+      "revisionId": "fb0a4f68-ad1e-400b-9db4-99889f8709aa",
+      "createdAt": "2026-10-04T09:34:14.421Z",
+      "resolvedAt": "2026-10-04T09:34:14.426Z"
+    }
+  ],
+  "revisions": [
+    {
+      "id": "2303cbad-c11f-4bb6-b26b-e29a5834854d",
+      "version": 1,
+      "reason": "Approved plan",
+      "proposalId": null,
+      "tasks": [
+        "implement-export-csv"
+      ],
+      "createdAt": "2026-10-04T09:33:52.331Z"
+    },
+    {
+      "id": "fb0a4f68-ad1e-400b-9db4-99889f8709aa",
+      "version": 2,
+      "reason": "ADD_TASK: Add 1 task (implement-normalize); the proposing task waits for them. The binding export contract mandates a separate src/normalize.js (normalizeRecord) that does not exist; CONVENTIONS.md forbids writing it inside the export task.",
+      "proposalId": "0ade3ac3-8729-4aff-b1f5-2acd2b7f565c",
+      "tasks": [
+        "implement-export-csv",
+        "implement-normalize"
+      ],
+      "createdAt": "2026-10-04T09:34:14.426Z"
+    }
+  ],
+  "proposer": {
+    "agentId": "594998ef-fe29-4bdd-bac4-6d9f7a2aa8d5",
+    "label": "Worker/implement-export-csv",
+    "role": "worker",
+    "model": "claude-sonnet-5-5",
+    "sdkSessions": [
+      {
+        "sdkSessionId": "9ed359db-28c2-49ab-9205-ed307c9a8fa2",
+        "state": "ended",
+        "endReason": "completed"
+      }
+    ]
+  },
+  "proposerTask": {
+    "key": "implement-export-csv",
+    "state": "completed",
+    "sessions": [
+      {
+        "agent": "Worker/implement-export-csv",
+        "sdkSessionId": "9ed359db-28c2-49ab-9205-ed307c9a8fa2",
+        "startedAt": "2026-10-04T09:33:56.535Z",
+        "endedAt": "2026-10-04T09:34:20.237Z",
+        "endReason": "completed"
+      },
+      {
+        "agent": "Worker/implement-export-csv",
+        "sdkSessionId": "88fa3693-8d79-4b10-a383-d4a31fccb98c",
+        "startedAt": "2026-10-04T09:40:52.571Z",
+        "endedAt": "2026-10-04T09:41:22.302Z",
+        "endReason": "completed"
+      }
+    ]
+  },
+  "addedTasks": [
+    {
+      "key": "implement-normalize",
+      "state": "completed",
+      "startedAt": "2026-10-04T09:34:22.608Z",
+      "finishedAt": "2026-10-04T09:40:51.727Z"
+    }
+  ],
+  "graphEvents": [
+    {
+      "type": "graph.revised",
+      "at": "2026-10-04T09:33:52.331Z",
+      "payload": {
+        "proposalId": null,
+        "revisionId": "2303cbad-c11f-4bb6-b26b-e29a5834854d",
+        "version": 1,
+        "summary": "Approved plan"
+      }
+    },
+    {
+      "type": "graph.proposed",
+      "at": "2026-10-04T09:34:09.664Z",
+      "payload": {
+        "proposalId": "296a3d80-0190-4abb-b8cd-4ecde69ec997",
+        "type": "ADD_TASK",
+        "proposedBy": "Worker/implement-export-csv"
+      }
+    },
+    {
+      "type": "graph.rejected",
+      "at": "2026-10-04T09:34:09.665Z",
+      "payload": {
+        "proposalId": "296a3d80-0190-4abb-b8cd-4ecde69ec997",
+        "errors": [
+          "changes.tasks.0.dependencies: Invalid input: expected array, received undefined"
+        ]
+      }
+    },
+    {
+      "type": "graph.proposed",
+      "at": "2026-10-04T09:34:14.421Z",
+      "payload": {
+        "proposalId": "0ade3ac3-8729-4aff-b1f5-2acd2b7f565c",
+        "type": "ADD_TASK",
+        "proposedBy": "Worker/implement-export-csv"
+      }
+    },
+    {
+      "type": "graph.revised",
+      "at": "2026-10-04T09:34:14.426Z",
+      "payload": {
+        "proposalId": "0ade3ac3-8729-4aff-b1f5-2acd2b7f565c",
+        "revisionId": "fb0a4f68-ad1e-400b-9db4-99889f8709aa",
+        "version": 2,
+        "summary": "ADD_TASK: Add 1 task (implement-normalize); the proposing task waits for them. The binding export contract mandates a separate src/normalize.js (normalizeRecord) that does not exist; CONVENTIONS.md forbids writing it inside the export task."
+      }
+    }
+  ],
+  "yieldEvents": [
+    {
+      "task": "implement-export-csv",
+      "at": "2026-10-04T09:34:20.521Z",
+      "payload": {
+        "from": "running",
+        "to": "queued",
+        "reason": "yielded: waiting for implement-normalize (graph change); resumes once it is merged"
+      }
+    }
+  ],
+  "reviews": [
+    {
+      "task": "implement-normalize",
+      "verdict": "approved",
+      "findings": 3
+    },
+    {
+      "task": "implement-normalize",
+      "verdict": "approved",
+      "findings": 2
+    },
+    {
+      "task": "implement-export-csv",
+      "verdict": "approved",
+      "findings": 3
+    }
+  ],
+  "verifications": [
+    {
+      "task": "implement-normalize",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "implement-normalize",
+      "kind": "verifier",
+      "passed": false,
+      "summary": "Not done: 3 of 4 task criteria pass, but `src/normalize.js` fails the contract on two edge paths, so the first criterion fails.\n\n- **Amount exponent is unbounded:** a string amount such as '1e999999999' or '1e-999999999' reaches `'0'.repeat(...)` with a huge count and throws RangeError instead of Ty"
+    },
+    {
+      "task": "implement-normalize",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "implement-normalize",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "All four task criteria pass. `npm test` exits 0 with 10/10 passing, and only `src/normalize.js` and `test/normalize.test.js` were added.\n\nThe verifier role cannot run `node` directly, so my extra edge-case probes were traced by hand against the source rather than executed. The runtime evidence is my"
+    },
+    {
+      "task": "implement-export-csv",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "implement-export-csv",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "All criteria pass. I regenerated the contract, read `src/export.js`, `src/normalize.js` and `test/export.test.js` against it, and ran `npm test` (15 pass, 0 fail, exit 0).\n\nLimits on what I ran: the verifier hook blocked `node` and a second `git` call, so I could not probe edge cases directly. Line-"
+    },
+    {
+      "task": "(mission)",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "(mission)",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "All five acceptance criteria pass. I generated the contract with `npm run generate-schema`, compared every rule in it against src/export.js and src/normalize.js, and re-ran `npm test` myself (15 pass, 0 fail, exit 0).\n\nTwo things to know:\n- The quoting test is titled \"commas, quotes and line breaks\""
+    }
+  ],
+  "sessions": [
+    {
+      "agentId": "26527edd-e91a-44db-860f-498874606c01",
+      "agent": "Planner",
+      "role": "planner",
+      "purpose": "plan",
+      "task": null,
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "ae50466f-1931-4e63-8da2-b2afa01745e0",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:33:04.491Z",
+      "endedAt": "2026-10-04T09:33:48.898Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "594998ef-fe29-4bdd-bac4-6d9f7a2aa8d5",
+      "agent": "Worker/implement-export-csv",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement-export-csv",
+      "model": "claude-sonnet-5-5",
+      "sdkSessionId": "9ed359db-28c2-49ab-9205-ed307c9a8fa2",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:33:56.535Z",
+      "endedAt": "2026-10-04T09:34:20.237Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "8fd0b97d-f780-4224-9334-aeac06747c15",
+      "agent": "Worker/implement-normalize",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement-normalize",
+      "model": "claude-sonnet-5-5",
+      "sdkSessionId": "17ddb277-bf84-4058-a987-14ccc447c80e",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:34:22.611Z",
+      "endedAt": "2026-10-04T09:34:51.306Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "b454e31e-1351-4f14-8d07-8b6bf3742197",
+      "agent": "Reviewer/implement-normalize",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "implement-normalize",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "968108bf-d242-4c61-a3a8-a4b3dac044de",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:34:53.350Z",
+      "endedAt": "2026-10-04T09:35:52.343Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "b5081c87-bf01-4dbe-8950-2b321341146b",
+      "agent": "Verifier/implement-normalize",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "implement-normalize",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "8f6077e7-2c60-4323-8a65-0d04bd24614b",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:35:52.353Z",
+      "endedAt": "2026-10-04T09:37:08.705Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "132d9a3d-60f5-4a84-9da8-5dc953aa9f51",
+      "agent": "Debugger/implement-normalize-fix1",
+      "role": "debugger",
+      "purpose": "diagnose",
+      "task": "implement-normalize-fix1",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "1671e554-a2f6-461f-9745-d76c5cffc390",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:37:08.716Z",
+      "endedAt": "2026-10-04T09:38:34.574Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "6c26ac37-f3a2-444f-aeeb-d770657a5c09",
+      "agent": "Reviewer/implement-normalize",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "implement-normalize",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "6aefa547-4da2-4f03-84a5-991659162837",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:38:37.026Z",
+      "endedAt": "2026-10-04T09:39:51.237Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "46bce2b8-57d3-4dd8-b366-f5a9060b035f",
+      "agent": "Verifier/implement-normalize",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "implement-normalize",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "4a59f1ba-b1dd-43ba-b9e0-cab09fd43b73",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:39:51.241Z",
+      "endedAt": "2026-10-04T09:40:50.823Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "26550a50-5013-40ba-87d0-04845290f0b8",
+      "agent": "Worker/implement-export-csv",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement-export-csv",
+      "model": "claude-sonnet-5-5",
+      "sdkSessionId": "88fa3693-8d79-4b10-a383-d4a31fccb98c",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:40:52.571Z",
+      "endedAt": "2026-10-04T09:41:22.302Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "0cb8bd25-496b-46f8-8fec-ed33ceb9547c",
+      "agent": "Reviewer/implement-export-csv",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "implement-export-csv",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "1b7508e0-0e03-4e88-a8ee-e3d218889e82",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:41:24.328Z",
+      "endedAt": "2026-10-04T09:42:11.549Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "c79bf1fc-3793-43c5-85fd-9fed3c1a49f6",
+      "agent": "Verifier/implement-export-csv",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "implement-export-csv",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "94bb2aa7-5a06-4e13-be21-867a44cbe04c",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:42:11.554Z",
+      "endedAt": "2026-10-04T09:43:07.241Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "51aead93-0857-4c0d-a9fc-c5c01237ace8",
+      "agent": "Verifier/mission",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": null,
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "05668f85-d9e4-4303-bd58-ff2c3b1cf61f",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T09:43:09.377Z",
+      "endedAt": "2026-10-04T09:44:00.174Z",
+      "hasHandoff": false
+    }
+  ],
+  "approvals": [
+    {
+      "kind": "tool",
+      "action": "Run shell command (bash)",
+      "command": "cat > /tmp/fix.py <<'EOF'\np='src/normalize.js'\ns=open(p,encoding='utf-8',newline='').read()\nnl='\\r\\n' if '\\r\\n' in s else '\\n'\ns=s.replace('\\r\\n','\\n')\na=s.index(\"  const shift = 2 + Number(exp || 0)\")\nb=s.index(\"  let value = BigInt(\")\ns=s[:a]+\"\"\"  const all = whole + frac\n  const digits = all.replace(/^0+/, '')\n  if (digits === '') return 0\n  // Number of integer digits of the minor-unit value; bounded before any padding is built.\n  const point = whole.length - (all.length - digits.length) + 2 + Number(exp || 0)\n  if (point > 16) throw new TypeError('amount out of range')\n  if (point < 0) return 0\n  const intPart = digits.slice(0, point).padEnd(point, '0')\n  const rest = digits.slice(point)\n\"\"\"+s[b:]\na=s.index(\"  const time = typeof\")\nb=s.index(\"  return { id: record.id\")\ns=s[:a]+\"\"\"  const day = toDay(record.timestamp)\n\"\"\"+s[b:]\na=s.index(\"export function normalizeRecord\")\ns=s[:a]+\"\"\"function toDay(timestamp) {\n  const m = typeof timestamp === 'string' ? ISO.exec(timestamp) : null\n  if (!m) throw new TypeError('timestamp must be an ISO 8601 date-time with Z or a UTC offset')\n  // Date.parse rolls impossible dates (e.g. Feb 30) over, so check the calendar date first.\n  const [year, month, date] = [Number(m[1]), Number(m[2]), Number(m[3])]\n  const local = new Date(0)\n  local.setUTCFullYear(year, month - 1, date)\n  if (local.getUTCMonth() !== month - 1 || local.getUTCDate() !== date) {\n    throw new TypeError('timestamp is not a valid calendar date')\n  }\n  const time = new Date(Date.parse(timestamp))\n  const utcYear = time.getUTCFullYear()\n  // The offset can push the UTC date outside the four-digit years YYYY-MM-DD can express.\n  if (Number.isNaN(utcYear) || utcYear < 0 || utcYear > 9999) throw new TypeError('timestamp out of range')\n  return time.toISOString().slice(0, 10)\n}\n\n\"\"\"+s[a:]\ns=s.replace(\"\"\"(?:e([+-]?\\\\d+))?$/i\n\"\"\",\"\"\"(?:e([+-]?\\\\d+))?$/i\n// Date-only and offset-less forms are rejected: they do not identify a UTC calendar date.\nconst ISO = /^(\\\\d{4})-(\\\\d{2})-(\\\\d{2})T(?:[01]\\\\d|2[0-3]):[0-5]\\\\d(?::[0-5]\\\\d(?:\\\\.\\\\d+)?)?(?:Z|[+-](?:[01]\\\\d|2[0-3]):[0-5]\\\\d)$/\n\"\"\")\nopen(p,'w',encoding='utf-8',newline='').write(s.replace('\\n',nl))\n\np='test/normalize.test.js'\ns=open(p,encoding='utf-8',newline='').read()\nnl='\\r\\n' if '\\r\\n' in s else '\\n'\ns=s.replace('\\r\\n','\\n')\ns=s.replace(\"\"\"  assert.equal(m('.5'), 50)\n})\n\"\"\",\"\"\"  assert.equal(m('.5'), 50)\n  assert.equal(m('0.00125e3'), 125)\n  assert.equal(m('0.5e-2'), 1)\n  assert.equal(m('-0.004'), 0)\n  assert.equal(m('90071992547409.91'), Number.MAX_SAFE_INTEGER)\n})\n\ntest('amount exponent is bounded', () => {\n  const m = (amount) => normalizeRecord(make({ amount })).amount_minor\n  assert.equal(m('1e-999999999'), 0)\n  assert.equal(m('1e-' + '9'.repeat(400)), 0)\n  assert.equal(m('0e999999999'), 0)\n  for (const amount of ['1e999999999', '1e99999999', '1e400', '1e' + '9'.repeat(400), '90071992547409.92', 1e300]) {\n    assert.throws(() => normalizeRecord(make({ amount })), TypeError)\n  }\n})\n\"\"\")\ns=s.replace(\"\"\"  for (const timestamp of ['nope', '', null, undefined]) {\n    assert.throws(() => normalizeRecord(make({ timestamp })), TypeError)\n  }\n})\n\"\"\",\"\"\"  assert.equal(normalizeRecord(make({ timestamp: '2026-03-02T00:30+01:00' })).day, '2026-03-01')\n  assert.equal(normalizeRecord(make({ timestamp: '2024-02-29T12:00:00.123Z' })).day, '2024-02-29')\n  assert.equal(normalizeRecord(make({ timestamp: '0000-01-01T00:00:00Z' })).day, '0000-01-01')\n  assert.equal(normalizeRecord(make({ timestamp: '9999-12-31T23:59:59Z' })).day, '9999-12-31')\n  for (const timestamp of ['nope', '', null, undefined]) {\n    assert.throws(() => normalizeRecord(make({ timestamp })), TypeError)\n  }\n})\n\ntest('timestamp must be strict ISO 8601 with an offset', () => {\n  const bad = [\n    'March 2, 2026', '1', '2026', 1767225600000, new Date(0),\n    '2026-03-02T23:30:00', '2026-03-02', '2026-03-02 23:30:00Z',\n    '2026-02-30T00:00:00Z', '2025-02-29T00:00:00Z', '2026-13-01T00:00:00Z', '2026-03-02T24:00:00Z',\n    '+010000-01-01T00:00:00Z', '-000001-01-01T00:00:00Z',\n    '9999-12-31T23:30:00-01:00', '0000-01-01T00:30:00+01:00'\n  ]\n  for (const timestamp of bad) {\n    assert.throws(() => normalizeRecord(make({ timestamp })), TypeError, String(timestamp))\n  }\n})\n\"\"\")\nopen(p,'w',encoding='utf-8',newline='').write(s.replace('\\n',nl))\nEOF\npython /tmp/fix.py && rm /tmp/fix.py && git stash list | head -1; npm test 2>&1 | tail -30; git status --short",
+      "risk": "high",
+      "approved": false
+    }
+  ],
+  "independentTestRun": {
+    "lines": [
+      "# tests 15",
+      "# pass 15",
+      "# fail 0"
+    ],
+    "pass": 15,
+    "fail": 0
+  },
+  "git": {
+    "userHeadUnchanged": true,
+    "userStatus": "",
+    "integrationFiles": [
+      ".gitignore",
+      "README.md",
+      "docs/CONVENTIONS.md",
+      "package.json",
+      "scripts/generate-contract.mjs",
+      "src/export.js",
+      "src/normalize.js",
+      "src/records.js",
+      "test/export.test.js",
+      "test/normalize.test.js",
+      "test/records.test.js",
+      "vendor/README.md",
+      "vendor/export-contract.bundle"
+    ]
+  },
+  "gates": {
+    "plan v1 does not contain the hidden prerequisite": true,
+    "an ADD_TASK proposal exists and was applied": true,
+    "the proposal was made by a real SDK session": true,
+    "a graph revision was created from the proposal": true,
+    "the proposed task was added to the graph (absent from plan v1)": true,
+    "a dependency from the proposer to the new task was created": true,
+    "the new prerequisite task executed and completed": true,
+    "the original task resumed after the prerequisite and completed": true,
+    "the run completed": true,
+    "mission verification passed": true,
+    "independent test run passes": true,
+    "the user checkout is untouched": true
+  },
+  "verdict": "PASS"
+}

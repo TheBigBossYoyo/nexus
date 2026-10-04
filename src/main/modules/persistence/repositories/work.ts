@@ -9,7 +9,7 @@ import type {
   Worktree,
 } from '@shared/domain'
 import type { Database } from '../database'
-import { Table, type Codec } from '../table'
+import { Table, decode, prepare, type Codec, type Row } from '../table'
 
 const worktreeCodec: Codec<Worktree> = {
   table: 'worktrees',
@@ -75,6 +75,12 @@ export class ReviewRepository extends Table<Review> {
   listByRun(runId: string): Review[] {
     return this.byRun(runId)
   }
+
+  /** Reviews of several tasks in one query, oldest first. */
+  listByTasks(taskIds: readonly string[]): Review[] {
+    if (taskIds.length === 0) return []
+    return this.query(`WHERE task_id IN (${taskIds.map(() => '?').join(',')}) ORDER BY created_at, rowid`, [...taskIds])
+  }
 }
 
 const verificationCodec: Codec<Verification> = {
@@ -106,6 +112,19 @@ export class VerificationRepository extends Table<Verification> {
 
   listByRun(runId: string): Verification[] {
     return this.byRun(runId)
+  }
+
+  /** The newest `limit` check runs of the given tasks (the whole run when taskIds is null), newest first, with the true total. */
+  latestChecks(runId: string, taskIds: readonly string[] | null, limit: number): { items: Verification[]; total: number } {
+    if (taskIds && taskIds.length === 0) return { items: [], total: 0 }
+    const scope = taskIds ? `AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
+    const params = [runId, ...(taskIds ?? [])]
+    const items = this.query(
+      `WHERE run_id = ? AND kind = 'checks' ${scope} ORDER BY created_at DESC, rowid DESC LIMIT ${Math.floor(limit)}`,
+      params,
+    )
+    const total = (prepare(this.db, `SELECT COUNT(*) AS n FROM verification_results WHERE run_id = ? AND kind = 'checks' ${scope}`).get(...params) as { n: number }).n
+    return { items, total }
   }
 }
 
@@ -211,6 +230,12 @@ const artifactCodec: Codec<Artifact> = {
   },
 }
 
+export type ArtifactMeta = Omit<Artifact, 'content'>
+const artifactMetaCodec: Codec<ArtifactMeta> = {
+  table: 'artifacts',
+  fields: { id: 'text', runId: 'text', taskId: 'text', agentId: 'text', kind: 'text', title: 'text', createdAt: 'text' },
+}
+
 export class ArtifactRepository extends Table<Artifact> {
   constructor(db: Database) {
     super(db, artifactCodec, 'artifact')
@@ -222,6 +247,24 @@ export class ArtifactRepository extends Table<Artifact> {
 
   listByTask(taskId: string): Artifact[] {
     return this.query('WHERE task_id = ? ORDER BY created_at, rowid', [taskId])
+  }
+
+  /** Artifacts of one kind with their content (e.g. the arbitration records). */
+  listByRunKind(runId: string, kind: string): Artifact[] {
+    return this.query('WHERE run_id = ? AND kind = ? ORDER BY created_at, rowid', [runId, kind])
+  }
+
+  /** Artifact headers (no content: setup logs and reports can be large), newest first, excluding one kind; with the true total. */
+  listMeta(runId: string, taskIds: readonly string[] | null, excludeKind: string, limit: number): { items: ArtifactMeta[]; total: number } {
+    if (taskIds && taskIds.length === 0) return { items: [], total: 0 }
+    const scope = taskIds ? ` AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
+    const params = [runId, excludeKind, ...(taskIds ?? [])]
+    const rows = prepare(
+      this.db,
+      `SELECT id, run_id, task_id, agent_id, kind, title, created_at FROM artifacts WHERE run_id = ? AND kind <> ?${scope} ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    ).all(...params, limit) as Row[]
+    const total = (prepare(this.db, `SELECT COUNT(*) AS n FROM artifacts WHERE run_id = ? AND kind <> ?${scope}`).get(...params) as { n: number }).n
+    return { items: rows.map((r) => decode(artifactMetaCodec, r)), total }
   }
 }
 

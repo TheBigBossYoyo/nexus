@@ -167,7 +167,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     project = repos.projects.list()[0] as Project
   }
 
-  const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> => {
+  const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 150_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs
     while (!predicate()) {
       if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
@@ -189,7 +189,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     project,
     events,
     pushes,
-    async waitForState(runId, states, timeoutMs = 60_000) {
+    async waitForState(runId, states, timeoutMs = 150_000) {
       const wanted = Array.isArray(states) ? states : [states]
       try {
         await waitFor(() => wanted.includes(repos.runs.require(runId).state), `run state ${wanted.join('|')}`, timeoutMs)

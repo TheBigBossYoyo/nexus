@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { ACTIVE_AGENT_STATES } from '@shared/domain'
-import { useAuthStatus, usePendingApprovals } from '../lib/queries'
+import { useActiveOvernight, useAuthStatus, usePendingApprovals } from '../lib/queries'
 import { summarizeAuth } from '../lib/authSummary'
 import { runStatus, TONE_CLASSES } from '../lib/status'
+import { activeIndicatorText } from '../views/run/overnightModel'
 import { shortId } from '../lib/format'
 import { cn } from '../lib/cn'
 import { useUiStore } from '../store/ui'
@@ -43,6 +44,27 @@ function AuthIndicator() {
       <KeyIcon size={12} className="text-fg-faint" />
       <span className={cn('text-[0.9rem]', TONE_CLASSES[tone].text)}>{text}</span>
       {keyExposed ? <Badge tone="warning">API key set</Badge> : null}
+    </button>
+  )
+}
+
+/** Shown on every screen while an overnight run owns the PC's power state; links to that run. */
+function OvernightIndicator() {
+  const active = useActiveOvernight().data ?? []
+  const openRun = useUiStore((s) => s.openRun)
+  const text = activeIndicatorText(active)
+  const first = active[0]
+  if (!text || !first) return null
+  return (
+    <button
+      type="button"
+      data-testid="overnight-indicator"
+      onClick={() => openRun(first.runId, first.projectId)}
+      title={`Overnight run active${active.length > 1 ? ` (${active.length})` : ''}. Click to open it.`}
+      className="inline-flex h-6 items-center gap-1.5 rounded-[3px] border border-tone-warning px-2 font-mono text-[0.85rem] text-tone-warning hover:bg-surface-3"
+    >
+      <StatusDot tone="warning" pulse />
+      {text}
     </button>
   )
 }
@@ -150,6 +172,7 @@ export function TopBar() {
         </div>
       ) : null}
       <div className="ml-auto flex items-center gap-2">
+        <OvernightIndicator />
         <RunControls />
         <ApprovalBadge />
         <AuthIndicator />

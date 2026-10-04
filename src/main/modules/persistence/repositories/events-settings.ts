@@ -60,6 +60,29 @@ export class EventRepository {
     return row?.created_at ?? null
   }
 
+  /** Timestamp of the run's latest event that is real orchestration activity (not supervisor bookkeeping). */
+  lastActivityAt(runId: string): string | null {
+    const row = prepare(
+      this.db,
+      "SELECT created_at FROM run_events WHERE run_id = ? AND type NOT LIKE 'overnight.%' AND type NOT LIKE 'checkpoint.%' ORDER BY seq DESC LIMIT 1",
+    ).get(runId) as { created_at: string } | undefined
+    return row?.created_at ?? null
+  }
+
+  /** The run's newest events of one type, newest first. */
+  recentOfType<T extends EventType>(runId: string, type: T, limit = 20): RunEvent<T>[] {
+    const rows = prepare(this.db, `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type = ? ORDER BY seq DESC LIMIT ?`).all(runId, type, limit) as Row[]
+    return rows.map((r) => decode(eventCodec, r) as RunEvent<T>)
+  }
+
+  /** The run's most recent event of one type, or null. */
+  latestOfType<T extends EventType>(runId: string, type: T): RunEvent<T> | null {
+    const row = prepare(this.db, `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type = ? ORDER BY seq DESC LIMIT 1`).get(runId, type) as
+      | Row
+      | undefined
+    return row ? (decode(eventCodec, row) as RunEvent<T>) : null
+  }
+
   /** Number of events of one type in a run that belong to any of the tasks, counted in SQL. */
   countByTypeForTasks(runId: string, type: EventType, taskIds: readonly string[]): number {
     let total = 0
@@ -72,6 +95,28 @@ export class EventRepository {
       total += row.n
     }
     return total
+  }
+
+  /** The NEWEST events of the given types in a run (newest first), optionally limited to some tasks; capped in SQL. */
+  listByTypes(runId: string, types: readonly EventType[], limit = 500, taskIds?: readonly string[]): RunEvent[] {
+    if (types.length === 0 || (taskIds && taskIds.length === 0)) return []
+    const taskClause = taskIds ? ` AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
+    const rows = prepare(
+      this.db,
+      `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type IN (${types.map(() => '?').join(',')})${taskClause} ORDER BY seq DESC LIMIT ?`,
+    ).all(runId, ...types, ...(taskIds ?? []), limit) as Row[]
+    return rows.map((r) => decode(eventCodec, r))
+  }
+
+  /** How many events of the given types exist (optionally for some tasks), so a capped listing can report what it left out. */
+  countByTypes(runId: string, types: readonly EventType[], taskIds?: readonly string[]): number {
+    if (types.length === 0 || (taskIds && taskIds.length === 0)) return 0
+    const taskClause = taskIds ? ` AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
+    const row = prepare(
+      this.db,
+      `SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type IN (${types.map(() => '?').join(',')})${taskClause}`,
+    ).get(runId, ...types, ...(taskIds ?? [])) as { n: number }
+    return row.n
   }
 
   /** Events with seq > afterSeq in ascending order. */

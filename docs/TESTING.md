@@ -219,3 +219,29 @@ CI does not run `pnpm test:e2e`, `pnpm smoke:claude` or `pnpm package`.
   `waitFor`.
 - Dispose harnesses in `afterEach` (it stops sessions, closes the database and removes the temp directory,
   retrying on Windows file locks).
+
+## 0.2.1: Overnight Mode and power control
+
+| Layer | Files | What it covers |
+|---|---|---|
+| Unit | `tests/unit/power/power-controller.test.ts` | Exact `shutdown.exe` arguments, `/f` only for forced close, delay validation, fixed messages, spawn without a shell, `SystemRoot` handling, the fake controller's single-timer model |
+| Unit | `tests/unit/power/isolation.test.ts` | Source-tree checks: only the supervisor and the main entry point import the power module; no other file names a power executable; the renderer cannot submit arbitrary arguments; power commands are refused for every agent role |
+| Unit | `tests/unit/overnight/policy.test.ts` | `decidePowerAction` (the authorization gate), the policy schema, `decideQuota`, report outcome labels, the tray model |
+| Scenario | `tests/scenarios/overnight.test.ts` | Real orchestrator with scripted agents and `FakePowerController`: authorization, failsafe before any agent, success, failure, blocker, quota (wait and exhausted), timeout, sleep and hibernate, cancel in every phase, change end action, extend, idempotent finalization, refused power commands, unattended approvals, watchdog, budgets, checkpoints, unfinished work committed, and recovery after a restart of NEXUS or Windows |
+| Scenario | `tests/scenarios/overnight-hardening.test.ts` | Regressions of the 0.2.1 audit: sealed authorization (an edited database row is refused), timers never left behind after a failure or crash at each step, overdue actions not executed late, project removal guard, quota event ordering, watchdog during check commands |
+| Stress | `tests/stress/overnight-stress.test.ts` | 1000 seeded histories (random policy, outcomes, user actions, clock jumps, refused commands, restarts of NEXUS and Windows) against the power invariants. Runs with `pnpm test` and with `pnpm stress` |
+| Integration | `tests/integration/persistence/overnight.test.ts` | Upgrade of a populated 0.2.0 database to schema 3, repositories, cascade behaviour |
+| E2E | `tests/e2e/overnight.spec.ts` | The built app with the fake power controller: composer and confirmation, banner, tray, hide to tray, report, success, failure, quota, timeout, restart, and the IPC surface refusing arbitrary power input |
+| Manual | `tests/manual/power.smoke.ts` (`pnpm smoke:power`) | The real `WindowsPowerController`: a shutdown one hour away is scheduled, confirmed, aborted, and a second abort proves nothing is left |
+
+Rules:
+
+- No automated test uses the real power controller. The fake one is selected in unpackaged builds only, and
+  always when the scripted runtime (`NEXUS_FAKE_RUNTIME=1`) is in use.
+- E2E and acceptance launches keep the window off-screen (`NEXUS_WINDOW_OFFSCREEN=1`). `NEXUS_E2E_SHOW=1`
+  shows it. Native dialogs are stubbed to their first button by `tests/e2e/helpers.ts`.
+- Scenario waits are generous (150 s, test timeout 240 s) and the integration project runs with six workers:
+  the suite drives many git processes and the waits bound a hang, they are not performance assertions.
+
+Real-runtime acceptance (consumes Claude usage): `pnpm accept:proposal` and `pnpm accept:rotation`; each prints
+its gates and writes evidence to `docs/acceptance/`.

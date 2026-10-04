@@ -7,13 +7,20 @@ import type {
   Severity,
   TaskState,
 } from './domain'
+import type { OvernightStatus } from './overnight'
+
+/**
+ * Why a run paused, more precisely than PauseReason: 'user' is the person pausing it, 'intervention'
+ * is NEXUS stopping because no task can make progress. Absent on events written before 0.2.1.
+ */
+export type PauseCause = 'user' | 'intervention' | 'time_limit' | 'auth' | 'quota' | 'recovery'
 
 /** Payload shape for every durable event type. Adding an event means adding a key here. */
 export interface EventPayloads {
   'run.created': { mode: string; preset: string }
   'run.state_changed': { from: RunState; to: RunState; reason?: string }
   'run.started': Record<string, never>
-  'run.paused': { reason: PauseReason; detail?: string }
+  'run.paused': { reason: PauseReason; detail?: string; cause?: PauseCause }
   'run.resumed': Record<string, never>
   'run.completed': { summary: string }
   'run.failed': { error: string }
@@ -92,6 +99,18 @@ export interface EventPayloads {
   'intelligence.refreshed': { facts: number; stale: number }
   'context.composed': { packId: string; included: number; excluded: number; chars: number }
   'review.arbitrated': { accepted: number; rejected: number }
+
+  // v0.2.1: Overnight Mode. Emitted by the OvernightSupervisor only.
+  'overnight.started': { deadlineAt: string; endAction: string; failsafeDeadline: string | null }
+  'overnight.state_changed': { from: string; to: string; detail?: string }
+  'overnight.failsafe': { action: 'armed' | 'cancelled' | 'rearmed' | 'lost' | 'failed'; deadline: string | null; ok: boolean }
+  'overnight.quota': { action: 'waiting' | 'resumed' | 'exhausted'; resetsAt: string | null; resumeAt: string | null }
+  'overnight.watchdog': { stage: string; detail: string }
+  'overnight.report': { path: string | null; chars: number }
+  'overnight.power': { action: string; operation: string; ok: boolean; executeAt: string | null; detail: string }
+  'overnight.amended': { change: string }
+  'overnight.approval': { approvalId: string; kind: string; decision: 'approved' | 'denied' }
+  'checkpoint.saved': { checkpointId: string; reason: string }
 }
 
 export type EventType = keyof EventPayloads
@@ -126,3 +145,4 @@ export type PushMessage =
   | { kind: 'agent.output'; agentId: string; runId: string; seq: number; outputKind: string; content: string }
   | { kind: 'agent.delta'; agentId: string; runId: string; text: string }
   | { kind: 'auth.changed' }
+  | { kind: 'overnight'; status: OvernightStatus }

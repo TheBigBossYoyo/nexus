@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipcInputs, type AppInfo, type IpcChannel, type IpcInput } from '@shared/ipc'
+import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT } from '@shared/overnight'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { RunEvent } from '@shared/events'
 import type { PushMessage } from '@shared/events'
@@ -22,6 +23,16 @@ const APP_INFO: AppInfo = {
 
 /** One minimal valid input per channel. Typed so that adding a channel without an entry fails to compile. */
 const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
+  'overnight.start': { projectId: 'p1', preset: 'balanced', prompt: 'do it', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT },
+  'overnight.get': { runId: 'r1' },
+  'overnight.active': {},
+  'overnight.cancelPower': { runId: 'r1' },
+  'overnight.changeEndAction': { runId: 'r1', endAction: 'NONE' },
+  'overnight.extend': { runId: 'r1', minutes: 30 },
+  'overnight.cancelMission': { runId: 'r1' },
+  'overnight.report': { runId: 'r1' },
+  'overnight.audit': { runId: 'r1' },
+  'overnight.checkpoints': { runId: 'r1' },
   'app.info': {},
   'app.openDataDir': {},
   'auth.status': {},

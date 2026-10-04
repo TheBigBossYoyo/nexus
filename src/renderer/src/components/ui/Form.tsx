@@ -17,6 +17,7 @@ export interface SelectOption<T extends string> {
   value: T
   label: string
   disabled?: boolean
+  testId?: string
 }
 
 /** Native select: keyboard and screen-reader friendly, and drivable by Playwright's selectOption. */
@@ -46,7 +47,7 @@ export function Select<T extends string>({
       {...rest}
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-surface-2">
+        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-surface-2" data-testid={o.testId}>
           {o.label}
         </option>
       ))}

@@ -137,8 +137,8 @@ export interface ReviewPromptInput {
   attempt: number
   /** Dual review: this reviewer's focus. */
   lens?: string
-  /** Messages the task's agents sent (type, recipient, subject); never their reasoning. */
-  sentMessages?: OrchestrationEvidence['messages']
+  /** From TaskEvidenceBuilder. The reviewer sees only the messages the task's agents sent (type, recipient, subject), never their reasoning. */
+  evidence?: OrchestrationEvidence
 }
 
 /**
@@ -152,7 +152,7 @@ export function buildReviewPrompt(input: ReviewPromptInput): Pack {
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
     { name: 'Check results', body: renderChecks(input.checkResults) },
-    { name: 'Orchestration records', body: input.sentMessages ? renderSentMessages(input.sentMessages) : null },
+    { name: 'Orchestration records', body: input.evidence ? renderSentMessages(input.evidence.messages, input.evidence.omittedMessages ?? 0) : null },
     { name: 'Review focus', body: input.lens ?? null },
     {
       name: 'Instructions',
@@ -218,7 +218,11 @@ export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): P
     { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Instructions',
-      body: 'Verify every mission acceptance criterion against the integrated code. Run the project checks yourself. Return one entry per criterion with evidence and list a failure for each that did not pass.',
+      body: [
+        'Verify every mission acceptance criterion against the integrated code. Run the project checks yourself. Return one entry per criterion with evidence and list a failure for each that did not pass.',
+        'The criteria were written with the first version of the plan. If the orchestration evidence lists graph revisions, the plan was changed during the run by a validated proposal: a criterion that only restates the scope of the original plan (for example an exact list of files or tasks) passes when the difference is the work a recorded revision added, and that work itself is correct. Say so in the evidence for that criterion.',
+        'A criterion that depends on something you are not allowed to do (for example a command your role may not run) is not a defect of the work: check it by the means you have (read the code and the tests, use the recorded check results and the quoted records) and fail it only when you find evidence that it is not met.',
+      ].join('\n'),
     },
   ])
 }

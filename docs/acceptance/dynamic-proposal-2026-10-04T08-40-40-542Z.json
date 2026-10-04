@@ -1,0 +1,844 @@
+{
+  "kind": "dynamic-graph-proposal",
+  "startedAt": "2026-10-04T08:25:51.327Z",
+  "executable": "dev build",
+  "mission": "Implement CSV analytics export.\nAdd src/export.js exporting `exportCsv(records)`, which returns CSV text for analytics records like the ones in src/records.js, with node:test tests in test/export.test.js.\nThe output must conform to the project export contract. The contract is generated: run `npm run generate-schema` and follow generated/export-contract.json exactly.\nFollow docs/CONVENTIONS.md. `npm test` must pass.",
+  "hiddenPrerequisite": "src/normalize.js (only named inside the packed contract)",
+  "app": {
+    "version": "0.2.0",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "planV1": {
+    "summary": "Add `src/export.js` exporting `exportCsv(records)` plus `test/export.test.js` (node:test), conforming to the generated export contract. The contract's contents could not be read during planning: `generated/` does not exist in the checkout (it is gitignored), and the planner role is blocked from running `node`/`npm`, so `vendor/export-contract.bundle` (XOR+gzip binary) was not unpacked. The plan therefore starts with a task that generates the contract and reports its exact rules and whether it requires any module beyond `src/export.js`; implementation follows, then independent verification. docs/CONVENTIONS.md line 6 forbids writing an unplanned module inside another task, so any extra module the contract demands must be added to the graph as its own task rather than inlined.",
+    "assumptions": [
+      "The contract's rules are unknown at planning time. Nothing in this plan about column order, delimiter, quoting, line endings, header, sorting, or value normalisation is verified; the contract is the only authority.",
+      "src/records.js SAMPLE hints at what the contract may regulate (untrimmed/multi-space customer names, a decomposed Unicode accent 'Zoé', string vs number amounts, lower-case currency, a non-UTC timestamp offset, ids out of order). These are guesses only and must not be implemented unless the contract says so.",
+      "The contract can be satisfied by a single module, src/export.js. If it requires another module (e.g. a shared helper it names), that becomes its own task with its own tests per docs/CONVENTIONS.md line 6.",
+      "generated/ is gitignored (.gitignore line 1) and never committed, so it may not carry over between task workspaces; every task that needs the contract re-runs `npm run generate-schema` itself.",
+      "Because generated/ is absent on a clean checkout, test/export.test.js must not read generated/export-contract.json at runtime; expected values are written into the tests from the contract.",
+      "`npm run generate-schema` works offline with the built-in node modules only (scripts/generate-contract.mjs uses node:zlib and node:fs) and the installed Node version supports `node --test`. Not executed during planning.",
+      "Bad input to exportCsv (e.g. non-array, or whatever the contract defines as invalid) throws TypeError per docs/CONVENTIONS.md line 7, unless the contract specifies otherwise."
+    ],
+    "acceptanceCriteria": [
+      "src/export.js exists, is plain ESM with no dependencies, and exports a function `exportCsv(records)` that returns a CSV string.",
+      "For the SAMPLE records in src/records.js, the output of exportCsv matches every rule in generated/export-contract.json (as produced by `npm run generate-schema`) exactly.",
+      "test/export.test.js exists, uses node:test, and covers each rule of the contract plus the TypeError path for bad input.",
+      "`npm test` exits 0 on a checkout where generated/ does not exist, with test/records.test.js still passing unchanged.",
+      "No files under generated/ are committed, vendor/ is unmodified, and no module other than those named in the plan's tasks is created."
+    ],
+    "tasks": [
+      {
+        "id": "read-export-contract",
+        "title": "Generate the export contract and report its exact requirements",
+        "description": "The planner could not read the export contract: generated/ is absent and gitignored, and vendor/export-contract.bundle is a packed binary. Run `npm run generate-schema` in the repository root (it runs scripts/generate-contract.mjs, which writes generated/export-contract.json). Read the whole generated file and report it in your result: reproduce every rule verbatim or near-verbatim (columns and their order, header, delimiter, quoting/escaping, line endings and trailing newline, row ordering, per-field normalisation or formatting, handling of missing/invalid values, encoding/BOM, and anything else it states), so the next task can implement against it without guessing. Also compare the rules against the sample records in src/records.js and note which sample quirks each rule affects. State explicitly whether the contract requires any module, file, or export other than `exportCsv` in src/export.js (for example a named helper module). docs/CONVENTIONS.md says a module that no task delivers must be added to the plan as its own task with its own tests and never written inside another task; if the contract requires such a module, do not create it: request the plan change (propose a graph change if that tool is available to you, otherwise call mcp__nexus__report_blocker with the contract text as evidence). Do not create or modify any tracked file, do not edit vendor/, and do not commit generated/. If the script fails, report the exact command output as a blocker rather than guessing the contract.",
+        "role": "worker",
+        "dependencies": [],
+        "parallelizable": false,
+        "suggestedFiles": [
+          "generated/export-contract.json"
+        ],
+        "acceptanceCriteria": [
+          "`npm run generate-schema` was run and its output (or its failure output) is quoted in the result.",
+          "The result contains the complete set of rules from generated/export-contract.json, with nothing summarised away.",
+          "The result states explicitly whether any module beyond src/export.js is required, and if so a plan change or blocker was raised instead of creating it.",
+          "`git status` shows no tracked file changed and nothing new staged or committed."
+        ],
+        "complexity": "small",
+        "risk": "low",
+        "requiresApproval": false
+      },
+      {
+        "id": "implement-export-csv",
+        "title": "Implement exportCsv in src/export.js with tests in test/export.test.js",
+        "description": "Create src/export.js exporting `exportCsv(records)`, which takes an array of analytics records shaped like SAMPLE in src/records.js (fields id, customer, amount, currency, timestamp) and returns CSV text. Create test/export.test.js with node:test tests. First run `npm run generate-schema` yourself (generated/ is gitignored and may not be present in your workspace) and read generated/export-contract.json; follow it exactly. Use the rule digest from the read-export-contract task as a cross-check, but the generated file is the authority; if the two disagree, follow the file and say so in your result. Do not invent behaviour the contract does not specify, and do not apply normalisations just because the sample data looks messy. Follow docs/CONVENTIONS.md: plain ESM JavaScript, no dependencies, tests with node:test under test/ using node:assert/strict (see test/records.test.js for the existing style), errors thrown for bad input are TypeError, never commit generated/. This task creates only src/export.js and test/export.test.js. If you find you need another module that no task delivers, do not write it here or inline a copy of it: request it as its own task (propose a graph change if available, otherwise mcp__nexus__report_blocker) and stop. Tests must assert the exact expected CSV string for SAMPLE and cover each contract rule individually (including quoting/escaping edge cases the contract defines, empty input, and the TypeError path). Tests must not read generated/export-contract.json, because it does not exist on a clean checkout; write expected values into the tests. Do not modify src/records.js, test/records.test.js, package.json, scripts/, or vendor/. Finish by running `npm test` and include its output in your result.",
+        "role": "worker",
+        "dependencies": [
+          "read-export-contract"
+        ],
+        "parallelizable": false,
+        "suggestedFiles": [
+          "src/export.js",
+          "test/export.test.js"
+        ],
+        "acceptanceCriteria": [
+          "src/export.js exports `exportCsv` as a named ESM export and has no imports outside node built-ins and this repository.",
+          "exportCsv(SAMPLE) returns exactly the CSV text the contract prescribes, asserted as a full-string comparison in test/export.test.js.",
+          "Each rule in generated/export-contract.json has at least one test that would fail if the rule were violated.",
+          "Invalid input throws TypeError, with a test asserting it.",
+          "`npm test` exits 0, including with the generated/ directory deleted.",
+          "`git status` shows only src/export.js and test/export.test.js as new files, and no other tracked file modified."
+        ],
+        "complexity": "medium",
+        "risk": "medium",
+        "requiresApproval": false
+      },
+      {
+        "id": "verify-export-contract-conformance",
+        "title": "Independently verify exportCsv against the generated contract",
+        "description": "Independently check the finished work. Run `npm run generate-schema` and read generated/export-contract.json yourself; do not rely on earlier tasks' summaries of it. Read src/export.js and test/export.test.js. Go through the contract rule by rule and confirm, with evidence (file and line, or command output), that exportCsv implements each rule exactly and that a test covers it. Run exportCsv on SAMPLE from src/records.js and compare the actual output character by character with what the contract prescribes, paying attention to line endings, trailing newline, quoting, column order and row order. Check the conventions in docs/CONVENTIONS.md: plain ESM, no dependencies, TypeError for bad input, only the planned modules created, generated/ not committed, vendor/ untouched. Check that tests were not written to merely mirror the implementation: expected values must be traceable to the contract. Run `npm test` and then run it again after deleting the generated/ directory to confirm tests do not depend on it. Report each deviation with the contract rule it violates; do not fix code yourself. Remove any temporary scripts you create.",
+        "role": "verifier",
+        "dependencies": [
+          "implement-export-csv"
+        ],
+        "parallelizable": false,
+        "suggestedFiles": [
+          "src/export.js",
+          "test/export.test.js"
+        ],
+        "acceptanceCriteria": [
+          "The result lists every contract rule with a pass/fail verdict and the evidence for it.",
+          "The actual output of exportCsv(SAMPLE) is quoted and compared against the contract.",
+          "`npm test` output is included for runs both with and without generated/ present, and both exit 0.",
+          "Convention checks (no dependencies, TypeError, only src/export.js and test/export.test.js added, vendor/ and generated/ not in the diff) are each reported with a verdict.",
+          "No temporary files are left in the working tree."
+        ],
+        "complexity": "small",
+        "risk": "low",
+        "requiresApproval": false
+      }
+    ],
+    "risks": [
+      {
+        "description": "The contract was not read during planning, so it may demand something this plan does not cover, such as an additional module or a shape of exportCsv output that the task descriptions do not anticipate.",
+        "mitigation": "The first task reports the full contract and must raise a plan change or blocker if another module is needed; the implementer has the same instruction and must not inline unplanned modules."
+      },
+      {
+        "description": "generated/export-contract.json is gitignored and may be missing in a later task's workspace, tempting an agent to implement from a summary or from guesses.",
+        "mitigation": "Each task that needs the contract re-runs `npm run generate-schema` itself and treats the generated file as the authority."
+      },
+      {
+        "description": "The implementer infers rules from the messy sample data (whitespace, Unicode, currency case, timezone, ordering) instead of from the contract, producing plausible but non-conforming output.",
+        "mitigation": "Task descriptions forbid behaviour the contract does not specify, and the verifier checks rule by rule against a freshly generated contract."
+      },
+      {
+        "description": "Tests that read generated/export-contract.json would fail `npm test` on a clean checkout where generated/ is absent.",
+        "mitigation": "Tests hard-code expected values; the verifier runs `npm test` with generated/ deleted."
+      },
+      {
+        "description": "`npm run generate-schema` could fail (corrupt bundle, Node version), leaving the contract unavailable.",
+        "mitigation": "The first task reports the exact failure output as a blocker instead of guessing; vendor/export-contract.bundle is never edited."
+      },
+      {
+        "description": "Subtle CSV details such as CRLF vs LF, trailing newline, or BOM are easy to get wrong and invisible in casual review.",
+        "mitigation": "Full-string equality assertions in tests and a character-by-character comparison in the verification task."
+      }
+    ]
+  },
+  "finishedAt": "2026-10-04T08:40:40.222Z",
+  "runId": "13377ea7-febd-4eb6-b97b-eadd28a3168b",
+  "runState": "paused",
+  "runError": null,
+  "baseCommit": "c2ede72c4b451ff10bdb5dfe8c714c6a20861cea",
+  "integrationBranch": "nexus/13377ea7/integration",
+  "plannerTools": [
+    {
+      "tool": "Bash",
+      "status": "denied",
+      "input": "{\"command\":\"cd \\\"C:/Users/user/AppData/Local/Temp/nexus-dyn-repo-oRE0xz\\\" && git ls-files && for f in $(git ls-files | grep -v '^vendor/'); do echo \\\"=== $f\\\"; cat -n \\\"$f\\\"; done\",\"description\":\"L"
+    },
+    {
+      "tool": "Bash",
+      "status": "completed",
+      "input": "{\"command\":\"git ls-files\",\"description\":\"List tracked files\"}"
+    },
+    {
+      "tool": "Glob",
+      "status": "completed",
+      "input": "{\"pattern\":\"**/*\"}"
+    },
+    {
+      "tool": "Bash",
+      "status": "completed",
+      "input": "{\"command\":\"cat -n .gitignore README.md docs/CONVENTIONS.md package.json scripts/generate-contract.mjs src/records.js test/records.test.js vendor/README.md\",\"description\":\"Print project files\"}"
+    },
+    {
+      "tool": "Bash",
+      "status": "failed",
+      "input": "{\"command\":\"ls -la vendor generated\",\"description\":\"List vendor and generated directories\"}"
+    },
+    {
+      "tool": "Bash",
+      "status": "denied",
+      "input": "{\"command\":\"node -e \\\"const z=require('node:zlib'),fs=require('node:fs');const K=Buffer.from('nexus-vendor-bundle-v3');const p=fs.readFileSync('vendor/export-contract.bundle');process.stdout.write(z.g"
+    },
+    {
+      "tool": "StructuredOutput",
+      "status": "completed",
+      "input": "{\"summary\":\"Add `src/export.js` exporting `exportCsv(records)` plus `test/export.test.js` (node:test), conforming to the generated export contract. The contract's contents could not be read during pla"
+    }
+  ],
+  "planV1TaskKeys": [
+    "read-export-contract",
+    "implement-export-csv",
+    "verify-export-contract-conformance"
+  ],
+  "planV1MentionsNormalization": false,
+  "tasks": [
+    {
+      "key": "read-export-contract",
+      "role": "worker",
+      "kind": "implement",
+      "state": "failed",
+      "attempt": 1,
+      "repairCycles": 3,
+      "startedAt": "2026-10-04T08:27:05.161Z",
+      "finishedAt": "2026-10-04T08:34:02.690Z",
+      "error": {
+        "what": "verification still failing after 3 repair cycle(s)",
+        "where": "read-export-contract",
+        "why": "Not passed: two of the four task criteria could not be verified, for reasons outside the implementation. The verifier role is blocked from running `npm run generate-schema`, and the bodies of the handoff messages (the task's \"result\") are not visible to me, so I cannot confirm what the result quotes or contains. Everything checkable in the worktree is consistent with the task having been done correctly: generated/export-contract.json exists and is gitignored, the tree is clean at c2ede72, no extra module was created, and the plan change for src/normalize.js is recorded as applied. A fourth repair cycle will not change this outcome; I raised a blocker asking for the result body to be exposed to the verifier, npm to be allowed, or a human to accept criteria 1 and 2. I also sent the planner the full contract as I read it from the generated file, with the sample-quirk comparison, so the next task is not left guessing. The contract does require a module beyond src/export.js: src/normalize.js exporting normalizeRecord(record), with test/normalize.test.js, delivered as its own task. Mission criteria about src/export.js and test/export.test.js belong to later tasks and are not assessed here.",
+        "retryable": true
+      }
+    },
+    {
+      "key": "implement-export-csv",
+      "role": "worker",
+      "kind": "implement",
+      "state": "blocked",
+      "attempt": 0,
+      "repairCycles": 0,
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null
+    },
+    {
+      "key": "verify-export-contract-conformance",
+      "role": "verifier",
+      "kind": "audit",
+      "state": "blocked",
+      "attempt": 0,
+      "repairCycles": 0,
+      "startedAt": null,
+      "finishedAt": null,
+      "error": null
+    },
+    {
+      "key": "normalize-module",
+      "role": "worker",
+      "kind": "implement",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 1,
+      "startedAt": "2026-10-04T08:34:05.374Z",
+      "finishedAt": "2026-10-04T08:40:36.407Z",
+      "error": null
+    },
+    {
+      "key": "read-export-contract-fix1",
+      "role": "debugger",
+      "kind": "repair",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0,
+      "startedAt": "2026-10-04T08:28:33.261Z",
+      "finishedAt": "2026-10-04T08:29:23.106Z",
+      "error": null
+    },
+    {
+      "key": "read-export-contract-fix2",
+      "role": "debugger",
+      "kind": "repair",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0,
+      "startedAt": "2026-10-04T08:30:13.095Z",
+      "finishedAt": "2026-10-04T08:31:03.096Z",
+      "error": null
+    },
+    {
+      "key": "read-export-contract-fix3",
+      "role": "debugger",
+      "kind": "repair",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0,
+      "startedAt": "2026-10-04T08:32:12.114Z",
+      "finishedAt": "2026-10-04T08:32:50.150Z",
+      "error": null
+    },
+    {
+      "key": "normalize-module-fix1",
+      "role": "debugger",
+      "kind": "repair",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0,
+      "startedAt": "2026-10-04T08:36:52.444Z",
+      "finishedAt": "2026-10-04T08:38:27.080Z",
+      "error": null
+    }
+  ],
+  "dependencies": [
+    {
+      "task": "implement-export-csv",
+      "dependsOn": "read-export-contract"
+    },
+    {
+      "task": "verify-export-contract-conformance",
+      "dependsOn": "implement-export-csv"
+    }
+  ],
+  "proposals": [
+    {
+      "id": "6fa3995d-2cc6-4937-bd58-8fa01d6b0471",
+      "type": "ADD_TASK",
+      "status": "rejected",
+      "proposedBy": "Worker/read-export-contract",
+      "proposedByAgentId": "7835f7a0-e9dd-4dd6-86c3-d07d96271b1d",
+      "task": "read-export-contract",
+      "reason": "Export contract v3 requires src/normalize.js (normalizeRecord) which no task delivers; CONVENTIONS.md says it must be its own task with tests, merged before src/export.js is completed.",
+      "evidence": "generated/export-contract.json prerequisites[0]: module src/normalize.js, export normalizeRecord(record), status \"MISSING: ... not part of the export task\"; delivery: separate task with test/normalize.test.js, merged before src/export.js. src/normalize.js absent in repo.",
+      "changes": {
+        "tasks": [],
+        "targetTask": null,
+        "dependsOn": null,
+        "blocksProposer": false,
+        "priority": null
+      },
+      "rejectionReason": "changes.tasks.0.dependencies: Invalid input: expected array, received undefined",
+      "revisionId": null,
+      "createdAt": "2026-10-04T08:27:15.142Z",
+      "resolvedAt": "2026-10-04T08:27:15.142Z"
+    },
+    {
+      "id": "9e714058-0e2d-4c0c-ad46-96faa49238d9",
+      "type": "ADD_TASK",
+      "status": "applied",
+      "proposedBy": "Worker/read-export-contract",
+      "proposedByAgentId": "7835f7a0-e9dd-4dd6-86c3-d07d96271b1d",
+      "task": "read-export-contract",
+      "reason": "Export contract v3 requires src/normalize.js (normalizeRecord) which no task delivers; CONVENTIONS.md says it must be its own task with tests, merged before src/export.js is completed.",
+      "evidence": "generated/export-contract.json prerequisites[0]: module src/normalize.js, export normalizeRecord(record), status \"MISSING: ... not part of the export task\"; delivery: separate task with test/normalize.test.js, merged before src/export.js. src/normalize.js absent in repo.",
+      "changes": {
+        "tasks": [
+          {
+            "key": "normalize-module",
+            "title": "Create src/normalize.js with normalizeRecord and test/normalize.test.js",
+            "description": "Plain ESM, no deps. export normalizeRecord(record) returning {id, customer, amount_minor, currency, day}. customer: Unicode NFC, trimmed, internal whitespace runs collapsed to one space. amount (number or decimal string, major units) -> amount_minor integer minor units, rounded half away from zero; non-finite/non-numeric throws TypeError. currency: upper-cased; not three ASCII letters throws TypeError. day: UTC calendar date YYYY-MM-DD of ISO 8601 timestamp; invalid timestamp throws TypeError. Tests with node:test in test/normalize.test.js.",
+            "role": "worker",
+            "dependencies": [],
+            "suggestedFiles": [
+              "src/normalize.js",
+              "test/normalize.test.js"
+            ],
+            "acceptanceCriteria": [
+              "src/normalize.js exports normalizeRecord implementing all four contract rules",
+              "test/normalize.test.js (node:test) covers each rule and each TypeError path using SAMPLE quirks",
+              "npm test exits 0 without generated/"
+            ],
+            "complexity": "small",
+            "risk": "low"
+          }
+        ],
+        "targetTask": null,
+        "dependsOn": null,
+        "blocksProposer": false,
+        "priority": null
+      },
+      "rejectionReason": null,
+      "revisionId": "da576917-41dc-4158-b1b4-74d483c757df",
+      "createdAt": "2026-10-04T08:27:21.256Z",
+      "resolvedAt": "2026-10-04T08:27:21.259Z"
+    }
+  ],
+  "revisions": [
+    {
+      "id": "bf02d725-c7c9-4183-9273-646df9d13785",
+      "version": 1,
+      "reason": "Approved plan",
+      "proposalId": null,
+      "tasks": [
+        "read-export-contract",
+        "implement-export-csv",
+        "verify-export-contract-conformance"
+      ],
+      "createdAt": "2026-10-04T08:27:02.692Z"
+    },
+    {
+      "id": "da576917-41dc-4158-b1b4-74d483c757df",
+      "version": 2,
+      "reason": "ADD_TASK: Add 1 task (normalize-module). Export contract v3 requires src/normalize.js (normalizeRecord) which no task delivers; CONVENTIONS.md says it must be its own task with tests, merged before src/export.js is completed.",
+      "proposalId": "9e714058-0e2d-4c0c-ad46-96faa49238d9",
+      "tasks": [
+        "read-export-contract",
+        "implement-export-csv",
+        "verify-export-contract-conformance",
+        "normalize-module"
+      ],
+      "createdAt": "2026-10-04T08:27:21.259Z"
+    }
+  ],
+  "proposer": {
+    "agentId": "7835f7a0-e9dd-4dd6-86c3-d07d96271b1d",
+    "label": "Worker/read-export-contract",
+    "role": "worker",
+    "model": "claude-sonnet-5-5",
+    "sdkSessions": [
+      {
+        "sdkSessionId": "ecffc42f-d618-4faf-bdea-3e8742b90f37",
+        "state": "ended",
+        "endReason": "completed"
+      }
+    ]
+  },
+  "proposerTask": {
+    "key": "read-export-contract",
+    "state": "failed",
+    "sessions": [
+      {
+        "agent": "Worker/read-export-contract",
+        "sdkSessionId": "ecffc42f-d618-4faf-bdea-3e8742b90f37",
+        "startedAt": "2026-10-04T08:27:05.167Z",
+        "endedAt": "2026-10-04T08:27:31.316Z",
+        "endReason": "completed"
+      }
+    ]
+  },
+  "addedTasks": [
+    {
+      "key": "normalize-module",
+      "state": "completed",
+      "startedAt": "2026-10-04T08:34:05.374Z",
+      "finishedAt": "2026-10-04T08:40:36.407Z"
+    }
+  ],
+  "graphEvents": [
+    {
+      "type": "graph.revised",
+      "at": "2026-10-04T08:27:02.692Z",
+      "payload": {
+        "proposalId": null,
+        "revisionId": "bf02d725-c7c9-4183-9273-646df9d13785",
+        "version": 1,
+        "summary": "Approved plan"
+      }
+    },
+    {
+      "type": "graph.proposed",
+      "at": "2026-10-04T08:27:15.142Z",
+      "payload": {
+        "proposalId": "6fa3995d-2cc6-4937-bd58-8fa01d6b0471",
+        "type": "ADD_TASK",
+        "proposedBy": "Worker/read-export-contract"
+      }
+    },
+    {
+      "type": "graph.rejected",
+      "at": "2026-10-04T08:27:15.143Z",
+      "payload": {
+        "proposalId": "6fa3995d-2cc6-4937-bd58-8fa01d6b0471",
+        "errors": [
+          "changes.tasks.0.dependencies: Invalid input: expected array, received undefined"
+        ]
+      }
+    },
+    {
+      "type": "graph.proposed",
+      "at": "2026-10-04T08:27:21.257Z",
+      "payload": {
+        "proposalId": "9e714058-0e2d-4c0c-ad46-96faa49238d9",
+        "type": "ADD_TASK",
+        "proposedBy": "Worker/read-export-contract"
+      }
+    },
+    {
+      "type": "graph.revised",
+      "at": "2026-10-04T08:27:21.259Z",
+      "payload": {
+        "proposalId": "9e714058-0e2d-4c0c-ad46-96faa49238d9",
+        "revisionId": "da576917-41dc-4158-b1b4-74d483c757df",
+        "version": 2,
+        "summary": "ADD_TASK: Add 1 task (normalize-module). Export contract v3 requires src/normalize.js (normalizeRecord) which no task delivers; CONVENTIONS.md says it must be its own task with tests, merged before src/export.js is completed."
+      }
+    }
+  ],
+  "yieldEvents": [],
+  "reviews": [
+    {
+      "task": "normalize-module",
+      "verdict": "approved",
+      "findings": 3
+    },
+    {
+      "task": "normalize-module",
+      "verdict": "approved",
+      "findings": 2
+    }
+  ],
+  "verifications": [
+    {
+      "task": "read-export-contract",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "verifier",
+      "passed": false,
+      "summary": "Not passed: two of the four task criteria are about the worker's result text, which was not supplied to me, so I could not verify them. I found no evidence of a defect in the work itself.\n\n- **What I could not check:** whether the result quotes the `npm run generate-schema` output and whether it rep"
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "verifier",
+      "passed": false,
+      "summary": "Two of four task criteria pass; the other two could not be verified and so are not passed. I found no defect in the work itself: the failures are because the task's result text was never made available to me.\n\n- **Not verified – generator output quoted:** the handoff message body is not in my inputs"
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "verifier",
+      "passed": false,
+      "summary": "Two of four task criteria are not passed, because I could not verify them: the task's result text is not visible to me (only message subjects are, and the diff is empty), and the verifier hook blocked `npm run generate-schema`, so I could neither read the quoted output nor reproduce it. The other tw"
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "read-export-contract",
+      "kind": "verifier",
+      "passed": false,
+      "summary": "Not passed: two of the four task criteria could not be verified, for reasons outside the implementation. The verifier role is blocked from running `npm run generate-schema`, and the bodies of the handoff messages (the task's \"result\") are not visible to me, so I cannot confirm what the result quotes"
+    },
+    {
+      "task": "normalize-module",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "normalize-module",
+      "kind": "verifier",
+      "passed": false,
+      "summary": "Not done: `normalizeRecord` breaks the currency and timestamp rules on edge inputs, so the first task criterion fails. The other task criteria and the applicable mission criteria pass.\n\n- **Currency:** validation runs after `toUpperCase()`, so inputs that are not three ASCII letters (`'ßa'`, `'uſd'`"
+    },
+    {
+      "task": "normalize-module",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "normalize-module",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "All three task criteria pass, and so do the two mission criteria that apply to this task. `npm test` exits 0 (9/9) with no generated/ directory, and only src/normalize.js and test/normalize.test.js were added.\n\nNot verified: I could not read generated/export-contract.json. The verifier hook blocked "
+    }
+  ],
+  "sessions": [
+    {
+      "agentId": "8fb43029-f0b2-4049-9124-a1701c93dc4d",
+      "agent": "Planner",
+      "role": "planner",
+      "purpose": "plan",
+      "task": null,
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "e381f550-6204-40d0-924d-e4f7d41a2f4f",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:25:54.678Z",
+      "endedAt": "2026-10-04T08:27:01.388Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "7835f7a0-e9dd-4dd6-86c3-d07d96271b1d",
+      "agent": "Worker/read-export-contract",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "read-export-contract",
+      "model": "claude-sonnet-5-5",
+      "sdkSessionId": "ecffc42f-d618-4faf-bdea-3e8742b90f37",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:27:05.167Z",
+      "endedAt": "2026-10-04T08:27:31.316Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "7df03c7d-0b57-4c16-ab43-35e1d641fb6c",
+      "agent": "Verifier/read-export-contract",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "read-export-contract",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "a2d6e104-0a3d-4ed5-8667-62047c62beb1",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:27:32.653Z",
+      "endedAt": "2026-10-04T08:28:33.258Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "8c185211-3bdc-4e17-81e9-0c2537b6955c",
+      "agent": "Debugger/read-export-contract-fix1",
+      "role": "debugger",
+      "purpose": "diagnose",
+      "task": "read-export-contract-fix1",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "20de6dc6-75f5-4994-89c7-5b6e2900303a",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:28:33.263Z",
+      "endedAt": "2026-10-04T08:29:23.105Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "96db7769-d957-4f0f-a76a-7a4e1c511384",
+      "agent": "Verifier/read-export-contract",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "read-export-contract",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "de019987-9253-49bd-8325-581dc96ecf98",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:29:24.487Z",
+      "endedAt": "2026-10-04T08:30:13.093Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "55783547-efb9-4738-acf4-99f3ca289a28",
+      "agent": "Debugger/read-export-contract-fix2",
+      "role": "debugger",
+      "purpose": "diagnose",
+      "task": "read-export-contract-fix2",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "29df9d31-071b-41cf-85f8-df1e0a0274e2",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:30:13.098Z",
+      "endedAt": "2026-10-04T08:31:03.095Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "5c82c8e3-718c-4edf-899e-240be58156ce",
+      "agent": "Verifier/read-export-contract",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "read-export-contract",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "d7580080-f03d-4898-bdca-3a4badbec1f4",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:31:04.342Z",
+      "endedAt": "2026-10-04T08:32:12.111Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "d0343912-024d-45b6-9071-dd9936c011e9",
+      "agent": "Debugger/read-export-contract-fix3",
+      "role": "debugger",
+      "purpose": "diagnose",
+      "task": "read-export-contract-fix3",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "834fe6d0-59d6-43ba-9a57-6549ec213607",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:32:12.119Z",
+      "endedAt": "2026-10-04T08:32:50.149Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "a5234a09-f25e-4487-91a6-48ca771909d6",
+      "agent": "Verifier/read-export-contract",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "read-export-contract",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "34ba2b92-43a2-4452-8a53-dd09e2eebc78",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:32:51.330Z",
+      "endedAt": "2026-10-04T08:34:02.689Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "9a4e9cff-71ed-4dd4-8d35-0263859dce7a",
+      "agent": "Worker/normalize-module",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "normalize-module",
+      "model": "claude-sonnet-5-5",
+      "sdkSessionId": "4eea0e9e-c7d1-4d70-953a-e24e70f5506f",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:34:05.378Z",
+      "endedAt": "2026-10-04T08:34:45.911Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "b5e55321-3569-4f72-8364-83599f6e9582",
+      "agent": "Reviewer/normalize-module",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "normalize-module",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "6d8874c9-2166-4da9-9b50-fe2df56ce47d",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:34:47.510Z",
+      "endedAt": "2026-10-04T08:35:40.651Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "f8a50c09-e2ac-4194-826b-f9d8384424b7",
+      "agent": "Verifier/normalize-module",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "normalize-module",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "0bd693ec-ccb9-4a9c-b5a6-1f2c6336b834",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:35:40.657Z",
+      "endedAt": "2026-10-04T08:36:52.442Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "37a0201c-026b-4559-94a0-74f9280850b4",
+      "agent": "Debugger/normalize-module-fix1",
+      "role": "debugger",
+      "purpose": "diagnose",
+      "task": "normalize-module-fix1",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "9533cffb-9fc9-4c0d-9720-3cc45130ad4e",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:36:52.447Z",
+      "endedAt": "2026-10-04T08:38:27.080Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "b2fd4f41-c7f6-4775-891e-d0ccd79a6ae6",
+      "agent": "Reviewer/normalize-module",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "normalize-module",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "c1ac23fd-09fb-48de-9ea0-e687ed90c9e1",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:38:28.409Z",
+      "endedAt": "2026-10-04T08:39:35.100Z",
+      "hasHandoff": false
+    },
+    {
+      "agentId": "039128c7-6ca3-40d4-b533-83edf618db4d",
+      "agent": "Verifier/normalize-module",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "normalize-module",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "51d556bb-c8e0-4b1e-8dad-f9236795101b",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T08:39:35.111Z",
+      "endedAt": "2026-10-04T08:40:35.730Z",
+      "hasHandoff": false
+    }
+  ],
+  "approvals": [
+    {
+      "kind": "tool",
+      "action": "Run shell command (bash)",
+      "command": "ls -la /c/Users/user/AppData/Local/Temp/nexus-dyn-data-3eqGfU/ /c/Users/user/AppData/Local/Temp/nexus-dyn-data-3eqGfU/worktrees/13377ea7/",
+      "risk": "medium",
+      "approved": false
+    },
+    {
+      "kind": "tool",
+      "action": "Run shell command (bash)",
+      "command": "ls -la src test vendor generated ../.. ../../..",
+      "risk": "medium",
+      "approved": false
+    },
+    {
+      "kind": "tool",
+      "action": "Run shell command (bash)",
+      "command": "cat > src/normalize.js <<'EOF'\nconst DECIMAL = /^([+-]?)(\\d*)\\.?(\\d*)$/\n\n// Convert a major-unit amount to integer minor units (2 decimals), half away from zero.\nfunction toMinor(amount) {\n  let text\n  if (typeof amount === 'number') {\n    if (!Number.isFinite(amount)) throw new TypeError('amount must be finite')\n    text = String(amount)\n    if (/e/i.test(text)) return Math.sign(amount) * Math.round(Math.abs(amount) * 100)\n  } else if (typeof amount === 'string') {\n    text = amount.trim()\n  } else {\n    throw new TypeError('amount must be a number or decimal string')\n  }\n  const m = DECIMAL.exec(text)\n  if (!m || (m[2] === '' && m[3] === '')) throw new TypeError(`invalid amount: ${amount}`)\n  const [, sign, whole, frac] = m\n  const padded = (frac + '00').slice(0, 2)\n  let minor = BigInt(whole + padded || '0')\n  if (frac.length > 2 && frac[2] >= '5') minor += 1n\n  const n = Number(minor)\n  if (!Number.isSafeInteger(n)) throw new TypeError(`amount out of range: ${amount}`)\n  return sign === '-' && n !== 0 ? -n : n\n}\n\nexport function normalizeRecord(record) {\n  const customer = String(record.customer ?? '').normalize('NFC').trim().replace(/\\s+/g, ' ')\n  const currency = typeof record.currency === 'string' ? record.currency.toUpperCase() : ''\n  if (!/^[A-Z]{3}$/.test(currency)) throw new TypeError(`invalid currency: ${record.currency}`)\n  const date = new Date(record.timestamp)\n  if (typeof record.timestamp !== 'string' || Number.isNaN(date.getTime())) {\n    throw new TypeError(`invalid timestamp: ${record.timestamp}`)\n  }\n  return {\n    id: record.id,\n    customer,\n    amount_minor: toMinor(record.amount),\n    currency,\n    day: date.toISOString().slice(0, 10),\n  }\n}\nEOF\ncat > test/normalize.test.js <<'EOF'\nimport test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { SAMPLE } from '../src/records.js'\nimport { normalizeRecord } from '../src/normalize.js'\n\nconst base = SAMPLE[1]\n\ntest('normalizes SAMPLE records', () => {\n  assert.deepEqual(normalizeRecord(SAMPLE[0]), {\n    id: 'r2', customer: 'Ada Lovelace', amount_minor: 1250, currency: 'EUR', day: '2026-03-02',\n  })\n  assert.deepEqual(normalizeRecord(SAMPLE[1]), {\n    id: 'r1', customer: 'Zoé Dupont', amount_minor: 300, currency: 'USD', day: '2026-03-01',\n  })\n})\n\ntest('customer is NFC', () => {\n  assert.equal(normalizeRecord(base).customer, 'Zoé Dupont')\n})\n\ntest('amount rounds half away from zero', () => {\n  const a = (amount) => normalizeRecord({ ...base, amount }).amount_minor\n  assert.equal(a('1.005'), 101)\n  assert.equal(a('-1.005'), -101)\n  assert.equal(a(0.004), 0)\n  assert.equal(a('2.5'), 250)\n})\n\ntest('day is UTC date', () => {\n  assert.equal(normalizeRecord({ ...base, timestamp: '2026-03-02T23:30:00-05:00' }).day, '2026-03-03')\n})\n\ntest('TypeError paths', () => {\n  for (const amount of [NaN, Infinity, 'abc', '', null, undefined, '1.2.3']) {\n    assert.throws(() => normalizeRecord({ ...base, amount }), TypeError)\n  }\n  for (const currency of ['EU', 'EURO', 'E1R', 'é€$', undefined, 5]) {\n    assert.throws(() => normalizeRecord({ ...base, currency }), TypeError)\n  }\n  for (const timestamp of ['nope', '', undefined, 123]) {\n    assert.throws(() => normalizeRecord({ ...base, timestamp }), TypeError)\n  }\n})\nEOF\nnpm test 2>&1 | tail -15",
+      "risk": "medium",
+      "approved": false
+    },
+    {
+      "kind": "tool",
+      "action": "Run shell command (bash)",
+      "command": "cat > src/normalize.js <<'EOF'\nconst DECIMAL = /^([+-]?)(\\d*)\\.?(\\d*)$/\nconst CURRENCY = /^[A-Za-z]{3}$/\n// ISO 8601 calendar date, optionally with a time that carries an explicit UTC offset.\nconst ISO_TIMESTAMP = /^(\\d{4})-(\\d{2})-(\\d{2})(?:T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2}))?$/\n\n// Convert a major-unit amount to integer minor units (2 decimals), half away from zero.\nfunction toMinor(amount) {\n  let text\n  if (typeof amount === 'number') {\n    if (!Number.isFinite(amount)) throw new TypeError('amount must be finite')\n    text = String(amount)\n    // String() only uses exponent notation below 1e-6 (rounds to zero) or from 1e21 (out of range).\n    if (/e/i.test(text)) {\n      if (Math.abs(amount) >= 1) throw new TypeError(`amount out of range: ${amount}`)\n      return 0\n    }\n  } else if (typeof amount === 'string') {\n    text = amount.trim()\n  } else {\n    throw new TypeError('amount must be a number or decimal string')\n  }\n  const m = DECIMAL.exec(text)\n  if (!m || (m[2] === '' && m[3] === '')) throw new TypeError(`invalid amount: ${amount}`)\n  const [, sign, whole, frac] = m\n  const padded = (frac + '00').slice(0, 2)\n  let minor = BigInt(whole + padded || '0')\n  if (frac.length > 2 && frac[2] >= '5') minor += 1n\n  const n = Number(minor)\n  if (!Number.isSafeInteger(n)) throw new TypeError(`amount out of range: ${amount}`)\n  return sign === '-' && n !== 0 ? -n : n\n}\n\n// UTC calendar date (YYYY-MM-DD) of an ISO 8601 timestamp.\nfunction toUtcDay(timestamp) {\n  const m = typeof timestamp === 'string' ? ISO_TIMESTAMP.exec(timestamp) : null\n  const date = new Date(m ? timestamp : NaN)\n  // Date rolls impossible days over (Feb 30 -> Mar 2), so check the calendar date itself.\n  const calendar = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : date\n  if (Number.isNaN(date.getTime()) || calendar.toISOString().slice(0, 10) !== timestamp.slice(0, 10)) {\n    throw new TypeError(`invalid timestamp: ${timestamp}`)\n  }\n  return date.toISOString().slice(0, 10)\n}\n\nexport function normalizeRecord(record) {\n  const customer = String(record.customer ?? '').normalize('NFC').trim().replace(/\\s+/g, ' ')\n  // Validate before upper-casing: toUpperCase() maps some non-ASCII letters to ASCII ('ß' -> 'SS').\n  if (typeof record.currency !== 'string' || !CURRENCY.test(record.currency)) {\n    throw new TypeError(`invalid currency: ${record.currency}`)\n  }\n  return {\n    id: record.id,\n    customer,\n    amount_minor: toMinor(record.amount),\n    currency: record.currency.toUpperCase(),\n    day: toUtcDay(record.timestamp),\n  }\n}\nEOF\nnode -e \"\nimport('./src/normalize.js').then(({normalizeRecord:n})=>{const b={id:'x',customer:'a',amount:'1',currency:'USD',timestamp:'2026-03-01T00:00:00Z'};\nfor(const [k,v] of [['currency','ßa'],['currency','uſd'],['currency','ınr'],['currency','ﬁa'],['currency','eUr'],['timestamp','March 1, 2026'],['timestamp','1'],['timestamp','2026-02-30'],['timestamp','2026-02-30T10:00:00Z'],['timestamp','2026-03-01T08:00:00'],['timestamp','2026-03-01'],['timestamp','2026-03-01T00:30+02:00'],['timestamp','2026-13-01'],['timestamp','0000-01-01'],['timestamp','2026-03-01T08:00:00.123456Z'],['timestamp','2026-03-01T25:00:00Z'],['amount',-1e-7],['amount',1e21],['amount',-1e21],['amount',1e-7],['amount',1.5e300],['amount',-0.001],['amount',-0],['amount',1.005],['amount',-2.675],['amount',123456789012345680000]]){try{const r=n({...b,[k]:v});console.log(k,JSON.stringify(v),'->',Object.is(r.amount_minor,-0)?'-0':r.amount_minor,r.currency,r.day)}catch(e){console.log(k,v,'THROWS',e.name)}}})\"",
+      "risk": "medium",
+      "approved": false
+    },
+    {
+      "kind": "tool",
+      "action": "Run shell command (bash)",
+      "command": "rm -f probe.tmp.mjs && rm -rf generated && npm test 2>&1 | tail -20 && git stash list | head -0; git status --short",
+      "risk": "high",
+      "approved": false
+    },
+    {
+      "kind": "tool",
+      "action": "Run PowerShell command",
+      "command": "Remove-Item -Force -Confirm:$false probe.tmp.mjs; Remove-Item -Recurse -Force -Confirm:$false generated; npm test; git status --short",
+      "risk": "high",
+      "approved": false
+    }
+  ],
+  "independentTestRun": {
+    "lines": [],
+    "pass": 0,
+    "fail": -1
+  },
+  "git": {
+    "userHeadUnchanged": true,
+    "userStatus": "",
+    "integrationFiles": [
+      ".gitignore",
+      "README.md",
+      "docs/CONVENTIONS.md",
+      "package.json",
+      "scripts/generate-contract.mjs",
+      "src/normalize.js",
+      "src/records.js",
+      "test/normalize.test.js",
+      "test/records.test.js",
+      "vendor/README.md",
+      "vendor/export-contract.bundle"
+    ]
+  },
+  "gates": {
+    "plan v1 does not contain the hidden prerequisite": true,
+    "an ADD_TASK proposal exists and was applied": true,
+    "the proposal was made by a real SDK session": true,
+    "a graph revision was created from the proposal": true,
+    "the proposed task was added to the graph (absent from plan v1)": true,
+    "a dependency from the proposer to the new task was created": false,
+    "the new prerequisite task executed and completed": true,
+    "the original task resumed after the prerequisite and completed": false,
+    "the run completed": false,
+    "mission verification passed": false,
+    "independent test run passes": false,
+    "the user checkout is untouched": true
+  },
+  "verdict": "FAIL"
+}

@@ -20,6 +20,12 @@ const revisionCodec: Codec<GraphRevision> = {
   fields: { id: 'text', runId: 'text', version: 'num', reason: 'text', proposalId: 'text', snapshot: 'json', createdAt: 'text' },
 }
 
+export type GraphRevisionMeta = Omit<GraphRevision, 'snapshot'>
+const revisionMetaCodec: Codec<GraphRevisionMeta> = {
+  table: 'graph_revisions',
+  fields: { id: 'text', runId: 'text', version: 'num', reason: 'text', proposalId: 'text', createdAt: 'text' },
+}
+
 export class GraphRevisionRepository extends Table<GraphRevision> {
   constructor(db: Database) {
     super(db, revisionCodec, 'graph revision')
@@ -28,6 +34,24 @@ export class GraphRevisionRepository extends Table<GraphRevision> {
   /** Ordered by version. */
   listByRun(runId: string): GraphRevision[] {
     return this.byRun(runId, 'version')
+  }
+
+  /** Revision headers without their snapshots, by version. */
+  listMetaByRun(runId: string): GraphRevisionMeta[] {
+    const rows = prepare(this.db, 'SELECT id, run_id, version, reason, proposal_id, created_at FROM graph_revisions WHERE run_id = ? ORDER BY version').all(runId) as Row[]
+    return rows.map((r) => decode(revisionMetaCodec, r))
+  }
+
+  /** Versions whose snapshot mentions one of the task ids (a substring test in SQL, no JSON parsing). */
+  versionsMentioning(runId: string, taskIds: readonly string[]): Set<number> {
+    if (taskIds.length === 0) return new Set()
+    const clause = taskIds.map(() => 'instr(snapshot, ?) > 0').join(' OR ')
+    const rows = prepare(this.db, `SELECT version FROM graph_revisions WHERE run_id = ? AND (${clause})`).all(runId, ...taskIds) as { version: number }[]
+    return new Set(rows.map((r) => r.version))
+  }
+
+  getByVersion(runId: string, version: number): GraphRevision | null {
+    return this.one('WHERE run_id = ? AND version = ?', [runId, version])
   }
 
   latest(runId: string): GraphRevision | null {
@@ -443,6 +467,16 @@ export class ContextPackRepository {
   /** Newest first, entries included. */
   listByRun(runId: string): ContextPack[] {
     return this.packs.listWhere('run_id', runId).map((p) => this.withEntries(p))
+  }
+
+  /** Pack ids and purposes only (no entries), newest first, with the true total; for the given tasks or the whole run. */
+  listMeta(runId: string, taskIds: readonly string[] | null, limit: number): { items: { id: string; purpose: string; createdAt: string }[]; total: number } {
+    if (taskIds && taskIds.length === 0) return { items: [], total: 0 }
+    const scope = taskIds ? ` AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
+    const params = [runId, ...(taskIds ?? [])]
+    const rows = prepare(this.db, `SELECT id, purpose, created_at FROM context_packs WHERE run_id = ?${scope} ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(...params, limit) as { id: string; purpose: string; created_at: string }[]
+    const total = (prepare(this.db, `SELECT COUNT(*) AS n FROM context_packs WHERE run_id = ?${scope}`).get(...params) as { n: number }).n
+    return { items: rows.map((r) => ({ id: r.id, purpose: r.purpose, createdAt: r.created_at })), total }
   }
 
   private withEntries(pack: PackRow): ContextPack {

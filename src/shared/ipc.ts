@@ -35,6 +35,15 @@ import type {
   RoutingDecision,
 } from './v2'
 import { SettingsSchema, type Settings } from './settings'
+import {
+  EndActionSchema,
+  EndConditionsSchema,
+  OVERNIGHT_CONFIRMATION_TEXT,
+  OvernightPolicySchema,
+  type OvernightStatus,
+  type PowerAuditEntry,
+  type RunCheckpoint,
+} from './overnight'
 
 const Id = z.string().min(1).max(64)
 const Empty = z.object({}).strict()
@@ -146,6 +155,8 @@ export const ipcInputs = {
       requirePlanApproval: z.boolean().optional(),
       planningMode: z.enum(['single', 'consensus']).optional(),
       reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
+      /** Rotate agent sessions after this many turns (0 disables). Lets an acceptance run exercise rotation cheaply. */
+      sessionRotationTurns: z.number().int().min(0).max(1000).optional(),
     })
     .strict(),
   'runs.approvePlan': z.object({ runId: Id }).strict(),
@@ -230,6 +241,41 @@ export const ipcInputs = {
   'intelligence.list': z.object({ projectId: Id, query: z.string().max(500).optional(), includeStale: z.boolean().optional() }).strict(),
   'intelligence.refresh': z.object({ projectId: Id }).strict(),
   'context.packs': z.object({ taskId: Id.optional(), agentId: Id.optional() }).strict(),
+
+  // v0.2.1: Overnight Mode. The renderer chooses from enums and bounded numbers; it never supplies a
+  // command, an executable or an argument. Main decides what actually runs.
+  'overnight.start': z
+    .object({
+      projectId: Id,
+      preset: PresetSchema,
+      prompt: z.string().min(1).max(20_000),
+      policy: OvernightPolicySchema,
+      /** The run-specific authorization: the ticked box and the exact sentence that was shown. */
+      confirmed: z.literal(true),
+      confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT),
+      maxParallelAgents: z.number().int().min(1).max(16).optional(),
+      maxIterations: z.number().int().min(1).max(50).optional(),
+      planningMode: z.enum(['single', 'consensus']).optional(),
+      reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
+    })
+    .strict(),
+  'overnight.get': z.object({ runId: Id }).strict(),
+  'overnight.active': Empty,
+  'overnight.cancelPower': z.object({ runId: Id }).strict(),
+  'overnight.changeEndAction': z
+    .object({
+      runId: Id,
+      endAction: EndActionSchema.optional(),
+      shutdownOn: EndConditionsSchema.optional(),
+      finalDelaySeconds: z.number().int().min(10).max(3600).optional(),
+      forceCloseApplications: z.boolean().optional(),
+    })
+    .strict(),
+  'overnight.extend': z.object({ runId: Id, minutes: z.number().int().min(1).max(24 * 60) }).strict(),
+  'overnight.cancelMission': z.object({ runId: Id }).strict(),
+  'overnight.report': z.object({ runId: Id }).strict(),
+  'overnight.audit': z.object({ runId: Id }).strict(),
+  'overnight.checkpoints': z.object({ runId: Id }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -296,6 +342,17 @@ export interface IpcOutputs {
   'intelligence.list': RepositoryFact[]
   'intelligence.refresh': { facts: number; stale: number }
   'context.packs': ContextPack[]
+  'overnight.start': { run: Run; overnight: OvernightStatus }
+  /** Null when the run is not an overnight run. */
+  'overnight.get': OvernightStatus | null
+  'overnight.active': OvernightStatus[]
+  'overnight.cancelPower': OvernightStatus
+  'overnight.changeEndAction': OvernightStatus
+  'overnight.extend': OvernightStatus
+  'overnight.cancelMission': OvernightStatus
+  'overnight.report': { text: string | null; path: string | null }
+  'overnight.audit': PowerAuditEntry[]
+  'overnight.checkpoints': RunCheckpoint[]
 }
 
 export type IpcResult<T> =

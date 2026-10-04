@@ -212,6 +212,9 @@ export function tokenize(input: string, shell: Shell, depth = 0): Segment[] {
       continue
     }
     if (c === '`' && !ps) {
+      if (words.length === 0 && !started && pending === null) {
+        extra.push({ words: ['$(<substitution>)'], redirects: [], sep: '', raw: '`' })
+      }
       endSegment('`', i)
       i++
       continue
@@ -228,6 +231,10 @@ export function tokenize(input: string, shell: Shell, depth = 0): Segment[] {
         i++
         continue
       }
+    }
+    if (c === '$' && next === '(' && !ps && words.length === 0 && !started && pending === null && input.charAt(i + 2) !== '(') {
+      // A command substitution in command position: the command's name is computed at run time.
+      extra.push({ words: ['$(<substitution>)'], redirects: [], sep: '', raw: '$(' })
     }
     if ((c === '$' || c === '@') && (next === '(' || (next === '{' && c === '@' && ps))) {
       // `$(` and `@(` are handled by the following paren; keep the sigil out of the word.
@@ -287,4 +294,138 @@ function matchParen(input: string, start: number): { inner: string; end: number 
     i++
   }
   return { inner: input.slice(start), end: input.length }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Inert heredoc text (git commit messages)
+// ---------------------------------------------------------------------------------------------
+
+const GIT_PREFIX = String.raw`(?:^|[\n;&|])[ \t]*git(?:[ \t]+-C[ \t]+(?:"[^"\n$\`]*"|'[^'\n]*'|[^\s"'$\`;&|()<>]+))*[ \t]+commit`
+/** `git commit [simple flags] -m "` immediately before a substitution. Flags may not take values. */
+const COMMIT_MESSAGE_PREFIX = new RegExp(
+  `${GIT_PREFIX}(?:[ \t]+--?[A-Za-z][A-Za-z-]*)*[ \t]+(?:-[A-Za-z]*m|--message)(?:[ \t]+|=)"$`,
+)
+/** `git commit [simple flags] -F -` immediately before a quoted heredoc. */
+const COMMIT_STDIN_PREFIX = new RegExp(`${GIT_PREFIX}(?:[ \t]+--?[A-Za-z][A-Za-z-]*)*[ \t]+(?:-F|--file)(?:[ \t]+|=)-[ \t]+$`)
+const MESSAGE_OPENER = /\$\([ \t]*cat[ \t]+<<(-?)[ \t]*'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/g
+const STDIN_OPENER = /<<(-?)[ \t]*'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\r?\n/g
+
+/** True when `s` ends outside every single-quoted, double-quoted or backtick region (bash rules). */
+function quotesBalanced(s: string): boolean {
+  let quote = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charAt(i)
+    if (quote === "'") {
+      if (c === "'") quote = ''
+    } else if (c === '\\') i++
+    else if (quote !== '') {
+      if (c === quote) quote = ''
+    } else if (c === '"' || c === "'" || c === '`') quote = c
+  }
+  return quote === ''
+}
+
+/** Index just past the heredoc terminator line (including its newline), or -1 when it never terminates. */
+function heredocEnd(text: string, from: number, delim: string, stripTabs: boolean): number {
+  let pos = from
+  while (pos <= text.length) {
+    const nl = text.indexOf('\n', pos)
+    const raw = text.slice(pos, nl < 0 ? text.length : nl).replace(/\r$/, '')
+    if ((stripTabs ? raw.replace(/^\t+/, '') : raw) === delim) return nl < 0 ? text.length : nl + 1
+    if (nl < 0) return -1
+    pos = nl + 1
+  }
+  return -1
+}
+
+/**
+ * Replaces the text of a quoted heredoc used purely as a git commit message with an inert placeholder,
+ * so prose such as "Co-Authored-By: X <a@b.c>" or "rm -rf" is not parsed as shell. Only two shapes
+ * qualify, and only for `git commit`:
+ *   git commit [flags] -m "$(cat <<'EOF' ... EOF )"   (substitution holds nothing but that heredoc)
+ *   git commit [flags] -F - <<'EOF' ... EOF
+ * The delimiter must be quoted (no expansion in the body), the opener line must hold nothing else, the
+ * terminator must be a line of its own, and the substitution must close immediately after it. Anything
+ * else is returned untouched and analysed as ordinary shell.
+ */
+export function neutralizeCommitHeredocs(text: string): string {
+  if (!text.includes('<<')) return text
+  let out = text
+  for (const [opener, prefixRe, mode] of [
+    [MESSAGE_OPENER, COMMIT_MESSAGE_PREFIX, 'message'],
+    [STDIN_OPENER, COMMIT_STDIN_PREFIX, 'stdin'],
+  ] as const) {
+    let from = 0
+    for (let guard = 0; guard < 16; guard++) {
+      opener.lastIndex = from
+      const m = opener.exec(out)
+      if (m === null) break
+      from = m.index + 1
+      const before = out.slice(0, m.index)
+      const prefix = prefixRe.exec(before)
+      if (prefix === null || !quotesBalanced(out.slice(0, prefix.index))) continue
+      const end = heredocEnd(out, m.index + m[0].length, m[2] ?? '', m[1] === '-')
+      if (end < 0) continue
+      if (mode === 'message') {
+        const close = /^[ \t\r\n]*\)"/.exec(out.slice(end))
+        if (close === null) continue
+        out = `${before}MESSAGE${out.slice(end + close[0].length - 1)}`
+      } else {
+        out = `${before.replace(/[ \t]+$/, '')}${out.slice(end - (out.charAt(end - 1) === '\n' ? 1 : 0))}`
+      }
+      from = 0
+    }
+  }
+  return out
+}
+
+// A redirection target: simple unquoted word, or a quoted string without expansion.
+const TARGET = String.raw`(?:"[^"\n$\`]*"|'[^'\n]*'|[^\s"'$\`;&|<>()-][^\s"'$\`;&|<>()]*)`
+const REDIRECT = String.raw`(?:\d?>>?[ \t]*${TARGET}|\d?>&\d)`
+/** Start of a command (line start or after ; & |, never "(" or a backtick), then `cat` with only output redirections. */
+const CAT_PREFIX = new RegExp(String.raw`(?:^|[\n;&|])[ \t]*cat(?:[ \t]+${REDIRECT})*[ \t]*$`)
+/** `tee [-a] file...` */
+const TEE_PREFIX = new RegExp(String.raw`(?:^|[\n;&|])[ \t]*tee(?:[ \t]+-a)?(?:[ \t]+${TARGET})+[ \t]*$`)
+/** What may follow the opener on its line: more output redirections, then end of line, a comment, && || or ; (never a lone pipe). */
+const OPENER_REST = new RegExp(String.raw`^(?:[ \t]*${REDIRECT})*[ \t]*(?:$|#|&&|\|\||;)`)
+const ANY_OPENER = /(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))/g
+
+/**
+ * Removes heredocs that are plain data from the text that gets analysed as shell: the delimiter is quoted
+ * ('EOF' or "EOF", so nothing in the body expands), the only consumer on the command is `cat` (optionally
+ * redirected to files) or `tee <files>`, the opener line carries nothing but further redirections or a
+ * following && / || / ; command, and the terminator is a line of its own. Redirection targets stay in the
+ * text, so the usual path checks still apply to them. Everything else is left exactly as written:
+ * interpreters and any other consumer, unquoted delimiters, `cat <<'EOF' | sh`, several heredocs opened on
+ * one line. Bodies of heredocs that are not removed are skipped, so text inside them is never mistaken for
+ * a command line. Text after the terminator is analysed normally.
+ */
+export function neutralizeInertHeredocs(text: string): string {
+  if (!text.includes('<<')) return text
+  let out = text
+  let scanFrom = 0
+  for (let guard = 0; guard < 64; guard++) {
+    ANY_OPENER.lastIndex = scanFrom
+    const m = ANY_OPENER.exec(out)
+    if (m === null) break
+    const before = out.slice(0, m.index)
+    if (!quotesBalanced(before)) break
+    const openerEnd = m.index + m[0].length
+    const nl = out.indexOf('\n', openerEnd)
+    if (nl < 0) break
+    const restLine = out.slice(openerEnd, nl).replace(/\r$/, '')
+    if (/<<(?!<)/.test(restLine.replace(/(['"]).*?\1/g, ''))) break // several heredocs on one line: give up
+    const quoted = m[2] !== undefined || m[3] !== undefined
+    const delim = m[2] ?? m[3] ?? m[4] ?? ''
+    const end = delim === '' ? -1 : heredocEnd(out, nl + 1, delim, m[1] === '-')
+    if (end < 0) break
+    const inert = quoted && (CAT_PREFIX.test(before) || TEE_PREFIX.test(before)) && OPENER_REST.test(restLine)
+    if (inert) {
+      out = `${before.replace(/[ \t]+$/, '')}${restLine}\n${out.slice(end)}`
+      scanFrom = 0 // earlier text is unchanged, but positions after it moved; rescan is cheap
+      continue
+    }
+    scanFrom = end // skip the body of a heredoc we cannot vouch for
+  }
+  return out
 }

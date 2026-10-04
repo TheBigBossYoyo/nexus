@@ -1,0 +1,6 @@
+export { FakePowerController } from './fake-power-controller'
+export type { FakePowerCall } from './fake-power-controller'
+export { WindowsPowerController } from './windows-power-controller'
+export type { SpawnLike, WindowsPowerControllerOptions } from './windows-power-controller'
+export { buildShutdownArgs, isEffectivelyForced, SHUTDOWN_MESSAGES } from './types'
+export type { PendingShutdown, PowerController, PowerState, ShutdownRequest } from './types'

@@ -15,6 +15,7 @@ import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
 import type { GitService } from '@main/modules/git'
+import type { OvernightSupervisor } from '@main/modules/overnight'
 import { attachArbitration, refreshProjectFacts, type Orchestrator } from '@main/modules/orchestrator'
 import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
@@ -26,7 +27,18 @@ export interface IpcContext {
   git: GitService
   runtime: AgentRuntime
   orchestrator: Orchestrator
+  /**
+   * Overnight Mode. The handlers reach power control only through the supervisor's typed operations;
+   * the power controller itself is never part of this context.
+   */
+  overnight?: OvernightSupervisor
   appInfo: () => Promise<AppInfo>
+  /**
+   * Native confirmation shown by the main process before NEXUS is given authority over Windows power
+   * state. The renderer's own dialog is a convenience; this one is the control, because a script running
+   * in the renderer cannot click it.
+   */
+  confirmPower?: (message: string, detail: string) => Promise<boolean>
   /** Native folder picker; resolves null when cancelled. Lives in main, never in the renderer. */
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
@@ -40,6 +52,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
   const projects = new ProjectService(repos, ctx.git)
   const queries = new QueryService(repos, ctx.git)
   let authCache: AuthStatus | null = null
+  const overnight = (): OvernightSupervisor => {
+    if (!ctx.overnight) throw new NexusError('runtime_unavailable', 'Overnight Mode is not available in this process')
+    return ctx.overnight
+  }
 
   return {
     'app.info': () => ctx.appInfo(),
@@ -81,10 +97,23 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       if (active.length > 0) {
         throw new NexusError('invalid_state', 'Cancel the active runs of this project before removing it')
       }
+      // The overnight record is the only thing that knows about an armed Windows shutdown timer or a
+      // pending power action; it must not disappear with the project.
+      for (const run of repos.runs.listByProject(projectId)) {
+        const overnightRun = repos.overnight.getByRun(run.id)
+        if (!overnightRun) continue
+        const armed = overnightRun.failsafe !== null && overnightRun.failsafe.result.ok && !overnightRun.failsafe.cancelledAt && !overnightRun.failsafe.lostAt
+        const pending = overnightRun.powerAction !== null && !overnightRun.powerAction.cancelledAt && !overnightRun.powerAction.executedAt
+        const live = ['ARMING', 'RUNNING', 'QUOTA_PAUSED', 'FINALIZING', 'POWER_ACTION_SCHEDULED', 'CANCELLING'].includes(overnightRun.state)
+        if (live || armed || pending) {
+          throw new NexusError('invalid_state', 'This project has an overnight run with a shutdown timer or power action still pending. Cancel the shutdown first.')
+        }
+      }
       // Removes NEXUS records only; the repository on disk is not touched.
       // Per-run and per-session bookkeeping lives in settings keys that no foreign key cascades to.
       for (const run of repos.runs.listByProject(projectId)) {
         repos.settings.deleteValue(`run-active:${run.id}`)
+        repos.settings.deleteValue(`overnight-heartbeat:${run.id}`)
         for (const task of repos.tasks.listByRun(run.id)) repos.settings.deleteValue(`graph-yield:${task.id}`)
         for (const approval of repos.approvals.listByRun(run.id)) repos.settings.deleteValue(`graph-approval:${approval.id}`)
         for (const agent of repos.agents.listByRun(run.id)) {
@@ -119,7 +148,11 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'runs.cancel': ({ runId }) => orchestrator.cancelRun(runId),
     'runs.summary': ({ runId }) => queries.runSummary(runId),
     'runs.diff': ({ runId }) => queries.runDiff(repos.runs.require(runId)),
-    'runs.recoverable': () => orchestrator.listRecoverable(),
+    // A live overnight run is recovered by its supervisor without anyone clicking; it is not offered in the dialog.
+    'runs.recoverable': () => {
+      const overnightRuns = new Set((ctx.overnight?.active() ?? []).map((o) => o.runId))
+      return orchestrator.listRecoverable().filter((r) => !overnightRuns.has(r.run.id))
+    },
     'runs.recover': ({ runId, action }) => orchestrator.recover(runId, action),
     'runs.cleanup': async ({ runId }) => {
       await orchestrator.cleanupRun(runId)
@@ -224,6 +257,51 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       const seen = new Set<string>()
       return packs.filter((p) => !seen.has(p.id) && seen.add(p.id))
     },
+
+    'overnight.start': async ({ confirmed, confirmation, ...input }) => {
+      const defined = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as typeof input
+      const supervisor = overnight()
+      const p = input.policy
+      if (ctx.confirmPower) {
+        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const detail = [
+          `Project: ${repos.projects.require(input.projectId).name}`,
+          `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
+          `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the mission ends`,
+          `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
+          p.endAction !== 'NONE' && p.failsafeEnabled
+            ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
+            : 'Failsafe: none',
+        ].join('\n')
+        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Start an unattended overnight run?' : 'Authorize NEXUS to control Windows power state for this run?', detail)
+        if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
+      }
+      return supervisor.start({ ...defined, confirmed, confirmation })
+    },
+    'overnight.get': ({ runId }) => ctx.overnight?.status(runId) ?? null,
+    'overnight.active': () => ctx.overnight?.active() ?? [],
+    'overnight.cancelPower': ({ runId }) => overnight().cancelPower(runId),
+    'overnight.changeEndAction': async ({ runId, ...change }) => {
+      const defined = Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined))
+      const supervisor = overnight()
+      const current = supervisor.status(runId)
+      // Anything that gives NEXUS more power than was authorized needs the native confirmation again.
+      const escalates =
+        current !== null &&
+        ((change.endAction !== undefined && change.endAction !== 'NONE' && change.endAction !== current.policy.endAction) ||
+          (change.forceCloseApplications === true && !current.policy.forceCloseApplications) ||
+          (change.shutdownOn !== undefined && Object.entries(change.shutdownOn).some(([name, on]) => on && !current.policy.shutdownOn[name as keyof typeof current.policy.shutdownOn])))
+      if (escalates && ctx.confirmPower) {
+        const ok = await ctx.confirmPower('Change what NEXUS may do to Windows at the end of this run?', `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}`)
+        if (!ok) throw new NexusError('invalid_state', 'The change was not authorized.')
+      }
+      return supervisor.changeEndPolicy(runId, defined)
+    },
+    'overnight.extend': ({ runId, minutes }) => overnight().extend(runId, minutes),
+    'overnight.cancelMission': ({ runId }) => overnight().cancelMission(runId),
+    'overnight.report': ({ runId }) => overnight().report(runId),
+    'overnight.audit': ({ runId }) => repos.powerAudit.listByRun(runId),
+    'overnight.checkpoints': ({ runId }) => repos.checkpoints.listByRun(runId).slice(-50),
   }
 }
 

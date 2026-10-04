@@ -80,6 +80,9 @@ export function keysForEvent(event: RunEvent): Key[] {
     case 'context':
       keys.push(qk.contextRoot())
       break
+    case 'overnight':
+      keys.push(qk.run(runId), qk.runsList(), qk.overnight(runId), qk.overnightActive(), qk.overnightReport(runId))
+      break
     default:
       // criterion.*, user.* and anything added later: refresh the run itself.
       keys.push(qk.run(runId), qk.runsList())
@@ -143,6 +146,11 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
         }
         case 'agent.delta':
           live.append(message.agentId, message.text)
+          break
+        case 'overnight':
+          // The push carries the whole record: render from it immediately, then refresh what hangs off it.
+          qc.setQueryData(qk.overnight(message.status.runId), message.status)
+          schedule([qk.overnightActive(), qk.overnightReport(message.status.runId), qk.run(message.status.runId), qk.runsList()])
           break
         case 'auth.changed':
           schedule([qk.auth(), qk.models()])

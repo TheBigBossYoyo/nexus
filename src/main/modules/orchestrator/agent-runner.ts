@@ -9,6 +9,7 @@ import {
   type AgentRole,
   type AgentState,
   type Handoff,
+  type ProjectProfile,
   type Run,
   type Severity,
   type Task,
@@ -155,6 +156,22 @@ const FILE_READ_TOOLS = new Set(['Read'])
 const FILE_WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 
+/** Script names that do more than build or check: never run by a gate role on its own. */
+const UNSAFE_SCRIPT = /deploy|publish|release|push|upload|start|serve|dev|watch|install|clean|reset|migrate|seed|docker|electron/i
+
+/**
+ * The project's own package scripts count as verification commands, so a verifier or reviewer can run
+ * what the acceptance criteria refer to (a generator, a build step). Planners stay read-only. The names
+ * come from the profile taken when the project was opened, not from the worktree an agent can edit.
+ */
+export function projectScriptPrefixes(profile: ProjectProfile | null): string[] {
+  if (!profile) return []
+  const runners = profile.packageManagers.length > 0 ? profile.packageManagers : ['npm']
+  return Object.keys(profile.scripts)
+    .filter((name) => /^[\w:.-]+$/.test(name) && !UNSAFE_SCRIPT.test(name))
+    .flatMap((name) => runners.flatMap((pm) => (pm === 'npm' ? [`npm run ${name}`] : [`${pm} run ${name}`, `${pm} ${name}`])))
+}
+
 /** Runs one agent (one or more SDK sessions) and records everything observable about it. */
 export class AgentRunner {
   constructor(
@@ -248,6 +265,8 @@ export class AgentRunner {
 
         // Session rotation: structured handoff, then a fresh session with minimal context.
         const handoff = await this.requestHandoff(input, agent.id, base, last.sdkSessionId)
+        // A pause, cancel or shutdown during the handoff request ends the agent here: no further session.
+        if (input.control.stopReason) break
         bus.emit({
           runId: input.run.id,
           taskId: input.task?.id ?? null,
@@ -334,6 +353,7 @@ export class AgentRunner {
       safeCommandPrefixes: [
         ...settings.permissions.safeCommandPrefixes,
         ...Object.values(run.config.checks).filter((c): c is string => typeof c === 'string'),
+        ...projectScriptPrefixes(repos.projects.get(run.projectId)?.profile ?? null),
       ],
       allowNetworkTools,
       allowedMcpServers: servers.map((s) => s.name),

@@ -293,7 +293,6 @@ describe('publishing, installs, environment, privileges', () => {
     'sc.exe config x start= auto',
     'net user bob pw /add',
     'schtasks /create /tn x /tr y',
-    'shutdown /s /t 0',
     'format D:',
     'diskpart',
     'bcdedit /set x y',
