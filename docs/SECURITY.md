@@ -162,6 +162,25 @@ through `cmd /c`, `powershell -Command`, `bash -c`, `Start-Process`, `&`/call op
 arguments; a command that is built dynamically at run time (for example from a variable) is still approval-gated as
 uninspectable but cannot be proven to be a power command.
 
+Hardening (0.2.1 audit): command words are matched after undoing trivial obfuscation (`shut^down`, `sh\utdown`,
+`'shut''down'`, `"shut"+"down"`, `%COMSPEC% /c`), inline interpreter code (`node -e`, `python -c`, `perl -e`,
+`ruby -e`, `php -r`, `awk`) is scanned for power names and APIs, PowerShell/.NET/COM spawn calls
+(`[Diagnostics.Process]::Start`, `WScript.Shell.Run`, `Shell.Application`) combined with a power name are forbidden,
+and `pnpm exec`/`npx`/`busybox <power command>` is forbidden. A command word that is a variable or command
+substitution in bash (`$s /s`, `$(echo x) /s`) and `& $x` in PowerShell need approval (high). `rundll32` always needs
+approval. `git config` writing a key that makes git run programs (`alias.*`, `core.editor/fsmonitor/hooksPath/sshCommand/pager`,
+`credential.*`, `include*`, `url.*`, `filter.*`, `diff.*`, `merge.*`, `gpg.*`, `sequence.*` ...) needs approval in every
+scope; reads and harmless keys are unchanged. `git -C/--git-dir/--work-tree` must resolve inside the worktree and may
+not be computed at run time, and assigning or exporting any `GIT_*` variable needs approval. Any command text that
+names `nexus.db` (including `-wal`/`-shm`) or `overnight.key` is forbidden for every role, except inside a `git commit`
+message.
+
+This is a best-effort lexical filter, not an OS sandbox. A writing agent can run code it wrote (tests, scripts), so a
+determined or prompt-injected agent could still run a power command, or abort a failsafe with `shutdown /a`, from its
+own program; a script written in one command and run in another is not caught. NEXUS's guarantee is narrower and
+holds regardless: no NEXUS mechanism (tool, message, proposal, IPC) gives an agent the power controller or the stored
+authorization, and the plain and commonly obfuscated command forms above are refused.
+
 ## Subscription-mode environment sanitization
 
 `buildAgentEnv` copies the NEXUS process environment for the agent, removing `ANTHROPIC_API_KEY` and

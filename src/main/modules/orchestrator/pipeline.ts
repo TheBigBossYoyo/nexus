@@ -472,7 +472,7 @@ export class TaskPipeline {
       return true
     }
     if (outcome === 'auth') {
-      this.core.pauseRun(run.id, 'user', 'Claude authentication required')
+      this.core.pauseRun(run.id, 'user', 'Claude authentication required', 'auth')
       return true
     }
     return false

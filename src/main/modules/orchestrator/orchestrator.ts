@@ -225,6 +225,8 @@ export class Orchestrator implements PipelineHost {
     const run = repos.runs.require(runId)
     const result = await refreshProjectFacts(this.deps, this.core.project(run), (line) => this.core.log(line))
     if (result) bus.emit({ runId, type: 'intelligence.refreshed', payload: result })
+    // Shutdown began meanwhile: nothing new may start (the run is picked up by recovery on the next launch).
+    if (this.closing) return false
     return repos.runs.require(runId).state === 'planning'
   }
 
@@ -233,6 +235,7 @@ export class Orchestrator implements PipelineHost {
     let run = repos.runs.require(runId)
     const project = this.core.project(run)
     if (!project.profile) throw new NexusError('invalid_state', 'Project has not been profiled')
+    if (this.closing) return
     const control = this.runControl(runId)
     let previousErrors: string[] | undefined
 

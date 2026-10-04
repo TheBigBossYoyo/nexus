@@ -286,7 +286,9 @@ describe('scenario: Overnight Mode', () => {
     const run = await o.start({ policy: { endAction: 'NONE' } })
     const record = await o.waitForOvernight(run.id, 'DONE')
     expect(record.finalReport).toContain('**SUCCESS**')
-    expect(shutdowns()).toHaveLength(1)
+    // No power action was asked for, so not even the failsafe timer was armed.
+    expect(o.power.calls).toHaveLength(0)
+    expect(record.failsafe).toBeNull()
     expect(o.power.getState().pending).toBeNull()
   })
 
@@ -473,7 +475,9 @@ describe('scenario: Overnight Mode', () => {
     const run = await o.start({ policy: { autoApprovePlanChanges: false, endAction: 'NONE' } })
     const record = await o.waitForOvernight(run.id, 'DONE')
     expect(h.task(run.id, 'risky').state).toBe('cancelled')
-    expect(['BLOCKED', 'USER_CANCELLED', 'SUCCESS']).toContain(record.terminalReason)
+    expect(h.task(run.id, 'after').state).not.toBe('completed')
+    expect(record.terminalReason).toBe('BLOCKED')
+    expect(h.repos.approvals.listByRun(run.id).find((a) => a.kind === 'task')?.status).toBe('denied')
     expect(sessionsOf(h, 'worker')).toHaveLength(0)
   })
 
@@ -546,7 +550,7 @@ describe('scenario: Overnight Mode', () => {
       }),
     )
     const run = await o.start({ policy: { endAction: 'NONE' } })
-    await h.waitFor(() => h.repos.toolEvents.listByRun?.(run.id)?.some((t) => t.status === 'completed') ?? h.eventsOfType(run.id, 'agent.tool.completed').length > 0, 'the write')
+    await h.waitFor(() => h.eventsOfType(run.id, 'agent.tool.completed').length > 0, 'the write')
     await o.supervisor.finalize(run.id, 'TIME_LIMIT')
     const record = o.record(run.id)
     expect(record.finalReport).toContain('Unfinished work committed on task branches')
@@ -641,7 +645,8 @@ describe('scenario: Overnight Mode recovery', () => {
     expect(record.failsafe?.lostAt).not.toBeNull()
     expect(record.powerAction).toBeNull()
     expect(record.finalReport).toContain('Windows restarted')
-    expect(o.power.calls).toHaveLength(0)
+    // Nothing is inferred from clocks: Windows is asked to drop any timer (it has none), and nothing is scheduled.
+    expect(o.power.calls.map((c) => c.operation)).toEqual(['cancelShutdown'])
     expect(o.supervisor.pendingPowerAction(runId)).toBeNull()
   })
 

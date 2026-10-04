@@ -129,7 +129,7 @@ export function independentTestRun(detail) {
   const integration = detail.worktrees.find((w) => w.taskId === null)
   if (!integration) return { error: 'no integration worktree' }
   try {
-    const out = execFileSync(process.execPath, ['--test'], { cwd: integration.path, encoding: 'utf8' })
+    const out = execFileSync(process.execPath, ['--test', '--test-reporter=tap'], { cwd: integration.path, encoding: 'utf8' })
     const lines = out.split('\n').filter((l) => /^# (tests|pass|fail)/.test(l))
     return { lines, pass: Number(/# pass (\d+)/.exec(out)?.[1] ?? 0), fail: Number(/# fail (\d+)/.exec(out)?.[1] ?? -1) }
   } catch (e) {

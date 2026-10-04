@@ -152,7 +152,7 @@ export function buildReviewPrompt(input: ReviewPromptInput): Pack {
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
     { name: 'Check results', body: renderChecks(input.checkResults) },
-    { name: 'Orchestration records', body: input.evidence ? renderSentMessages(input.evidence.messages) : null },
+    { name: 'Orchestration records', body: input.evidence ? renderSentMessages(input.evidence.messages, input.evidence.omittedMessages ?? 0) : null },
     { name: 'Review focus', body: input.lens ?? null },
     {
       name: 'Instructions',

@@ -144,7 +144,7 @@ export class ConsensusPlanner {
       return true
     }
     if (result.outcome === 'auth') {
-      this.core.pauseRun(runId, 'user', 'Claude authentication required')
+      this.core.pauseRun(runId, 'user', 'Claude authentication required', 'auth')
       return true
     }
     return false

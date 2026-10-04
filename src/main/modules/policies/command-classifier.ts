@@ -1,5 +1,5 @@
 import { canonicalizePath, isPathInside, isSecretPath } from './paths'
-import { neutralizeCommitHeredocs, tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
 import type { Segment, Shell } from './shell-tokenizer'
 
 export type CommandLevel = 'safe' | 'write' | 'needs_approval' | 'forbidden'
@@ -135,10 +135,10 @@ const ENV_ASSIGN_REASON = 'sets an environment variable that makes tools run pro
 const POWER_REASON = 'shutting down, restarting, suspending or powering off the machine is forbidden for every role'
 /** Power-state APIs and WMI/CIM methods; plain command names are matched per segment instead. */
 const POWER_TEXT =
-  /\b(win32shutdown|win32shutdowntracker|setsuspendstate|exitwindowsex|initiatesystemshutdown(?:ex)?|ntshutdownsystem|ntinitiatepoweraction|ntsetsystempowerstate)\b|powrprof(?:\.dll)?\s*,|\binvoke-(?:wmi|cim)method\b[^|;&\n]*-(?:method)?name\s+['"]?(?:win32)?(?:shutdown|reboot)\b|\bsystemctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)\b|\bloginctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate)\b/i
+  /\b(shutdownwindows|win32shutdown|win32shutdowntracker|setsuspendstate|exitwindowsex|initiatesystemshutdown(?:ex)?|ntshutdownsystem|ntinitiatepoweraction|ntsetsystempowerstate)\b|powrprof(?:\.dll)?\s*,|\binvoke-(?:wmi|cim)method\b[^|;&\n]*-(?:method)?name\s+['"]?(?:win32)?(?:shutdown|reboot)\b|\bsystemctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)\b|\bloginctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate)\b/i
 /** Executables that power off, restart or suspend the machine. Matched on the normalised base name. */
 const POWER_CMDS = new Set([
-  'shutdown', 'psshutdown', 'psshutdown64', 'stop-computer', 'restart-computer', 'poweroff', 'halt', 'reboot', 'slidetoshutdown', 'telinit',
+  'shutdown', 'psshutdown', 'psshutdown64', 'stop-computer', 'restart-computer', 'poweroff', 'halt', 'reboot', 'slidetoshutdown', 'telinit', 'tsshutdn',
 ])
 /** Commands that launch or schedule another program: their arguments may name a power command. */
 const LAUNCHER_CMDS = new Set([
@@ -146,11 +146,15 @@ const LAUNCHER_CMDS = new Set([
   'schtasks', 'at', 'new-scheduledtaskaction', 'register-scheduledtask', 'set-scheduledtask', 'runas', 'explorer', 'conhost', 'wt', 'set-alias', 'new-alias', 'sal', 'nal', 'alias',
   'rundll32', 'mshta', 'wscript', 'cscript', 'forfiles', 'wmic', 'invoke-wmimethod', 'invoke-cimmethod',
 ])
+const DANGEROUS_ENV_SET = new RegExp(
+  `(?:\\b(?:set-item|new-item|si|ni|sp|set-content|add-content|set-itemproperty)\\s+(?:-(?:path|name|literalpath)\\s+)?["']?\\$?env:${DANGEROUS_ENV_NAME}\\b|setenvironmentvariable\\s*\\(\\s*["']${DANGEROUS_ENV_NAME}["'])`,
+  'i',
+)
 const DOTNET_NETWORK = /net\.webclient|downloadstring|downloadfile|start-bitstransfer|system\.net\.http/i
 
 function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number): void {
   // A quoted heredoc used only as a git commit message is inert prose, not shell (bash only).
-  const text = shell === 'bash' ? neutralizeCommitHeredocs(rawText) : rawText
+  const text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(rawText)) : rawText
   if (depth > MAX_NESTING) {
     a.ask('high', 'shell commands are nested too deeply to inspect')
     return
@@ -161,7 +165,10 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
   if (SECURITY_TOOLING.test(text)) {
     a.add('forbidden', 'high', 'disabling or modifying security tooling is not permitted', 'SYSTEM_CHANGE')
   }
-  if (POWER_TEXT.test(text)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+  if (POWER_TEXT.test(text) || POWER_TEXT.test(squash(text)) || powerViaExecApi(text) || scriptWriteRunsPower(rawText)) {
+    a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+  }
+  if (DANGEROUS_ENV_SET.test(text)) a.ask('high', ENV_ASSIGN_REASON)
   if (MACHINE_ENV.test(text)) {
     a.ask('high', 'changes machine/user environment variables', 'SYSTEM_CHANGE')
   }
@@ -186,8 +193,111 @@ const SH_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'])
 const HARMLESS_REDIRECT_TARGET = new Set(['/dev/null', 'nul', '$null'])
 
 function normalizeName(word: string): string {
+  if (/^(%comspec%|\$env:comspec|\$\{env:comspec\}|\$comspec)$/i.test(word)) return 'cmd'
   const base = word.split(/[\\/]/).pop() ?? word
   return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, '')
+}
+
+/**
+ * Every plausible reading of a command word once trivial obfuscation is undone: the plain base name, the
+ * name with cmd carets, quotes, backticks and "+" removed (shut^down, 'shut''down', "shut"+"down") and the
+ * name with backslash escapes removed (sh\\utdown).
+ */
+function commandNameCandidates(word: string): string[] {
+  const stripped = word.replace(/[\^`"'+]/g, '')
+  return [...new Set([normalizeName(word), normalizeName(stripped), normalizeName(stripped.replace(/\\/g, ''))])]
+}
+
+/** Merges adjacent string literals ("shut"+"down") and drops quoting/escape characters, so names can be matched. */
+function squash(text: string): string {
+  let t = text
+  for (let k = 0; k < 4; k++) t = t.replace(/(["'])\s*\+\s*(["'])/g, '')
+  return t.replace(/[\^`"']/g, '')
+}
+
+const NEXUS_DATA = /nexus\.db(?:-wal|-shm|-journal)?|overnight\.key/i
+const NEXUS_DATA_REASON = 'NEXUS application data (its database and overnight key) must never be accessed from an agent shell'
+const DYNAMIC_REASON = 'the command name is computed at run time (variable or command substitution) and cannot be inspected'
+const POWER_WORDS =
+  /\b(?:shutdown(?:\.exe)?|poweroff|reboot|stop-computer|restart-computer|psshutdown\w*|tsshutdn|slidetoshutdown|setsuspendstate|exitwindowsex|initiatesystemshutdown\w*|shutdownwindows|win32shutdown\w*|ntshutdownsystem)\b|powrprof/i
+/** APIs and cmdlets that start another program; combined with a power word anywhere in the same text they are forbidden. */
+const EXEC_API =
+  /start-process|\bsaps\b|\binvoke-expression\b|\biex\b|invoke-command|diagnostics\.process|processstartinfo|wscript\.shell|shell\.application|shellexecute|new-object\s+-com|\.run\s*\(|child_process|\bos\.(?:system|popen|exec\w*|spawn\w*)|subprocess|\bpopen\b|\bexec(?:sync|file|filesync)?\s*\(|\bspawn(?:sync)?\s*\(|\bsystem\s*\(|\bgettype\s*\(|\bproc_open|\bshell_exec|\bpassthru/i
+/** Interpreter flags whose argument is program text. */
+const INLINE_FLAGS: Record<string, string[]> = {
+  node: ['-e', '--eval', '-p', '--print'],
+  bun: ['-e', '--eval'],
+  python: ['-c'],
+  python3: ['-c'],
+  py: ['-c'],
+  perl: ['-e'],
+  ruby: ['-e'],
+  php: ['-r'],
+  lua: ['-e'],
+  deno: ['eval'],
+}
+
+function powerViaExecApi(text: string): boolean {
+  let t = text
+  if (/\bgit\s+commit\b/i.test(t)) t = t.replace(/(\s-[a-zA-Z]*m|\s--message)[ =]+("[^"]*"|'[^']*')/g, ' ')
+  const s = squash(t)
+  return EXEC_API.test(s) && POWER_WORDS.test(s)
+}
+
+/** Program text passed on the command line to an interpreter (-e, -c, eval ...), or null when it runs a file. */
+function inlineProgram(cmd: string, args: string[]): string | null {
+  const lc = args.map((x) => x.toLowerCase())
+  if (cmd === 'awk' || cmd === 'gawk' || cmd === 'mawk') return args.filter((x) => !x.startsWith('-')).join(' ')
+  const flags = INLINE_FLAGS[cmd]
+  if (flags === undefined) return null
+  const k = lc.findIndex((x) => flags.includes(x) || (cmd !== 'deno' && /^-[a-z]{2,}$/.test(x) && flags.some((f) => f.length === 2 && x.endsWith(f.slice(1)))))
+  return k < 0 ? null : args.slice(k + 1).join(' ')
+}
+
+/** `shutdown` & co. named by the first real argument of a package runner or multi-call binary. */
+function runnerLaunchesPower(cmd: string, args: string[]): boolean {
+  const lc = args.map((x) => x.toLowerCase())
+  const firstReal = (xs: string[]): string | undefined => xs.find((x) => !x.startsWith('-'))
+  let target: string | undefined
+  if (cmd === 'busybox' || cmd === 'toybox' || cmd === 'npx' || cmd === 'bunx') target = firstReal(args)
+  else if (['pnpm', 'npm', 'yarn', 'bun'].includes(cmd)) {
+    const k = lc.findIndex((x) => x === 'exec' || x === 'dlx' || x === 'x')
+    if (k >= 0) target = firstReal(args.slice(k + 1))
+  }
+  return target !== undefined && commandNameCandidates(target).some((n) => POWER_CMDS.has(n))
+}
+
+const SCRIPT_NAME = /[^\s"'<>|&;()=,]{1,200}\.(?:bat|cmd|ps1|sh)\b/gi
+
+/** A script written in this command line that contains a power command and is also run in it. */
+function scriptWriteRunsPower(rawText: string): boolean {
+  const counts = new Map<string, number>()
+  for (const m of rawText.matchAll(SCRIPT_NAME)) {
+    const name = (m[0].split(/[\\/]/).pop() ?? m[0]).toLowerCase()
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  if (![...counts.values()].some((n) => n >= 2)) return false
+  if (textRunsPowerCommand(rawText)) return true
+  for (const shell of ['bash', 'powershell'] as const) {
+    for (const seg of tokenize(rawText, shell)) {
+      const mentions = [...seg.words, ...seg.redirects.map((r) => r.target)].some((w) => /\.(bat|cmd|ps1|sh)\b/i.test(w))
+      if (mentions && launchesPowerCommand(seg.words.slice(1))) return true
+    }
+  }
+  return false
+}
+
+/** True when any real argument word of a segment (not a git commit message) mentions NEXUS's own data. */
+function touchesNexusData(seg: Segment): boolean {
+  const words = seg.words
+  const commit = words.some((w) => normalizeName(w) === 'git') && words.includes('commit')
+  const texts: string[] = seg.redirects.map((r) => r.target)
+  words.forEach((w, k) => {
+    const prev = words[k - 1] ?? ''
+    if (commit && (/^-[a-zA-Z]*m$|^--message$|^-[Fm]$/.test(prev) || /^--message=/.test(w))) return
+    texts.push(w)
+  })
+  return texts.some((t) => NEXUS_DATA.test(t) || NEXUS_DATA.test(squash(t)))
 }
 
 function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number): void {
@@ -210,8 +320,9 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
   }
   const first = words[i]
   if (isCallOp && (first === undefined || first.startsWith('$'))) {
-    a.ask('medium', 'call operator with a dynamic command name cannot be inspected')
+    a.ask('high', 'call operator with a dynamic command name cannot be inspected')
   }
+  if (touchesNexusData(seg)) a.add('forbidden', 'high', NEXUS_DATA_REASON, 'SYSTEM_CHANGE')
 
   // Strip wrappers that run another command.
   for (let guard = 0; guard < 4 && words[i] !== undefined; guard++) {
@@ -248,9 +359,19 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     a.segments.push({ command: '', kind: bare ? 'readonly' : 'other', class: own.length > 0 ? maxClass(own) : bare ? 'SAFE_READ' : 'SAFE_PROJECT_WRITE' })
     return
   }
-  const cmd = normalizeName(nameWord)
+  const cands = commandNameCandidates(nameWord)
+  const cmd = cands.find((c) => INTERPRETERS.has(c) || SH_SHELLS.has(c)) ?? cands[0] ?? normalizeName(nameWord)
   const args = words.slice(i + 1)
   const lc = args.map((x) => x.toLowerCase())
+
+  if (!isCallOp && ((shell === 'bash' && /^\$/.test(nameWord)) || /^%[^%\s]+%/.test(nameWord))) {
+    if (normalizeName(nameWord) !== 'cmd') a.ask('high', DYNAMIC_REASON)
+  }
+  const program = inlineProgram(cmd, args)
+  if (program !== null && (POWER_WORDS.test(squash(program)) || POWER_TEXT.test(squash(program)))) {
+    a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+  }
+  if (runnerLaunchesPower(cmd, args)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
 
   if (seg.sep === '|' && INTERPRETERS.has(cmd) && args.every((x) => x.startsWith('-'))) {
     a.ask('high', `piping data into ${cmd} executes it (download-and-execute pattern)`)
@@ -259,7 +380,7 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     a.ask('high', 'piping into Invoke-Expression executes arbitrary text')
   }
 
-  if (POWER_CMDS.has(cmd)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+  if (cands.some((c) => POWER_CMDS.has(c))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
   else if (LAUNCHER_CMDS.has(cmd) && launchesPowerCommand(args)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
 
   const handledNested = analyzeNestedShell(cmd, args, a, depth)
@@ -320,9 +441,10 @@ function textRunsPowerCommand(text: string, depth = 0): boolean {
   for (const shell of ['bash', 'powershell'] as const) {
     for (const seg of tokenize(text, shell)) {
       const words = seg.words.filter((w) => w !== '&' && w !== '.')
-      const first = normalizeName(words[0] ?? '')
-      if (POWER_CMDS.has(first)) return true
-      if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => !w.startsWith('-') && !w.startsWith('/') && POWER_CMDS.has(normalizeName(w)))) return true
+      const names = commandNameCandidates(words[0] ?? '')
+      const first = names.find((n) => POWER_WRAPPERS.has(n)) ?? names[0] ?? ''
+      if (names.some((n) => POWER_CMDS.has(n))) return true
+      if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => !w.startsWith('-') && !w.startsWith('/') && commandNameCandidates(w).some((n) => POWER_CMDS.has(n)))) return true
       if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => /\s/.test(w) && textRunsPowerCommand(w, depth + 1))) return true
     }
   }
@@ -338,7 +460,7 @@ function launchesPowerCommand(args: string[]): boolean {
       if (m?.[1] !== undefined) values.push(m[1])
     }
     for (const v of values) {
-      if (/\s/.test(v) ? textRunsPowerCommand(v) : POWER_CMDS.has(normalizeName(v))) return true
+      if (/\s/.test(v) ? textRunsPowerCommand(v) : commandNameCandidates(v).some((n) => POWER_CMDS.has(n))) return true
     }
   }
   return false
@@ -486,6 +608,7 @@ function analyzeNestedShell(cmd: string, args: string[], a: Analysis, depth: num
 const HIGH_ALWAYS: Record<string, string> = {
   setx: 'setx changes persistent environment variables',
   schtasks: 'schtasks manages scheduled tasks',
+  rundll32: 'rundll32 runs arbitrary DLL entry points',
   powercfg: 'powercfg changes power and sleep configuration',
   format: 'format erases a volume',
   'format-volume': 'format-volume erases a volume',
@@ -677,6 +800,14 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
     case 'start':
       if (lc.includes('runas')) a.ask('high', 'starts a process with elevated privileges (-Verb RunAs)', 'SYSTEM_CHANGE')
       break
+    case 'export':
+    case 'declare':
+    case 'typeset':
+    case 'readonly':
+    case 'local':
+    case 'setenv':
+      if (args.some((x) => DANGEROUS_ENV_WORD.test(x))) a.ask('high', ENV_ASSIGN_REASON)
+      break
     case 'printenv':
       if (positional.length === 0 || positional.some((x) => KEYLIKE.test(x))) a.ask('high', 'accessing secrets: printenv reads environment variables')
       break
@@ -737,6 +868,51 @@ function analyzeFind(args: string[], lc: string[], a: Analysis): void {
 const GIT_UNSAFE_CONFIG =
   /^(core\.|credential\.|alias\.|http\.|protocol\.|diff\.|difftool\.|merge\.|mergetool\.|filter\.|pager\.|gpg\.|sequence\.|url\.|uploadpack\.|receive\.|include|submodule\.|ssh\.|man\.|web\.|browser\.|remote\.[^.]*\.(proxy|uploadpack|receivepack|vcs))/i
 
+/** git keys that cannot hurt on their own (the broader GIT_UNSAFE_CONFIG list also matches them). */
+const GIT_HARMLESS_CONFIG =
+  /^(core\.(autocrlf|filemode|safecrlf|ignorecase|eol|longpaths|quotepath|whitespace|symlinks|precomposeunicode|trustctime|untrackedcache|abbrev|commentchar)|merge\.(ff|conflictstyle|renames|stat|verbosity)|diff\.(renames|algorithm|colormoved|context|mnemonicprefix|wsErrorHighlight)|http\.(sslverify|postbuffer))$/i
+const GIT_CONFIG_READ_FLAGS = new Set(['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l', '--show-origin', '--show-scope', '--name-only', '--get-color', '--get-colorbool'])
+const GIT_CONFIG_REMOVE_FLAGS = new Set(['--unset', '--unset-all', '--remove-section', '--rename-section'])
+
+/** `git config` writing a key that makes git run programs is as dangerous as `git -c`, in every scope. */
+function analyzeGitConfig(rest: string[], rlc: string[], a: Analysis): void {
+  if (rlc.some((x) => GIT_CONFIG_READ_FLAGS.has(x) || GIT_CONFIG_REMOVE_FLAGS.has(x))) return
+  if (rlc.includes('-e') || rlc.includes('--edit')) {
+    a.ask('high', 'git config --edit opens an editor', 'SYSTEM_CHANGE')
+    return
+  }
+  let positional = rest.filter((x) => !x.startsWith('-'))
+  // newer syntax: git config set|get|unset|list|edit
+  const verb = positional[0]?.toLowerCase()
+  if (verb === 'get' || verb === 'list' || verb === 'unset') return
+  if (verb === 'edit') {
+    a.ask('high', 'git config edit opens an editor', 'SYSTEM_CHANGE')
+    return
+  }
+  if (verb === 'set') positional = positional.slice(1)
+  const key = positional[0]
+  if (key !== undefined && GIT_UNSAFE_CONFIG.test(key) && !GIT_HARMLESS_CONFIG.test(key)) {
+    a.ask('high', `git config ${key} can make git run arbitrary programs`, 'SYSTEM_CHANGE')
+  }
+}
+
+/** -C / --git-dir / --work-tree must stay inside the worktree and may not be computed at run time. */
+function checkGitLocation(value: string | undefined, a: Analysis): void {
+  if (value === undefined || /[$`%~]/.test(value)) {
+    a.ask('high', 'git is pointed at a location computed at run time (-C/--git-dir/--work-tree)', 'SYSTEM_CHANGE')
+    return
+  }
+  const base = a.roots[0]
+  if (base === undefined) return
+  try {
+    const target = canonicalizePath(value, base)
+    if (a.roots.some((r) => isPathInside(r, target))) return
+  } catch {
+    // unresolvable: treat as outside
+  }
+  a.ask('high', `git is pointed outside the worktree (${value})`, 'SYSTEM_CHANGE')
+}
+
 function analyzeGit(args: string[], lc: string[], a: Analysis): void {
   let i = 0
   while (i < args.length) {
@@ -747,7 +923,13 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
     } else if (/^--config-env/i.test(w)) {
       a.ask('high', 'git --config-env can configure arbitrary command execution')
       i += w.includes('=') ? 1 : 2
-    } else if (['-C', '--git-dir', '--work-tree', '--namespace', '--exec-path'].includes(w)) i += 2
+    } else if (['-C', '--git-dir', '--work-tree'].includes(w)) {
+      checkGitLocation(args[i + 1], a)
+      i += 2
+    } else if (/^--(git-dir|work-tree)=/i.test(w)) {
+      checkGitLocation(w.slice(w.indexOf('=') + 1), a)
+      i++
+    } else if (['--namespace', '--exec-path'].includes(w)) i += 2
     else if (w.startsWith('-')) i++
     else break
   }
@@ -808,6 +990,7 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
       if (['remove', 'prune', 'move'].includes(rlc[0] ?? '')) a.ask('high', `git worktree ${rlc[0]} removes or relocates worktrees`, 'DESTRUCTIVE')
       break
     case 'config':
+      analyzeGitConfig(rest, rlc, a)
       if (hasFlag('--global', '--system', '--file', '-f')) a.ask('high', 'git config --global/--system changes configuration outside the repository', 'SYSTEM_CHANGE')
       break
     case 'stash':

@@ -212,6 +212,9 @@ export function tokenize(input: string, shell: Shell, depth = 0): Segment[] {
       continue
     }
     if (c === '`' && !ps) {
+      if (words.length === 0 && !started && pending === null) {
+        extra.push({ words: ['$(<substitution>)'], redirects: [], sep: '', raw: '`' })
+      }
       endSegment('`', i)
       i++
       continue
@@ -228,6 +231,10 @@ export function tokenize(input: string, shell: Shell, depth = 0): Segment[] {
         i++
         continue
       }
+    }
+    if (c === '$' && next === '(' && !ps && words.length === 0 && !started && pending === null && input.charAt(i + 2) !== '(') {
+      // A command substitution in command position: the command's name is computed at run time.
+      extra.push({ words: ['$(<substitution>)'], redirects: [], sep: '', raw: '$(' })
     }
     if ((c === '$' || c === '@') && (next === '(' || (next === '{' && c === '@' && ps))) {
       // `$(` and `@(` are handled by the following paren; keep the sigil out of the word.
@@ -368,6 +375,57 @@ export function neutralizeCommitHeredocs(text: string): string {
       }
       from = 0
     }
+  }
+  return out
+}
+
+// A redirection target: simple unquoted word, or a quoted string without expansion.
+const TARGET = String.raw`(?:"[^"\n$\`]*"|'[^'\n]*'|[^\s"'$\`;&|<>()-][^\s"'$\`;&|<>()]*)`
+const REDIRECT = String.raw`(?:\d?>>?[ \t]*${TARGET}|\d?>&\d)`
+/** Start of a command (line start or after ; & |, never "(" or a backtick), then `cat` with only output redirections. */
+const CAT_PREFIX = new RegExp(String.raw`(?:^|[\n;&|])[ \t]*cat(?:[ \t]+${REDIRECT})*[ \t]*$`)
+/** `tee [-a] file...` */
+const TEE_PREFIX = new RegExp(String.raw`(?:^|[\n;&|])[ \t]*tee(?:[ \t]+-a)?(?:[ \t]+${TARGET})+[ \t]*$`)
+/** What may follow the opener on its line: more output redirections, then end of line, a comment, && || or ; (never a lone pipe). */
+const OPENER_REST = new RegExp(String.raw`^(?:[ \t]*${REDIRECT})*[ \t]*(?:$|#|&&|\|\||;)`)
+const ANY_OPENER = /(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))/g
+
+/**
+ * Removes heredocs that are plain data from the text that gets analysed as shell: the delimiter is quoted
+ * ('EOF' or "EOF", so nothing in the body expands), the only consumer on the command is `cat` (optionally
+ * redirected to files) or `tee <files>`, the opener line carries nothing but further redirections or a
+ * following && / || / ; command, and the terminator is a line of its own. Redirection targets stay in the
+ * text, so the usual path checks still apply to them. Everything else is left exactly as written:
+ * interpreters and any other consumer, unquoted delimiters, `cat <<'EOF' | sh`, several heredocs opened on
+ * one line. Bodies of heredocs that are not removed are skipped, so text inside them is never mistaken for
+ * a command line. Text after the terminator is analysed normally.
+ */
+export function neutralizeInertHeredocs(text: string): string {
+  if (!text.includes('<<')) return text
+  let out = text
+  let scanFrom = 0
+  for (let guard = 0; guard < 64; guard++) {
+    ANY_OPENER.lastIndex = scanFrom
+    const m = ANY_OPENER.exec(out)
+    if (m === null) break
+    const before = out.slice(0, m.index)
+    if (!quotesBalanced(before)) break
+    const openerEnd = m.index + m[0].length
+    const nl = out.indexOf('\n', openerEnd)
+    if (nl < 0) break
+    const restLine = out.slice(openerEnd, nl).replace(/\r$/, '')
+    if (/<<(?!<)/.test(restLine.replace(/(['"]).*?\1/g, ''))) break // several heredocs on one line: give up
+    const quoted = m[2] !== undefined || m[3] !== undefined
+    const delim = m[2] ?? m[3] ?? m[4] ?? ''
+    const end = delim === '' ? -1 : heredocEnd(out, nl + 1, delim, m[1] === '-')
+    if (end < 0) break
+    const inert = quoted && (CAT_PREFIX.test(before) || TEE_PREFIX.test(before)) && OPENER_REST.test(restLine)
+    if (inert) {
+      out = `${before.replace(/[ \t]+$/, '')}${restLine}\n${out.slice(end)}`
+      scanFrom = 0 // earlier text is unchanged, but positions after it moved; rescan is cheap
+      continue
+    }
+    scanFrom = end // skip the body of a heredoc we cannot vouch for
   }
   return out
 }

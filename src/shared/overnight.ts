@@ -129,6 +129,11 @@ export interface OvernightAuthorization {
   confirmation: string
   /** The policy as approved. Later changes are recorded as amendments, never by rewriting this. */
   policy: OvernightPolicy
+  /**
+   * Keyed signature of this authorization together with the current policy, written by the supervisor.
+   * A row changed by anything else no longer matches and is refused at every power decision.
+   */
+  seal?: string
 }
 
 /** Result of one power-controller command, exactly as executed. */

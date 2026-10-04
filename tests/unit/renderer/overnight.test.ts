@@ -144,7 +144,9 @@ describe('overnight formatting and summary', () => {
     const lines = summarizeOvernight(form({ endAction: 'NONE', failsafeEnabled: false }))
     expect(lines.at(-1)).toMatch(/no power action/)
     expect(lines.join('\n')).toContain('On success: no power action')
-    expect(lines.join('\n')).toContain('Failsafe shutdown: off')
+    expect(lines.join('\n')).toContain('Failsafe shutdown: not armed (no power action)')
+    // Also when the failsafe box is still ticked: main arms no timer for an end action of NONE.
+    expect(summarizeOvernight(form({ endAction: 'NONE', failsafeEnabled: true })).join('\n')).toContain('Failsafe shutdown: not armed')
   })
 })
 

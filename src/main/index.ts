@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync } from 'node:fs'
+import { createHmac, randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, safeStorage, shell } from 'electron'
 import type { PushMessage } from '@shared/events'
 import { IPC_INVOKE_CHANNEL, IPC_PUSH_CHANNEL, type AppInfo } from '@shared/ipc'
 import { errorMessage } from '@shared/result'
@@ -66,6 +67,10 @@ function createMainWindow(): BrowserWindow {
   })
 
   window.once('ready-to-show', () => (offscreen ? window.showInactive() : window.show()))
+  // Windows is shutting down or the user is signing out: nothing may hold that up with a question.
+  window.on('session-end', () => {
+    quitAllowed = true
+  })
   window.on('close', (event) => {
     // True means the close was handled (hidden to the tray, or the user chose to stay).
     if (onWindowClose?.(window)) event.preventDefault()
@@ -96,6 +101,31 @@ function readSdkVersion(): string {
   }
 }
 
+/**
+ * Signs the overnight authorization and policy with a key that only this process holds. The key is kept
+ * on disk encrypted for the Windows user (DPAPI) so a quick restart of NEXUS can still verify a running
+ * overnight record; when that is not possible the key lives in memory and a restart simply ends the
+ * power authorization.
+ */
+function createSealer(dataDir: string): { sign(payload: string): string } {
+  const file = join(dataDir, 'overnight.key')
+  let key: Buffer | null = null
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      if (existsSync(file)) key = Buffer.from(safeStorage.decryptString(readFileSync(file)), 'base64')
+      if (!key || key.length !== 32) {
+        key = randomBytes(32)
+        writeFileSync(file, safeStorage.encryptString(key.toString('base64')))
+      }
+    }
+  } catch (e) {
+    console.error(`[nexus] overnight key: ${errorMessage(e)}`)
+    key = null
+  }
+  const secret = key ?? randomBytes(32)
+  return { sign: (payload) => createHmac('sha256', secret).update(payload).digest('base64') }
+}
+
 /** Only our own renderer document may call the IPC surface. */
 function isTrustedSender(url: string | undefined): boolean {
   if (!url) return false
@@ -104,6 +134,9 @@ function isTrustedSender(url: string | undefined): boolean {
 }
 
 let quitting = false
+/** False while a live overnight mission requires the user to confirm a quit. */
+let quitAllowed = false
+let confirmQuit: () => Promise<boolean> = async () => true
 /** True while an overnight mission keeps the app alive without a window. */
 let keepAliveWithoutWindow: () => boolean = () => false
 /** What the tray currently shows; end-to-end tests read it through the main process. */
@@ -164,6 +197,9 @@ async function bootstrap(): Promise<void> {
   }
   const testTick = !app.isPackaged ? Number(process.env['NEXUS_OVERNIGHT_TICK_MS'] ?? '') : NaN
   let tray: OvernightTray | null = null
+  // Windows must not put the PC to sleep in the middle of an unattended mission.
+  let awakeBlocker: number | null = null
+  let keepAwake: () => void = () => undefined
   const overnight = power
     ? new OvernightSupervisor({
         repos,
@@ -174,9 +210,11 @@ async function bootstrap(): Promise<void> {
         push: (message) => {
           push(message)
           tray?.refresh()
+          keepAwake()
         },
         flush: () => void db.pragma('wal_checkpoint(TRUNCATE)'),
         reportsDir: join(dataDir, 'reports'),
+        sealer: createSealer(dataDir),
         ...(Number.isFinite(testTick) && testTick >= 100 ? { tickIntervalMs: testTick } : {}),
         logger: (line) => console.error(`[nexus] ${line}`),
       })
@@ -189,6 +227,15 @@ async function bootstrap(): Promise<void> {
   }
   if (overnight) {
     const supervisor = overnight
+    keepAwake = () => {
+      const wanted = supervisor.hasActive() && !quitting
+      if (wanted && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
+      else if (!wanted && awakeBlocker !== null) {
+        if (powerSaveBlocker.isStarted(awakeBlocker)) powerSaveBlocker.stop(awakeBlocker)
+        awakeBlocker = null
+      }
+    }
+    keepAwake()
     const current = (): ReturnType<OvernightSupervisor['active']>[number] | null => supervisor.active()[0] ?? null
     tray = new OvernightTray(
       () => {
@@ -213,6 +260,7 @@ async function bootstrap(): Promise<void> {
     )
     const overnightTray = tray
     trayModel = () => overnightTray.model()
+    let hiddenToTray = false
     let refreshQueued = false
     bus.subscribe(() => {
       // Agent counts and run state change with ordinary events; one refresh per second is plenty.
@@ -222,8 +270,13 @@ async function bootstrap(): Promise<void> {
         refreshQueued = false
         if (quitting) return
         overnightTray.refresh()
-        // Nothing keeps the app in the background once the mission is over: bring the window back.
-        if (!supervisor.hasActive() && BrowserWindow.getAllWindows().every((w) => !w.isVisible())) showWindow()
+        keepAwake()
+        // Nothing keeps the app in the background once the mission is over: bring back the window that was
+        // hidden to the tray (and only that; a window the user minimized is left alone).
+        if (hiddenToTray && !supervisor.hasActive()) {
+          hiddenToTray = false
+          showWindow()
+        }
       }, 1000).unref()
     })
 
@@ -243,6 +296,7 @@ async function bootstrap(): Promise<void> {
         .then(async ({ response }) => {
           const choice: CloseChoice = CLOSE_DIALOG.choices[response] ?? 'return'
           if (choice === 'hide') {
+            hiddenToTray = true
             window.hide()
             overnightTray.refresh()
           } else if (choice === 'cancel') {
@@ -255,6 +309,29 @@ async function bootstrap(): Promise<void> {
       return true
     }
     keepAliveWithoutWindow = () => supervisor.hasActive()
+    // Quitting (menu, taskbar, Alt+F4 on a hidden app) during an overnight mission: the Windows timer
+    // outlives NEXUS, so the user decides knowingly. Returns true when the quit may proceed.
+    confirmQuit = async () => {
+      if (!supervisor.hasActive()) return true
+      const pending = supervisor.active().map((o) => supervisor.pendingPowerAction(o.runId)).find((p) => p !== null)
+      const window = BrowserWindow.getAllWindows()[0]
+      const options = {
+        type: 'warning' as const,
+        title: 'NEXUS',
+        message: 'An overnight mission is still running.',
+        detail: pending
+          ? `Windows is set to ${pending.action === 'SHUTDOWN' ? 'shut down' : pending.action.toLowerCase()} this PC at ${new Date(pending.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. That timer belongs to Windows and stays armed after NEXUS quits.`
+          : 'Quitting stops the agents. The mission can be resumed the next time NEXUS starts.',
+        buttons: [pending ? 'Quit and leave the shutdown timer armed' : 'Quit', 'Cancel the mission and its shutdown, then quit', 'Return'],
+        defaultId: 2,
+        cancelId: 2,
+        noLink: true,
+      }
+      const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+      if (response === 2) return false
+      if (response === 1) for (const status of supervisor.active()) await supervisor.cancelMission(status.runId)
+      return true
+    }
     // An overnight run that was active when NEXUS stopped resumes without anyone clicking; the Windows
     // failsafe scheduled before the restart stays as it is.
     void supervisor
@@ -283,6 +360,12 @@ async function bootstrap(): Promise<void> {
     ...(overnight ? { overnight } : {}),
     appInfo,
     push,
+    confirmPower: async (message, detail) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      const options = { type: 'warning' as const, title: 'NEXUS Overnight Mode', message, detail, buttons: ['Authorize', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true }
+      const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+      return response === 0
+    },
     pickDirectory: async () => {
       const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
       const options = { title: 'Open Project', properties: ['openDirectory' as const] }
@@ -301,16 +384,39 @@ async function bootstrap(): Promise<void> {
     return dispatchIpc(handlers, channel, input)
   })
 
+  let quitAsked = false
   app.on('before-quit', (event) => {
     if (quitting) return
+    event.preventDefault()
+    if (!quitAllowed) {
+      // One question at a time; "Return" leaves everything as it was.
+      if (quitAsked) return
+      quitAsked = true
+      void confirmQuit()
+        .then((go) => {
+          quitAsked = false
+          if (!go) return
+          quitAllowed = true
+          app.quit()
+        })
+        .catch((e: unknown) => {
+          quitAsked = false
+          console.error(`[nexus] quit: ${errorMessage(e)}`)
+        })
+      return
+    }
     // Stop agent processes and flush the database before the process exits. An armed overnight
     // failsafe is left alone: it belongs to Windows and outlives this process on purpose.
-    event.preventDefault()
     quitting = true
-    overnight?.dispose()
+    keepAwake()
     tray?.destroy()
-    void orchestrator
-      .shutdown()
+    // A finalization in flight (report, power step) finishes before the database closes.
+    const settled = overnight ? Promise.race([overnight.idle(), new Promise((resolve) => setTimeout(resolve, 30_000))]) : Promise.resolve()
+    void settled
+      .then(() => {
+        overnight?.dispose()
+        return orchestrator.shutdown()
+      })
       .catch((e: unknown) => console.error(`[nexus] shutdown: ${errorMessage(e)}`))
       .finally(() => {
         if (db.open) db.close()

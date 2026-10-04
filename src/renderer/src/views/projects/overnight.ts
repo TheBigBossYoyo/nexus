@@ -262,10 +262,13 @@ export function summarizeOvernight(form: OvernightForm, now: number = Date.now()
   )
   lines.push(outcomeLine('On timeout', form, form.shutdownOn.timeout))
   lines.push(outcomeLine('On cancellation', form, form.shutdownOn.cancellation))
-  if (form.failsafeEnabled) {
+  if (form.endAction === 'NONE') {
+    // Main arms no timer at all when no power action is wanted.
+    lines.push('Failsafe shutdown: not armed (no power action)')
+  } else if (form.failsafeEnabled) {
     const minutes = effectiveFailsafeMinutes(form)
     lines.push(
-      `Failsafe shutdown: ${formatWallClock(now + minutes * 60_000, now)} (in ${formatMinutes(minutes)})`,
+      `Failsafe shutdown: ${formatWallClock(now + minutes * 60_000, now)} (in ${formatMinutes(minutes)}), always closing applications without waiting`,
     )
   } else {
     lines.push('Failsafe shutdown: off')

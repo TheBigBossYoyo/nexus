@@ -235,7 +235,11 @@ export function OvernightPanel({
           checked={form.failsafeEnabled}
           onChange={(failsafeEnabled) => onChange({ failsafeEnabled })}
           label="Enabled"
-          hint="A Windows shutdown timer armed at the start, so the PC still shuts down if NEXUS crashes."
+          hint={
+            form.endAction === 'NONE'
+              ? 'Not armed while the end action is None: no power action of any kind is taken.'
+              : 'A Windows shutdown timer armed at the start, so the PC still shuts down if NEXUS crashes.'
+          }
           testId="overnight-failsafe-enabled"
         />
         <Field

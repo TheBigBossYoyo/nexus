@@ -65,6 +65,11 @@ export async function launchApp(dataDir: string, pickPath: string | null): Promi
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [p] })) as typeof dialog.showOpenDialog
     }, pickPath)
   }
+  // Native confirmations (overnight authorization, close and quit questions) are answered with their first
+  // button: authorize / hide to tray / quit and leave the timer armed. Tests that care replace this stub.
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as never
+  })
   const page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   await expect(page.getByTestId('app-shell')).toBeVisible()

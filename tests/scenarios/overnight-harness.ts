@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { join } from 'node:path'
 import type { Run } from '@shared/domain'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT, type OvernightPolicy, type OvernightRun } from '@shared/overnight'
@@ -75,6 +76,8 @@ export function attachOvernight(h: Harness, options: AttachOptions = {}): Overni
     bootTime: options.bootTime ?? (() => 0),
     tickIntervalMs: 0,
     stopTimeoutMs: 20_000,
+    // The same keyed signature the app uses, with a key only this "process" holds.
+    sealer: { sign: (payload) => createHmac('sha256', 'scenario-key').update(payload).digest('base64') },
   })
   const overnight: Overnight = {
     supervisor,

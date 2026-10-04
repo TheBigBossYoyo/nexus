@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { uptime } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { TERMINAL_RUN_STATES, type ApprovalRequest, type Preset, type Run, type RunConfig } from '@shared/domain'
 import type { PauseCause, PushMessage, RunEvent } from '@shared/events'
 import { newId } from '@shared/ids'
@@ -69,6 +69,14 @@ export interface OvernightDeps {
   tickIntervalMs?: number
   /** Longest wait for agent sessions to stop during finalization. */
   stopTimeoutMs?: number
+  /** Longest time finalization spends on Git (checkpoint commits and state capture). */
+  gitTimeoutMs?: number
+  /**
+   * Keyed signature over the authorization and the current policy. The key never leaves the main
+   * process, so a row edited from outside (an agent's shell can reach the database file) fails the
+   * check and no power action is taken. Without a sealer the stored row is trusted (tests).
+   */
+  sealer?: { sign(payload: string): string }
   logger?: (line: string) => void
 }
 
@@ -112,6 +120,28 @@ const CHECKPOINT_EVENTS: Partial<Record<RunEvent['type'], string>> = {
 
 const iso = (ms: number): string => new Date(ms).toISOString()
 
+/** JSON with sorted keys, so the same value always signs to the same text. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical((value as Record<string, unknown>)[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+
+/** Resolve with `fallback` when `work` takes longer than `ms`; the work itself is not interrupted. */
+async function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([work, new Promise<T>((resolve) => (timer = setTimeout(() => resolve(fallback), ms)))])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 /**
  * Deterministic owner of an overnight run's lifecycle: arms the failsafe before any agent starts,
  * watches the run, the wall clock, the usage limit and the budgets, and at the end stops the work,
@@ -127,6 +157,8 @@ export class OvernightSupervisor {
   private readonly lastCheckpoint = new Map<string, number>()
   private readonly ticking = new Set<string>()
   private readonly lastHeartbeat = new Map<string, number>()
+  /** Set synchronously while a start is in flight, so two starts cannot both pass the single-run check. */
+  private starting = false
   private readonly unsubscribe: () => void
   private timer: ReturnType<typeof setInterval> | null = null
   private disposed = false
@@ -201,14 +233,23 @@ export class OvernightSupervisor {
    * before the first agent session starts; if the failsafe cannot be armed the run never begins.
    */
   async start(input: OvernightStartInput): Promise<{ run: Run; overnight: OvernightStatus }> {
-    const { repos, orchestrator } = this.deps
     if (input.confirmed !== true || input.confirmation !== OVERNIGHT_CONFIRMATION_TEXT) {
       throw new NexusError('invalid_input', 'Overnight Mode needs the explicit power authorization for this run.')
     }
     const policy = OvernightPolicySchema.parse(input.policy)
-    if (this.live.size > 0) {
+    if (this.live.size > 0 || this.starting) {
       throw new NexusError('invalid_state', 'An overnight run is already active. Windows holds a single shutdown timer; finish or cancel that run first.')
     }
+    this.starting = true
+    try {
+      return await this.startReserved(input, policy)
+    } finally {
+      this.starting = false
+    }
+  }
+
+  private async startReserved(input: OvernightStartInput, policy: OvernightPolicy): Promise<{ run: Run; overnight: OvernightStatus }> {
+    const { repos, orchestrator } = this.deps
     const run = await orchestrator.createRun({
       projectId: input.projectId,
       mode: 'mission',
@@ -239,7 +280,7 @@ export class OvernightSupervisor {
       projectId: run.projectId,
       state: 'ARMING',
       policy,
-      authorization: { runId: run.id, authorizedAt: iso(now), confirmation: OVERNIGHT_CONFIRMATION_TEXT, policy },
+      authorization: this.sealed({ runId: run.id, authorizedAt: iso(now), confirmation: OVERNIGHT_CONFIRMATION_TEXT, policy }, policy),
       startedAt: iso(now),
       deadlineAt: iso(now + policy.maxDurationMinutes * 60_000),
       failsafe: null,
@@ -258,8 +299,10 @@ export class OvernightSupervisor {
       finishedAt: null,
     })
     this.live.add(run.id)
+    let timerScheduled = false
     try {
-      if (policy.failsafeEnabled) {
+      // With no end action the user asked for no power action at all, so no shutdown timer is armed either.
+      if (policy.failsafeEnabled && policy.endAction !== 'NONE') {
         const delaySeconds = policy.failsafeAfterMinutes * 60
         const result = await power.scheduleShutdown({ delaySeconds, force: policy.forceCloseApplications, purpose: 'failsafe' })
         this.writeAudit(run.id, 'arm_failsafe', 'SHUTDOWN', `Failsafe after ${policy.failsafeAfterMinutes} minutes`, result)
@@ -271,11 +314,14 @@ export class OvernightSupervisor {
               : `Windows refused the failsafe shutdown timer (exit ${result.exitCode ?? 'n/a'}): ${result.output || 'no output'}`
           throw new NexusError('invalid_state', `Overnight run not started: ${why}`)
         }
+        timerScheduled = true
         const deadline = iso(Date.parse(result.at) + delaySeconds * 1000)
         record = this.update(record.id, { failsafe: { scheduledAt: result.at, deadline, result, cancelledAt: null, cancelResult: null, lostAt: null } })
         bus.emit({ runId: run.id, type: 'overnight.failsafe', payload: { action: 'armed', deadline, ok: true } })
       }
-      this.setState(record, 'RUNNING')
+      // A cancel that arrived while Windows was being asked has already moved the record on.
+      const current = repos.overnight.require(record.id)
+      if (current.state === 'ARMING') this.setState(current, 'RUNNING')
       this.heartbeat(run.id, this.now())
       bus.emit({
         runId: run.id,
@@ -284,8 +330,55 @@ export class OvernightSupervisor {
       })
     } catch (e) {
       this.live.delete(run.id)
-      this.update(record.id, { state: 'DONE', error: errorMessage(e), finishedAt: iso(this.now()) })
+      // The run does not start, so a timer Windows already accepted must not stay behind.
+      let note = ''
+      if (timerScheduled) {
+        const aborted = await this.abortOsTimer(run.id, 'The overnight run did not start').catch(() => false)
+        if (aborted) {
+          const failsafe = repos.overnight.getByRun(run.id)?.failsafe
+          if (failsafe) this.tryUpdate(record.id, { failsafe: { ...failsafe, cancelledAt: iso(this.now()) } })
+        } else note = ' The failsafe shutdown timer could not be cancelled: run "shutdown /a".'
+      }
+      this.tryUpdate(record.id, { state: 'DONE', error: `${errorMessage(e)}${note}`, finishedAt: iso(this.now()) })
+      if (note) throw new NexusError('internal', `${errorMessage(e)}${note}`)
       throw e
+    }
+  }
+
+  /** The stored authorization with its signature over the approved and the current policy. */
+  private sealed(authorization: Omit<OvernightRun['authorization'], 'seal'>, currentPolicy: OvernightPolicy): OvernightRun['authorization'] {
+    const { sealer } = this.deps
+    if (!sealer) return authorization
+    return { ...authorization, seal: sealer.sign(canonical({ authorization, policy: currentPolicy })) }
+  }
+
+  /** The gate for every power decision: integrity of the stored row first, then the policy itself. */
+  private decide(record: OvernightRun, reason: TerminalReason): ReturnType<typeof decidePowerAction> {
+    if (!this.intact(record)) {
+      return { action: null, why: 'The stored authorization or policy failed its integrity check (it was changed outside NEXUS).' }
+    }
+    return decidePowerAction(record, record.runId, reason)
+  }
+
+  private intact(record: OvernightRun): boolean {
+    const { sealer } = this.deps
+    if (!sealer) return true
+    const { seal, ...authorization } = (record.authorization ?? {}) as OvernightRun['authorization']
+    return Boolean(seal) && seal === sealer.sign(canonical({ authorization, policy: record.policy }))
+  }
+
+  /** Ask Windows to abort its shutdown timer, whatever the record says. True when none is pending afterwards. */
+  private async abortOsTimer(runId: string, why: string): Promise<boolean> {
+    const result = await this.deps.power.cancelShutdown()
+    this.writeAudit(runId, 'cancel_failsafe', 'SHUTDOWN', why, result)
+    return result.ok || result.exitCode === 1116
+  }
+
+  private tryUpdate(id: string, patch: Partial<Omit<OvernightRun, 'id'>>): void {
+    try {
+      this.update(id, patch)
+    } catch (e) {
+      this.log(`update ${id}: ${errorMessage(e)}`)
     }
   }
 
@@ -338,7 +431,9 @@ export class OvernightSupervisor {
       const approval = repos.approvals.get(approvalId)
       if (!approval || approval.status !== 'pending') return
       const planChange = approval.kind === 'plan' || approval.kind === 'task' || approval.kind === 'graph'
-      const approve = planChange && (approval.kind === 'plan' || record.policy.autoApprovePlanChanges)
+      // A task the planner marked high-risk is never started without a person.
+      const tooRisky = approval.kind === 'task' && approval.risk === 'high'
+      const approve = planChange && !tooRisky && (approval.kind === 'plan' || record.policy.autoApprovePlanChanges)
       orchestrator.resolveApproval(approvalId, approve, `Overnight Mode (unattended): ${approve ? 'approved by run policy' : 'denied, nobody is present to approve it'}`)
       bus.emit({ runId, type: 'overnight.approval', payload: { approvalId, kind: approval.kind, decision: approve ? 'approved' : 'denied' } })
     } catch (e) {
@@ -404,6 +499,11 @@ export class OvernightSupervisor {
         const action = record.powerAction
         if (!action || action.cancelledAt || action.executedAt) return
         const due = Date.parse(action.executeAt)
+        if (action.mechanism === 'app_timer' && now > due + MISSED_ACTION_GRACE_MS) {
+          // The machine slept or the clock jumped: acting now would surprise whoever is back at the keyboard.
+          this.fail(record, 'POWER_ACTION_FAILED', `${action.action} was due at ${action.executeAt} but NEXUS could not act then (the PC slept or the clock changed); it is not executed late.`)
+          return
+        }
         if (action.mechanism === 'app_timer' && now >= due) return this.executeFinal(record)
         if (action.mechanism === 'os_timer' && now >= due + OS_TIMER_OVERRUN_MS) {
           this.fail(record, 'POWER_ACTION_FAILED', 'The Windows shutdown timer elapsed but Windows is still running.')
@@ -451,7 +551,11 @@ export class OvernightSupervisor {
     const lastAt = repos.events.lastActivityAt(runId)
     const idleMs = now - (lastAt ? Date.parse(lastAt) : Date.parse(record.startedAt))
     const stall = this.stalls.get(runId)
-    if (idleMs < record.policy.watchdog.stallMinutes * 60_000) {
+    // Check commands (build, test, lint, typecheck) run silently for up to their timeout each.
+    const started = repos.events.latestOfType(runId, 'checks.started')
+    const completed = repos.events.latestOfType(runId, 'checks.completed')
+    const checkBudgetMs = started && started.seq > (completed?.seq ?? 0) ? started.payload.commands.length * repos.settings.get().execution.checkTimeoutMinutes * 60_000 : 0
+    if (idleMs < record.policy.watchdog.stallMinutes * 60_000 + checkBudgetMs) {
       if (stall) {
         this.stalls.delete(runId)
         this.diagnose(record, 'recovered', 'Activity resumed after scheduler reconciliation.')
@@ -514,8 +618,13 @@ export class OvernightSupervisor {
     const record = repos.overnight.getByRun(runId)
     if (!record || record.state !== 'RUNNING') return
     const now = this.now()
-    const limited = repos.events.latestOfType(runId, 'agent.rate_limited')
-    const resetsAt = limited && limited.payload.status === 'rejected' ? normalizeEpochMs(limited.payload.resetsAt) : null
+    // The runtime can report the limit twice (a rate-limit event with the reset time, then an error
+    // without one): take the newest rejection since the run last resumed that says when it resets.
+    const since = repos.events.latestOfType(runId, 'run.resumed')?.seq ?? 0
+    const limited = repos.events
+      .recentOfType(runId, 'agent.rate_limited', 20)
+      .find((e) => e.seq > since && e.payload.status === 'rejected' && normalizeEpochMs(e.payload.resetsAt) !== null)
+    const resetsAt = limited ? normalizeEpochMs(limited.payload.resetsAt) : null
     const waits = record.quota?.waits ?? 0
     const decision = decideQuota({ policy: record.policy.quotaPolicy, now, deadline: Date.parse(record.deadlineAt), resetsAt, waits })
     if (decision.action === 'end') {
@@ -567,13 +676,13 @@ export class OvernightSupervisor {
       await this.stopRun(runId, terminalReason)
       // 2. Preserve unfinished work and capture what Git looks like now.
       const run = repos.runs.require(runId)
-      const git = await this.captureGit(run, record.policy.commitCompletedWork)
+      const git = await within(this.captureGit(run, record.policy.commitCompletedWork), this.deps.gitTimeoutMs ?? 180_000, null)
       // 3. Everything so far reaches the database file.
       this.flushSafe()
       // 4. The report, saved before any power step.
       const decision = options.suppressPower
         ? ({ action: null, why: options.suppressPower } as const)
-        : decidePowerAction(repos.overnight.require(record.id), runId, terminalReason)
+        : this.decide(repos.overnight.require(record.id), terminalReason)
       const powerPlan =
         decision.action !== null
           ? `${decision.action} after ${record.policy.finalDelaySeconds} seconds (${record.policy.forceCloseApplications ? 'forced close' : 'normal close'}), to be scheduled once this report is saved.`
@@ -649,6 +758,8 @@ export class OvernightSupervisor {
         const task = repos.tasks.get(worktree.taskId)
         if (!task || task.state === 'completed' || task.state === 'cancelled') continue
         await attempt(`checkpoint commit ${task.key}`, async () => {
+          // A half-finished merge would be committed with its conflict markers.
+          if (await git.isMergeInProgress(worktree.path)) throw new Error('a merge is in progress; nothing was committed')
           const commit = await git.commitAll(worktree.path, `nexus: overnight checkpoint of unfinished work (${task.key})`, author)
           if (commit) capture.checkpointCommits.push({ task: task.key, branch: worktree.branch, commit })
         })
@@ -708,8 +819,22 @@ export class OvernightSupervisor {
   /** Keep `.nexus/` out of the user's `git status` through the repository-local exclude file. */
   private excludeFromGit(root: string): void {
     try {
-      const gitDir = join(root, '.git')
-      if (!existsSync(gitDir) || !statSync(gitDir).isDirectory()) return
+      // The project may be a subdirectory of the repository, or a linked worktree whose `.git` is a file.
+      let dir = resolve(root)
+      while (!existsSync(join(dir, '.git'))) {
+        const parent = dirname(dir)
+        if (parent === dir) return
+        dir = parent
+      }
+      let gitDir = join(dir, '.git')
+      if (!statSync(gitDir).isDirectory()) {
+        const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitDir, 'utf8'))?.[1]?.trim()
+        if (!pointer) return
+        gitDir = resolve(dir, pointer)
+        const common = join(gitDir, 'commondir')
+        if (existsSync(common)) gitDir = resolve(gitDir, readFileSync(common, 'utf8').trim())
+      }
+      if (!existsSync(gitDir)) return
       const info = join(gitDir, 'info')
       const exclude = join(info, 'exclude')
       const current = existsSync(exclude) ? readFileSync(exclude, 'utf8') : ''
@@ -791,21 +916,32 @@ export class OvernightSupervisor {
       if (!(await this.cancelFailsafe(before, 'Replaced by the final shutdown'))) {
         return this.fail(repos.overnight.require(record.id), 'POWER_ACTION_FAILED', `The failsafe could not be replaced; it stays armed for ${before.failsafe?.deadline ?? 'n/a'}.`)
       }
+      // Written before Windows is asked: if NEXUS dies in between, the next start knows a final timer may exist.
+      const intent = this.update(record.id, {
+        powerAction: { action: 'SHUTDOWN', reason: decision.reason, scheduledAt: iso(now), executeAt, forced: true, mechanism: 'os_timer', result: null, executedAt: null, cancelledAt: null },
+      })
+      this.setState(intent, 'POWER_ACTION_SCHEDULED', `SHUTDOWN at ${executeAt}`)
       let result = await power.scheduleShutdown({ delaySeconds: delay, force: true, purpose: 'final' })
       this.writeAudit(runId, 'schedule_final', 'SHUTDOWN', `Final shutdown in ${delay} s (${decision.reason})`, result)
       if (!result.ok) {
         result = await power.scheduleShutdown({ delaySeconds: delay, force: true, purpose: 'final' })
         this.writeAudit(runId, 'schedule_final', 'SHUTDOWN', 'Retry of the final shutdown', result)
       }
+      const action = repos.overnight.require(record.id).powerAction as NonNullable<OvernightRun['powerAction']>
+      if (!result.ok && result.exitCode === 1190 && failsafeDeadline === null && before.failsafe?.cancelledAt) {
+        // Our failsafe was already replaced in an earlier attempt that NEXUS did not live to record: the
+        // timer Windows reports is that final shutdown. Keep it and say so.
+        const adopted = this.update(record.id, { powerAction: { ...action, result: { ...result, ok: true, output: `${result.output} (adopted: a final shutdown was already scheduled)` } } })
+        this.appendAddendum(adopted)
+        return
+      }
       if (!result.ok) {
+        this.update(record.id, { powerAction: { ...action, result, cancelledAt: iso(this.now()) } })
         if (failsafeDeadline !== null) await this.rearmFailsafe(repos.overnight.require(record.id), failsafeDeadline, 'Final shutdown was refused; failsafe restored')
         return this.fail(repos.overnight.require(record.id), 'POWER_ACTION_FAILED', `Windows refused the final shutdown (exit ${result.exitCode ?? 'n/a'}): ${result.output}`)
       }
-      const scheduled = this.update(record.id, {
-        powerAction: { action: 'SHUTDOWN', reason: decision.reason, scheduledAt: result.at, executeAt: iso(Date.parse(result.at) + delay * 1000), forced: true, mechanism: 'os_timer', result, executedAt: null, cancelledAt: null },
-      })
+      const scheduled = this.update(record.id, { powerAction: { ...action, scheduledAt: result.at, executeAt: iso(Date.parse(result.at) + delay * 1000), result } })
       this.appendAddendum(scheduled)
-      this.setState(scheduled, 'POWER_ACTION_SCHEDULED', `SHUTDOWN at ${scheduled.powerAction?.executeAt ?? ''}`)
       return
     }
 
@@ -824,7 +960,7 @@ export class OvernightSupervisor {
     const { repos, power } = this.deps
     const action = record.powerAction
     if (!action || action.cancelledAt || action.executedAt) return
-    const decision = decidePowerAction(record, record.runId, action.reason)
+    const decision = this.decide(record, action.reason)
     if (decision.action === null || decision.action !== action.action) {
       this.writeAudit(record.runId, 'denied', action.action, decision.action === null ? decision.why : 'The end action changed during the countdown.', null)
       this.update(record.id, { powerAction: { ...action, cancelledAt: iso(this.now()) } })
@@ -860,7 +996,8 @@ export class OvernightSupervisor {
     const { repos, orchestrator } = this.deps
     for (const run of repos.runs.listActive()) {
       if (run.id === exceptRunId || run.state === 'paused' || TERMINAL_RUN_STATES.includes(run.state)) continue
-      await orchestrator.pauseRun(run.id, 'user', 'Paused before the overnight power action.', 'user').catch((e: unknown) => this.log(`pause ${run.id}: ${errorMessage(e)}`))
+      const pause = orchestrator.pauseRun(run.id, 'user', 'Paused before the overnight power action.', 'user').then(() => undefined, (e: unknown) => this.log(`pause ${run.id}: ${errorMessage(e)}`))
+      await within(pause, this.deps.stopTimeoutMs ?? 120_000, undefined)
     }
   }
 
@@ -877,7 +1014,15 @@ export class OvernightSupervisor {
 
   private finish(record: OvernightRun): void {
     this.setState(this.deps.repos.overnight.require(record.id), 'DONE')
-    this.live.delete(record.runId)
+    this.release(record.runId)
+  }
+
+  private release(runId: string): void {
+    this.live.delete(runId)
+    this.stalls.delete(runId)
+    this.lastHeartbeat.delete(runId)
+    this.lastCheckpoint.delete(runId)
+    this.deps.repos.settings.deleteValue(heartbeatKey(runId))
   }
 
   private fail(record: OvernightRun, state: 'FINALIZATION_FAILED' | 'POWER_ACTION_FAILED', error: string): void {
@@ -885,7 +1030,7 @@ export class OvernightSupervisor {
     const updated = this.update(record.id, { error })
     this.appendAddendum(updated)
     this.setState(this.deps.repos.overnight.require(record.id), state, error)
-    this.live.delete(record.runId)
+    this.release(record.runId)
   }
 
   // ───────────────────────────── user actions ─────────────────────────────
@@ -924,11 +1069,14 @@ export class OvernightSupervisor {
         return toStatus(repos.overnight.require(record.id))
       }
       if (record.state === 'FINALIZATION_FAILED' || record.state === 'POWER_ACTION_FAILED') {
-        // Finalization stopped half-way and left the failsafe armed: the user may still call it off.
-        if (!(await this.cancelFailsafe(record, 'Cancelled by the user'))) {
-          throw new NexusError('internal', 'The failsafe shutdown could not be cancelled. Run "shutdown /a".')
+        // Finalization stopped half-way: whatever the record says, ask Windows to drop any pending shutdown.
+        if (!(await this.abortOsTimer(runId, 'Cancelled by the user'))) {
+          throw new NexusError('internal', 'Windows did not cancel the pending shutdown. Run "shutdown /a".')
         }
-        return toStatus(this.update(record.id, {}))
+        const at = iso(this.now())
+        const failsafe = record.failsafe && !record.failsafe.cancelledAt ? { ...record.failsafe, cancelledAt: at } : record.failsafe
+        const powerAction = record.powerAction && !record.powerAction.cancelledAt && !record.powerAction.executedAt ? { ...record.powerAction, cancelledAt: at } : record.powerAction
+        return toStatus(this.update(record.id, { failsafe, powerAction }))
       }
       if (record.state !== 'RUNNING' && record.state !== 'QUOTA_PAUSED') {
         throw new NexusError('invalid_state', `No power action can be cancelled while the overnight run is ${record.state}`)
@@ -956,12 +1104,18 @@ export class OvernightSupervisor {
       if (change.forceCloseApplications !== undefined) parts.push(`force close -> ${change.forceCloseApplications ? 'yes' : 'no'}`)
       if (parts.length === 0) return toStatus(record)
       record = this.amend(record, change, parts.join('; '))
-      // A power action was switched back on after CANCEL SHUTDOWN removed the failsafe: restore it.
-      if (record.policy.endAction !== 'NONE' && record.policy.failsafeEnabled && record.failsafe && !this.failsafeArmed(record)) {
-        await this.rearmFailsafe(record, Math.max(Date.parse(record.failsafe.deadline), this.now() + 120_000), 'End action re-enabled by the user')
-        record = repos.overnight.require(record.id)
+      if (record.policy.endAction === 'NONE') {
+        // No power action is wanted any more: the failsafe goes too.
+        if (!(await this.cancelFailsafe(record, 'End action set to NONE by the user'))) {
+          throw new NexusError('internal', 'The end action is now NONE, but the failsafe shutdown could not be cancelled. Run "shutdown /a".')
+        }
+      } else if (record.policy.failsafeEnabled && !this.failsafeArmed(record)) {
+        // A power action was switched (back) on and no failsafe is armed: arm it for the original offset.
+        const wanted = record.failsafe ? Date.parse(record.failsafe.deadline) : Date.parse(record.startedAt) + record.policy.failsafeAfterMinutes * 60_000
+        const armed = await this.rearmFailsafe(record, Math.max(wanted, this.now() + 120_000), 'End action enabled by the user')
+        if (!armed) throw new NexusError('internal', 'The end action was changed, but Windows refused the failsafe timer: no failsafe is armed.')
       }
-      return toStatus(record)
+      return toStatus(repos.overnight.require(record.id))
     })
   }
 
@@ -1007,8 +1161,13 @@ export class OvernightSupervisor {
 
   private amend(record: OvernightRun, change: OvernightAmendment, description: string): OvernightRun {
     const policy = OvernightPolicySchema.parse({ ...record.policy, ...change })
+    if (!this.intact(record)) {
+      throw new NexusError('invalid_state', 'The stored overnight policy failed its integrity check; it cannot be changed. Cancel the shutdown instead.')
+    }
+    const authorization = { runId: record.authorization.runId, authorizedAt: record.authorization.authorizedAt, confirmation: record.authorization.confirmation, policy: record.authorization.policy }
     const updated = this.update(record.id, {
       policy,
+      authorization: this.sealed(authorization, policy),
       amendments: [...record.amendments, { at: iso(this.now()), by: 'user', change: description }],
     })
     this.deps.bus.emit({ runId: record.runId, type: 'overnight.amended', payload: { change: description } })
@@ -1035,7 +1194,7 @@ export class OvernightSupervisor {
     // timer is gone, and the record must say so.
     const boot = this.bootTime()
     for (const record of repos.overnight.listAll(50)) {
-      if (this.failsafeArmed(record) && !this.live.has(record.runId) && record.failsafe && boot > Date.parse(record.failsafe.scheduledAt) + 5000) {
+      if (this.failsafeArmed(record) && !this.live.has(record.runId) && record.failsafe && boot > Date.parse(record.failsafe.scheduledAt) + 60_000) {
         this.update(record.id, { failsafe: { ...record.failsafe, lostAt: iso(this.now()) } })
       }
     }
@@ -1049,13 +1208,13 @@ export class OvernightSupervisor {
   }
 
   private async recoverOne(runId: string): Promise<void> {
-    const { repos, bus, orchestrator } = this.deps
+    const { repos, bus, orchestrator, power } = this.deps
     let record = this.requireRecord(runId)
     const now = this.now()
-    const boot = this.bootTime()
-    // Windows restarted after the overnight run began: every OS timer is gone.
-    const rebooted = boot > Date.parse(record.startedAt) + 5000
     const lastAlive = repos.settings.getValue<string>(heartbeatKey(runId)) ?? record.updatedAt
+    // Windows booted after NEXUS was last alive in this run: it restarted in between. A clock correction can
+    // make this true by mistake; that only makes the recovery more cautious, and Windows is asked either way.
+    const rebooted = this.bootTime() > Date.parse(lastAlive) + 2000
     const gapMs = now - Date.parse(lastAlive)
     // After a restart of Windows or a long absence of NEXUS the unattended session the user authorized
     // is over: a person started NEXUS again, and nothing may power the machine off on that launch.
@@ -1064,45 +1223,66 @@ export class OvernightSupervisor {
       : gapMs > CONTINUITY_GAP_MS
         ? `NEXUS was not running for ${Math.round(gapMs / 60_000)} minutes; the power authorization lapsed.`
         : null
-    if (rebooted && this.failsafeArmed(record)) {
-      const failsafe = record.failsafe as NonNullable<OvernightRun['failsafe']>
-      record = this.update(record.id, { failsafe: { ...failsafe, lostAt: iso(now) } })
-      bus.emit({ runId, type: 'overnight.failsafe', payload: { action: 'lost', deadline: failsafe.deadline, ok: true } })
-    }
     const run = repos.runs.get(runId)
     bus.emit({ runId, type: 'overnight.state_changed', payload: { from: record.state, to: record.state, detail: 'RECOVERING OVERNIGHT RUN' } })
 
+    // Whether a timer still exists is never inferred from clocks: when the session lapsed, or the record
+    // cannot say what was scheduled, Windows is asked to drop whatever shutdown is pending.
+    const dropTimers = async (why: string): Promise<boolean> => {
+      // After a restart of Windows no timer can have survived, so a refused abort changes nothing.
+      const aborted = (await this.abortOsTimer(runId, why)) || rebooted
+      const current = repos.overnight.require(record.id)
+      const at = iso(this.now())
+      if (aborted) {
+        const failsafe = current.failsafe && !current.failsafe.cancelledAt ? { ...current.failsafe, cancelledAt: at, lostAt: rebooted ? at : current.failsafe.lostAt } : current.failsafe
+        const powerAction = current.powerAction && !current.powerAction.cancelledAt && !current.powerAction.executedAt ? { ...current.powerAction, cancelledAt: at } : current.powerAction
+        record = this.update(record.id, { failsafe, powerAction })
+        if (failsafe !== current.failsafe && failsafe) {
+          bus.emit({ runId, type: 'overnight.failsafe', payload: { action: rebooted ? 'lost' : 'cancelled', deadline: failsafe.deadline, ok: true } })
+        }
+      }
+      return aborted
+    }
+    const stuckTimer = 'Windows did not cancel the pending shutdown. Run "shutdown /a".'
+
     if (record.state === 'POWER_ACTION_SCHEDULED') {
       const action = record.powerAction
-      if (rebooted || !action) {
-        // The shutdown happened (or its timer died with Windows).
-        this.finish(record)
-        return
+      if (!action) return this.finish(record)
+      if (lapsed) {
+        const pendingBefore = !action.executedAt && !action.cancelledAt
+        if (!(await dropTimers(lapsed))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
+        // After a restart of Windows the shutdown either happened or died with it.
+        if (rebooted || !pendingBefore) return this.finish(record)
+        return this.fail(record, 'POWER_ACTION_FAILED', `${action.action} was pending when NEXUS stopped; it was cancelled and is not executed late.`)
       }
-      const overdue = now > Date.parse(action.executeAt) + MISSED_ACTION_GRACE_MS
-      if (overdue || (lapsed && action.mechanism === 'app_timer')) {
-        this.fail(record, 'POWER_ACTION_FAILED', `${action.action} was due at ${action.executeAt} but did not happen while NEXUS was not running; it is not executed late.`)
+      if (now > Date.parse(action.executeAt) + MISSED_ACTION_GRACE_MS) {
+        if (!(await dropTimers('A final action was overdue'))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
+        return this.fail(record, 'POWER_ACTION_FAILED', `${action.action} was due at ${action.executeAt} but did not happen while NEXUS was not running; it is not executed late.`)
+      }
+      if (action.mechanism === 'os_timer' && action.result === null) {
+        // NEXUS died around the moment it asked Windows for the final timer: ask again. 1190 means the
+        // first request was accepted, which is exactly the timer this record describes.
+        const delaySeconds = Math.max(10, Math.round((Date.parse(action.executeAt) - now) / 1000))
+        const result = await power.scheduleShutdown({ delaySeconds, force: true, purpose: 'final' })
+        this.writeAudit(runId, 'schedule_final', 'SHUTDOWN', 'Completing a final shutdown interrupted by a restart of NEXUS', result)
+        if (result.ok) this.update(record.id, { powerAction: { ...action, scheduledAt: result.at, executeAt: iso(Date.parse(result.at) + delaySeconds * 1000), result } })
+        else if (result.exitCode === 1190) this.update(record.id, { powerAction: { ...action, result: { ...result, ok: true } } })
+        else this.fail(record, 'POWER_ACTION_FAILED', `Windows refused the final shutdown (exit ${result.exitCode ?? 'n/a'}): ${result.output}`)
       }
       return
     }
     if (record.state === 'CANCELLING') {
       // The process died while the user was cancelling: finish the cancellation.
-      if (!(await this.cancelFailsafe(record, 'Completing a cancellation interrupted by a restart'))) {
-        this.fail(repos.overnight.require(record.id), 'POWER_ACTION_FAILED', `The failsafe shutdown at ${record.failsafe?.deadline ?? 'n/a'} could not be cancelled. Run "shutdown /a".`)
-        return
-      }
-      this.finish(repos.overnight.require(record.id))
-      return
+      if (!(await dropTimers('Completing a cancellation interrupted by a restart'))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
+      return this.finish(record)
     }
     if (record.state === 'ARMING') {
-      // The process died between creating the record and starting work.
-      if (!this.failsafeArmed(record) && record.policy.failsafeEnabled && !rebooted) {
-        this.update(record.id, { error: 'NEXUS stopped while arming the overnight run.' })
-        this.finish(record)
-        return
-      }
-      record = this.setState(record, 'RUNNING', 'recovered')
+      // The process died while arming: the record cannot say whether Windows accepted the failsafe.
+      if (!(await dropTimers('NEXUS stopped while arming the overnight run'))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
+      this.update(record.id, { error: 'NEXUS stopped while arming the overnight run; it was not started.' })
+      return this.finish(record)
     }
+    if (lapsed && !(await dropTimers(lapsed))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
     const suppress = lapsed ? { suppressPower: lapsed } : {}
     if (record.state === 'FINALIZING') return this.doFinalize(runId, record.terminalReason ?? 'FAILED', record.terminalDetail ?? undefined, suppress)
     if (!run) return this.doFinalize(runId, 'FAILED', 'The run no longer exists.', suppress)
@@ -1117,6 +1297,8 @@ export class OvernightSupervisor {
       }
       this.checkpoint(runId, 'recovery')
     }
+    // Requests raised just before the restart have no listener any more: answer them now.
+    for (const approval of repos.approvals.listPending(runId)) this.answerApproval(runId, approval.id)
   }
 
   // ───────────────────────────── plumbing ─────────────────────────────

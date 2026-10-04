@@ -248,6 +248,8 @@ export class AgentRunner {
 
         // Session rotation: structured handoff, then a fresh session with minimal context.
         const handoff = await this.requestHandoff(input, agent.id, base, last.sdkSessionId)
+        // A pause, cancel or shutdown during the handoff request ends the agent here: no further session.
+        if (input.control.stopReason) break
         bus.emit({
           runId: input.run.id,
           taskId: input.task?.id ?? null,

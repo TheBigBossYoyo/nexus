@@ -91,6 +91,7 @@ const { repo, git, baseCommit } = createFixtureRepo('nexus-dyn', {
 
 const MISSION = [
   'Implement CSV analytics export.',
+  'Plan this as a single implementation task for the export (with its tests). Generating and reading the contract is the first step of that task, not a task of its own.',
   'Add src/export.js exporting `exportCsv(records)`, which returns CSV text for analytics records like the ones in src/records.js, with node:test tests in test/export.test.js.',
   'The output must conform to the project export contract. The contract is generated: run `npm run generate-schema` and follow generated/export-contract.json exactly.',
   'Follow docs/CONVENTIONS.md. `npm test` must pass.',

@@ -278,14 +278,16 @@ async function runSeed(seed: number): Promise<void> {
     try {
       await world.supervisor.start({ projectId: world.project.id, prompt: 'stress', preset: 'balanced', policy, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT })
     } catch (e) {
-      if (!(foreign && policy.failsafeEnabled)) throw e
+      if (!(foreign && policy.failsafeEnabled && policy.endAction !== 'NONE')) throw e
       world.injectedFailures++
       if (world.supervisor.hasActive()) fail('a run that could not arm its failsafe is still active')
       if (world.repos.runs.require(world.runId).state !== 'cancelled') fail('the run was not cancelled when the failsafe could not be armed')
       return
     }
     if (foreign) return // failsafe disabled: nothing of ours is armed, the foreign timer is not ours to manage.
-    if (policy.failsafeEnabled && world.power.getState().pending?.purpose !== 'failsafe') fail('the failsafe is not armed after start')
+    const wantsFailsafe = policy.failsafeEnabled && policy.endAction !== 'NONE'
+    if (wantsFailsafe && world.power.getState().pending?.purpose !== 'failsafe') fail('the failsafe is not armed after start')
+    if (!wantsFailsafe && world.power.calls.length > 0) fail('a timer was armed although the policy asks for none')
     check()
 
     const steps = 6 + Math.floor(rand() * 16)

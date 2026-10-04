@@ -69,6 +69,12 @@ export class EventRepository {
     return row?.created_at ?? null
   }
 
+  /** The run's newest events of one type, newest first. */
+  recentOfType<T extends EventType>(runId: string, type: T, limit = 20): RunEvent<T>[] {
+    const rows = prepare(this.db, `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type = ? ORDER BY seq DESC LIMIT ?`).all(runId, type, limit) as Row[]
+    return rows.map((r) => decode(eventCodec, r) as RunEvent<T>)
+  }
+
   /** The run's most recent event of one type, or null. */
   latestOfType<T extends EventType>(runId: string, type: T): RunEvent<T> | null {
     const row = prepare(this.db, `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type = ? ORDER BY seq DESC LIMIT 1`).get(runId, type) as
@@ -91,15 +97,26 @@ export class EventRepository {
     return total
   }
 
-  /** Events of the given types in a run, oldest first, optionally limited to some tasks; capped in SQL. */
+  /** The NEWEST events of the given types in a run (newest first), optionally limited to some tasks; capped in SQL. */
   listByTypes(runId: string, types: readonly EventType[], limit = 500, taskIds?: readonly string[]): RunEvent[] {
     if (types.length === 0 || (taskIds && taskIds.length === 0)) return []
     const taskClause = taskIds ? ` AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
     const rows = prepare(
       this.db,
-      `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type IN (${types.map(() => '?').join(',')})${taskClause} ORDER BY seq LIMIT ?`,
+      `SELECT ${EVENT_COLUMNS} FROM run_events WHERE run_id = ? AND type IN (${types.map(() => '?').join(',')})${taskClause} ORDER BY seq DESC LIMIT ?`,
     ).all(runId, ...types, ...(taskIds ?? []), limit) as Row[]
     return rows.map((r) => decode(eventCodec, r))
+  }
+
+  /** How many events of the given types exist (optionally for some tasks), so a capped listing can report what it left out. */
+  countByTypes(runId: string, types: readonly EventType[], taskIds?: readonly string[]): number {
+    if (types.length === 0 || (taskIds && taskIds.length === 0)) return 0
+    const taskClause = taskIds ? ` AND task_id IN (${taskIds.map(() => '?').join(',')})` : ''
+    const row = prepare(
+      this.db,
+      `SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type IN (${types.map(() => '?').join(',')})${taskClause}`,
+    ).get(runId, ...types, ...(taskIds ?? [])) as { n: number }
+    return row.n
   }
 
   /** Events with seq > afterSeq in ascending order. */

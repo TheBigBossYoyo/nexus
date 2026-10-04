@@ -1,0 +1,191 @@
+# Overnight Mode (0.2.1)
+
+An overnight run is a MISSION run that works without anyone present and ends with a power action the
+user approved for that run: shut down, sleep, hibernate, or nothing.
+
+## Who does what
+
+```
+Claude Agent SDK ── agents (planner, workers, reviewer, verifier)
+        │
+NEXUS Orchestrator ── plans, schedules, reviews, repairs, verifies
+        │  run events
+OvernightSupervisor ── deterministic code in the Electron main process
+        │  the only holder of
+PowerController ── WindowsPowerController → System32\shutdown.exe / powershell.exe
+```
+
+Agents have no path to the power controller. It is created in `src/main/index.ts` and passed to the
+supervisor only; no IPC handler, agent tool or MCP server holds it (`tests/unit/power/isolation.test.ts`
+checks this against the source tree). An agent's shell tool cannot run power commands either: they are
+`forbidden` for every role, with no approval path (see SECURITY.md, "Command classes").
+
+## Starting a run
+
+Mission composer → Mode **OVERNIGHT** → set the policy → tick
+"I authorize NEXUS to control Windows power state for this run." → START OVERNIGHT RUN → confirm.
+
+The confirmation is per run and is asked twice: in the composer, and then by the main process in a native
+Windows dialog that lists the policy. The native dialog is the control: a script in the renderer cannot
+click it. A later change that gives NEXUS more power (another end action, force close, more conditions)
+asks the native dialog again.
+
+`overnight.start` stores, in `overnight_runs`:
+
+- the policy exactly as approved (`authorization.policy`; later changes are appended as amendments),
+- `authorizedAt`, the run id, the confirmation sentence,
+- `authorization.seal`: an HMAC over the authorization and the current policy. The key is held by the main
+  process and kept on disk encrypted for the Windows user (`overnight.key`, DPAPI). Every power decision
+  verifies the seal first, so a row edited from outside NEXUS is refused: the report is written and no
+  power action is taken.
+
+Order at start: run row → overnight record with the authorization → failsafe timer → state `RUNNING` →
+first agent session. If Windows refuses the failsafe (for example another shutdown is already scheduled),
+the run is cancelled before any agent starts.
+
+Only one overnight run can be active: Windows has a single shutdown timer.
+
+## The policy
+
+| Field | Default | Meaning |
+|---|---|---|
+| `maxDurationMinutes` | 480 | Wall-clock mission deadline |
+| `endAction` | SHUTDOWN | NONE, SHUTDOWN, SLEEP, HIBERNATE |
+| `shutdownOn` | all but cancellation | Which endings the end action applies to: success, failure, blocker, quotaExhausted, timeout, cancellation |
+| `finalDelaySeconds` | 60 | Countdown before the end action |
+| `forceCloseApplications` | false | Adds `/f`: Windows closes applications without waiting |
+| `failsafeEnabled` / `failsafeAfterMinutes` | true / 540 | Windows shutdown timer armed at start; must be later than the deadline. Not armed when the end action is NONE |
+| `quotaPolicy` | WAIT_AND_RETRY | or END_RUN |
+| `autoApprovePlanChanges` | true | Grant task-start and graph-change approvals. Tool approvals are always denied, and so is the start of a task the planner marked high-risk |
+| `budgets` | 400 sessions, 60 repairs | Exceeding either ends the run as blocked |
+| `watchdog` | 30 min stall, 15 min grace | See below |
+| `saveFinalReport` | true | Also write the report to `<project>/.nexus/reports/` |
+| `commitCompletedWork` | true | Commit unfinished work on its task branch during finalization |
+| `checkpointIntervalMinutes` | 15 | Periodic checkpoint |
+
+Fixed, not configurable: three planner attempts; mission verification repairs are bounded by Max repairs.
+Token or cost thresholds are not implemented (subscription sessions report no reliable cost).
+
+## Facts about Windows that shape the behaviour
+
+- `shutdown /s /t N` with N > 0 always closes applications without waiting, with or without `/f`. The
+  failsafe is such a timer, so **the failsafe is always a forced shutdown**.
+- A normal (non-forced) shutdown therefore cannot be a Windows timer. NEXUS counts down itself and then
+  runs `shutdown /s /t 0`. The failsafe stays armed during that countdown and is replaced at the last
+  moment. Applications with unsaved data can still stop a normal shutdown; then the PC stays on.
+- With `forceCloseApplications`, the final shutdown is a Windows timer (`shutdown /s /f /t <delay>`), which
+  also survives a crash of NEXUS during the countdown.
+- Sleep (`SetSuspendState('Suspend')` through Windows PowerShell) and hibernate (`shutdown /h`) have no
+  delayed form; NEXUS counts down. The failsafe is always a shutdown, whatever the end action is.
+- Windows holds one shutdown timer. A second `shutdown /s` fails with 1190; `shutdown /a` aborts.
+
+## States
+
+`ARMING → RUNNING ⇄ QUOTA_PAUSED → FINALIZING → POWER_ACTION_SCHEDULED → DONE`, plus `CANCELLING`,
+`FINALIZATION_FAILED`, `POWER_ACTION_FAILED`.
+
+| Ending | Trigger |
+|---|---|
+| SUCCESS | run completed |
+| FAILED | run failed |
+| BLOCKED | NEXUS paused the run for intervention, authentication was lost, the watchdog or a budget fired |
+| QUOTA_EXHAUSTED | usage limit with no reset time, a reset after the deadline, END_RUN, or six waits |
+| TIME_LIMIT | the wall-clock deadline |
+| USER_CANCELLED | the run was cancelled |
+
+A pause by the user (PAUSE MISSION) ends nothing; the deadline and the failsafe stay in force.
+
+## End-of-run pipeline
+
+1. State `FINALIZING`; the first terminal reason wins and is persisted.
+2. Stop the run (pause; a failed or unfinished run stays resumable). Wait up to two minutes for sessions.
+3. Commit unfinished work in task worktrees on their task branches (never in the user's checkout).
+4. Checkpoint the SQLite log into the database file.
+5. Capture Git state: the user's branch and status, the integration branch head, commits, changed files.
+6. Build and persist the report (`overnight_runs.final_report`), write it to `<data>/reports/` and, if
+   enabled, `<project>/.nexus/reports/overnight-<start>.md` (`.nexus/` is added to `.git/info/exclude`).
+7. `decidePowerAction`: allowed only when Overnight Mode is enabled, the stored authorization is for this
+   run id, and the policy applies the end action to the terminal reason.
+8. Not allowed: cancel the failsafe, state `DONE`. Allowed: other active runs are paused, the failsafe is
+   replaced by the final action, state `POWER_ACTION_SCHEDULED`, the banner shows the countdown.
+
+Finalization is idempotent. Calling it again, from any trigger, changes nothing. A crash in the middle is
+finished on the next start with the same reason.
+
+If a power command is refused, the state becomes `POWER_ACTION_FAILED`, the failsafe is restored where it
+was replaced, and CANCEL SHUTDOWN still works.
+
+## While the run is going
+
+- **Banner**: state, failsafe time, mission deadline, end action, countdown.
+- **CANCEL SHUTDOWN**: during the run, cancels the failsafe and sets the end action to NONE (the mission
+  continues); during the countdown, aborts the pending action.
+- **CHANGE END ACTION**, **EXTEND MISSION** (moves the deadline and the failsafe together),
+  **PAUSE MISSION**, **CANCEL MISSION**.
+- **Approvals**: tool approvals are denied (the agent continues another way); the plan is not held for
+  approval; task-start and graph approvals follow `autoApprovePlanChanges`.
+- **Quota**: `QUOTA_PAUSED` is not a failure. When Claude reports when the limit resets and that is inside
+  the mission time, the run resumes 90 seconds after the reset.
+- **Watchdog**: no orchestration event for `stallMinutes` → diagnostic snapshot → scheduler reconciliation →
+  if still silent after `graceMinutes` → BLOCKED. Check commands that are still running extend the
+  allowance by their timeout. Diagnostics are in the report.
+- **Sleep**: NEXUS holds a "prevent app suspension" request while an overnight run is live, so Windows does
+  not put the PC to sleep on idle. If the PC sleeps anyway (lid, manual) and an end-of-run countdown is
+  more than five minutes overdue on wake, the action is not executed late.
+- **Checkpoints** (`run_checkpoints`): after planning, each graph revision, each completed task, each merge,
+  each recovery and every interval. They record run state, graph version, tasks, leases, worktrees, session
+  ids, message and decision counts and the last check results. They are a record for inspection; recovery
+  itself reads the live tables.
+
+## Window and tray
+
+Closing the window during an overnight run asks: Hide to tray and continue / Cancel mission / Return. The
+mission, the report and the power action belong to the main process and do not need the window. The tray
+icon exists only while an overnight run is live; its menu has Open NEXUS, Pause or Resume, Cancel shutdown,
+Cancel mission. When the run is over and the window is hidden, the window comes back.
+
+Quitting NEXUS during an overnight run asks first: quit and leave the Windows timer armed, cancel the
+mission and its shutdown and then quit, or return. A crash leaves the failsafe armed; that is what it is
+for. A project cannot be removed while its overnight run has a timer or a power action pending.
+
+## Restart of NEXUS or Windows
+
+On start the supervisor looks at every live overnight record.
+
+| Situation | What happens |
+|---|---|
+| NEXUS was away for at most 10 minutes, before the deadline | The run resumes without a click. The failsafe is not touched and not scheduled again |
+| Same, after the deadline | Finalized as TIME_LIMIT with the normal countdown |
+| NEXUS was away for more than 10 minutes | The unattended session is over: Windows is asked to drop any pending shutdown, report, **no power action**, the run stays paused for manual resume |
+| Windows restarted since NEXUS was last alive | Same, and the failsafe is recorded as lost |
+| A final action was pending and its time passed while NEXUS was not running | Cancelled, not executed late; `POWER_ACTION_FAILED` |
+| NEXUS died while arming, cancelling, or right after asking Windows for the final timer | The interrupted step is completed: timers are dropped (arming, cancelling) or the already accepted final timer is adopted and stays cancellable |
+
+What Windows holds is never inferred from clocks alone: whenever the record cannot be trusted, NEXUS runs
+`shutdown /a` and records the answer.
+
+A person starts NEXUS, so a launch never powers the machine off for a run that lapsed.
+
+## Verifying on your machine
+
+- `pnpm smoke:power`: schedules a real shutdown one hour away with the real controller and aborts it at
+  once, then checks nothing is left armed.
+- Everything else uses `FakePowerController` (unit, scenario, stress and E2E tests). It is selected only in
+  an unpackaged build, and always when the scripted runtime is in use.
+
+## Limits
+
+- An agent's shell policy is a lexical filter, not an operating-system sandbox (SECURITY.md). A worker can
+  run code it wrote. NEXUS guarantees that none of its own mechanisms hands an agent the power controller
+  or a valid authorization, and that plain and commonly obfuscated power commands are refused; it cannot
+  stop a program the agent wrote from calling Windows directly.
+- A normal (non-forced) shutdown can be vetoed by an application with unsaved data. The failsafe has been
+  replaced by then, so the PC stays on.
+- Finalization waits up to two minutes for agents to stop and three minutes for Git; CANCEL SHUTDOWN
+  pressed during that time takes effect when the step returns.
+
+## Not verified
+
+Real sleep and hibernate were not executed (they would suspend the development machine), and no real
+shutdown was allowed to complete. Their command lines are pinned by tests; the shutdown timer was exercised
+for real by the smoke test only.
