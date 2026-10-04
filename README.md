@@ -24,7 +24,7 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 
 | Feature | What it does | Where to read more |
 |---|---|---|
-| Arena | Runs the same task under different strategies in controlled trials. Each trial has its own fresh Git repository and project; a hidden evaluator scores the finished trial after the agents are gone. Twelve built-in cases ship with NEXUS. Raw metrics are stored and a documented, versioned ranking (`score-v1`) puts correctness first. | [ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md) |
+| Arena | Runs the same task under different strategies in controlled trials. Each trial has its own fresh Git repository and project; a hidden evaluator scores the finished trial after the agents are gone. Twelve built-in cases ship with NEXUS (they run with the Node.js on your `PATH`, version 20 or newer). Raw metrics are stored and a documented, versioned ranking (`score-v1`) puts correctness first. | [ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md) |
 | Adaptive policy | `ADAPTIVE` profiles the task and chooses a strategy from a versioned policy: a default table, an evidence override that exists only after you promote a candidate, and bounded exploration. Every decision stores its reason, its evidence and its seed. Candidates are proposed from stored evidence and never applied by themselves; promotion, rollback and pin are user actions. | [ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md) |
 | Strategies | `SINGLE`, `BUILD`, `SWARM`, `CONSENSUS`, `SPECULATIVE` and `ADAPTIVE` configure the one orchestration engine. `SINGLE` has no planner: one worker implements the mission. `SPECULATIVE` has two or three independent candidates implement the same task and picks one by objective checks. | [ORCHESTRATION](docs/ORCHESTRATION.md), [SPECULATIVE_EXECUTION](docs/SPECULATIVE_EXECUTION.md) |
 | Usage intelligence | Records what NEXUS's own sessions used and what the runtime reports about limits and plan windows, each value with its source and confidence. A percentage is shown only when the runtime supplied it. | [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md) |
@@ -76,6 +76,7 @@ The design and its deviations from the implementation are in [V0_2_DESIGN](docs/
 | Windows 11 x64 | The only supported and packaged platform. CI runs on `windows-latest`. |
 | Node.js 24 | Matches Electron 44's Node and the CI configuration. |
 | pnpm | CI pins pnpm 12.8.1. |
+| Node.js 20 or newer on `PATH` | Needed only by the Arena: its built-in cases run `node --test`. NEXUS ships no Node. |
 | Git | Needed for worktrees. Developed against Git 2.53 for Windows. |
 | Claude Code, logged in | Run `claude auth login` once in a terminal. See [Authentication](#authentication). |
 
@@ -135,7 +136,7 @@ cost beyond that document.
 2. Projects view, "Open Project", and pick a folder. NEXUS resolves the Git root, then profiles the
    project read-only: package managers, languages, frameworks, scripts, and the build, test, lint and
    typecheck commands it will use as automated checks. Nothing in the folder is changed.
-3. In the project, write the mission, choose a mode, a preset, a strategy, a planning mode and a review mode, and start the run.
+3. In the project, write the mission, choose a mode, a preset, a strategy, a planning mode and a review mode, and press Start mission. NEXUS opens on Home.
 
 The strategy selector is shown for every mode except ASK and AUDIT (read-only) and for OVERNIGHT. It defaults to
 `ADAPTIVE`. Strategies configure the same engine; they do not add a second one:
@@ -147,7 +148,7 @@ The strategy selector is shown for every mode except ASK and AUDIT (read-only) a
 | `BUILD` | Planning `single`, review `auto`, the preset's agent limit. |
 | `SWARM` | As BUILD with the swarm planner guidance and the maximum preset's agent limit (the ECO cap in ECO). |
 | `CONSENSUS` | Consensus planning (three planners, critic, synthesizer) and dual review. |
-| `SPECULATIVE` | No planner. Two candidates by default (three at most) implement the same task in separate worktrees; objective checks pick one; it then goes through review and verification. Uses more Claude usage. |
+| `SPECULATIVE` | No planner. Two candidates by default (three at most) implement the same task, each in its own clone of the repository; objective checks pick one; it then goes through review and verification. Uses more Claude usage. |
 
 Details: [ORCHESTRATION](docs/ORCHESTRATION.md) (Strategies), [ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md).
 
@@ -237,7 +238,8 @@ cleaned up. NEXUS does not merge into your branch, push, or delete branches. See
 
 | What | Location |
 |---|---|
-| Database (SQLite, WAL) | `%APPDATA%\NEXUS\nexus.db` (plus `-wal` and `-shm` files while running) |
+| Database (SQLite, WAL) | `%APPDATA%\NEXUS\nexus.db` (plus `-wal` and `-shm` files while running). Before a schema upgrade NEXUS keeps `nexus.db.v<old>.bak` next to it |
+| Arena trial repositories | `%APPDATA%\NEXUS\arena\<campaign>\<trial>\`; removed by `arena.cleanup` for a finished campaign |
 | Task and integration worktrees | `%APPDATA%\NEXUS\worktrees\<run>\<task>\` |
 | Electron profile data | `%APPDATA%\NEXUS\` |
 | Claude session transcripts | Written by the Claude runtime itself under `~\.claude\projects\` |
@@ -357,13 +359,18 @@ earlier single-mission acceptance script.
 - `ALWAYS_FOR_HIGH_RISK` speculation behaves as `AUTO`. Candidates are proposed for exact and category-level contexts, never global ones.
   Learning runs only when you ask for it. A run created without a strategy records no mission outcome.
 - The ADAPTIVE decision is fixed when the run is created. An explicit strategy choice is used as given and records no decision.
-- Arena: every built-in case is a small JavaScript project, so results say nothing about other languages or large repositories.
-  Creating a campaign from a user repository is not offered. Overnight Arena under the supervisor is not implemented.
+- Arena needs Node.js 20 or newer on `PATH` (NEXUS ships none); without it a campaign cannot start. Every built-in case is a
+  small JavaScript project, so results say nothing about other languages or large repositories. Creating a campaign from a
+  user repository is not offered. Overnight Arena with a power action is not implemented. Unattended trials deny every tool
+  approval request. The `performance-optimization` evaluator decides by timing and runs on one machine.
   Pausing a campaign does not pause runs already running. Budgets are checked after each trial (the wall-clock budget on a timer),
-  so the running trial can exceed them. Regression detection compares only the oldest and the newest NEXUS version group.
+  so the running trial can exceed them. Regression detection compares only the two newest (NEXUS version, model) groups.
   See [ARENA](docs/ARENA.md).
-- Small samples: a preference needs at least `MODERATE` evidence (12 weighted trials) before it is proposed. No p-values are
+- Small samples: a preference is proposed only when its challenger has at least 5 Arena trials from 3 distinct cases and `MODERATE` evidence (12 weighted trials); missions alone never produce a candidate. No p-values are
   computed, and a table that says two strategies are not separated means exactly that. See [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md).
+- Dependency installs, check commands and Arena commands run without your Claude credentials (`ANTHROPIC_*`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `NODE_OPTIONS`, `NODE_PATH`); other environment variables are passed on. The agent shell policy is still a lexical filter
+  (see [SECURITY](docs/SECURITY.md)).
 - A speculative task costs one extra implementing session per extra candidate and applies to a single-task run only; a
   planned task graph has no speculative tasks.
 

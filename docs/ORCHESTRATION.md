@@ -284,7 +284,7 @@ erase the difference the Arena measures. Outside the Arena an explicit override 
 ## Speculative implement stage (v0.3)
 
 For a run whose `speculativeCandidates` is at least 2, the implement stage of the mission's own worker task
-(no parent task, first attempt) runs 2 or 3 candidate sessions in separate worktrees from the same commit, and
+(no parent task, first attempt) runs 2 or 3 candidate sessions, each in its own clone of the repository made at the same commit (own refs and objects, no remote), and
 a deterministic tournament picks one. The winner continues through the normal checks, review, verification
 and merge. Code: `orchestrator/speculation.ts` (`SpeculativeStage`), `strategy/tournament.ts`. Rules, edge
 cases and records are in [SPECULATIVE_EXECUTION](SPECULATIVE_EXECUTION.md).
@@ -300,7 +300,7 @@ While `canDispatch()` is false, a scheduler tick does this:
 | Part of the tick | Behaviour |
 |---|---|
 | Duration limit, expired leases, dependency-failure cascade | Still run |
-| `restartOrphans` | Skipped |
+| `restartOrphans` | Skipped. When the gate is open, orphan restarts are limited to the free slots under `gate.limit(...)`, so the ramp applies to them as well |
 | `selectRunnable` | Called with `paused: true`: no task starts. Deferral announcements still happen |
 | Finalization, mission verification, "stuck" detection | Skipped. The mission verifier is a session, and nothing is declared stuck because the gate is closed |
 | Planning | No planner session starts; the run is paused with reason `quota` |
@@ -308,7 +308,7 @@ While `canDispatch()` is false, a scheduler tick does this:
 | Checks and merges in flight | Finish: they are local and deterministic |
 
 When the gate is open, the limit passed to `selectRunnable` is `gate.limit(run.config.maxParallelAgents)`,
-which a ramp after a resume lowers. When the gate reopens (`onChange`), every active run is ticked.
+which a ramp after a resume lowers (it also bounds how many orphaned tasks restart at once). When the gate reopens (`onChange`), every active run is ticked.
 
 ## Human interventions
 

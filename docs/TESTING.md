@@ -271,6 +271,8 @@ real ADAPTIVE mission), the result of the real-runtime check is in V0_3_RELEASE_
 | Scenario | `tests/scenarios/v3-adaptive.test.ts` | ADAPTIVE: profile, decision, outcome; promotion and rollback change the decision; a user-chosen strategy is used as given |
 | Scenario | `tests/scenarios/v3-arena.test.ts` | The same case under SINGLE and BUILD on the real orchestrator; a campaign continued after a restart |
 | Stress | `tests/stress/usage-stress.test.ts`, `policy-stress.test.ts`, `arena-stress.test.ts` | Seeded histories, see below. They run under `pnpm stress` |
+| E2E | `tests/e2e/v3.spec.ts` (6 tests) | The built app on the scripted runtime: shell, navigation and first-launch pages; usage with a reported percentage and with no report; a usage limit with a known reset (banner, countdown, automatic resume, mission completes) and with no reset time (says so, probes, resumes); mission control and the inspector after a SINGLE mission with the why-this-strategy view for ADAPTIVE; an Arena campaign created in the dialog, with isolated trials, results and policy evidence |
+| Visual | `tests/e2e/__screenshots__/` (written by `toHaveScreenshot` in `v3.spec.ts`, `maxDiffPixelRatio` 0.01) | Stored screenshots of the empty, first-launch and settings pages |
 | Real runtime | `tests/manual/usage-report.smoke.ts` (`pnpm smoke:usage`) | Account information and the experimental usage report; no prompt is sent |
 
 ### Stress variables
@@ -323,8 +325,21 @@ writes evidence to `docs/acceptance/`.
 | `pnpm accept:speculative` (`scripts/strategy-acceptance.mjs speculative`) | One bounded task implemented by two candidates, then tournament, review, verification; checks the user's repository is untouched |
 | `pnpm accept:adaptive` (`scripts/strategy-acceptance.mjs adaptive`) | One mission under ADAPTIVE: profile, decision, reason, outcome with observed usage |
 
+### Visual tests
+
+The stored screenshots are machine-specific (font rendering, display scaling). On a different machine, or after a deliberate
+UI change, regenerate them with `pnpm test:e2e --update-snapshots` and review the diff. A mismatch above 1 percent of pixels fails
+the test.
+
 ### Test-only environment variables (unpackaged builds only)
 
-`NEXUS_USAGE_TICK_MS` (controller tick, at least 100), `NEXUS_USAGE_RESUME_DELAY_S`, `NEXUS_USAGE_PROBE_S` (override the
-resume delay and the probe interval) and `NEXUS_USAGE_DEMO_RESET_S` (the demo script's reset delay, default 6) shorten
-quota waits for E2E runs. `src/main/index.ts` ignores them in a packaged build. See QUOTA_RECOVERY.md.
+| Variable | Effect |
+|---|---|
+| `NEXUS_FAKE_RUNTIME=1` | Selects the scripted runtime (`FakeAgentRuntime`) |
+| `NEXUS_FAKE_USAGE` | With the scripted runtime: `unknown` = the runtime reports no usage report; a number = the plan window percentage it reports |
+| `NEXUS_USAGE_TICK_MS` | Quota controller tick (accepted when 100 or more) |
+| `NEXUS_USAGE_RESUME_DELAY_S` | Overrides `resumeDelaySeconds` |
+| `NEXUS_USAGE_PROBE_S` | Overrides the first unknown-reset probe interval, in seconds |
+| `NEXUS_USAGE_DEMO_RESET_S` | The demo script's simulated reset delay (default 6) |
+
+`src/main/index.ts` ignores the timing variables and `NEXUS_FAKE_USAGE` in a packaged build. See QUOTA_RECOVERY.md.

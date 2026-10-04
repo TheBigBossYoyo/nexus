@@ -9,7 +9,7 @@ NEXUS does not claim universal superiority of any strategy. Arena results descri
 versions that were run, and nothing else.
 
 Code: `src/main/modules/arena/` (`case-format.ts`, `fixtures.ts`, `evaluator.ts`, `metrics.ts`,
-`scoring.ts`, `campaign.ts`), contracts in `src/shared/v3.ts` and `src/shared/v3-read.ts`, IPC in
+`scoring.ts`, `campaign.ts`, `preflight.ts`, `env.ts`), contracts in `src/shared/v3.ts` and `src/shared/v3-read.ts`, IPC in
 `src/main/modules/ipc/v3-handlers.ts`, cases in `arena/cases/`. How results are scored and read:
 [BENCHMARK_METHODOLOGY.md](BENCHMARK_METHODOLOGY.md). How the policy consumes trials:
 [ADAPTIVE_POLICY.md](ADAPTIVE_POLICY.md).
@@ -19,7 +19,7 @@ Code: `src/main/modules/arena/` (`case-format.ts`, `fixtures.ts`, `evaluator.ts`
 | Term | Meaning |
 |---|---|
 | Case | A task with a fixture repository, a visible prompt and criteria, and a hidden evaluator |
-| Case version | One immutable `(case id, version)`; stored with the hash of its evaluator and its fixture |
+| Case version | One immutable `(case id, version)`; stored with its whole definition, the hash of its evaluator and the hash of its fixture |
 | Campaign | A persisted set of trials: cases x strategies x repetitions, with budgets |
 | Trial | One `(case version, strategy, repetition)`: one provisioned repository, one NEXUS run, one evaluation |
 | Strategy | One of `CONCRETE_STRATEGIES`: `SINGLE`, `BUILD`, `SWARM`, `CONSENSUS`, `SPECULATIVE` (`ADAPTIVE` is not an Arena strategy: it would pick one of these) |
@@ -69,16 +69,18 @@ rely on a shell. Commands run through `runCommandLine`, which does not use a she
 | `case.json` must be valid JSON and pass the schema; the error lists every issue with its path | `loadCaseDirectory` |
 | `fixture/` and `evaluator/` must each contain at least one file | `loadCaseDirectory` |
 | A case directory may not contain symbolic links | `listFilesRecursive` |
+| Neither `fixture/` nor `evaluator/` may contain a `.git` entry (any case, any depth) | `listFilesRecursive` |
+| A case directory is capped at `MAX_CASE_FILES` = 5000 files and `MAX_CASE_BYTES` = 50 MB | `listFilesRecursive`, `loadCaseDirectory` |
 | `fixtureHash` = SHA-256 over sorted relative paths and file contents. Text files are hashed with LF line endings, so autocrlf does not change a case's identity | `hashDirectory`, `normalizedBytes` |
-| `evaluatorHash` = SHA-256 over the evaluator directory hash, the evaluation command and its timeout. Changing the files, the command or the timeout is a different evaluator | `hashEvaluator` |
+| `evaluatorHash` = SHA-256 over the evaluator directory hash, the evaluation command and timeout, and the canonical JSON of the whole validated definition (setup, checks, prompt, criteria, budgets, allowed strategies, scoring). Any change to the files or to `case.json` is a different hash | `hashEvaluator`, `hashCaseEvaluator` |
 | A new `version` creates a new `arena_case_versions` row | `registerLoadedCase` |
 | The same `version` with a different evaluator hash or fixture hash is refused: bump `version` | `registerLoadedCase` |
 | A version lower than the latest registered one is refused: versions only increase | `registerLoadedCase` |
 | A case id registered with one origin cannot be re-registered with another (an imported case cannot take over a built-in id) | `registerLoadedCase` |
-| Before every provisioning and every evaluation the directory is re-read and re-hashed; a mismatch with the stored hashes refuses the trial | `loadVerifiedCase` |
+| Before every provisioning and every evaluation the directory is re-read and re-hashed; a mismatch with the stored hashes refuses the trial. The definition that runs is the one stored with the version, not the one now on disk (whole-definition pinning) | `loadVerifiedCase` |
 
-The design said the evaluator hash covered the evaluator directory; the code also hashes the command
-and timeout.
+The design said the evaluator hash covered the evaluator directory. The code also hashes the whole definition,
+so editing `case.json` under an unchanged `version` is refused like editing the evaluator.
 
 ### Trusted and imported cases
 
@@ -88,7 +90,10 @@ and timeout.
 | `imported` | false | `arena.importCase` opens a folder picker; `importCase` registers the directory and returns the full list of commands (`setup:`, `check:`, `hidden evaluation:`). Nothing from the case is executed at import |
 | `repository` | n/a | The type exists (`ArenaCase.origin`, and `provisionTrial` accepts a `repository` input that clones a local repository at a commit). No code path creates such a case or campaign: see Limits |
 
-`arena.trustCase` marks an imported version trusted. It re-reads the directory first and refuses when the
+`arena.trustCase` marks an imported version trusted. The main process first shows a native Windows confirmation
+(`ctx.confirmTrust` in `ipc/v3-handlers.ts`) that lists every `setup`, check and evaluation command; declining
+refuses the call. The renderer's own dialog is a convenience, the native one is the control, because a script in the
+renderer cannot click it. The service then re-reads the directory and refuses when the
 version, evaluator hash or fixture hash differ from what was stored at import, so a case edited after the
 user reviewed its commands cannot be trusted by accident. `createCampaign` refuses any untrusted case
 version. The trust flag is a boolean on the version row; the design said the confirmation is stored with
@@ -96,27 +101,31 @@ the evaluator hash. In the code the hash is re-checked at trust time and on ever
 
 ## Built-in cases
 
-Twelve cases, all version 1, all JavaScript (node:test, no dependencies), all allowing all five concrete
-strategies. Visible check: `node --test`. Hidden evaluation: `node --test hidden-tests/**/*.test.mjs`,
-timeout 120 s (the glob is expanded by Node, not a shell). Per-case budgets are
+Twelve cases, all version 2, all JavaScript (node:test, no dependencies), all allowing all five concrete
+strategies. Visible check: `node --test`. Hidden evaluation: `node --test hidden-tests/<case id>.test.mjs`, an
+explicit file per case, timeout 120 s. Every case has `maxAgentsPerTrial` 8. Per-case budgets are
 `wall-clock minutes / agent sessions / agents per trial / turns per agent`.
 
 | Id | Category | Complexity | Risk | Budgets | What it measures |
 |---|---|---|---|---|---|
-| `bugfix-localized` | bugfix | small | low | 20 / 20 / 4 / 60 | One-token defect in a pagination helper: a last page holding one item is lost |
-| `bugfix-cross-module` | bugfix | medium | medium | 25 / 30 / 4 / 60 | Wrong totals and stock when an order is priced or reserved twice; the cause is in a shared helper |
-| `bugfix-concurrency` | bugfix | large | high | 30 / 40 / 4 / 70 | Semaphore, job queue, read-through cache and `mapLimit` misbehave under concurrency, failure and cancellation |
-| `feature-small` | feature | small | low | 20 / 20 / 4 / 60 | A well-specified group-by-and-sort summary function in a small report library |
-| `feature-multi-module` | feature | large | medium | 40 / 60 / 4 / 80 | Priorities and due dates in a todo library: model, versioned storage with backwards compatibility, service, rendering, flags |
-| `refactor-extract` | refactor | medium | medium | 20 / 20 / 4 / 60 | Behaviour-preserving extraction of line pricing duplicated in three modules into one shared module |
-| `migration-schema` | migration | medium | high | 30 / 30 / 4 / 70 | Versioned, idempotent, non-lossy v1 to v2 migration of a JSON contact store, with backup and corrupt-entry reporting |
-| `performance-optimization` | performance | medium | low | 25 / 30 / 3 / 60 | A correct log-analytics toolkit that collapses on realistic sizes; remove algorithmic hot spots without changing results |
-| `security-hardening` | security | large | high | 40 / 40 / 4 / 80 | Classic vulnerabilities in a static-serving, upload, config, templating and auth helper library |
-| `testing-gap` | testing | medium | low | 25 / 30 / 3 / 60 | A cron library with shallow tests; write a regression suite strong enough to catch behavioural bugs in every module |
-| `ui-state-bug` | ui | medium | low | 25 / 30 / 3 / 60 | Framework-free state layer of a to-do panel mutates state and derives counts from the wrong data |
-| `recovery-persistence` | infrastructure | large | high | 40 / 50 / 4 / 80 | An embedded key/value store with journal and snapshots that loses data after a crash |
+| `bugfix-localized` | bugfix | small | low | 20 / 20 / 8 / 60 | One-token defect in a pagination helper: a last page holding one item is lost |
+| `bugfix-cross-module` | bugfix | medium | medium | 25 / 30 / 8 / 60 | Wrong totals and stock when an order is priced or reserved twice; the cause is in a shared helper |
+| `bugfix-concurrency` | bugfix | large | high | 30 / 40 / 8 / 70 | Semaphore, job queue, read-through cache and `mapLimit` misbehave under concurrency, failure and cancellation |
+| `feature-small` | feature | small | low | 20 / 20 / 8 / 60 | A well-specified group-by-and-sort summary function in a small report library |
+| `feature-multi-module` | feature | large | medium | 40 / 60 / 8 / 80 | Priorities and due dates in a todo library: model, versioned storage with backwards compatibility, service, rendering, flags |
+| `refactor-extract` | refactor | medium | medium | 20 / 20 / 8 / 60 | Behaviour-preserving extraction of line pricing duplicated in three modules into one shared module |
+| `migration-schema` | migration | medium | high | 30 / 30 / 8 / 70 | Versioned, idempotent, non-lossy v1 to v2 migration of a JSON contact store, with backup and corrupt-entry reporting |
+| `performance-optimization` | performance | medium | low | 25 / 30 / 8 / 60 | A correct log-analytics toolkit that collapses on realistic sizes; remove algorithmic hot spots without changing results |
+| `security-hardening` | security | large | high | 40 / 40 / 8 / 80 | Classic vulnerabilities in a static-serving, upload, config, templating and auth helper library |
+| `testing-gap` | testing | medium | low | 25 / 30 / 8 / 60 | A cron library with shallow tests; write a regression suite strong enough to catch behavioural bugs in every module |
+| `ui-state-bug` | ui | medium | low | 25 / 30 / 8 / 60 | Framework-free state layer of a to-do panel mutates state and derives counts from the wrong data |
+| `recovery-persistence` | infrastructure | large | high | 40 / 50 / 8 / 80 | An embedded key/value store with journal and snapshots that loses data after a crash |
 
-Each case's `README.md` states what it measures and why its hidden tests are fair. The `architecture`
+Two evaluators are not plain assertions. `performance-optimization` measures scaling by timing: each operation is timed
+at 2000 and at 16000 items, in batches of at least 40 ms, the best of 7 batches is kept, and the ratio must stay below 24
+(about 8 is linear, about 64 is quadratic). `testing-gap` applies equivalent edits to the sources as controls: the
+agent's tests must still pass on them, so a suite that hashes or greps the sources fails. Each case's `README.md`
+states what it measures and why its hidden tests are fair; fairness was not probed exhaustively (see Limits). The `architecture`
 category exists in the schema; no built-in case uses it.
 
 Reference solutions live outside the case directories, in `tests/fixtures/arena-solutions/<id>/`. An
@@ -143,10 +152,13 @@ queued -> provisioning -> running -> evaluating -> passed | failed | blocked
    inside, the case directory.
 2. The case is re-read and re-hashed (`loadVerifiedCase`).
 3. The trial directory is removed if it exists, then created: a re-provisioned trial is identical to a
-   first attempt.
+   first attempt. A guard (`gitGuard`) is created for every Git command the Arena runs on case content:
+   `core.hooksPath` points at an empty directory, `core.fsmonitor=false`, `GIT_CONFIG_NOSYSTEM=1` and an empty
+   `GIT_CONFIG_GLOBAL`; `git init` and `git clone` use `--template=` and the baseline commit uses `--no-verify`. No hook
+   of a case or of the machine runs.
 4. `fixture/` is copied (not linked, symlinks dereferenced) to `<trial>/repo`.
-5. The case's `setup` commands run there. Timeout 10 minutes each, output capped at 64 KiB. A failing
-   setup command fails provisioning.
+5. The case's `setup` commands run there with `cleanEnv()` (see "Command environment"). Timeout 10 minutes
+   each, output capped at 64 KiB. A failing setup command fails provisioning.
 6. `assertNoEvaluatorFiles` checks that no evaluator file exists in the repository, by relative path
    (case-insensitive) or by content hash. An evaluator file that is byte-identical to a fixture file is
    allowed (that content is already visible to the agent).
@@ -178,17 +190,24 @@ The Arena calls `ArenaRunHost.createRun` (adapted to the real orchestrator in `s
 In an Arena run `maxParallelAgents` is a cap: `Orchestrator.createRun` applies
 `min(strategy plan parallelism, cap)`, so each strategy keeps its own parallelism below the cap (see
 [ORCHESTRATION.md](ORCHESTRATION.md)). Each trial has its own project, so project memory, repository
-facts and task outcomes cannot reach another trial. Tool approvals cannot be given in a trial: a run that
-reaches `awaiting_approval` is cancelled and the trial is `blocked`. A run paused for any reason other
-than `quota` or `recovery` is cancelled and the trial is `blocked` with the pause error.
+facts and task outcomes cannot reach another trial.
+
+Nobody is present in a trial, so the Arena answers approval requests itself (`answerApproval`, on each
+`approval.requested` event and for any still pending). Every strategy gets the same rule, the one an unattended
+Overnight run uses: a tool request is denied (the agent is told and continues another way); a plan, task or graph
+approval is granted, except the start of a task the planner marked high-risk, which is denied. Without this rule a
+run waited on a tool approval until the case's time budget ran out and the strategy was blamed for it. A run that still
+reaches `awaiting_approval` is cancelled and the trial is `blocked` (kind `run`). A run paused for any reason other
+than `quota` or `recovery` is cancelled and the trial is `blocked` (kind `run`) with the pause error.
 
 ### Waiting for the run (`waitForRunEnd`)
 
 Run events (`run.completed`, `run.failed`, `run.cancelled`, `run.paused`, `run.resumed`,
 `run.state_changed`) wake the job; a poll every 2000 ms is a safety net. The trial clock runs while the
 run is active. It stops while the run is paused for `quota`. At the case's `maxWallClockMinutes` the run is
-cancelled (`timeout`) and the trial ends `blocked` with the detail "Trial exceeded the case wall-clock
-budget". A run paused for `recovery` after a restart is resumed once through the host.
+cancelled (`timeout`) and the trial ends `blocked`, kind `timeout`, with the detail "Trial exceeded the case
+wall-clock budget". The trial clock is stored in the settings key/value table (`arena.clock.trial.<trial id>`) and
+reloaded after a restart. A run paused for `recovery` after a restart is resumed once through the host.
 
 ### Hidden evaluation (`evaluator.ts`, `evaluateTrial`)
 
@@ -201,13 +220,18 @@ budget". A run paused for `recovery` after a restart is resumed once through the
    numbers.
 4. With no result commit the evaluator does not run. The evaluation row records `passed = false`, the
    skipped reason and score 0. The evaluator is not run on the unmodified fixture.
-5. Otherwise: the case is re-verified by hash; `<trial>/eval` is created by `git clone --no-hardlinks
-   --no-checkout` of the trial repository, the result commit is checked out detached, `.git` is removed
-   (a plain file export with no link back), and the evaluator directory is copied over it (evaluator files
-   win over same-named files from the agent). The evaluation command runs there with the case timeout and
-   a 16 KiB output cap (tail kept). `eval/` is removed in a `finally`, whatever the outcome.
-6. Passed means exit code 0 and no timeout. An evaluator that cannot start is a failed evaluation with the
-   reason in the output.
+5. Otherwise: the case is re-verified by hash; `<trial>/eval` is created by a guarded `git clone --no-hardlinks
+   --no-checkout --template= -c core.symlinks=false` of the trial repository (a symlink in the agent's commit
+   becomes a plain file), the result commit is checked out detached and `.git` is removed (a plain file export with
+   no link back). Then the tamper check: if any top-level name of the evaluator already exists in the export (a
+   planted `hidden-tests/`, a junction), the evaluator is not run and the trial fails as tampering. Otherwise
+   the evaluator's top-level entries are copied in with `force: false`, `errorOnExist: true` and no symlink
+   dereference, so nothing is overwritten and no link is followed. The evaluation command runs there with
+   `cleanEnv()`, the case timeout and a 16 KiB output cap (tail kept). `eval/` is removed in a `finally`, whatever
+   the outcome.
+6. Passed means exit code 0, no timeout, and (for a `node --test` command) at least one test reported. An evaluator
+   that executes zero tests (`# tests 0`, no summary with a clean exit, or a missing test file) is an infrastructure
+   error: nothing was learned about the strategy. An evaluator that cannot start is also an infrastructure error.
 7. The evaluator runs only in `<trial>/eval`. It does not run the case's `setup` commands.
 
 ### Final state of a trial
@@ -216,14 +240,39 @@ budget". A run paused for `recovery` after a restart is resumed once through the
 |---|---|---|
 | Hidden evaluation passed | `passed` | |
 | Run `completed`, evaluation failed | `failed` | `Hidden acceptance failed (exit n)` or `Hidden evaluation timed out` |
+| Result commit collides with an evaluator path | `failed` | `Tampering: ...` |
 | Run `failed` | `failed` | `The run failed: <error>` |
-| Run cancelled, timed out, blocked, no integration commit | `blocked` | the reason |
-| Provisioning or run start failed, evaluation threw | `blocked` | `Provisioning failed: ...`, `Could not start the run: ...`, `Evaluation failed: ...` |
+| Case wall-clock budget exceeded | `blocked`, kind `timeout` | `Trial exceeded the case wall-clock budget` |
+| Run needed an intervention, or paused for a reason other than quota or recovery | `blocked`, kind `run` | the reason |
+| Provisioning or run start failed, evaluator not runnable or ran zero tests, run cancelled from outside the Arena, resume after restart failed | `blocked`, kind `infrastructure` | `Provisioning failed: ...`, `Could not start the run: ...`, `The evaluator executed no tests` |
 | Campaign cancelled or budget closed while queued or running | `cancelled` | |
 
+`blockKind` (`TrialBlockKind`: `infrastructure`, `run`, `timeout`) is stored on a blocked trial (column
+`arena_trials.block_kind`) and is null otherwise. `trialOutcome()` in `scoring.ts` decides how a trial counts in
+comparisons:
+
+| Trial | Counts as |
+|---|---|
+| `passed` | pass |
+| `failed` (including tampering) | fail |
+| `blocked`, kind `run` or `timeout` | fail: a failure of the strategy; dropping it would be survivorship bias |
+| `blocked`, kind `infrastructure` or no recorded kind | excluded from n and from policy evidence; counted as `excludedInfrastructure` |
+| `queued`, `running`, `cancelled` and the rest | ignored |
+
+### Command environment (`env.ts`, `process/run-process.ts`)
+
+Every command the Arena runs for a case (setup, evaluator, the Node preflight) gets `cleanEnv()`: `projectCommandEnv()`
+(the process environment without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`NODE_OPTIONS` and `NODE_PATH`) minus every `ANTHROPIC_*` variable and `NODE_TEST_CONTEXT`. Credentials of the user's
+Claude account never reach a case command, and nothing can redirect how Node loads code or runs the test runner.
+
+### Evaluation records
+
 A trial that fails does not stop the campaign. Evaluations are stored in `arena_evaluations`: the command,
-exit code, timeout flag, duration, output tail, `passed`, the skip reason, `evaluatorHash`, `scoreVersion`
-(`score-v1`), the score and its breakdown. The output is for people; it is never sent to an agent.
+exit code, timeout flag, duration, output tail, `passed`, the skip reason (or the infrastructure error), `evaluatorHash`,
+`scoreVersion` (`score-v1`), the score and its breakdown. Each evaluation inserts a new row, so a re-evaluation after a
+restart keeps the earlier one; readers use the latest row of a trial (`latestForTrial`). The output is for people; it is
+never sent to an agent.
 
 ## Campaigns
 
@@ -239,20 +288,27 @@ draft -> running <-> paused (user | quota) -> completed
 ### Creating a campaign
 
 `createCampaign` expands `repetition x case x strategy` with repetition as the outermost loop, so a
-campaign cut short by a budget still has balanced strategies. A `(case, strategy)` pair is planned only
-if the case allows the strategy. Duplicate strategies are removed. Creation fails when no case or no
+campaign cut short by a budget still has balanced strategies. The strategy order is counterbalanced: for case index `i`
+and repetition `r` the allowed strategies are rotated by `(i + r - 1) mod k`, so no strategy always runs first. A
+`(case, strategy)` pair is planned only if the case allows the strategy. Duplicate strategies are removed. Creation fails when no case or no
 strategy is chosen, a case is untrusted, no pair is allowed, or the trial count exceeds `maxTrials`. The
 trials are inserted `queued` with their `ordinal` in one transaction; execution order follows the
 ordinal. The environment (platform, OS release, Node, SDK version, Git version, model tier aliases), the
-NEXUS version and the active policy snapshot id are recorded on the campaign.
+NEXUS version and the active policy snapshot id are recorded on the campaign. The Node version recorded is the one
+that will run the cases (see "Node.js preflight"), not the application's own runtime.
 
 ### Budget presets (`ARENA_BUDGET_DEFAULTS`)
 
 | Preset | `maxWallClockMinutes` | `maxTrials` | `maxConcurrentTrials` | `maxAgentSessions` | `maxAgentsPerTrial` |
 |---|---|---|---|---|---|
 | `eco` | 120 | 12 | 1 | 120 | 2 |
-| `balanced` | 360 | 40 | 1 | 400 | 4 |
-| `research` | 720 | 120 | 2 | 1500 | 6 |
+| `balanced` | 360 | 40 | 1 | 400 | 8 |
+| `research` | 720 | 120 | 2 | 1500 | 8 |
+
+`maxAgentsPerTrial` is a cap, not a setting: each strategy keeps its own parallelism below it (SWARM uses up to 8). The
+preset defaults (2, 8, 8) leave every strategy at its usual limit (SINGLE 1, BUILD and CONSENSUS 4, SPECULATIVE 3, SWARM 8;
+2 for any non-SINGLE strategy in ECO). When a campaign's cap is below a strategy's usual limit, the results carry a note
+saying so.
 
 The UI (IPC `arena.createCampaign`) can override `maxConcurrentTrials` (1 to 4) and
 `maxWallClockMinutes`. The service also accepts `maxTrials`, `maxAgentSessions`, `maxAgentsPerTrial` and
@@ -264,7 +320,7 @@ strategies per request.
 | Budget | Checked | Effect when reached |
 |---|---|---|
 | `maxTrials` | At creation only | The campaign is refused |
-| `maxWallClockMinutes` | A timer re-armed every 5 s while the campaign is `running`; counts active time only (a quota pause or a user pause stops the clock) | `exhaust`: queued trials cancelled, running trials stopped (run cancelled), campaign completes with `error = "Budget: maxWallClockMinutes (n) reached"` |
+| `maxWallClockMinutes` | A timer re-armed every 5 s while the campaign is `running`; counts active time only (a quota pause or a user pause stops the clock). The elapsed time is written to the settings key/value table (`arena.clock.campaign.<id>`) and reloaded after a restart | `exhaust`: queued trials cancelled, running trials stopped (run cancelled), campaign completes with `error = "Budget: maxWallClockMinutes (n) reached"` |
 | `maxAgentSessions` | Before a trial is scheduled and after each trial ends (sum of `sessions` in stored trial metrics) | Same, with `Budget: maxAgentSessions (n) reached`. A running trial can overshoot the limit before the check |
 | `maxAgentsPerTrial` | At run creation | Cap on parallel agents, lower of campaign and case value |
 | `maxConcurrentTrials` | At scheduling | At most this many jobs per campaign, started in ordinal order |
@@ -274,6 +330,14 @@ strategies per request.
 
 A stopped trial after a campaign budget is `cancelled`, not evaluated.
 
+### Node.js preflight (`preflight.ts`)
+
+The built-in cases are Node.js projects and NEXUS ships no Node. `checkNode()` resolves `node` on `PATH` the way
+`runCommandLine` does, runs `node --version` with `cleanEnv()` and requires `MIN_NODE_MAJOR` = 20. `arena.status`
+returns `{ nodeFound, nodeVersion, ok, message }` for the UI. `start()` refuses with that message when Node is missing or
+too old, and `createCampaign` with `start: true` does the same. A trial whose evaluator cannot start or runs zero tests is an
+infrastructure block, excluded from the statistics.
+
 ### Pause, resume, cancel
 
 | Action | Effect |
@@ -281,7 +345,8 @@ A stopped trial after a campaign budget is `cancelled`, not evaluated.
 | `arena.pause` | Campaign `paused`, reason `user`. No new trial starts. Running trials continue and are evaluated. It does not pause their runs |
 | `arena.resume` | Back to `running`, scheduling continues |
 | `arena.cancel` | Queued trials cancelled, running trials stopped and their runs cancelled, campaign `cancelled` |
-| `arena.start` | Only for a `draft` |
+| `arena.start` | Only for a `draft`, and only when the Node preflight passes |
+| `arena.cleanup` | `cleanupCampaign`: for a finished campaign (`completed`, `cancelled`, `failed`) with no trial still finishing, removes each trial's run worktrees through the host and then its trial directory under `<data>/arena/`. Database rows are kept. Nothing calls it automatically |
 
 ### Quota pause
 
@@ -303,11 +368,11 @@ Called at startup after `syncBuiltinCases()`.
 | `queued`, campaign closed by a budget (`error` starts with `Budget:`) | Cancelled |
 | `provisioning`, or `running` with no run | Back to `queued`; re-provisioned from scratch in a clean directory |
 | `running` with a run | Re-attached: waits for the run (a run paused for `recovery` is resumed) and evaluates it |
-| `evaluating` | Evaluated again. Evaluation is a function of the result commit; the old evaluation row is replaced |
-| `running` campaign | Wall-clock budget clock preloaded as `now - startedAt` |
+| `evaluating` | Evaluated again. Evaluation is a function of the result commit; a new evaluation row is added and the earlier one is kept |
+| `running` or `paused` campaign | Campaign and trial budget clocks reloaded from the settings key/value table. Time while the application was closed is not counted |
 
-The preload counts the whole elapsed time since `startedAt`, including any time the application was
-closed or paused. It is not exact.
+The clocks are saved on every state change, on each timer tick and in `dispose()`. A crash loses at most the time since
+the last save.
 
 ## Raw metrics
 
@@ -323,7 +388,7 @@ metrics row is stored in `arena_trial_metrics` (one per trial, replaced on re-ev
 | `verifierPassed` | bool or null | Newest mission-level `verifier` verification | No verifier ran |
 | `criticalFindings`, `highFindings`, `mediumFindings` | int | Findings standing at the end: for each task only its last review counts, and only when its verdict was `changes_requested`; findings the dual-review arbiter rejected are excluded | Never null |
 | `repairs` | int | Tasks with a parent task, of kind `repair`, or with key prefix `mission-fix-` | Never null |
-| `wallClockMs` | int or null | `run.finishedAt - run.startedAt`. Includes quota waits | The run has no start or finish time |
+| `wallClockMs` | int or null | `run.finishedAt - run.startedAt - quotaWaitMs`, floored at 0. Quota waits are excluded | The run has no start or finish time |
 | `sessions` | int | Rows in the session table over every agent of the run | Never null |
 | `turns`, `toolCalls` | int or null | Sum of agent metrics | The run has no agents |
 | `inputTokens`, `outputTokens` | int or null | Sum of the agents' reported token counts, ignoring agents that reported none | No agent reported any |
@@ -350,12 +415,21 @@ over all finished trials (optionally one campaign or the last `sinceDays`, defau
 breakdown, regression flags and plain-language notes. Statistics, labels and notes are defined in
 [BENCHMARK_METHODOLOGY.md](BENCHMARK_METHODOLOGY.md).
 
-A trial counts in pass proportions when it is `passed`, `failed` or `blocked` and has an evaluation row.
-A trial that never reached evaluation (provisioning failure, cancellation) does not count.
+How a trial counts is decided by `trialOutcome()` (see "Final state of a trial"): passed and failed trials count,
+blocked trials count as failures when the block was the run's (`run`) or the case's time budget (`timeout`), and
+harness-blocked trials (`infrastructure`) are left out and shown as `excludedInfrastructure`. Queued, running and
+cancelled trials are ignored. Each `StrategyComparisonRow` has `n`, `cases` (distinct cases behind `n`),
+`excludedInfrastructure`, the Wilson interval and the label. The label is capped at WEAK while `cases` is below 3
+(`MIN_CASES_FOR_EVIDENCE`): repetitions of one case are not independent. Time, sessions, tokens and repairs are summarised
+over passed trials only, so a fast failure does not look efficient.
 
-Regression detection compares only the oldest and the newest NEXUS version group (by the earliest
-creation time of the group's campaigns), over case versions that both groups ran. It does not compare
-policy versions or models, and it ignores groups in between.
+`resultNotes` states in words: n below 5, a single-case row, trials excluded as infrastructure, which pairs are separated
+and which are not, the multiple-comparison caveat when more than two strategies are compared, the agent cap of a
+campaign (ECO) and that efficiency figures cover passed trials only.
+
+Regression detection groups trials by (NEXUS version, model signature: the sorted `role=model` pairs of the trial),
+takes the two newest groups by the earliest campaign creation time, and compares, per strategy, only the case
+versions both groups ran. Policy versions are not compared and older groups are ignored.
 
 ## How the policy consumes trials
 
@@ -365,9 +439,9 @@ policy versions or models, and it ignores groups in between.
 | Aspect | Rule |
 |---|---|
 | Context | The `contextKey` of the trial's `TaskProfile` when the run produced one; else `category | complexity | risk` from the case definition |
-| Skipped | `cancelled`, `queued`, `provisioning`, `running`, `evaluating` |
+| Skipped | `cancelled`, `queued`, `provisioning`, `running`, `evaluating`, and trials blocked by infrastructure |
 | Success | `hiddenPassed === true` |
-| Stability failure | State `blocked`, or `crashedAgents > 0`, or `schedulerFailures > 0` |
+| Stability failure | Never for a passed trial; otherwise `blocked` by the run or the time budget, or `crashedAgents > 0`, or `schedulerFailures > 0` |
 | Weight | 1, times the recency weight (half-life 90 days by default), times `modelDriftWeight` (0.5) when the recorded models differ from the models now configured |
 
 Arena trials are kept as `kind = 'arena'` in `strategy_statistics`; real-mission outcomes are `kind =
@@ -377,8 +451,9 @@ Arena trials and 4 of 6 real missions (observational)"). Runs of Arena trials re
 `isArena` and are excluded from mission evidence. Policy changes only by explicit promotion, and learning
 never rewrites NEXUS source code. Details: [ADAPTIVE_POLICY.md](ADAPTIVE_POLICY.md).
 
-Note that learning counts every `blocked` trial as a failure of its strategy, including a trial blocked
-by a provisioning failure, which the Arena results table leaves out.
+A trial blocked by infrastructure is left out of both the results table and the policy evidence. A finished campaign
+calls `PolicyService.learn()` once (`learnOnCampaignEnd` in `policy/wiring.ts`, wrapped around the Arena's push when
+the campaign reaches `completed`): statistics are refreshed and candidates may be proposed. It never promotes.
 
 ## IPC channels
 
@@ -386,15 +461,17 @@ All are in the `v3-handlers.ts` registry and validated by the schemas in `src/sh
 
 | Channel | Input | Returns |
 |---|---|---|
+| `arena.status` | none | `{ nodeFound, nodeVersion, ok, message }`: whether this computer can run the cases |
 | `arena.cases` | none | `ArenaCaseSummary[]` (case row and latest version) |
 | `arena.importCase` | none; opens a folder picker | `{ summary, commands }` or null when cancelled; registered untrusted |
-| `arena.trustCase` | `caseVersionId` | the trusted `ArenaCaseVersion` |
+| `arena.trustCase` | `caseVersionId` | the trusted `ArenaCaseVersion`; shows a native confirmation listing the commands first |
 | `arena.campaigns` | `limit` 1 to 100, `offset` | `{ campaigns, total }` with state counts |
 | `arena.createCampaign` | `name`, `caseIds`, `strategies`, `repetitions`, `modelPreset`, `budgetPreset`, optional `maxConcurrentTrials`, `maxWallClockMinutes`, `start` | `ArenaCampaign` |
 | `arena.campaign` | `campaignId` | detail: cases, matrix, comparison, usage totals |
 | `arena.trials` | `campaignId`, `limit` 1 to 200 (default 100), `offset` | `{ trials, total }` with metrics, score, hidden result, run state |
 | `arena.trial` | `trialId` | trial, case, metrics, evaluation, task profile |
 | `arena.start`, `arena.pause`, `arena.resume`, `arena.cancel` | `campaignId` | `ArenaCampaign` |
+| `arena.cleanup` | `campaignId` | `{ removed }`: trial directories deleted |
 | `arena.results` | optional `campaignId`, `sinceDays` 1 to 730 | comparison, by case, regressions, notes, total trials |
 
 The service pushes `{ kind: 'arena', campaignId }` after every state change. `home.*` channels summarize
@@ -409,9 +486,9 @@ Migration 004 (`src/main/modules/persistence/migrations/004-v0-3.ts`), additive.
 | `arena_cases` | Case id, name, origin, category, complexity, risk, latest version, source path |
 | `arena_case_versions` | `(case_id, version)` unique; definition JSON, `evaluator_hash`, `fixture_hash`, `trusted` |
 | `arena_campaigns` | State, pause reason, case version ids, strategies, repetitions, model preset, budgets, `overnight`, policy snapshot id, NEXUS version, environment, error, times |
-| `arena_trials` | Campaign, case version, strategy, repetition, ordinal, state, project, run, repo path, baseline and result commit, policy snapshot, task profile, resolved models, detail, times |
+| `arena_trials` | Campaign, case version, strategy, repetition, ordinal, state, `block_kind`, project, run, repo path, baseline and result commit, policy snapshot, task profile, resolved models, detail, times. Index `idx_arena_trials_project` on `project_id` |
 | `arena_trial_metrics` | One row per trial, the fields above |
-| `arena_evaluations` | The hidden evaluation and the score |
+| `arena_evaluations` | The hidden evaluation and the score; one row per evaluation, history kept |
 
 Also written for Arena runs: `task_profiles.arena_trial_id`, `mission_outcomes.is_arena`,
 `usage_events.arena_campaign_id`. The design planned `projects.kind`; the migration adds no column to
@@ -422,21 +499,26 @@ Also written for Arena runs: `task_profiles.arena_trial_id`, `mission_outcomes.i
 - Repository-origin cases: `provisionTrial` can clone a user repository at a commit, but
   `ArenaService` has no method to create such a case or campaign. Only built-in and imported case
   directories can be run.
-- Overnight Arena under the supervisor is not implemented in 0.3. `ArenaCampaign.overnight` is stored
+- Arena cases need Node.js 20 or newer on `PATH`; NEXUS does not ship Node. Without it a campaign cannot start.
+- Overnight Arena with a power action is not implemented in 0.3. `ArenaCampaign.overnight` is stored
   and the IPC schema does not set it; nothing in `overnight/` reads it. A campaign is a normal campaign
   that stops on its own budgets.
 - Pausing a campaign does not pause running runs; they finish and are evaluated.
 - Budgets are checked after each trial (`maxAgentSessions`) or on a 5 s timer (`maxWallClockMinutes`);
   `maxTrials` only at creation. The session budget can be exceeded by the trial that is running.
 - Case `budgets.maxAgentSessions` is part of the schema and is not enforced.
-- Regression detection compares the oldest and newest NEXUS version group only.
-- `wallClockMs` includes quota waits; the budget clocks do not. Compare `quotaWaitMs`.
+- Regression detection compares only the two newest (NEXUS version, model signature) groups.
+- Unattended trials deny every tool approval request, so a strategy cannot be credited for work that needs one.
+- The `performance-optimization` evaluator decides by timing. It keeps the best of several batches to resist load, but it
+  runs on whatever machine runs the campaign, which is a single machine with no isolation from other load.
+- Evaluator fairness was checked with a reference solution per case, not probed exhaustively with alternative correct
+  solutions.
 - Scores are relative to the passing trials of the same case in the same campaign and are recomputed when
   another trial of that case finishes. They are not comparable across campaigns. Compare pass rates and
   raw metrics.
 - Campaign state `failed` exists and is never set.
-- Evaluators are checked for presence in the trial repository only at provisioning. A later agent write of
-  a file with the evaluator's name is not an error: the evaluator copy overwrites it.
+- Evaluators are checked for presence in the trial repository at provisioning. A result commit that contains an
+  evaluator's top-level path fails the trial as tampering; the evaluator is never copied over agent files.
 - Every built-in case is a small JavaScript project. Results say nothing about other languages, large
   repositories, or work that needs network access or services.
 - A trial uses the real Claude runtime and spends the account's usage. A `research` campaign can plan up to

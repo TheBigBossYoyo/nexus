@@ -440,14 +440,14 @@ Found while writing the 0.3 documentation from the code. Where the two differ, t
 | Topic | Design | Implementation |
 |---|---|---|
 | Arena project marker | `ALTER TABLE projects ADD COLUMN kind` is the only change to an existing table | Migration 004 alters no table. Arena projects are identified by `arena_trials.project_id`: `projects.list()` excludes them, `listArena()` returns them |
-| Evaluator hash | SHA-256 over the evaluator directory | `hashEvaluator` also hashes the evaluation command and timeout |
+| Evaluator hash | SHA-256 over the evaluator directory | The hash also covers the evaluation command, the timeout and the whole canonical definition |
 | Import trust | The confirmation is stored with the evaluator hash | `trusted` is a boolean on `arena_case_versions`; `trustCaseVersion` re-hashes when trusting and `loadVerifiedCase` re-hashes on every use |
 | Case budgets | Case budgets listed | Schema has `maxWallClockMinutes`, `maxAgentSessions`, `maxAgentsPerTrial`, `maxTurnsPerAgent`; the case-level `maxAgentSessions` is read by no code |
 | Overnight Arena | A campaign started through the supervisor | Only a stored `overnight` flag on the campaign. Nothing in `overnight/` reads it and the IPC schema does not set it |
 | Campaign pause reasons | `user`, `quota`, `budget`, `restart` | Only `user` and `quota` are set. A budget completes the campaign with an error note. Campaign state `failed` is never set |
 | `arena.createCampaign` budgets | Full budget set | The IPC input exposes `maxConcurrentTrials` and `maxWallClockMinutes` only; `maxTrials`, `maxAgentSessions`, `maxAgentsPerTrial` and `overnight` are service-only |
 | Trial with no integration branch | Evaluated as failed acceptance | An `arena_evaluations` row is written (not passed, skip reason, score 0); the evaluator is not run. Trial state is `failed` or `blocked` by how the run ended. A wall-clock timeout cancels the run and blocks the trial |
-| Regression grouping | Groups by (NEXUS version, policy version, model) | Groups by campaign NEXUS version only; compares the oldest group with the newest over common case versions |
+| Regression grouping | Groups by (NEXUS version, policy version, model) | See the later row: (NEXUS version, model signature), the two newest groups, common case versions |
 | Convenience score | Weights 15/10/5/5/5 | Same weights; findings and repairs use `w/(1+n)`, time and usage use credit relative to the best passing peer of the same case in the same campaign. Scores are recomputed when another trial of the case finishes |
 | Policy context of a trial | Case category, complexity and risk | The run's `TaskProfile` context key when present (inferred from the prompt), else the case's declared values |
 | Repository-origin cases | A trial repository is a clone at the chosen commit | `provisionFromRepository` exists and is tested; `ArenaService` has no way to create such a case or campaign |
@@ -456,13 +456,13 @@ Found while writing the 0.3 documentation from the code. Where the two differ, t
 | `THROTTLED` | Overloaded or short retry-after | `overloaded` and `server_error` only; decays after 120 s or on the next agent message. No retry-after rule |
 | Window status from a usage report | Not specified | NEXUS derives it from the percentage: 100 or more is `rejected`, 90 or more is `allowed_warning`. At 100 percent a report only gives `LIMIT_APPROACHING` and pauses nothing |
 | Local work while waiting | In-flight checks and merges finish; `allowLocalTasksWhileWaiting` | In-flight checks and merges finish; a closed gate starts no task. The setting was removed: it had no behaviour |
-| Overnight quota wait | Uses `planQuotaWait` and the shared probe | As designed, plus: the supervisor writes `quota_pauses` rows of scope `overnight` (`limit_type` null) and `quota_resumes` rows; `usage.overnightWaitForReset` off, `usage.maxQuotaWaitMinutes` exceeded and `MAX_QUOTA_WAITS` (6) end the run as `QUOTA_EXHAUSTED`. Without a probe object the 0.2.1 margin of 90 s applies |
+| Overnight quota wait | Uses `planQuotaWait` and the shared probe | As designed, plus: the supervisor writes `quota_pauses` rows of scope `overnight` (with the limit type) and `quota_resumes` rows; `usage.overnightWaitForReset` off, `usage.maxQuotaWaitMinutes` exceeded and `MAX_QUOTA_WAITS` (6) end the run as `QUOTA_EXHAUSTED`. Without a probe object the 0.2.1 margin of 90 s applies |
 | Test timing overrides | Not in the design | `NEXUS_USAGE_TICK_MS`, `NEXUS_USAGE_RESUME_DELAY_S`, `NEXUS_USAGE_PROBE_S` (unpackaged builds only) and `NEXUS_USAGE_DEMO_RESET_S` (demo script) |
 | `ALWAYS_FOR_HIGH_RISK` | A distinct speculation policy | Only `OFF` is tested anywhere; `AUTO` and `ALWAYS_FOR_HIGH_RISK` behave the same |
 | Resource layer | Defers speculation and may reduce parallelism | Also defers SWARM when Claude is not `AVAILABLE` or a limit was hit within the hour; halves the worker count (`THROTTLE_WORKER_DIVISOR` 2) when THROTTLED or LIMIT_APPROACHING |
 | Candidate contexts | Proposed for a context | Proposed for exact contexts and category-level contexts (`category`, then wildcards), never the global one |
 | Learning trigger | `learn()` recomputes statistics | Runs only through `policy.learn`, a user action; decisions use the statistics of its last run |
-| Pooled label | Wilson interval on counts | `poolRow` computes label and interval on weighted effective counts; stored `strategy_statistics` rows use raw counts, so the two labels can differ |
+| Pooled label | Wilson interval on counts | `poolRow` uses the weighted pass proportion and the Wilson interval on raw Arena counts; the label uses the weighted n and is capped at WEAK below 3 cases, so it can differ from the stored `strategy_statistics` label |
 | Fallback sufficiency | Each fallback level needs sufficient evidence | The threshold is WEAK (`levelSufficient`) |
 | Outcome recording | A `mission_outcomes` row at the run's end | Also when a run pauses for an intervention, recorded as `blocked`; upserted by run. A completed run with no mission criteria counts as success |
 | Explicit strategy | Every run records a decision | A concrete strategy skips the engine: a task profile and the snapshot id are stored, no decision. The `user` layer and `forced` input exist but are unused |
@@ -471,3 +471,30 @@ Found while writing the 0.3 documentation from the code. Where the two differ, t
 | Policy configuration | Not described | `policy.setConfig` (exploration, speculation) creates a snapshot with origin `config`; no other field can be changed |
 | ADAPTIVE without a policy service | Not described | The orchestrator resolves it to BUILD and records nothing |
 | Provider abstraction | Not in the 0.3 design | Only the `AgentRuntime` interface with `ClaudeSdkRuntime` and `FakeAgentRuntime` exists; no provider class or registry |
+| Speculative candidates | Worktrees `nexus/<run>/<task>-cand-a` | Separate clones (`git clone --no-hardlinks --no-tags`, remote removed) at the base commit; states `running`, `decided`, `adopted`; the winner is fetched and fast-forwarded; messages sent to the task reach every candidate; the tournament order is total |
+| Trial outcome | Failed, blocked, passed | `blockKind` (`infrastructure`, `run`, `timeout`) on a blocked trial; `trialOutcome()` counts run and timeout blocks as failures and excludes infrastructure blocks from n and from policy evidence; a result commit that collides with an evaluator path fails the trial as tampering |
+| Evidence label in the Arena | Label by n | Capped at WEAK below 3 distinct cases (`MIN_CASES_FOR_EVIDENCE`); `StrategyComparisonRow.cases` and `excludedInfrastructure`; efficiency means over passed trials only; result notes for single-case rows, multiple comparisons, agent caps and passed-only efficiency |
+| Wall clock in a trial | Wall clock | `wallClockMs` excludes quota waits; campaign and trial budget clocks are persisted in the settings key/value table and survive a restart |
+| Strategy order in a campaign | Repetition outermost | Also counterbalanced: the strategy order rotates by (case index + repetition - 1) |
+| Case `case.json` | Version plus evaluator hash | The hash covers the whole definition; the stored definition runs; `.git` entries are refused; imports are capped at 5000 files and 50 MB; all built-in cases are version 2 with an explicit evaluator file and `maxAgentsPerTrial` 8 |
+| Budget presets | `maxAgentsPerTrial` 2, 4, 6 | 2, 8, 8, so BALANCED and RESEARCH never cap a strategy below its own parallelism |
+| Node for cases | Not covered | A preflight (`arena.status`) requires Node.js 20 or newer on `PATH`; a campaign cannot start without it; an evaluator that runs zero tests is an infrastructure block |
+| Unattended trials | Approvals not specified | The Arena answers approvals: tool requests denied, plan, task and graph approvals granted, a high-risk task start denied |
+| Command environment | Not in the design | Setup, check and Arena commands run with `projectCommandEnv()`; the Arena also removes `ANTHROPIC_*` and `NODE_TEST_CONTEXT` |
+| Trial Git | Not in the design | Hook-free, config-free Git on case content; tamper-safe evaluator copy; `arena.cleanup` removes a finished campaign's trial directories; `arena.trustCase` shows a native confirmation |
+| Regression grouping | (NEXUS version, policy version, model) | (NEXUS version, model signature), the two newest groups |
+| Campaign end | Learning on demand | A completed campaign calls `PolicyService.learn()` once (`learnOnCampaignEnd`); it never promotes |
+| Suppression | At least 3 effective samples with no success, or 2 failures, in the window | Judged per context level on that level's own evidence; stability failures must be at least 2 (weighted) and more than half of the effective observations; a passed trial is never a stability failure |
+| Candidate threshold | Challenger MODERATE, incumbent WEAK | Also at least 5 Arena trials from at least 3 distinct cases at the challenger's level; observational evidence alone never produces a candidate; a rejected candidate returns only after 5 more Arena trials; `promote` refuses a stale candidate; `learn()` judges against the head snapshot |
+| Model drift | Recorded model differs from the configured one | Exact resolved model id compared with the newest evidence's models |
+| Usage service failure in the policy | Not specified | Status `RUNTIME_UNAVAILABLE` with a note, so SWARM and SPECULATIVE are deferred |
+| Plain assistant `rate_limit` | Quota | A quota only after a rejected rate-limit event or a usage-limit text; otherwise a throttle. `billing_error` is always a quota and is checked with a minimal session, never from the report alone |
+| Later rejection without a reset | Not specified | It keeps a reset already known |
+| Probe | Usage report, then minimal session | Window-aware: a stale 100 percent window is not a limit; a rejection with no window type goes to the minimal session |
+| Repeated rejection after a resume | Not specified | A rejection within 10 minutes of an automatic resume continues the same wait; after `MAX_FAILED_RESUMES` (6) the wait ends |
+| Ended wait across a restart | Not specified | Stays ended; the run waits for a manual resume |
+| Gate release in an Overnight wait | Not specified | Every exit releases the gate; a gate nobody owns reopens after `ORPHAN_QUOTA_MS` (30 s) |
+| Agents ended by quota or auth | Not specified | State `stopped`, not `failed` |
+| Stale plan windows | Not specified | Reset passed or older than `USAGE_WINDOW_MAX_AGE_MS` (30 minutes): no percentage, confidence UNKNOWN |
+| `allowLocalTasksWhileWaiting` | A setting | Removed: it had no behaviour |
+| Database upgrade | Single transaction | Also keeps `nexus.db.v<old>.bak` before an upgrade |

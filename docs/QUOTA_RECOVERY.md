@@ -27,18 +27,23 @@ Done in `agent-runtime/translate.ts` (what the runtime said) and `usage/classify
 | Signal | Class | Effect |
 |---|---|---|
 | `rate_limit_event` status `rejected` | quota | turn outcome `quota`; reset time and window type kept |
-| Assistant error `rate_limit` or `billing_error` | quota | outcome `quota`; no reset time |
+| Assistant error `billing_error` | quota | outcome `quota`; no reset time or window type |
+| Assistant error `rate_limit` after a `rejected` rate-limit event of the same session, or whose text starts with an SDK usage-limit prefix | quota | outcome `quota` |
+| Assistant error `rate_limit` with neither | throttle | a plain 429: event `agent.rate_limited` with status `throttled`; nothing pauses |
 | Failed result whose text starts with an SDK `USAGE_LIMIT_ERROR_PREFIXES` entry | quota | outcome `quota` |
 | `rate_limit_event` status `allowed_warning` | information | status `LIMIT_APPROACHING`; nothing pauses |
 | Assistant error `overloaded` or `server_error` | throttle | `THROTTLED` for up to 120 s or until the next successful message; nothing pauses |
 | Assistant errors `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `verification_required`, `cloud_credential_error` | auth | outcome `auth`; the run pauses with cause `auth` (a person must act; the controller does not wait for it) |
 
-A throttle is never turned into a quota pause, and a quota signal is never turned into a retry.
+A throttle is never turned into a quota pause, and a quota signal is never turned into a retry. A later rejection of
+the same pause that carries no reset time never erases a reset time already known (the SDK reports one limit twice: a
+rate-limit event with the reset, then an error without one). An agent whose session ended with `quota` or `auth` is
+recorded as `stopped` (reason recorded), not `failed`.
 
 ## What happens on a limit, step by step
 
 1. **Session ends with outcome `quota`.** The pipeline treats it as a halt (`haltOutcome`): the task keeps
-   its state and its SDK session id, no attempt is consumed, nothing is marked failed. The orchestrator
+   its state and its SDK session id, no attempt is consumed, nothing is marked failed (the agent is `stopped`). The orchestrator
    calls `pauseRun(runId, 'quota', 'Claude usage limit reached')`. The same happens when planning or the
    consensus planner hits the limit.
 2. **Run paused.** The run becomes `paused` with `pauseReason: quota` and emits `run.paused` with
@@ -48,7 +53,11 @@ A throttle is never turned into a quota pause, and a quota signal is never turne
    - A `run_checkpoints` row is written (reason `quota`) and `checkpoint.saved` is emitted. At most 50
      checkpoints are kept per run.
    - A `quota_pauses` row of scope `global` is inserted if none is live. It holds the reset time (and its
-     confidence: `EXACT` when known, else `UNKNOWN`), the limit type, `probes: 0` and `next_check_at`.
+     confidence: `EXACT` when known, else `UNKNOWN`), the limit type, `probes: 0` and `next_check_at`. A run rejected again
+     within `RESUME_CARRY_MS` (10 minutes) after an automatic resume continues the same wait: the new global row keeps
+     the earlier start and carries `probes + 1`, so the backoff and `maxQuotaWaitMinutes` accumulate. After
+     `MAX_FAILED_RESUMES` (6) automatic resumes that Claude rejected again, the wait ends (`wait_ended` notice) and the
+     runs stay paused.
    - A `quota_pauses` row of scope `run` is inserted for this run, with the checkpoint id and the run's
      resume state.
    - The status machine gets `quota_checkpointed` and moves to `WAITING_FOR_RESET`.
@@ -82,7 +91,11 @@ A throttle is never turned into a quota pause, and a quota signal is never turne
 | Arena campaigns | Derived pause, below |
 
 When the gate reopens the orchestrator ticks every active run. `gate.limit(normal)` lowers the parallel
-limit during the ramp.
+limit during the ramp, and the ramp also limits how many orphaned tasks are restarted at once.
+
+A closed gate that nothing owns reopens by itself: when status is `QUOTA_PAUSED`, `WAITING_FOR_RESET` or `PROBING`, no
+`quota_pauses` row is live, no Overnight run is in `QUOTA_PAUSED`, and `ORPHAN_QUOTA_MS` (30,000 ms) has passed, the
+controller tick returns the status to `AVAILABLE`.
 
 ## Wait planning: `planQuotaWait`
 
@@ -120,11 +133,15 @@ row's `next_check_at` has passed. At most one probe is in flight: concurrent cal
 Check now, the supervisor's own probe object) share the first one's answer.
 
 1. **Usage report first** (when `usage.useRuntimeUsageReport` is on and the runtime has `getUsageReport`).
-   No prompt, no model call.
-   - A rejected window that reports no percentage but a reset still in the future: limited.
-   - Otherwise the window with the highest percentage decides: 100 or more is limited (and its reset
-     time is learned), below 100 is available.
-   - No usable percentage, `rateLimitsAvailable` false, an error or a timeout: no answer; fall through.
+   No prompt, no model call. The probe is window-aware: it receives the type of the window that was rejected.
+   - The rejection named no window (`billing_error`, overage, no limit type), or the report has no such window: the report
+     alone is not trusted; fall through to the minimal session. A `billing_error` therefore never resumes automatically
+     from the report alone.
+   - The named window reports no percentage: a reset still in the future means limited; otherwise no answer, fall through.
+   - The named window reports a percentage: 100 or more is limited unless its reset time has passed (a stale 100 percent
+     window is not a limit); below 100 is available.
+   - With no hint (Check now): the highest window whose reset has not passed decides, the same 100 threshold.
+   - `rateLimitsAvailable` false, an error or a timeout: no answer; fall through.
 2. **Minimal session fallback.** One session with `maxTurns: 1`, no tools (every authorization denied),
    working directory in the OS temp directory, no project settings, the fast model tier from
    `settings.models.tiers.fast`, system prompt appendix "This is an availability check. Answer in one
@@ -133,8 +150,8 @@ Check now, the supervisor's own probe object) share the first one's answer.
 
 | Probe outcome | Meaning |
 |---|---|
-| `available` | report below 100, or the session completed |
-| `limited` | report at 100 or more, or the session ended with outcome `quota` (a reset time in a `rejected` event is kept) |
+| `available` | report below 100 (or stale), or the session completed |
+| `limited` | report at 100 or more with a reset still ahead, or the session ended with outcome `quota` (a reset time in a `rejected` event is kept) |
 | `auth` | the session ended with outcome `auth` |
 | `runtime` | the session timed out, crashed or ended in another error |
 
@@ -185,7 +202,9 @@ empty.
 
 ## Restart during a wait
 
-The `quota_pauses` rows are the durable state. After `recoverOnStartup` (which converts runs that were
+The `quota_pauses` rows are the durable state. An ended wait stays ended: a run whose wait was ended (by the person or by
+the plan) after it paused is not given new rows by `recover()` and stays paused for a manual resume
+(`waitEndedSincePause`). After `recoverOnStartup` (which converts runs that were
 active into recovery pauses and leaves `paused/quota` runs alone), `src/main/index.ts` calls
 `recovery.recover()`:
 
@@ -200,6 +219,9 @@ active into recovery pauses and leaves `paused/quota` runs alone), `src/main/ind
 If the stored reset time has passed while NEXUS was closed, the plan's first branch gives
 `checkAt = now + resumeDelaySeconds` and the first scheduler pass probes. A run that was `paused/quota`
 is not converted into a recovery pause and is not offered for recovery.
+
+At shutdown `recovery.dispose()` stops the scheduler and `recovery.idle()` waits for a tick or probe in flight before the
+database closes; a probe that finishes after disposal writes nothing and resumes nothing.
 
 ## User actions
 
@@ -241,7 +263,7 @@ On `run.paused` with cause `quota`, `onQuota` decides:
 | Policy `quotaPolicy: END_RUN` | Ends `QUOTA_EXHAUSTED` ("The policy ends the run on a usage limit.") |
 | `usage.overnightWaitForReset` off | Ends `QUOTA_EXHAUSTED` |
 | The run already waited `MAX_QUOTA_WAITS` (6) times | Ends `QUOTA_EXHAUSTED` |
-| Reset known, check time (`reset + resumeDelaySeconds`) before the deadline | State `QUOTA_PAUSED`; wait |
+| Reset known, check time (`reset + resumeDelaySeconds`) before the deadline | State `QUOTA_PAUSED`; wait. The reset is the newest rejection since the run last resumed that carries one, so a second rejection without a reset does not hide it |
 | Reset known, check time at or after the deadline | Ends `QUOTA_EXHAUSTED` |
 | Reset unknown, first check (now + 5 min) before the deadline | Wait; probes on the 5, 10, 20, 30, 30 ... minute schedule |
 | Reset unknown, next check at or after the deadline | Ends `QUOTA_EXHAUSTED` |
@@ -253,8 +275,9 @@ On `run.paused` with cause `quota`, `onQuota` decides:
 | `resumeRun` fails | `BLOCKED` |
 
 The reset time is read from the newest rejected `agent.rate_limited` event since the run last resumed that
-carries one. The supervisor also writes a `quota_pauses` row of scope `overnight` (history stays uniform)
-and the controller never touches it. Without a probe object the supervisor behaves as in 0.2.1
+carries one. The supervisor also writes a `quota_pauses` row of scope `overnight` (history stays uniform, with the
+limit type) and the controller never touches it. Every exit from an overnight wait releases the dispatch gate (the usage
+service handles `overnight.state_changed` from `QUOTA_PAUSED`), and a gate nobody owns self-heals (see "Dispatch gate"). Without a probe object the supervisor behaves as in 0.2.1
 (`decideQuota`: wait only for a known reset, resume 90 s after it, never probe).
 
 `MAX_QUOTA_WAITS` counts waits, not probes. See [OVERNIGHT_MODE.md](OVERNIGHT_MODE.md) for the end-of-run
@@ -309,6 +332,7 @@ greater than 0. They cannot be set in a packaged build.
 | `NEXUS_USAGE_TICK_MS` | Scheduler interval of the controller (accepted when 100 or more; default 10,000) |
 | `NEXUS_USAGE_RESUME_DELAY_S` | Replaces `resumeDelaySeconds` |
 | `NEXUS_USAGE_PROBE_S` | Replaces the first unknown-reset interval (seconds); the cap becomes 6 times that unless `probeMaxSeconds` is passed |
+| `NEXUS_FAKE_USAGE` | Only with `NEXUS_FAKE_RUNTIME=1` in an unpackaged build: `unknown` makes the scripted runtime report no usage report; a number sets the plan window percentage it reports |
 | `NEXUS_USAGE_DEMO_RESET_S` | Read by the scripted runtime's demo script (`quota-reset` behaviour): seconds until the simulated reset, default 6 |
 
 The overrides apply to the controller only. The Overnight supervisor reads the stored settings.
@@ -320,15 +344,11 @@ The overrides apply to the controller only. The Overnight supervisor reads the s
 - With `pauseAllOnGlobalLimit` off, other runs keep their sessions until they hit the limit themselves;
   the gate still stops new sessions everywhere.
 - The first plan can end the wait immediately: when `maxQuotaWaitMinutes` is set below the planned first
-  check, the controller ends the wait before inserting the run's row (`handleQuotaPause`). The run stays
-  paused with reason `quota`, no row, no notice, and the status returns to `AVAILABLE`. A later restart
-  (`recover()`) would create the rows again. With the default of 0 this does not occur.
+  check, the rows are written and closed as `ended` with the reason, the `wait_ended` notice is pushed, and the run stays
+  paused with reason `quota` for a manual resume. A restart does not reopen it.
 - Ordinary runs have no deadline: with an unknown reset and `maxQuotaWaitMinutes` 0 the controller probes
   at the capped interval indefinitely, as long as NEXUS runs.
-- A window at or above 100 percent with a reset time that has passed is still read as limited by the
-  usage report probe (`probe.ts` checks the percentage, not the reset).
-- The Overnight probe does not pass the rejected window type (`limitType` is null on `overnight` rows), so
-  the "rejected window with no percentage" rule applies only to ordinary runs.
+- A rejection with no window type can only be checked with a minimal session, which costs one small request per interval.
 - While dispatch is closed no task starts, local or not; checks and merges already running finish. There is no setting for this.
 - Resume depends on the SDK session still being resumable; otherwise the 0.2.1 handoff is used.
 - Auth and runtime failures are not waited out by the controller beyond the backoff re-plan; authentication

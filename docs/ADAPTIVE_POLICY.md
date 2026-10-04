@@ -175,15 +175,20 @@ rate is above 0 and the context allows it, the seed is stored whether or not the
 
 ### Suppression
 
-A strategy is suppressed for a context when, at the context or any fallback level (`suppressedStrategies`),
-the pooled row has at least `suppressMinEffectiveSamples = 3` effective samples and zero effective
-successes, or at least `suppressStabilityFailures = 2` stability failures. A suppressed strategy is never
-chosen by layers 2 to 4. A stability failure is a blocked Arena trial or one with crashed agents or
-scheduler failures, or a mission outcome with terminal `blocked`.
+A strategy is suppressed for a context (`suppressedStrategies`) when the pooled row of that context level has, on its
+own evidence, either at least `suppressMinEffectiveSamples = 3` effective samples and zero effective successes, or
+`stabilityFailures >= suppressStabilityFailures = 2` (weighted, like the effective counts) and more than half of the
+effective observations. Each level is judged on its own evidence: there is no union over levels, so a failure in one
+context never suppresses a strategy in an unrelated one. A suppressed strategy is never chosen by layers 2 to 4.
+A stability failure is a trial that did not pass and was blocked by its run (`blockKind` `run`) or had crashed agents
+or scheduler failures, or a mission outcome that did not succeed with terminal `blocked`. A passed trial is never a
+stability failure, whatever happened to an agent on the way. A trial blocked by infrastructure is not evidence at all.
 
 ### Resource layer
 
-Skipped when `forced`. `available` is `usageStatus === 'AVAILABLE'` and no limit within one hour.
+Skipped when `forced`. `available` is `usageStatus === 'AVAILABLE'` and no limit within one hour. When this layer
+replaces a strategy an earlier layer chose, the decision is no longer an exploration: `exploration` is set to false,
+the layer names what actually decided, and `resourceNotes` records that the explored strategy was replaced.
 
 | Condition | Effect |
 |---|---|
@@ -192,8 +197,8 @@ Skipped when `forced`. `available` is `usageStatus === 'AVAILABLE'` and no limit
 | Status `THROTTLED` or `LIMIT_APPROACHING` (`THROTTLED_STATUSES`) and worker count above 1 | `workerCount = max(1, floor(workerCount / THROTTLE_WORKER_DIVISOR))`, `THROTTLE_WORKER_DIVISOR = 2` |
 
 The usage status is read from `UsageIntelligenceService.status()`, a runtime fact (USAGE_INTELLIGENCE.md).
-If the usage service throws, `PolicyService.usageNow` reports `AVAILABLE` with `recentLimit = true`, so
-SWARM and SPECULATIVE are deferred.
+If the usage service throws, `PolicyService.usageNow` reports `RUNTIME_UNAVAILABLE` with a note in `resourceNotes`:
+availability is treated as unknown, so SWARM and SPECULATIVE are deferred.
 
 ### Decision record
 
@@ -208,7 +213,7 @@ with counts and the evidence label), `evidenceSummary` rows, `resourceNotes`, us
 
 | Source | Counted when | Success |
 |---|---|---|
-| Arena trial (kind `arena`) | state is not `cancelled`, `queued`, `running`, `provisioning`, `evaluating`; finished inside the evidence window | `metrics.hiddenPassed === true` |
+| Arena trial (kind `arena`) | state is not `cancelled`, `queued`, `running`, `provisioning`, `evaluating`; not blocked by infrastructure (`blockKind` `infrastructure`, or a legacy blocked row with no kind and no ended run); finished inside the evidence window | `metrics.hiddenPassed === true` |
 | Mission outcome (kind `mission`) | not an Arena run (`isArena`), terminal not `cancelled`, inside the window | `MissionOutcome.success` |
 
 Each observation is added to its exact context key and to every fallback level (`category|*|*`, `*|*|*`).
@@ -220,7 +225,7 @@ Each observation is added to its exact context key and to every fallback level (
 | `evidenceWindowDays` | 365 | Older evidence is ignored entirely |
 | `recencyHalfLifeDays` | 90 | Weight x `0.5^(age / 90 days)` (`recencyWeight`) |
 | `missionWeight` | 0.5 | Base weight of a mission outcome; an Arena trial has base weight 1 |
-| `modelDriftWeight` | 0.5 | Extra factor when any role's recorded model differs from the model the tier resolves to now (`modelDrifted`, `sameModel`: equal, or one contains the other; unknown on either side is not drift) |
+| `modelDriftWeight` | 0.5 | Extra factor when any role's recorded resolved model id differs, by exact comparison (`modelDrifted`), from the models recorded on the newest evidence item in the window that records any. Only when no item records a model are the configured tier aliases used. A role unknown on either side is not drift |
 | `scoringVersion` | `score-v1` | Recorded in the snapshot |
 
 Only `exploration` and `speculation` can be changed by the user (`policy.setConfig`). The other fields
@@ -229,29 +234,35 @@ are fixed at their defaults.
 ### Statistics
 
 `aggregateEvidence` writes one `strategy_statistics` row per (context, strategy, kind): raw `n` and
-`successes`, weighted `effectiveN` and `effectiveSuccesses`, pass proportion, Wilson 95% interval on the
-raw counts, median and mean duration, mean sessions, mean observed tokens (input plus output), mean
-repairs, repair distribution, stability failures, evidence label. The interval formula, the label
+`successes`, `distinctUnits` (distinct Arena cases, or distinct runs for missions), weighted `effectiveN` and
+`effectiveSuccesses`, pass proportion, Wilson 95% interval on the raw counts, median and mean duration, mean sessions,
+mean observed tokens (input plus output), mean repairs, repair distribution, weighted stability failures, evidence
+label. Duration, sessions and tokens are means over passed runs only: a fast failure is not efficient. The interval formula, the label
 thresholds (`EVIDENCE_THRESHOLDS`: weak 5, moderate 12, strong 30, strong max width 0.30) and the rule
 that no p-values are computed are in BENCHMARK_METHODOLOGY.md.
 
-For decisions, `poolRow` combines the Arena and mission rows of a strategy: counts are kept apart for
-display, `effectiveN` and `effectiveSuccesses` are summed for the pass proportion, the interval and the
-label (these use the weighted counts, so a pooled label can differ from a `strategy_statistics` label).
-Efficiency figures (sessions, tokens, median time) come from Arena rows when there are any, else from
-mission rows.
+For decisions, `poolRow` combines the Arena and mission rows of a strategy. Counts are kept apart for display
+(`arenaN`, `arenaCases`, `missionN`). The pass proportion is the weighted `effectiveSuccesses / effectiveN`. The Wilson
+interval used for "separated" is computed on the raw Arena counts when the strategy has any (controlled evidence);
+only a mission-only row uses its raw mission counts. A Wilson interval on fractional weighted counts would claim a
+precision the data does not have. The label is `evidenceLabel(effectiveN, interval)` and is capped at WEAK while the
+Arena evidence comes from fewer than `minDistinctCases = 3` distinct cases (`capLabel`), so a pooled label can differ from
+the label stored in `strategy_statistics`. Efficiency figures (sessions, tokens, median time) come from Arena rows when
+there are any, else from mission rows.
 
 ### Context fallback
 
 `summarize` walks exact, `category|*|*`, `*|*|*` and takes the first level where some strategy has at
-least `levelSufficient = WEAK` evidence. `evidenceContextKey` records which level was used; it is null
+least `levelSufficient = WEAK` evidence (after the case cap). `evidenceContextKey` records which level was used; it is null
 when no level qualifies.
 
-### Statistics are refreshed only by `learn()`
+### Statistics are refreshed by `learn()`
 
-Decisions read `strategy_statistics` as it was at the last `learn()`. Nothing calls `learn()`
-automatically: it runs when the user triggers `policy.learn`. New Arena trials and outcomes do not affect
-decisions until then.
+Decisions read `strategy_statistics` as it was at the last `learn()`. `learn()` runs when the user triggers
+`policy.learn` and once when an Arena campaign reaches `completed` (`learnOnCampaignEnd` in `wiring.ts`, wrapped around
+the Arena's push in `src/main/index.ts`). That call refreshes the statistics and may propose candidates; it never
+promotes. Mission outcomes and trials of a cancelled campaign do not trigger it, so they affect decisions only after the
+next `learn()`.
 
 ## Candidates
 
@@ -259,21 +270,24 @@ decisions until then.
 (exact keys and `category|*|*` keys; `*|*|*` is excluded). Candidates are therefore proposed for exact and
 category-level contexts, never global.
 
-For each context the incumbent is the active snapshot's preference, else the default. Every other
-strategy is judged against it by `judgeChallenger`:
+For each context the incumbent is the preference of the head snapshot (the pointer's active one, not a pinned one), else
+the default. Every other strategy is judged against it, on that context level's own rows, by `judgeChallenger`:
 
 | Step | Rule |
 |---|---|
 | 1 | The challenger is not suppressed |
-| 2 | The challenger has at least `challengerMin = MODERATE` evidence (n of 12 or more) |
-| 3 | The incumbent has at least `incumbentMin = WEAK` evidence (n of 5 or more) |
-| 4a | Challenger's lower Wilson bound is above the incumbent's upper bound: proposed (rule `separated`) |
-| 4b | Challenger's interval lies entirely below the incumbent's: refused |
-| 4c | Intervals overlap: both need `overlapBothMin = MODERATE`, the challenger's pass proportion must be at least the incumbent's, and the challenger must be at least `efficiencyBand = 0.20` lower (20%) on mean sessions or median duration (`betterByBand`): proposed (rule `overlap-efficiency`) |
+| 2 | The challenger has at least `minArenaTrials` = 5 Arena trials. Observational evidence alone never produces a candidate: with only missions the note says to run an Arena campaign for the context |
+| 3 | The challenger's Arena trials come from at least `minDistinctCases` = 3 distinct cases at this context level (repetitions of one case are not independent) |
+| 4 | The challenger has at least `challengerMin = MODERATE` evidence (effective n of 12 or more, after the case cap) |
+| 5 | The incumbent has at least `incumbentMin = WEAK` evidence |
+| 6a | Challenger's lower Wilson bound is above the incumbent's upper bound: proposed (rule `separated`) |
+| 6b | Challenger's interval lies entirely below the incumbent's: refused |
+| 6c | Intervals overlap: both need `overlapBothMin = MODERATE`; the challenger's pass proportion must be at least the incumbent's; the challenger's Wilson lower bound may not be below the incumbent's by more than `efficiencyLowerBoundSlack = 0.05`; and the challenger must be at least `efficiencyBand = 0.20` lower (20%) on mean sessions or median duration over passed runs (`betterByBand`): proposed (rule `overlap-efficiency`) |
 
 SPECULATIVE is skipped as a challenger while speculation is `OFF`. Among passing challengers a
 `separated` one beats an `overlap-efficiency` one; within a rule the higher pass proportion wins. At
-most one candidate per context. When none qualifies the reason is returned as a note
+most one candidate per context. A candidate that was rejected on the same base snapshot is not proposed again until the
+challenger has gained `reproposeAfterArenaTrials` = 5 more Arena trials since the rejection; the note says so. When none qualifies the reason is returned as a note
 (`LearnResult.notes`), for example that the incumbent has too little evidence.
 
 A candidate stores the two strategies, counts, label, `expected` lines (counts, mean sessions, median
@@ -301,7 +315,7 @@ The pointer is the settings value `policy-pointer` (`POLICY_POINTER_KEY`): `{ ac
 | Action | Channel | Effect |
 |---|---|---|
 | Default | startup (`ensureDefault`, called from `src/main/index.ts`) | Writes version 1 (no preferences, `DEFAULT_POLICY_CONFIG`) and the pointer if missing. Idempotent. |
-| Promote | `policy.promote` | Candidate must be `proposed`. New snapshot version n+1 with the preference added for that context (`applyPromotion`; promoting the default strategy removes the preference). Built on the pointer's active snapshot, not a pinned one. Pointer: `activeId` = new, `previousId` = old. Candidate becomes `promoted`. Row in `policy_promotions`. |
+| Promote | `policy.promote` | Candidate must be `proposed` and its base snapshot must still be the head: a stale candidate (the head moved since it was proposed) is refused with "stale candidate: run learn again". New snapshot version n+1 with the preference added for that context (`applyPromotion`; promoting the default strategy removes the preference). Built on the pointer's active snapshot, not a pinned one. Pointer: `activeId` = new, `previousId` = old. Candidate becomes `promoted`. Row in `policy_promotions`. |
 | Reject | `policy.reject` | Candidate becomes `rejected`; no snapshot. Row in `policy_promotions`. |
 | Config | `policy.setConfig` | `exploration` and/or `speculation`. New snapshot (origin `config`), same pointer move as a promotion. No-op if nothing changes. |
 | Rollback | `policy.rollback` | `activeId` = `previousId`, `previousId` = null. Only one step. Error if there is no earlier snapshot. |
@@ -346,7 +360,9 @@ a run that is blocked and later finished replaces its earlier row.
 | `inputTokens`, `outputTokens` | sum over agents that reported tokens; null when none did |
 | `quotaPauses`, `quotaWaitMs` | from `quota_pauses` |
 | `humanInterventions` | count of `user.intervention` events |
-| `isArena` | an Arena trial row exists for the run |
+| `isArena` | an Arena trial row exists for the run, or the run's strategy info names an Arena trial |
+
+`isArena` is also set when `run.config.strategy.arenaTrialId` is present, not only when an Arena trial row exists for the run.
 
 Nothing is recorded when: the run has no `config.strategy` (created before 0.3); no task profile exists;
 the run is in any other state (for example `paused` for quota or by the user, or still running); or the
@@ -403,13 +419,14 @@ real ADAPTIVE mission result is stated here: see V0_3_RELEASE_REPORT.md.
 - `ALWAYS_FOR_HIGH_RISK` behaves as `AUTO` in 0.3. Only `OFF` is tested (`allowedStrategies`,
   `preferenceFor`, `proposeCandidates`). SPECULATIVE is never a default under any setting.
 - Candidates are proposed for exact and category-level contexts, never global (`*|*|*`).
-- Learning runs only when the user calls `policy.learn`. Decisions use the statistics of the last run of it.
+- Learning runs when the user calls `policy.learn` and when an Arena campaign completes. Decisions use the statistics of
+  the last run of it.
 - A run created with a concrete strategy records a task profile and the snapshot id but no decision. A run
   without a strategy in its config (pre-0.3) records no outcome at all.
 - A mission outcome is observational. Its `success` is NEXUS's own verification, and runs that finish
   without mission criteria count as successful when completed.
-- Small samples: nothing is proposed below `MODERATE` (12) for the challenger and `WEAK` (5) for the
-  incumbent, and even `MODERATE` evidence is a small sample. No p-values are computed.
+- Small samples: nothing is proposed unless the challenger has 5 Arena trials from 3 distinct cases and `MODERATE` (12)
+  effective evidence, and the incumbent `WEAK` (5). Even `MODERATE` evidence is a small sample. No p-values are computed.
 - The context is three coarse buckets from keyword rules. Two different tasks in one bucket are treated
   as the same.
 - The user's explicit strategy choice does not go through the policy engine, so the `user` layer and the

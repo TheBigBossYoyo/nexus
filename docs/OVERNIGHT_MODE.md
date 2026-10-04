@@ -140,9 +140,13 @@ was replaced, and CANCEL SHUTDOWN still works.
   | `usage.maxQuotaWaitMinutes` (0 = none) exceeded | Ends `QUOTA_EXHAUSTED` |
   | Deadline reached during the wait | `TIME_LIMIT`, wait row closed |
 
-  The probe asks the runtime's usage report first (no prompt) and falls back to one minimal session. Each
-  wait is a `quota_pauses` row of scope `overnight`, with `quota_resumes` rows for the probes and the
-  resume. Without a probe object (not the case in the application) the 0.2.1 rule applies: wait only for a
+  The probe asks the runtime's usage report first (no prompt) and falls back to one minimal session; it is
+  given the rejected window's type, so a window at 100 percent whose reset has passed is not read as a limit,
+  and a rejection with no window type is checked with the minimal session. Each
+  wait is a `quota_pauses` row of scope `overnight` (with the limit type), with `quota_resumes` rows for the probes and the
+  resume. Every exit from the wait (resume, deadline, cancel, a person's resume) releases the dispatch gate: the usage
+  service reacts to `overnight.state_changed` from `QUOTA_PAUSED`, and a closed gate that no `quota_pauses` row and no
+  overnight wait owns for `ORPHAN_QUOTA_MS` (30 s) reopens by itself. Without a probe object (not the case in the application) the 0.2.1 rule applies: wait only for a
   known reset, resume 90 seconds after it.
 - **Watchdog**: no orchestration event for `stallMinutes` → diagnostic snapshot → scheduler reconciliation →
   if still silent after `graceMinutes` → BLOCKED. Check commands that are still running extend the

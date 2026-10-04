@@ -20,8 +20,8 @@ Verified against the Claude Agent SDK 0.3.288 and the code that reads it.
 | Window type | `rate_limit_info.rateLimitType` (`five_hour`, `seven_day`, ...) | same | stored verbatim in `limit_type` |
 | Utilization of that window | `rate_limit_info.utilization`, optional | same | stored verbatim with unit `raw`; never shown as a percentage, because the SDK declaration does not give the unit |
 | Overage fields | `overageStatus`, `isUsingOverage`, `surpassedThreshold` | same | carried on `agent.rate_limited`; `isUsingOverage` adds `:overage` to the stored classification text. Nothing else reads them |
-| Usage-limit failure | assistant error `rate_limit` or `billing_error`, `rate_limit_event` with `rejected`, or a result text starting with an SDK `USAGE_LIMIT_ERROR_PREFIXES` entry | `translate.ts` (`QUOTA_ERRORS`, `classifyResult`) | turn outcome `quota`, source `ERROR_METADATA` |
-| Transient failure | assistant error `overloaded`, `server_error` | `translate.ts` | event `throttle`; never `quota` |
+| Usage-limit failure | assistant error `billing_error`; assistant error `rate_limit` when the session's `rate_limit_event` was `rejected` or the text starts with an SDK `USAGE_LIMIT_ERROR_PREFIXES` entry; `rate_limit_event` with `rejected`; a result text starting with such a prefix | `translate.ts` (`state.quotaSignal`, `looksLikeUsageLimit`, `classifyResult`) | turn outcome `quota`, source `ERROR_METADATA` |
+| Transient failure | assistant error `overloaded`, `server_error`, or a plain `rate_limit` (a 429 with no rejected event and no usage-limit text) | `translate.ts` | event `throttle`; never `quota` |
 | Authentication failure | assistant errors `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `verification_required`, `cloud_credential_error` | `translate.ts` (`AUTH_ERRORS`) | turn outcome `auth` |
 | Account | `accountInfo()`: subscription type, token source | `claude-sdk-runtime.ts` `getAccountInfo` | `EXACT`, source `RUNTIME` |
 | Plan windows without sending a prompt | `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })` on a `query()` object | `claude-sdk-runtime.ts` `getUsageReport`, `parseUsageReport` | `EXACT` when it answers; optional |
@@ -113,7 +113,7 @@ strategy, campaign, agent and task.
 | `limit_rejected` | `rate_limit` status `rejected`, or a `quota` turn outcome or error. A second rejection of the same run within `LIMIT_DEDUPE_MS` (10 s) that carries no reset time is not stored again |
 | `limit_warning` | `rate_limit` status `allowed_warning` |
 | `limit_allowed` | Classified but not stored: a plain `allowed` only refreshes `usage_windows` |
-| `throttle` | `overloaded` or `server_error` (arrives as `agent.rate_limited` with status `throttled`) |
+| `throttle` | `overloaded`, `server_error` or a plain `rate_limit` (arrives as `agent.rate_limited` with status `throttled`) |
 | `auth` | A run paused with cause `auth` |
 | `runtime_error` | Defined and classified (`crashed` turn outcome), but nothing in `src/main` produces that signal; see "Limits" |
 | `probe` | One availability probe and its result |
@@ -143,6 +143,10 @@ One row per `limit_type` (`UNIQUE`), the latest value: `status` (`allowed`, `all
 `observed_at`, `updated_at`. Written from rate-limit events (those that carry a `rateLimitType`) and from
 usage reports (status derived from the percentage: 100 or more `rejected`, 90 or more `allowed_warning`,
 else `allowed`).
+
+The overview withholds a stale window's percentage. A window is stale when its reset time has passed or it was last
+observed more than `USAGE_WINDOW_MAX_AGE_MS` (30 minutes) ago: its `utilizationPercent` becomes null, its confidence
+`UNKNOWN` and `stale` is true. `subscriptionUtilizationPercent` and `nextResetAt` ignore stale windows.
 
 The existing `usage_snapshots` table (0.1) is still written per turn and is not read by the usage service.
 
@@ -176,7 +180,7 @@ false while a live `global` row exists in `quota_pauses`, whatever the status.
 | `THROTTLED`, `AUTH_REQUIRED`, `RUNTIME_UNAVAILABLE` | `allowed` signal | `AVAILABLE` |
 | `AVAILABLE`, `LIMIT_APPROACHING` | usage report: highest percentage 90 or more | `LIMIT_APPROACHING` (never `QUOTA_PAUSED`: a report that says 100 does not pause anything) |
 | `LIMIT_APPROACHING` | usage report: highest percentage below 90 | `AVAILABLE` |
-| `THROTTLED`, `AUTH_REQUIRED`, `RUNTIME_UNAVAILABLE` | `session_ok` (any `agent.message`) | `AVAILABLE` |
+| `THROTTLED`, `AUTH_REQUIRED`, `RUNTIME_UNAVAILABLE` | `session_ok` (an `agent.started`: a session initialized; message text from an agent is not evidence) | `AVAILABLE` |
 | `AUTH_REQUIRED`, `RUNTIME_UNAVAILABLE` | `account_ok` (a successful account check) | `AVAILABLE` |
 | any except `PROBING`, `WAITING_FOR_RESET` | `quota_checkpointed` (a `quota_pauses` row was written) | `WAITING_FOR_RESET` |
 | any | `restore_wait` (startup found an open wait, or the supervisor started a wait) | `WAITING_FOR_RESET` |
@@ -186,11 +190,13 @@ false while a live `global` row exists in `quota_pauses`, whatever the status.
 | same | `probe_result` auth / runtime | `AUTH_REQUIRED` / `RUNTIME_UNAVAILABLE` |
 | waiting, `QUOTA_PAUSED`, `AUTH_REQUIRED`, `RUNTIME_UNAVAILABLE` | `wait_ended` (deadline, user, policy) | `AVAILABLE` |
 | `THROTTLED` | `tick` after `THROTTLE_DECAY_MS` (120,000 ms) | `AVAILABLE` |
+| waiting, `QUOTA_PAUSED`, `AUTH_REQUIRED`, `RUNTIME_UNAVAILABLE` | `overnight.state_changed` from `QUOTA_PAUSED` with no live global row | `AVAILABLE` (releases the gate) |
 | `LIMIT_APPROACHING` | `tick` when the stored reset has passed | `AVAILABLE` |
 | `QUOTA_PAUSED` | `tick` with no live wait for `ORPHAN_QUOTA_MS` (30,000 ms) | `AVAILABLE` |
 
 During `WAITING_FOR_RESET` and `PROBING` only a probe or the end of the wait changes the status. A newer
-reset time on a `rejected` signal is still learned.
+reset time on a `rejected` signal is still learned. A rejection while already `QUOTA_PAUSED` that carries no reset time
+keeps the reset time and limit type already known.
 
 `LIMIT_APPROACHING` is entered only on a runtime `allowed_warning`, or on a runtime percentage (unit
 `percent`) at or above `APPROACHING_PERCENT` (90). Observed token counts never cause it. It blocks

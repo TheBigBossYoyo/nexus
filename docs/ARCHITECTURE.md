@@ -179,7 +179,7 @@ Run view, a Context tab in the task inspector, and a routing section in the Agen
     returns null on any failure and callers treat null as UNKNOWN; recovery then falls back to a minimal session probe.
 23. **Arena trials are ordinary runs in isolated repositories.** Each trial has its own repository under
     `<data>/arena/`, its own project row (found through `arena_trials.project_id`; `ProjectRepository.list()`
-    excludes it) and its own memory, facts and outcomes. The hidden evaluator is copied in only after the run ends. See
+    and the Home and Activity queries exclude it; Arena runs and events are filtered out in SQL) and its own memory, facts and outcomes. The hidden evaluator is copied in only after the run ends. See
     ARENA.md and BENCHMARK_METHODOLOGY.md.
 24. **Ranking is lexicographic and versioned.** `score-v1` orders trials by correctness first; the convenience score
     cannot hide a failed hidden evaluation. The version is stored with every result.
@@ -189,15 +189,29 @@ Run view, a Context tab in the task inspector, and a routing section in the Agen
     pin move or add snapshots and are user actions. Learning proposes candidates and never edits NEXUS source code.
     See ADAPTIVE_POLICY.md.
 27. **The speculative tournament uses objective checks only.** No model opinion and, in an Arena trial, no hidden
-    evaluator is an input. See SPECULATIVE_EXECUTION.md.
+    evaluator is an input. Candidates are separate clones of the repository (own refs and objects, no remote), not
+    worktrees, and a speculative run moves `running`, `decided`, `adopted`. See SPECULATIVE_EXECUTION.md.
 28. **Migration 004 is additive.** `004-v0-3.ts` creates tables and indexes only; no existing table is altered (the
     design planned a `projects.kind` column; the code identifies Arena projects through `arena_trials.project_id`
     instead). New tables: `usage_events`, `usage_windows`, `quota_pauses`, `quota_resumes`, `arena_cases`,
     `arena_case_versions`, `arena_campaigns`, `arena_trials`, `arena_trial_metrics`, `arena_evaluations`,
     `task_profiles`, `mission_outcomes`, `policy_snapshots`, `policy_decisions`, `policy_candidates`,
-    `policy_promotions`, `strategy_statistics`, `speculative_runs`, `candidate_results`, `tournament_decisions`. Indexes
+    `policy_promotions`, `strategy_statistics`, `speculative_runs`, `candidate_results`, `tournament_decisions`. Columns added by the audit: `arena_trials.block_kind`,
+    `strategy_statistics.distinct_units`; index `idx_arena_trials_project`. Indexes
     cover the aggregation keys (run, day, model, strategy, campaign, agent, task). `RunConfig` gains the optional
     `strategy` object, stored in the existing `runs.config` JSON.
+
+29. **Commands NEXUS runs on project code carry no Claude credentials.** Dependency installs, check commands and every Arena
+    command use `projectCommandEnv()` (no `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+    `NODE_OPTIONS`, `NODE_PATH`); the Arena removes every `ANTHROPIC_*` variable as well.
+30. **Unattended Arena trials answer approvals by rule.** Tool requests are denied; plan, task and graph approvals are
+    granted unless a high-risk task would start. Every strategy gets the same rule.
+31. **A trial's outcome says what it measured.** `blockKind` (`infrastructure`, `run`, `timeout`) separates a harness
+    failure, which is excluded from statistics and policy evidence, from a failure of the strategy, which counts.
+32. **The previous database is kept.** Before a schema upgrade `openDatabase` copies `nexus.db` to `nexus.db.v<old>.bak`
+    (once per old version, never overwritten), because an upgraded database cannot be opened by the older NEXUS.
+33. **A finished Arena campaign triggers learning, never promotion.** `learnOnCampaignEnd` (`policy/wiring.ts`) calls
+    `PolicyService.learn()` once when a campaign completes.
 
 ### Composition root order (`src/main/index.ts`, `bootstrap`)
 
@@ -206,10 +220,11 @@ Run view, a Context tab in the task inspector, and a routing section in the Agen
 3. `UsageIntelligenceService` and `RuntimeAvailabilityProbe`.
 4. `PolicyService` (`ensureDefault()` creates the default snapshot; `attachOutcomeRecording` subscribes to run events).
 5. `Orchestrator` (with `strategies: policy`), then `setDispatchGate(usage)`, then `recoverOnStartup()`.
-6. `QuotaRecoveryController` (test timing overrides read only in an unpackaged build), then `recover()`.
+6. `QuotaRecoveryController` (test timing overrides read only in an unpackaged build), then `recover()`. At shutdown the
+   controller is disposed and awaited (`idle()`) before the database closes.
 7. Power controller and `OvernightSupervisor` (receives the same `probe`).
 8. Window, tray and quit handling.
-9. `ArenaService`, then `syncBuiltinCases()`, then `recover()` in the background.
+9. `ArenaService` (its push is wrapped by `learnOnCampaignEnd`), then `syncBuiltinCases()`, then `recover()` in the background.
 10. IPC handlers, with the 0.3 handlers (`createV3Handlers`) built from the usage service, recovery controller, Arena and policy.
 
 ### Provider abstraction
