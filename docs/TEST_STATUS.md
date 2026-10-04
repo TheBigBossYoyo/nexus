@@ -1,5 +1,45 @@
 # Test Status
 
+Factual status as of 2026-10-04 13:20 (+01:00), version 0.2.1, branch `v0.2.1`, commit `10be52f`. Details and
+evidence: `docs/V0_2_1_RELEASE_REPORT.md`. The 0.2.0 and 0.1 sections below are the earlier records, unchanged.
+
+## 0.2.1: automated (no Claude usage), final tree
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm lint` | pass |
+| `pnpm test:unit` | 46 files, 1361 tests passed |
+| `pnpm test` | 80 files, 1772 tests passed (34 integration and scenario files, 411 tests) |
+| `pnpm test:e2e` | 10 Playwright tests passed, run after the version bump and the last code change |
+| `pnpm stress` (orchestrator, 1000 seeds) | 977 passed in three parallel ranges; 23 hit the 120 s per-run limit on a busy machine and each passed when rerun alone. No invariant failure |
+| Overnight state-machine stress (1000 seeds) | passed (part of `pnpm test`) |
+| `pnpm package` | produced `release/NEXUS-Setup-0.2.1.exe` (206,906,496 bytes) |
+
+## 0.2.1: manual
+
+| Check | Result |
+|---|---|
+| `pnpm smoke:power` (real Windows shutdown timer, one hour away, aborted at once) | passed; nothing left armed |
+| Dynamic graph proposal with real Claude | passed, 12 of 12 gates, on the third attempt (the first two exposed NEXUS defects, fixed) |
+| Session rotation with real Claude | passed, 11 of 11 gates, on the fifth attempt (see the release report for each attempt) |
+| Packaged build on a real 0.1 and a real 0.2.0 database | passed: schema 3, no row lost, auth, project open, Overnight UI |
+| Real mission on the packaged build | completed, mission verification passed |
+
+Not verified: running the NSIS installer and uninstaller; real sleep, hibernate and a completed shutdown; a
+real Claude usage limit; restart recovery, parallel workers and messaging with the real runtime on 0.2.1.
+
+## Intermittent failures (0.2.1)
+
+Scenario tests time out when the machine is busy (git process start-up was about 180 ms at the worst). They
+pass on a quiet machine; wait budgets were raised and the integration project limited to six workers. The
+0.1 "run ended paused" symptom did not recur; its cause is still unproven.
+
+---
+
+# 0.2.0 status (2026-10-04 02:35)
+
+
 Factual status as of 2026-10-04 02:35 (+01:00), version 0.2.0. The section "v0.1 status (2026-10-03)" below
 is the earlier record, kept unchanged.
 
