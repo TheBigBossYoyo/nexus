@@ -1,6 +1,6 @@
 {
   "id": "feature-multi-module",
-  "version": 1,
+  "version": 2,
   "name": "Task priorities and due dates across a todo service",
   "description": "Add priorities and due dates to a todo library: model, versioned storage with backwards compatibility, service filtering and sorting, text rendering and command flags.",
   "category": "feature",
@@ -28,13 +28,13 @@
   },
   "setup": [],
   "hiddenEvaluation": {
-    "command": "node --test hidden-tests/**/*.test.mjs",
+    "command": "node --test hidden-tests/feature-multi-module.test.mjs",
     "timeoutSeconds": 120
   },
   "budgets": {
     "maxWallClockMinutes": 40,
     "maxAgentSessions": 60,
-    "maxAgentsPerTrial": 4,
+    "maxAgentsPerTrial": 8,
     "maxTurnsPerAgent": 80
   },
   "allowedStrategies": [

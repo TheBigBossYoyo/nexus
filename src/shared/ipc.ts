@@ -55,6 +55,7 @@ import type {
   ArenaCampaignSummary,
   ArenaCaseSummary,
   ArenaResults,
+  ArenaStatus,
   ArenaTrialDetail,
   ArenaTrialRow,
   HomeSummary,
@@ -341,6 +342,9 @@ export const ipcInputs = {
 
   // v0.3: arena
   'arena.cases': Empty,
+  'arena.status': Empty,
+  /** Removes the trial repositories of a finished campaign from disk. Database rows are kept. */
+  'arena.cleanup': z.object({ campaignId: Id }).strict(),
   /** Opens the native folder picker; returns null when cancelled. The case is registered untrusted. */
   'arena.importCase': Empty,
   'arena.trustCase': z.object({ caseVersionId: Id }).strict(),
@@ -477,6 +481,8 @@ export interface IpcOutputs {
   'usage.endWait': UsageOverview
 
   'arena.cases': ArenaCaseSummary[]
+  'arena.status': ArenaStatus
+  'arena.cleanup': { removed: number }
   'arena.importCase': { summary: ArenaCaseSummary; commands: string[] } | null
   'arena.trustCase': ArenaCaseVersion
   'arena.campaigns': { campaigns: ArenaCampaignSummary[]; total: number }

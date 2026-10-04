@@ -24,3 +24,6 @@ Every behaviour asserted is written in the prompt or README of the fixture and u
 Superficial fixes fail: a naive in-flight map that keeps rejected promises (poisoned key), one that is not
 cleaned on a synchronous throw, `try/finally` in `run` without removing aborted waiters, or a cache that
 lets a stale load overwrite a newer value.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

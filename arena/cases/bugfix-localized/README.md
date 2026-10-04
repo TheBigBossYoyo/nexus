@@ -12,3 +12,6 @@ Why the hidden tests are fair:
 - They sweep many total/pageSize combinations, so a fix that special-cases the reported numbers fails.
 - Superficial fix that fails: patching `paginate` to add a page itself (or only handling `totalItems < pageSize`) leaves `pageCount`, `pageWindow` and `pageFromQuery` consumers wrong for 11/5 or 101/100.
 - Existing behaviour (0 items, exact multiples, clamping, validation) is re-asserted so a rewrite that regresses it fails.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

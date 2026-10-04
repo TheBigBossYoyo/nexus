@@ -1,22 +1,45 @@
 {
   "id": "bugfix-localized",
-  "version": 1,
+  "version": 2,
   "name": "Pagination drops one-item last pages",
   "description": "A small pagination library miscounts pages in a single helper, so lists whose last page holds exactly one item lose that item.",
   "category": "bugfix",
   "complexity": "small",
   "risk": "low",
-  "languages": ["JavaScript"],
-  "frameworks": ["node:test"],
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
   "taskPrompt": "Users of our list views report that the very last item sometimes never shows up: with 11 items and a page size of 5 the pager only offers 2 pages, so item 11 is unreachable. A list with a single item also seems to show nothing useful. Please find the cause in the pager-kit library and fix it. Keep the existing public API and behaviour for everything else, and add a regression test next to the existing ones.",
   "visibleAcceptance": [
     "Every item of a list is reachable by walking pages 1..totalPages",
     "Lists whose last page holds exactly one item report the correct number of pages",
     "Existing tests keep passing and a regression test is added"
   ],
-  "checks": { "build": null, "test": "node --test", "lint": null, "typecheck": null },
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
   "setup": [],
-  "hiddenEvaluation": { "command": "node --test hidden-tests/**/*.test.mjs", "timeoutSeconds": 120 },
-  "budgets": { "maxWallClockMinutes": 20, "maxAgentSessions": 20, "maxAgentsPerTrial": 4, "maxTurnsPerAgent": 60 },
-  "allowedStrategies": ["SINGLE", "BUILD", "SWARM", "CONSENSUS", "SPECULATIVE"]
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/bugfix-localized.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 20,
+    "maxAgentSessions": 20,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 60
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
 }

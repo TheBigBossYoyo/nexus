@@ -192,6 +192,7 @@ async function runSeed(seed: number, repos: Repositories, bus: EventBus): Promis
       nexusVersion: 'stress',
       environment: async () => ({ platform: 't', osRelease: '1', nodeVersion: 'v', sdkVersion: null, gitVersion: null, modelTiers: {} }),
       pollMs: 0,
+      preflight: async () => ({ nodeFound: true, nodeVersion: 'v22.0.0', ok: true, message: 'ok', path: 'node' }),
       minuteMs: 3_600_000,
       agentSettleMs: 50,
       usage: {
@@ -229,7 +230,17 @@ async function runSeed(seed: number, repos: Repositories, bus: EventBus): Promis
             epoch,
             resolve: () => {
               const passed = input.resultCommit !== null && rand() < 0.6
-              resolve({ exitCode: passed ? 0 : 1, timedOut: false, durationMs: 1, output: '', passed, skippedReason: input.resultCommit ? null : (input.skippedReason ?? 'none') })
+              const infra = input.resultCommit !== null && rand() < 0.05
+              resolve({
+                exitCode: passed ? 0 : 1,
+                timedOut: false,
+                durationMs: 1,
+                output: '',
+                passed: passed && !infra,
+                skippedReason: input.resultCommit ? null : (input.skippedReason ?? 'none'),
+                infrastructureError: infra ? 'evaluator crashed' : null,
+                tampered: null,
+              })
             },
           })
         }),
@@ -248,7 +259,7 @@ async function runSeed(seed: number, repos: Repositories, bus: EventBus): Promis
   })
   const trialIds = repos.arenaTrials.listByCampaign(campaign.id).map((t) => t.id)
   const terminalSnapshots = new Map<string, string>()
-  service.start(campaign.id)
+  await service.start(campaign.id)
 
   const check = (): void => {
     const trials = trialIds.map((id) => repos.arenaTrials.require(id))
@@ -264,15 +275,23 @@ async function runSeed(seed: number, repos: Repositories, bus: EventBus): Promis
         terminalSnapshots.set(t.id, snap)
         const metrics = repos.arenaMetrics.getByTrial(t.id)
         const evaluation = repos.arenaEvaluations.latestForTrial(t.id)
-        if ((metrics === null) !== (evaluation === null)) w.violations.push(`trial ${t.id} (${t.state}) metrics/evaluation mismatch`)
-        if ((t.state === 'passed' || t.state === 'failed') && (!metrics || !evaluation)) w.violations.push(`evaluated trial ${t.id} lacks rows`)
+        if (t.state === 'blocked' && t.blockKind === null) w.violations.push(`blocked trial ${t.id} has no blockKind`)
+        if (t.state !== 'blocked' && t.blockKind !== null) w.violations.push(`${t.state} trial ${t.id} has blockKind ${t.blockKind}`)
+        if ((t.state === 'passed' || t.state === 'failed') && !t.detail?.startsWith('Tampering') && !t.detail?.startsWith('The run failed') && (!metrics || !evaluation)) w.violations.push(`evaluated trial ${t.id} lacks rows`)
         if (t.state === 'cancelled' && (metrics || evaluation)) w.violations.push(`cancelled trial ${t.id} has evaluation rows`)
-        if (evaluation && evaluation.passed !== (t.state === 'passed')) w.violations.push(`trial ${t.id} state ${t.state} disagrees with evaluation ${evaluation.passed}`)
+        if (evaluation && t.state !== 'blocked' && evaluation.passed !== (t.state === 'passed')) w.violations.push(`trial ${t.id} state ${t.state} disagrees with evaluation ${evaluation.passed}`)
         if (evaluation && !evaluation.passed && evaluation.score !== 0) w.violations.push(`failed trial ${t.id} has score ${evaluation.score}`)
+        if (!t.runId && (metrics || evaluation)) w.violations.push(`trial ${t.id} without a run has evaluation rows`)
       } else {
         if (repos.arenaEvaluations.latestForTrial(t.id) && t.state !== 'evaluating') w.violations.push(`non-terminal trial ${t.id} (${t.state}) has an evaluation`)
       }
     }
+    // The campaign view and the results page count the same trials: observations in n, harness blocks excluded.
+    const detail = service.campaignDetail(campaign.id)
+    const expectedN = trials.filter((t) => t.state === 'passed' || t.state === 'failed' || (t.state === 'blocked' && (t.blockKind === 'run' || t.blockKind === 'timeout'))).length
+    const expectedExcluded = trials.filter((t) => t.state === 'blocked' && t.blockKind === 'infrastructure').length
+    if (detail.comparison.reduce((n, r) => n + r.n, 0) !== expectedN) w.violations.push('comparison n disagrees with the trial states')
+    if (detail.comparison.reduce((n, r) => n + r.excludedInfrastructure, 0) !== expectedExcluded) w.violations.push('excluded count disagrees with the trial states')
     const c = repos.arenaCampaigns.require(campaign.id)
     const allTerminal = trials.every((t) => TERMINAL_TRIAL_STATES.includes(t.state))
     if (c.state === 'completed' && !allTerminal) w.violations.push('campaign completed with open trials')

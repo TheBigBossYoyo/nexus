@@ -1,13 +1,17 @@
 {
   "id": "migration-schema",
-  "version": 1,
+  "version": 2,
   "name": "Migrate the contact store from schema v1 to v2",
   "description": "Add a versioned, idempotent, non-lossy v1 to v2 migration to a JSON-file-backed contact store, with atomic write-back, a backup, future-version refusal and corrupt-entry reporting.",
   "category": "migration",
   "complexity": "medium",
   "risk": "high",
-  "languages": ["JavaScript"],
-  "frameworks": ["node:test"],
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
   "taskPrompt": "We are changing the on-disk format of the contact store (README describes version 1) to version 2, and existing users have v1 files we must not damage. Implement the migration inside the loader and update the rest of the code to the new shape.\n\nVersion 2 document: `{ \"version\": 2, \"records\": [...], \"quarantine\": [...] }`. A v2 record has `id` (string), `firstName`, `lastName`, `created` (ISO 8601 string from `Date#toISOString`), optional `updated` (ISO string), `tags` (array of trimmed, non-empty strings) and any other field the v1 record had (for example `email`), which must be carried over unchanged. The v1 `name` becomes `firstName`/`lastName` by trimming, collapsing whitespace and splitting at the last space (\"Mary Ann Smith\" -> firstName \"Mary Ann\", lastName \"Smith\"; a single word is a firstName with an empty lastName). v1 `created`/`updated` are epoch milliseconds. v1 `tags` is a comma separated string (a missing tags field becomes `[]`).\n\nRequirements:\n- `src/schema.js`: `CURRENT_VERSION` becomes 2.\n- `src/store.js` exports `migrateV1ToV2(doc)`: a pure function (does not mutate its input) turning a version 1 document into a version 2 document. Records that cannot be converted (not an object, missing/empty `id` or `name`, `created`/`updated` not a valid epoch-millisecond date, tags that are not a string) must not abort the migration and must not be dropped: they are moved to `quarantine` as `{ index, reason, raw }` where `index` is the position in the v1 `records` array, `reason` is a human readable string and `raw` is the original entry. Throws a `StoreError` with code `UNSUPPORTED_VERSION` if given anything other than a v1 document.\n- `loadStore(filePath)`: a v1 file is upgraded in memory, the original file bytes are first saved to `<filePath>.bak`, and the v2 document is then written back to `filePath` atomically (temp file in the same directory, then rename; no temp files left behind). Loading is idempotent: an already-v2 file is returned as is with no rewrite and no new backup. A missing file still yields an empty store (now `{ version: 2, records: [], quarantine: [] }`). Any other `version` (newer, missing or otherwise unknown) rejects with `StoreError` code `UNSUPPORTED_VERSION` and a message that includes the version found, leaving the file untouched. Unparseable or structurally invalid files keep rejecting with `CORRUPT_FILE`.\n- `saveStore` only accepts version 2 documents and must also write atomically.\n- `addContact`, `search`, `listByTag` and `displayName` keep their signatures and inputs (`addContact` still takes a `name` string and tags as a string or array) but now work on and store v2 records; `displayName` returns the first and last name joined by a space.\n\nKeep the existing tests passing (adjust them only where the format change requires it).",
   "visibleAcceptance": [
     "A v1 file is upgraded to v2 by loadStore, with a .bak copy of the original and an atomic write-back",
@@ -15,9 +19,28 @@
     "Corrupt entries are reported in the quarantine list instead of crashing or being silently lost, and unknown record fields are preserved",
     "search, listByTag, addContact and displayName work against the v2 shape and the existing tests pass"
   ],
-  "checks": { "build": null, "test": "node --test", "lint": null, "typecheck": null },
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
   "setup": [],
-  "hiddenEvaluation": { "command": "node --test hidden-tests/**/*.test.mjs", "timeoutSeconds": 120 },
-  "budgets": { "maxWallClockMinutes": 30, "maxAgentSessions": 30, "maxAgentsPerTrial": 4, "maxTurnsPerAgent": 70 },
-  "allowedStrategies": ["SINGLE", "BUILD", "SWARM", "CONSENSUS", "SPECULATIVE"]
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/migration-schema.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 30,
+    "maxAgentSessions": 30,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 70
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
 }

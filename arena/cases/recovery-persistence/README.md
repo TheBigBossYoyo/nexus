@@ -30,3 +30,6 @@ live handle is only required to stay consistent. Superficial fixes that fail: ig
 truncating it (the next append is glued to the fragment and lost), swallowing all journal/snapshot errors (real
 corruption must still raise), treating every existing LOCK as stale (a second handle must still be refused), and
 checking sequence numbers only when a snapshot exists.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

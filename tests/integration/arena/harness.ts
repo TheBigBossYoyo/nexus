@@ -106,6 +106,8 @@ export class FakeHost implements ArenaRunHost {
   sessionsPerRun = 1
   /** Extra hook run when a run is created (e.g. to seed review findings). */
   onCreated: ((run: Run, input: CreateInput) => void) | null = null
+  /** Optional host cleanup of a run's worktrees (assigned by tests). */
+  cleanupRun?: (runId: string) => Promise<unknown>
 
   constructor(
     private readonly repos: Repositories,

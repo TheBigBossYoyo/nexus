@@ -1,4 +1,6 @@
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { rm, rmdir } from 'node:fs/promises'
+import { join, resolve, sep } from 'node:path'
 import type { Preset, Project, Run, RunConfig, RunMode, RunState } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
 import { newId, nowIso, shortId } from '@shared/ids'
@@ -19,6 +21,7 @@ import {
   type ArenaTrial,
   type ArenaTrialMetrics,
   type ConcreteStrategy,
+  type TrialBlockKind,
   type TrialState,
 } from '@shared/v3'
 import type {
@@ -33,17 +36,18 @@ import type { EventBus } from '../events'
 import type { GitService } from '../git'
 import type { Repositories } from '../persistence'
 import { importCase, registerCases, trustCaseVersion, type ImportedCase } from './case-format'
+import { checkNode, type NodeStatus } from './preflight'
+import { detectRegressions as detectPolicyRegressions, type RegressionGroup } from '../policy/learning'
 import { evaluateTrial } from './evaluator'
 import { provisionTrial } from './fixtures'
 import { collectTrialMetrics } from './metrics'
 import {
-  COUNTED_STATES,
   buildMatrix,
   compareStrategies,
-  detectRegressions,
   mergeScoring,
   resultNotes,
   scoreTrial,
+  trialOutcome,
   type ComparisonTrial,
 } from './scoring'
 
@@ -63,6 +67,8 @@ export interface ArenaRunHost {
   pauseRun(runId: string): Promise<unknown>
   resumeRun(runId: string): Promise<unknown>
   cancelRun(runId: string): Promise<unknown>
+  /** Optional: remove the run's worktrees and branches before the Arena deletes the trial directory. */
+  cleanupRun?(runId: string): Promise<unknown>
 }
 
 export interface ArenaServiceDeps {
@@ -82,7 +88,8 @@ export interface ArenaServiceDeps {
   nexusVersion: string
   environment(): Promise<ArenaEnvironment>
   logger?: (line: string) => void
-  /** Test seams. */
+  /** Test seams. `preflight` resolves and queries the `node` that case commands will run. */
+  preflight?: () => Promise<NodeStatus>
   provision?: typeof provisionTrial
   evaluate?: typeof evaluateTrial
   /** Milliseconds in one budget "minute" (tests shrink it). */
@@ -113,7 +120,7 @@ export interface CreateCampaignInput {
 type StopKind = 'cancel' | 'budget' | 'timeout'
 type RunEnd =
   | { kind: 'completed' | 'failed' | 'cancelled' | 'missing' }
-  | { kind: 'blocked'; detail: string }
+  | { kind: 'blocked'; detail: string; blockKind: TrialBlockKind }
   | { kind: 'stopped'; stop: StopKind; detail: string }
 
 /** Active time only: a quota wait does not count against a wall-clock budget. */
@@ -153,6 +160,13 @@ const RUN_EVENTS = new Set(['run.completed', 'run.failed', 'run.cancelled', 'run
 const TERMINAL_RUN: readonly RunState[] = ['completed', 'failed', 'cancelled']
 const isTerminalTrial = (s: TrialState): boolean => TERMINAL_TRIAL_STATES.includes(s)
 const TIMER_TICK_MS = 5000
+
+/** Nominal agent parallelism of a strategy (the "usual limit" quoted when a campaign cap lowers it). */
+function usualParallelism(strategy: ConcreteStrategy, modelPreset: string): number {
+  if (strategy === 'SINGLE') return 1
+  if (modelPreset === 'eco') return 2
+  return { BUILD: 4, CONSENSUS: 4, SPECULATIVE: 3, SWARM: 8 }[strategy]
+}
 
 const unref = <T extends ReturnType<typeof setTimeout>>(t: T): T => {
   ;(t as { unref?: () => void }).unref?.()
@@ -272,12 +286,13 @@ export class ArenaService {
     }
     // Repetition is the outermost loop: a campaign cut short by a budget still has balanced strategies.
     const planned: { version: ArenaCaseVersion; strategy: ConcreteStrategy; repetition: number }[] = []
+    // Counterbalanced: the strategy order rotates with (case index + repetition) so none always runs first.
     for (let repetition = 1; repetition <= input.repetitions; repetition++) {
-      for (const { version } of resolved) {
-        for (const strategy of strategies) {
-          if (version.definition.allowedStrategies.includes(strategy)) planned.push({ version, strategy, repetition })
-        }
-      }
+      resolved.forEach(({ version }, caseIndex) => {
+        const allowed = strategies.filter((s) => version.definition.allowedStrategies.includes(s))
+        const k = allowed.length === 0 ? 0 : (caseIndex + repetition - 1) % allowed.length
+        for (const strategy of [...allowed.slice(k), ...allowed.slice(0, k)]) planned.push({ version, strategy, repetition })
+      })
     }
     if (planned.length === 0) throw new NexusError('invalid_input', 'None of the chosen strategies is allowed for the chosen cases')
     if (planned.length > budgets.maxTrials) {
@@ -286,7 +301,10 @@ export class ArenaService {
         maxTrials: budgets.maxTrials,
       })
     }
-    const environment = await this.deps.environment()
+    // The node recorded is the one that will actually run the cases, not the app's own runtime.
+    const node = await this.nodeStatus()
+    if (input.start && !node.ok) throw new NexusError('runtime_unavailable', node.message)
+    const environment = { ...(await this.deps.environment()), nodeVersion: node.nodeVersion ?? 'unavailable' }
     const now = this.now()
     const campaign: ArenaCampaign = {
       id: newId(),
@@ -328,6 +346,7 @@ export class ArenaService {
           taskProfileId: null,
           models: {},
           detail: null,
+          blockKind: null,
           createdAt: now,
           startedAt: null,
           finishedAt: null,
@@ -335,7 +354,7 @@ export class ArenaService {
       })
     })
     this.push(campaign.id)
-    return input.start ? this.start(campaign.id) : campaign
+    return input.start ? await this.start(campaign.id) : campaign
   }
 
   /** Writes a campaign patch, keeps the budget clock in step with the state, and announces it. */
@@ -362,7 +381,25 @@ export class ArenaService {
       this.armCampaignTimer(c.id)
     } else {
       clock.stop()
+      this.saveClock(`arena.clock.campaign.${c.id}`, clock.elapsed())
       this.disarmCampaignTimer(c.id)
+    }
+  }
+
+  private saveClock(key: string, ms: number): void {
+    try {
+      this.repos.settings.setValue(key, Math.round(ms))
+    } catch {
+      // The database may already be closed while the app quits; the next write wins.
+    }
+  }
+
+  private loadClock(key: string): number {
+    try {
+      const v = this.repos.settings.getValue<number>(key)
+      return typeof v === 'number' && v >= 0 ? v : 0
+    } catch {
+      return 0
     }
   }
 
@@ -380,6 +417,7 @@ export class ArenaService {
           this.campaignTimers.delete(id)
           const cur = this.repos.arenaCampaigns.get(id)
           if (!cur || cur.state !== 'running') return
+          this.saveClock(`arena.clock.campaign.${id}`, this.clockOf(id).elapsed())
           if (this.clockOf(id).elapsed() >= limit) {
             this.exhaust(id, `Budget: maxWallClockMinutes (${c.budgets.maxWallClockMinutes}) reached`)
           } else {
@@ -396,10 +434,30 @@ export class ArenaService {
     this.campaignTimers.delete(id)
   }
 
-  start(campaignId: string): ArenaCampaign {
+  private nodeStatus(): Promise<NodeStatus> {
+    return (this.deps.preflight ?? (() => checkNode()))()
+  }
+
+  /** Whether Arena cases can run here (Node.js on PATH, new enough). For the UI before a campaign is created. */
+  async arenaStatus(): Promise<{ nodeFound: boolean; nodeVersion: string | null; ok: boolean; message: string }> {
+    const n = await this.nodeStatus()
+    return { nodeFound: n.nodeFound, nodeVersion: n.nodeVersion, ok: n.ok, message: n.message }
+  }
+
+  /** Starts a draft campaign. Refuses with a clear error when `node` is missing or too old. */
+  async start(campaignId: string): Promise<ArenaCampaign> {
+    const before = this.repos.arenaCampaigns.require(campaignId)
+    if (before.state !== 'draft') throw new NexusError('invalid_state', `Campaign is ${before.state}; only a draft can be started`)
+    const node = await this.nodeStatus()
+    if (!node.ok) throw new NexusError('runtime_unavailable', node.message)
     const c = this.repos.arenaCampaigns.require(campaignId)
     if (c.state !== 'draft') throw new NexusError('invalid_state', `Campaign is ${c.state}; only a draft can be started`)
-    const next = this.setCampaign(campaignId, { state: 'running', pauseReason: null, startedAt: this.now() })
+    const next = this.setCampaign(campaignId, {
+      state: 'running',
+      pauseReason: null,
+      startedAt: this.now(),
+      environment: { ...c.environment, nodeVersion: node.nodeVersion ?? c.environment.nodeVersion },
+    })
     this.reconcile(campaignId)
     this.schedule(campaignId)
     return this.repos.arenaCampaigns.get(campaignId) ?? next
@@ -474,7 +532,8 @@ export class ArenaService {
   campaignDetail(campaignId: string): ArenaCampaignDetail {
     const campaign = this.repos.arenaCampaigns.require(campaignId)
     const trials = this.repos.arenaTrials.listByCampaign(campaignId, { limit: 2000 })
-    const evaluations = this.latestEvaluations(this.repos.arenaEvaluations.listByCampaign(campaignId))
+    // One query for the whole campaign; the evaluator output (up to 16 KB per trial) is dropped at once.
+    const slim = this.latestEvaluations(this.repos.arenaEvaluations.listByCampaign(campaignId))
     const metrics = new Map(this.repos.arenaMetrics.listByCampaign(campaignId).map((m) => [m.trialId, m]))
     const versions = this.repos.arenaCaseVersions.listByIds(campaign.caseVersionIds)
     return {
@@ -483,8 +542,8 @@ export class ArenaService {
         const c = this.repos.arenaCases.get(v.caseId)
         return c ? [{ case: c, version: v }] : []
       }),
-      matrix: buildMatrix(trials, [...evaluations.values()]),
-      comparison: compareStrategies(this.comparisonTrials(trials, evaluations, metrics)),
+      matrix: buildMatrix(trials, [...slim.values()]),
+      comparison: compareStrategies(this.comparisonTrials(trials, metrics)),
       usage: this.repos.usageEvents.totals({ arenaCampaignId: campaignId }),
     }
   }
@@ -521,76 +580,106 @@ export class ArenaService {
     }
   }
 
-  private latestEvaluations(rows: ArenaEvaluation[]): Map<string, ArenaEvaluation> {
-    const out = new Map<string, ArenaEvaluation>()
-    for (const e of rows) out.set(e.trialId, e) // listByCampaign is oldest first: the newest wins
+  private latestEvaluations(rows: ArenaEvaluation[]): Map<string, Pick<ArenaEvaluation, 'trialId' | 'score' | 'passed'>> {
+    const out = new Map<string, Pick<ArenaEvaluation, 'trialId' | 'score' | 'passed'>>()
+    // listByCampaign is oldest first: the newest wins. Only the small fields are kept.
+    for (const e of rows) out.set(e.trialId, { trialId: e.trialId, score: e.score, passed: e.passed })
     return out
   }
 
-  private comparisonTrials(
-    trials: readonly ArenaTrial[],
-    evaluations: Map<string, ArenaEvaluation>,
-    metrics: Map<string, ArenaTrialMetrics>,
-  ): ComparisonTrial[] {
+  /**
+   * The ONE definition of what counts, used by the campaign view, the results page and whatever the policy
+   * reads: passed and failed trials, and trials blocked by the run or by the time budget, are observations
+   * (failures of the strategy); trials blocked by the harness are excluded and counted separately.
+   */
+  private comparisonTrials(trials: readonly ArenaTrial[], metrics: Map<string, ArenaTrialMetrics>): ComparisonTrial[] {
     return trials.flatMap((t) => {
-      const e = evaluations.get(t.id)
-      // Only trials that were actually evaluated (or scored as failed acceptance) count; provisioning failures and cancellations do not.
-      if (!e || !COUNTED_STATES.includes(t.state)) return []
-      return [{ strategy: t.strategy, passed: e.passed, metrics: metrics.get(t.id) ?? null }]
+      const outcome = trialOutcome(t)
+      if (outcome === 'ignored') return []
+      return [{ strategy: t.strategy, caseId: t.caseId, passed: outcome === 'pass', infrastructure: outcome === 'excluded', metrics: metrics.get(t.id) ?? null }]
     })
   }
 
-  results(options: { campaignId?: string; sinceDays?: number } = {}): ArenaResults {
+  /** `limit` bounds the number of trials read when no campaign is named. */
+  results(options: { campaignId?: string; sinceDays?: number; limit?: number } = {}): ArenaResults {
     let trials: ArenaTrial[]
     if (options.campaignId) {
       trials = this.repos.arenaTrials.listByCampaign(options.campaignId, { limit: 2000 })
     } else {
       const days = options.sinceDays ?? 3650
-      trials = this.repos.arenaTrials.listFinishedSince(new Date(Date.parse(this.now()) - days * 86_400_000).toISOString())
+      trials = this.repos.arenaTrials.listFinishedSince(new Date(Date.parse(this.now()) - days * 86_400_000).toISOString(), options.limit ?? 5000)
     }
     const metrics = new Map(this.repos.arenaMetrics.listByTrials(trials.map((t) => t.id)).map((m) => [m.trialId, m]))
-    const evaluations = new Map<string, ArenaEvaluation>()
-    for (const t of trials) {
-      const e = this.repos.arenaEvaluations.latestForTrial(t.id)
-      if (e) evaluations.set(t.id, e)
-    }
-    const counted = this.comparisonTrials(trials, evaluations, metrics)
-    const countedIds = new Set(trials.filter((t) => evaluations.has(t.id) && COUNTED_STATES.includes(t.state)).map((t) => t.id))
+    const counted = this.comparisonTrials(trials, metrics)
+    const observed = trials.filter((t) => ['pass', 'fail'].includes(trialOutcome(t)))
     const comparison = compareStrategies(counted)
 
     const byCaseMap = new Map<string, ArenaTrial[]>()
-    for (const t of trials) if (countedIds.has(t.id)) byCaseMap.set(t.caseId, [...(byCaseMap.get(t.caseId) ?? []), t])
+    for (const t of trials) if (trialOutcome(t) !== 'ignored') byCaseMap.set(t.caseId, [...(byCaseMap.get(t.caseId) ?? []), t])
     const byCase = [...byCaseMap.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([caseId, list]) => ({
         caseId,
         caseName: this.repos.arenaCases.get(caseId)?.name ?? caseId,
-        rows: compareStrategies(this.comparisonTrials(list, evaluations, metrics)),
+        rows: compareStrategies(this.comparisonTrials(list, metrics)),
       }))
 
-    // Regression: oldest vs newest NEXUS version, over the case versions both ran.
     const campaigns = new Map<string, ArenaCampaign>()
     for (const t of trials) if (!campaigns.has(t.campaignId)) campaigns.set(t.campaignId, this.repos.arenaCampaigns.require(t.campaignId))
-    const groups = new Map<string, { first: string; trials: ArenaTrial[] }>()
+    return {
+      comparison,
+      byCase,
+      regressions: this.regressions(observed, campaigns),
+      totalTrials: counted.filter((t) => !t.infrastructure).length,
+      notes: resultNotes(comparison, { agentCaps: this.agentCaps(comparison, campaigns) }),
+    }
+  }
+
+  /** Strategies whose usual parallelism is above the cap of a campaign they ran in. */
+  private agentCaps(rows: readonly { strategy: ConcreteStrategy }[], campaigns: Map<string, ArenaCampaign>): { strategy: ConcreteStrategy; cap: number; usual: number }[] {
+    const out: { strategy: ConcreteStrategy; cap: number; usual: number }[] = []
+    for (const { strategy } of rows) {
+      let lowest: { cap: number; usual: number } | null = null
+      for (const c of campaigns.values()) {
+        if (!c.strategies.includes(strategy)) continue
+        const usual = usualParallelism(strategy, c.modelPreset)
+        if (c.budgets.maxAgentsPerTrial < usual && (!lowest || c.budgets.maxAgentsPerTrial < lowest.cap)) lowest = { cap: c.budgets.maxAgentsPerTrial, usual }
+      }
+      if (lowest) out.push({ strategy, ...lowest })
+    }
+    return out
+  }
+
+  /**
+   * Groups observations by (NEXUS version, model signature), takes the two newest groups and compares, per
+   * strategy, only the cases both ran. The policy module decides what is flagged.
+   */
+  private regressions(trials: readonly ArenaTrial[], campaigns: Map<string, ArenaCampaign>): ArenaResults['regressions'] {
+    const groups = new Map<string, { label: string; first: string; trials: ArenaTrial[] }>()
     for (const t of trials) {
-      if (!countedIds.has(t.id)) continue
       const c = campaigns.get(t.campaignId)!
-      const g = groups.get(c.nexusVersion) ?? { first: c.createdAt, trials: [] }
-      g.first = g.first < c.createdAt ? g.first : c.createdAt
+      const models = Object.entries(t.models).sort(([a], [b]) => a.localeCompare(b)).map(([r, m]) => `${r}=${m}`).join(',')
+      const key = `${c.nexusVersion}\u0000${models}`
+      const g = groups.get(key) ?? { label: `NEXUS ${c.nexusVersion}${models ? ` · ${models}` : ''}`, first: c.createdAt, trials: [] }
+      if (c.createdAt < g.first) g.first = c.createdAt
       g.trials.push(t)
-      groups.set(c.nexusVersion, g)
+      groups.set(key, g)
     }
-    const ordered = [...groups.entries()].sort(([, a], [, b]) => a.first.localeCompare(b.first))
-    let regressions: ArenaResults['regressions'] = []
-    if (ordered.length >= 2) {
-      const [olderName, older] = ordered[0]!
-      const [newerName, newer] = ordered[ordered.length - 1]!
-      const common = new Set(older.trials.map((t) => t.caseVersionId).filter((id) => newer.trials.some((t) => t.caseVersionId === id)))
-      const pick = (g: { trials: ArenaTrial[] }): ComparisonTrial[] =>
-        this.comparisonTrials(g.trials.filter((t) => common.has(t.caseVersionId)), evaluations, metrics)
-      regressions = detectRegressions({ group: `NEXUS ${olderName}`, trials: pick(older) }, { group: `NEXUS ${newerName}`, trials: pick(newer) })
+    const ordered = [...groups.values()].sort((a, b) => a.first.localeCompare(b.first)).slice(-2)
+    if (ordered.length < 2) return []
+    const [older, newer] = ordered as [(typeof ordered)[number], (typeof ordered)[number]]
+    const out: RegressionGroup[] = []
+    for (const strategy of [...new Set(trials.map((t) => t.strategy))]) {
+      const of = (g: typeof older): ArenaTrial[] => g.trials.filter((t) => t.strategy === strategy)
+      const common = new Set(of(older).map((t) => t.caseId).filter((id) => of(newer).some((t) => t.caseId === id)))
+      if (common.size === 0) continue
+      const caseKey = [...common].sort().join(',')
+      ;[older, newer].forEach((g, order) => {
+        const list = of(g).filter((t) => common.has(t.caseId))
+        out.push({ group: g.label, order, strategy, caseKey, n: list.length, successes: list.filter((t) => t.state === 'passed').length })
+      })
     }
-    return { comparison, byCase, regressions, totalTrials: counted.length, notes: resultNotes(comparison) }
+    return detectPolicyRegressions(out)
   }
 
   // ───────────────────────────── scheduler ─────────────────────────────
@@ -680,6 +769,7 @@ export class ArenaService {
       poke: null,
       promise: Promise.resolve(),
     }
+    if (from !== 'provision') job.clock.preload(this.loadClock(`arena.clock.trial.${trial.id}`))
     this.jobs.set(trial.id, job)
     if (trial.runId) this.jobsByRun.set(trial.runId, job)
     job.promise = this.runJob(job, from).finally(() => {
@@ -737,7 +827,7 @@ export class ArenaService {
       if (from === 'provision') {
         const started = await this.provisionAndStart(job, trial, campaign, caseRow, version)
         if (started.kind === 'ended') {
-          this.finishWithoutEvaluation(job.trialId, started.state, started.detail)
+          this.finishWithoutEvaluation(job.trialId, started.state, started.detail, started.blockKind)
           return
         }
         trial = started.trial
@@ -754,13 +844,14 @@ export class ArenaService {
       this.log(`trial ${job.trialId} failed: ${errorMessage(e)}`)
       const current = this.repos.arenaTrials.get(job.trialId)
       if (current && !isTerminalTrial(current.state)) {
-        this.finishWithoutEvaluation(job.trialId, job.stop && job.stop.kind !== 'timeout' ? 'cancelled' : 'blocked', `Trial error: ${errorMessage(e)}`)
+        const cancelled = job.stop !== null && job.stop.kind !== 'timeout'
+        this.finishWithoutEvaluation(job.trialId, cancelled ? 'cancelled' : 'blocked', `Trial error: ${errorMessage(e)}`, cancelled ? null : 'infrastructure')
       }
     }
   }
 
-  private finishWithoutEvaluation(trialId: string, state: 'blocked' | 'cancelled', detail: string): void {
-    this.setTrial(trialId, { state, detail, finishedAt: this.now() })
+  private finishWithoutEvaluation(trialId: string, state: 'blocked' | 'cancelled', detail: string, blockKind: TrialBlockKind | null = null): void {
+    this.setTrial(trialId, { state, detail, blockKind: state === 'blocked' ? (blockKind ?? 'infrastructure') : null, finishedAt: this.now() })
   }
 
   private async provisionAndStart(
@@ -769,7 +860,7 @@ export class ArenaService {
     campaign: ArenaCampaign,
     caseRow: ArenaCase,
     version: ArenaCaseVersion,
-  ): Promise<{ kind: 'started'; trial: ArenaTrial } | { kind: 'ended'; state: 'blocked' | 'cancelled'; detail: string }> {
+  ): Promise<{ kind: 'started'; trial: ArenaTrial } | { kind: 'ended'; state: 'blocked' | 'cancelled'; detail: string; blockKind: TrialBlockKind | null }> {
     let provisioned: { repoPath: string; baselineCommit: string }
     try {
       provisioned = await this.provision({
@@ -779,10 +870,10 @@ export class ArenaService {
         git: this.deps.git,
       })
     } catch (e) {
-      return { kind: 'ended', state: 'blocked', detail: `Provisioning failed: ${errorMessage(e)}` }
+      return { kind: 'ended', state: 'blocked', detail: `Provisioning failed: ${errorMessage(e)}`, blockKind: 'infrastructure' }
     }
     trial = this.setTrial(trial.id, { repoPath: provisioned.repoPath, baselineCommit: provisioned.baselineCommit })
-    if (job.stop) return { kind: 'ended', state: 'cancelled', detail: job.stop.detail }
+    if (job.stop) return { kind: 'ended', state: 'cancelled', detail: job.stop.detail, blockKind: null }
 
     let run: Run
     try {
@@ -808,7 +899,7 @@ export class ArenaService {
         },
       })
     } catch (e) {
-      return { kind: 'ended', state: 'blocked', detail: `Could not start the run: ${errorMessage(e)}` }
+      return { kind: 'ended', state: 'blocked', detail: `Could not start the run: ${errorMessage(e)}`, blockKind: 'infrastructure' }
     }
     job.runId = run.id
     this.jobsByRun.set(run.id, job)
@@ -825,8 +916,11 @@ export class ArenaService {
     const def = this.repos.arenaCaseVersions.require(trial.caseVersionId).definition
     const limitMs = def.budgets.maxWallClockMinutes * this.minuteMs
     job.clock.start()
+    const clockKey = `arena.clock.trial.${trial.id}`
     const tick = (): void => {
       if (job.stop || this.disposed) return
+      // Elapsed active time survives an app restart: a restart neither resets nor inflates the budget.
+      this.saveClock(clockKey, job.clock.elapsed())
       if (job.clock.elapsed() >= limitMs) {
         this.requestStop(job, 'timeout', `Trial exceeded the case wall-clock budget (${def.budgets.maxWallClockMinutes} min)`)
         return
@@ -846,6 +940,7 @@ export class ArenaService {
         if (job.timer) clearTimeout(job.timer)
         job.poke = null
         job.clock.stop()
+        this.saveClock(clockKey, job.clock.elapsed())
         resolve(end)
       }
       const setQuota = (paused: boolean): void => {
@@ -853,6 +948,7 @@ export class ArenaService {
         job.quotaPaused = paused
         if (paused) job.clock.stop()
         else job.clock.start()
+        this.saveClock(clockKey, job.clock.elapsed())
         this.reconcile(job.campaignId)
       }
       const check = (): void => {
@@ -869,7 +965,7 @@ export class ArenaService {
         if (TERMINAL_RUN.includes(run.state)) return finish({ kind: run.state as 'completed' | 'failed' | 'cancelled' })
         if (run.state === 'awaiting_approval') {
           this.cancelQuietly(run.id)
-          return finish({ kind: 'blocked', detail: 'The run is waiting for an approval no one can give in an Arena trial' })
+          return finish({ kind: 'blocked', blockKind: 'run', detail: 'The run is waiting for an approval no one can give in an Arena trial' })
         }
         if (run.state === 'paused') {
           if (run.pauseReason === 'quota') return setQuota(true)
@@ -881,13 +977,13 @@ export class ArenaService {
                 .catch((e) => {
                   this.log(`resumeRun ${run.id}: ${errorMessage(e)}`)
                   this.cancelQuietly(run.id)
-                  finish({ kind: 'blocked', detail: `The run could not be resumed after a restart: ${errorMessage(e)}` })
+                  finish({ kind: 'blocked', blockKind: 'infrastructure', detail: `The run could not be resumed after a restart: ${errorMessage(e)}` })
                 })
             }
             return
           }
           this.cancelQuietly(run.id)
-          return finish({ kind: 'blocked', detail: `Run paused for intervention${run.error ? `: ${run.error}` : ''}` })
+          return finish({ kind: 'blocked', blockKind: 'run', detail: `Run paused for intervention${run.error ? `: ${run.error}` : ''}` })
         }
         setQuota(false)
       }
@@ -923,11 +1019,11 @@ export class ArenaService {
     let trial = this.setTrial(job.trialId, { state: 'evaluating' })
     const run = trial.runId ? this.repos.runs.get(trial.runId) : null
     if (!run) {
-      this.finishWithoutEvaluation(trial.id, 'blocked', 'The trial has no run to evaluate')
+      this.finishWithoutEvaluation(trial.id, 'blocked', 'The trial has no run to evaluate', 'infrastructure')
       return
     }
     if (!(await this.waitForAgentsToStop(run.id))) {
-      this.finishWithoutEvaluation(trial.id, 'blocked', 'Agents of the run were still active; the evaluator never runs next to an agent')
+      this.finishWithoutEvaluation(trial.id, 'blocked', 'Agents of the run were still active; the evaluator never runs next to an agent', 'infrastructure')
       return
     }
 
@@ -957,6 +1053,14 @@ export class ArenaService {
             : end?.kind === 'blocked'
               ? end.detail
               : `The run ${run.state}${run.error ? `: ${run.error}` : ''}`
+    if (resultCommit !== null) {
+      // The `node` that runs the evaluator, checked again right before it runs.
+      const node = await this.nodeStatus()
+      if (!node.ok) {
+        this.finishWithoutEvaluation(trial.id, 'blocked', `Evaluation could not run: ${node.message}`, 'infrastructure')
+        return
+      }
+    }
     let outcome
     try {
       outcome = await this.evaluate({
@@ -969,39 +1073,47 @@ export class ArenaService {
         skippedReason,
       })
     } catch (e) {
-      this.finishWithoutEvaluation(trial.id, 'blocked', `Evaluation failed: ${errorMessage(e)}`)
+      // A copy error or a hash mismatch is the harness's problem, not the strategy's.
+      this.finishWithoutEvaluation(trial.id, 'blocked', `Evaluation failed: ${errorMessage(e)}`, 'infrastructure')
       return
     }
 
-    const metrics = this.repos.arenaMetrics.replaceForTrial({ ...collected, id: newId(), hiddenPassed: outcome.passed })
-    const previous = this.repos.arenaEvaluations.latestForTrial(trial.id)
+    const infra = outcome.infrastructureError !== null
+    const metrics = this.repos.arenaMetrics.replaceForTrial({ ...collected, id: newId(), hiddenPassed: infra ? null : outcome.passed })
     const config = mergeScoring(DEFAULT_SCORING, version.definition.scoring)
     const peers = this.passingPeers(trial.campaignId, trial.caseVersionId, trial.id)
     const scored = scoreTrial(metrics, outcome.passed, peers, config)
-    this.repos.transaction(() => {
-      if (previous) this.repos.arenaEvaluations.delete(previous.id)
-      this.repos.arenaEvaluations.insert({
-        id: newId(),
-        trialId: trial.id,
-        kind: 'hidden',
-        command: version.definition.hiddenEvaluation.command,
-        exitCode: outcome.exitCode,
-        timedOut: outcome.timedOut,
-        durationMs: outcome.durationMs,
-        output: outcome.output,
-        passed: outcome.passed,
-        skippedReason: outcome.skippedReason,
-        evaluatorHash: version.evaluatorHash,
-        scoreVersion: SCORE_VERSION,
-        score: scored.score,
-        scoreBreakdown: scored.breakdown,
-        createdAt: this.now(),
-      })
+    // History is kept: a re-evaluation inserts a new row (latestForTrial picks the newest).
+    this.repos.arenaEvaluations.insert({
+      id: newId(),
+      trialId: trial.id,
+      kind: 'hidden',
+      command: version.definition.hiddenEvaluation.command,
+      exitCode: outcome.exitCode,
+      timedOut: outcome.timedOut,
+      durationMs: outcome.durationMs,
+      output: outcome.output,
+      passed: outcome.passed,
+      skippedReason: outcome.skippedReason ?? outcome.infrastructureError,
+      evaluatorHash: version.evaluatorHash,
+      scoreVersion: SCORE_VERSION,
+      score: scored.score,
+      scoreBreakdown: scored.breakdown,
+      createdAt: this.now(),
     })
 
     let state: TrialState
     let detail: string | null = null
-    if (outcome.passed) state = 'passed'
+    let blockKind: TrialBlockKind | null = null
+    if (outcome.tampered) {
+      // The agent's result collides with the evaluator: a failure of that trial, with the reason.
+      state = 'failed'
+      detail = `Tampering: ${outcome.tampered}`
+    } else if (infra) {
+      state = 'blocked'
+      blockKind = 'infrastructure'
+      detail = outcome.infrastructureError
+    } else if (outcome.passed) state = 'passed'
     else if (runEnd === 'completed') {
       state = 'failed'
       detail = outcome.timedOut ? 'Hidden evaluation timed out' : `Hidden acceptance failed (exit ${outcome.exitCode ?? 'n/a'})`
@@ -1010,9 +1122,19 @@ export class ArenaService {
       detail = `The run failed${run.error ? `: ${run.error}` : ''}`
     } else {
       state = 'blocked'
-      detail = end?.kind === 'stopped' || end?.kind === 'blocked' ? end.detail : `The run ended ${run.state}`
+      if (end?.kind === 'stopped') {
+        blockKind = 'timeout'
+        detail = end.detail
+      } else if (end?.kind === 'blocked') {
+        blockKind = end.blockKind
+        detail = end.detail
+      } else {
+        // The run was cancelled from outside the Arena (or vanished): nothing the strategy did.
+        blockKind = 'infrastructure'
+        detail = `The run ended ${run.state} outside the Arena`
+      }
     }
-    this.setTrial(trial.id, { state, detail, finishedAt: this.now() })
+    this.setTrial(trial.id, { state, detail, blockKind, finishedAt: this.now() })
     this.rescoreCase(trial.campaignId, trial.caseVersionId, version, config)
   }
 
@@ -1057,13 +1179,13 @@ export class ArenaService {
       }
       const budgetClosed = c.error?.startsWith('Budget:') === true
       if (budgetClosed) this.closing.add(c.id)
-      if (c.state === 'running' && c.startedAt) this.clockOf(c.id).preload(Date.parse(this.now()) - Date.parse(c.startedAt))
+      this.clockOf(c.id).preload(this.loadClock(`arena.clock.campaign.${c.id}`))
       for (const t of open) {
         if (this.jobs.has(t.id)) continue
         if (t.state === 'queued') {
           if (budgetClosed) this.repos.arenaTrials.update(t.id, { state: 'cancelled', detail: c.error, finishedAt: this.now() })
         } else if (t.state === 'provisioning' || (t.state === 'running' && !t.runId)) {
-          this.repos.arenaTrials.update(t.id, { state: 'queued', repoPath: null, baselineCommit: null, runId: null, startedAt: null, detail: null })
+          this.repos.arenaTrials.update(t.id, { state: 'queued', repoPath: null, baselineCommit: null, runId: null, startedAt: null, detail: null, blockKind: null })
         } else if (t.state === 'running') {
           this.startJob(t, 'attach')
         } else {
@@ -1077,6 +1199,33 @@ export class ArenaService {
     }
   }
 
+  /**
+   * Deletes the trial directories of a finished campaign (the repositories, never the database rows) after the
+   * host removed the runs' worktrees. Nothing calls this automatically.
+   */
+  async cleanupCampaign(campaignId: string): Promise<{ removed: number }> {
+    const c = this.repos.arenaCampaigns.require(campaignId)
+    if (c.state !== 'completed' && c.state !== 'cancelled' && c.state !== 'failed') {
+      throw new NexusError('invalid_state', `Campaign is ${c.state}; only a finished campaign can be cleaned up`)
+    }
+    if (this.jobsOf(campaignId).length > 0) throw new NexusError('invalid_state', 'The campaign still has trials finishing; try again in a moment')
+    const root = resolve(this.deps.dataDir, 'arena')
+    let removed = 0
+    for (const t of this.repos.arenaTrials.listByCampaign(campaignId, { limit: 2000 })) {
+      if (t.runId && this.deps.host.cleanupRun) {
+        await Promise.resolve(this.deps.host.cleanupRun(t.runId)).catch((e) => this.log(`cleanupRun ${t.runId}: ${errorMessage(e)}`))
+      }
+      const dir = resolve(this.trialDir(c, t))
+      if (!dir.startsWith(root + sep)) continue
+      if (existsSync(dir)) {
+        await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+        removed++
+      }
+    }
+    await rmdir(join(root, shortId(c.id))).catch(() => undefined)
+    return { removed }
+  }
+
   /** Resolves when no trial is being worked on. */
   async idle(): Promise<void> {
     while (this.jobs.size > 0) await Promise.allSettled([...this.jobs.values()].map((j) => j.promise))
@@ -1084,6 +1233,8 @@ export class ArenaService {
 
   /** Stops timers and subscriptions. Runs and trials are left as they are (recover() picks them up). */
   dispose(): void {
+    for (const [id, clock] of this.clocks) this.saveClock(`arena.clock.campaign.${id}`, clock.elapsed())
+    for (const job of this.jobs.values()) this.saveClock(`arena.clock.trial.${job.trialId}`, job.clock.elapsed())
     this.disposed = true
     for (const u of this.unsubscribes.splice(0)) u()
     for (const id of [...this.campaignTimers.keys()]) this.disarmCampaignTimer(id)

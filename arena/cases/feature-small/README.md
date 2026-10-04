@@ -11,3 +11,6 @@ Why the hidden tests are fair:
 - Superficial implementation that fails: implementing `order: 'desc'` with `.reverse()` or a negated comparator on an unstable tie-break flips tied groups; applying `limit` before sorting; sorting keys with `localeCompare`; ignoring that non-numeric values still count; mutating or freezing-sensitive code on frozen input.
 - Edge cases covered: empty input, missing/null group field, ties for total and count, every validation branch.
 - Existing exports are re-checked so the index file is not broken while adding the new one.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

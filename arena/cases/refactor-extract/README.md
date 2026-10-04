@@ -23,3 +23,6 @@ The module path, exports and the rounding seam are all specified in the prompt; 
 public API and the specified seam. Aggregate rounding (subtotals, totals) is deliberately not constrained.
 A superficial fix (creating `pricing.js` and wiring only one or two callers, or a module whose internals
 call `Math.round` directly) fails the seam tests; a "cleanup" that changes rounding fails characterisation.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

@@ -1,23 +1,46 @@
 {
   "id": "security-hardening",
-  "version": 1,
+  "version": 2,
   "name": "Harden the docs portal helpers against common web attacks",
   "description": "A small static-serving, upload, config, templating and auth helper library has several classic vulnerabilities; harden it without breaking legitimate use.",
   "category": "security",
   "complexity": "large",
   "risk": "high",
-  "languages": ["JavaScript"],
-  "frameworks": ["node:test"],
-  "taskPrompt": "A security review flagged the helpers in this repo (see README for what each one does; the portal runs on both Windows and Linux hosts). Please harden them against the usual classes of attack on this kind of code: path traversal and other ways of escaping the public/upload directory (including encoded and Windows-specific variants such as alternate separators, drive letters, UNC paths, device names and alternate data streams), unsafe file type checks on uploads, prototype pollution through merged or parsed configuration, injection of markup through template values and through template lookups, a naive origin allow-list check, and a secret comparison that is not constant-time.\n\nKeep every exported function name and signature. Behaviour for legitimate input must not change: normal request paths (including percent-encoded spaces, query strings and directories with a trailing slash), ordinary upload names, normal config merging and ordinary template data must keep working exactly as before. Rejections of unsafe input are reported by throwing an `Error` for functions that return paths or documents (`resolveStaticPath`, `readStaticFile`, `saveUpload`, `loadConfig`), `false` for predicates (`isAllowedUpload`, `isAllowedOrigin`, `verifyToken`); a predicate must never throw on unexpected input types. Template values are HTML-escaped when rendered. `loadConfig` should reject documents whose top level is not an object, and keys that would reach an object's prototype must be ignored by the merge rather than applied. Add tests for the attack classes you handle.",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "A security review flagged the helpers in this repo (see README for what each one does; the portal runs on both Windows and Linux hosts). Please harden them against the usual classes of attack on this kind of code: path traversal and other ways of escaping the public/upload directory (including encoded and Windows-specific variants such as alternate separators, drive letters, UNC paths, device names and alternate data streams), unsafe file type checks on uploads, prototype pollution through merged or parsed configuration, injection of markup through template values and through template lookups, a naive origin allow-list check, and a secret comparison that is not constant-time.\n\nKeep every exported function name and signature. Behaviour for legitimate input must not change: normal request paths (including percent-encoded spaces, query strings and directories with a trailing slash), ordinary upload names, normal config merging and ordinary template data must keep working exactly as before. Rejections of unsafe input are reported by throwing an `Error` for functions that return paths or documents (`resolveStaticPath`, `readStaticFile`, `saveUpload`, `loadConfig`), `false` for predicates (`isAllowedUpload`, `isAllowedOrigin`, `verifyToken`); a predicate must never throw on unexpected input types. Template values are HTML-escaped when rendered. `loadConfig` should reject documents whose top level is not an object, and keys that would reach an object's prototype must be ignored by the merge rather than applied. Add tests for the attack classes you handle. Specifics the callers rely on: `saveUpload` stores the file directly inside the upload directory under a plain file name (no directory part, no colon) and returns that name in `name`; it creates nothing outside the upload directory and nothing at all for a rejected name. Upload names with trailing spaces or dots, control characters (including NUL and newlines) or alternate-data-stream suffixes are not allowed types. The keys `__proto__`, `constructor` and `prototype` are ignored at every level of a merge or of `loadConfig`. A template placeholder only reads own properties of the data: one that names an inherited or built-in member (for example `constructor`, `__proto__`, `toString`, `map`) renders as an empty string, and so does one that resolves to an object rather than a string, number or boolean. `verifyToken` and `isAllowedOrigin` return `false` for any argument that is not a non-empty string (or, for the allow-list, a list of strings).",
   "visibleAcceptance": [
     "Request paths and upload names can never resolve outside the public or upload directory, including encoded and Windows-specific variants",
     "Config merging and template lookups cannot touch or read prototypes, and template values are HTML-escaped",
     "Origin checks compare whole origins and token comparison is constant-time and never throws",
     "Legitimate paths, uploads, configs and templates keep working and the existing tests pass"
   ],
-  "checks": { "build": null, "test": "node --test", "lint": null, "typecheck": null },
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
   "setup": [],
-  "hiddenEvaluation": { "command": "node --test hidden-tests/**/*.test.mjs", "timeoutSeconds": 120 },
-  "budgets": { "maxWallClockMinutes": 40, "maxAgentSessions": 40, "maxAgentsPerTrial": 4, "maxTurnsPerAgent": 80 },
-  "allowedStrategies": ["SINGLE", "BUILD", "SWARM", "CONSENSUS", "SPECULATIVE"]
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/security-hardening.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 40,
+    "maxAgentSessions": 40,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 80
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
 }

@@ -23,3 +23,6 @@ Tests only use public functions. A superficial fix fails: in-memory-only migrati
 dropping or crashing on bad entries, losing extra fields, overwriting the backup on the second load,
 treating epoch 0 or empty tags as corrupt, or migrating the loader but leaving `search`/`displayName`
 on the v1 shape.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

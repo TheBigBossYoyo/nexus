@@ -365,8 +365,8 @@ describe('v0.3 repositories', () => {
 
   it('keeps the runs and events of Arena trials out of the user feeds in SQL, before the limit applies', () => {
     setup()
-    const mine = repos.projects.insert(makeProject({ rootPath: 'C:\mine' }))
-    const hidden = repos.projects.insert(makeProject({ rootPath: 'C:\arena\t\repo' }))
+    const mine = repos.projects.insert(makeProject({ rootPath: 'C:/mine' }))
+    const hidden = repos.projects.insert(makeProject({ rootPath: 'C:/arena/t/repo' }))
     const myRun = repos.runs.insert(makeRun(mine.id, { createdAt: '2026-01-01T00:00:00.000Z' }))
     repos.events.insert({ runId: myRun.id, type: 'run.started', payload: {} })
     const c = repos.arenaCampaigns.insert(campaign())

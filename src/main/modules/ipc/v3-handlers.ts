@@ -31,6 +31,8 @@ const V3_CHANNELS: readonly V3Channel[] = [
   'usage.resumeNow',
   'usage.endWait',
   'arena.cases',
+  'arena.status',
+  'arena.cleanup',
   'arena.importCase',
   'arena.trustCase',
   'arena.campaigns',
@@ -177,6 +179,8 @@ export function createV3Handlers(ctx: V3Context): V3Handlers {
 
     // ───────────── arena ─────────────
     'arena.cases': () => arena().listCases(),
+    'arena.status': () => arena().arenaStatus(),
+    'arena.cleanup': ({ campaignId }) => arena().cleanupCampaign(campaignId),
     'arena.importCase': async () => {
       const dir = await ctx.pickDirectory()
       if (!dir) return null
@@ -195,10 +199,9 @@ export function createV3Handlers(ctx: V3Context): V3Handlers {
       return arena().trustCase(caseVersionId)
     },
     'arena.campaigns': ({ limit, offset }) => arena().listCampaigns({ limit: limit ?? 25, offset: offset ?? 0 }),
-    'arena.createCampaign': async ({ start, ...input }) => {
-      const campaign = await arena().createCampaign(input)
-      return start ? arena().start(campaign.id) : campaign
-    },
+    // `start` is passed through: the service checks that Node.js is available before it creates anything,
+    // and starts the campaign exactly once.
+    'arena.createCampaign': (input) => arena().createCampaign(input),
     'arena.campaign': ({ campaignId }) => arena().campaignDetail(campaignId),
     'arena.trials': ({ campaignId, limit, offset }) => arena().trials(campaignId, { limit: limit ?? 100, offset: offset ?? 0 }),
     'arena.trial': ({ trialId }) => arena().trial(trialId),
@@ -299,6 +302,6 @@ function arenaHeadline(arena: ArenaService, campaignId: string, counts: Record<s
   const n = rows.reduce((sum, r) => sum + r.n, 0)
   // Counts for every strategy, in a fixed order. No strategy is named "best": that needs evidence the
   // Arena page shows with its intervals, not a one-line summary.
-  const counts = [...rows].sort((a, b) => a.strategy.localeCompare(b.strategy)).map((r) => `${r.strategy} ${r.passed}/${r.n}`)
-  return `${counts.join(' · ')} passed (n=${n} trials)`
+  const parts = [...rows].sort((a, b) => a.strategy.localeCompare(b.strategy)).map((r) => `${r.strategy} ${r.passed}/${r.n}`)
+  return `${parts.join(' · ')} passed (n=${n} trials)`
 }

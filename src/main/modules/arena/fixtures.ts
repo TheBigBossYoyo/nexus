@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
-import { cp, mkdir, readFile, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { NexusError } from '@shared/result'
 import type { ArenaCaseVersion } from '@shared/v3'
-import type { GitService } from '../git'
+import type { GitService, RunGitOptions } from '../git'
 import { runCommandLine } from '../process'
 import { listFilesRecursive, loadVerifiedCase, normalizedBytes } from './case-format'
+import { cleanEnv } from './env'
 
 export const BASELINE_AUTHOR = { name: 'NEXUS Arena', email: 'arena@nexus.invalid' } as const
 /** A fixed date makes the baseline commit id a pure function of the fixture: two trials share one sha. */
@@ -34,9 +35,33 @@ const isInside = (parent: string, child: string): boolean => {
   return c.startsWith(p)
 }
 
+/**
+ * Git runs on case content (agent-visible or imported): hooks, fsmonitor and any system/global configuration
+ * that could inject them are switched off for every command the Arena runs on a trial repository.
+ */
+export interface GitGuard {
+  args: string[]
+  env: NodeJS.ProcessEnv
+}
+
+export async function gitGuard(trialDir: string): Promise<GitGuard> {
+  const dir = join(trialDir, '.guard')
+  await mkdir(join(dir, 'hooks'), { recursive: true })
+  const config = join(dir, 'empty.gitconfig')
+  await writeFile(config, '')
+  return {
+    args: ['-c', `core.hooksPath=${join(dir, 'hooks')}`, '-c', 'core.fsmonitor=false'],
+    env: { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: config },
+  }
+}
+
+export function guardedGit(git: GitService, guard: GitGuard, cwd: string, args: readonly string[], opts: RunGitOptions = {}) {
+  return git.run(cwd, [...guard.args, ...args], { ...opts, env: { ...guard.env, ...(opts.env ?? {}) } })
+}
+
 async function runSetup(commands: readonly string[], cwd: string): Promise<void> {
   for (const command of commands) {
-    const result = await runCommandLine(command, { cwd, timeoutMs: SETUP_TIMEOUT_MS, maxOutputBytes: 64 * 1024 })
+    const result = await runCommandLine(command, { cwd, env: cleanEnv(), timeoutMs: SETUP_TIMEOUT_MS, maxOutputBytes: 64 * 1024 })
     if (result.exitCode !== 0 || result.timedOut) {
       throw new NexusError('invalid_state', `Case setup command failed (exit ${result.exitCode ?? 'n/a'}): ${command}`, {
         output: result.output.slice(-2000),
@@ -65,7 +90,7 @@ export async function assertNoEvaluatorFiles(repoPath: string, evaluatorDir: str
     const bytes = await readFile(join(evaluatorDir, rel))
     if (bytes.length > 0 && !fixtureHashes.has(sha256(bytes))) hashes.add(sha256(bytes))
   }
-  const repoFiles = listFilesRecursive(repoPath).filter((f) => f !== '.git' && !f.startsWith('.git/'))
+  const repoFiles = listFilesRecursive(repoPath, { skipGit: true })
   for (const rel of repoFiles) {
     if (names.has(rel.toLowerCase())) {
       throw new NexusError('invalid_state', `Evaluator file "${rel}" exists in the trial repository`, { file: rel })
@@ -77,12 +102,13 @@ export async function assertNoEvaluatorFiles(repoPath: string, evaluatorDir: str
   }
 }
 
-async function configureRepo(git: GitService, repoPath: string): Promise<void> {
-  await git.run(repoPath, ['config', 'user.name', BASELINE_AUTHOR.name])
-  await git.run(repoPath, ['config', 'user.email', BASELINE_AUTHOR.email])
-  await git.run(repoPath, ['config', 'commit.gpgsign', 'false'])
+async function configureRepo(git: GitService, guard: GitGuard, repoPath: string): Promise<void> {
+  const g = (...args: string[]) => guardedGit(git, guard, repoPath, args)
+  await g('config', 'user.name', BASELINE_AUTHOR.name)
+  await g('config', 'user.email', BASELINE_AUTHOR.email)
+  await g('config', 'commit.gpgsign', 'false')
   // Line endings must not depend on the machine: the baseline is byte-identical everywhere.
-  await git.run(repoPath, ['config', 'core.autocrlf', 'false'])
+  await g('config', 'core.autocrlf', 'false')
 }
 
 /**
@@ -98,9 +124,10 @@ export async function provisionTrial(input: ProvisionInput): Promise<Provisioned
   const repoPath = join(trialDir, 'repo')
   await rm(trialDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   await mkdir(trialDir, { recursive: true })
+  const guard = await gitGuard(trialDir)
 
   if (input.repository) {
-    return provisionFromRepository(input, loaded.definition.setup, loaded.evaluatorDir, repoPath)
+    return provisionFromRepository(input, guard, loaded.definition.setup, loaded.evaluatorDir, repoPath)
   }
 
   // Copy, never link: a trial can neither change the case nor see another trial.
@@ -108,10 +135,10 @@ export async function provisionTrial(input: ProvisionInput): Promise<Provisioned
   await runSetup(loaded.definition.setup, repoPath)
   await assertNoEvaluatorFiles(repoPath, loaded.evaluatorDir, loaded.fixtureDir)
 
-  await git.run(repoPath, ['init', '--initial-branch=main'])
-  await configureRepo(git, repoPath)
-  await git.run(repoPath, ['add', '-A'])
-  await git.run(repoPath, ['commit', '--no-verify', '--allow-empty', '-m', `Arena baseline ${caseVersion.caseId}@${caseVersion.version}`], {
+  await guardedGit(git, guard, repoPath, ['init', '--template=', '--initial-branch=main'])
+  await configureRepo(git, guard, repoPath)
+  await guardedGit(git, guard, repoPath, ['add', '-A'])
+  await guardedGit(git, guard, repoPath, ['commit', '--no-verify', '--allow-empty', '-m', `Arena baseline ${caseVersion.caseId}@${caseVersion.version}`], {
     env: { GIT_AUTHOR_DATE: BASELINE_DATE, GIT_COMMITTER_DATE: BASELINE_DATE },
   })
   return { repoPath, baselineCommit: await git.headCommit(repoPath) }
@@ -119,6 +146,7 @@ export async function provisionTrial(input: ProvisionInput): Promise<Provisioned
 
 async function provisionFromRepository(
   input: ProvisionInput,
+  guard: GitGuard,
   setup: readonly string[],
   evaluatorDir: string,
   repoPath: string,
@@ -132,11 +160,11 @@ async function provisionFromRepository(
   const before = JSON.stringify([await git.headCommit(source), await git.currentBranch(source), await git.status(source)])
 
   // --no-hardlinks: a full copy of the objects, so nothing in the trial can touch the original's object store.
-  await git.run(trialDir, ['clone', '--no-hardlinks', '--no-checkout', source, repoPath])
-  await git.run(repoPath, ['checkout', '--quiet', '-b', 'arena-baseline', commit])
+  await guardedGit(git, guard, trialDir, ['clone', '--no-hardlinks', '--no-checkout', '--template=', source, repoPath])
+  await guardedGit(git, guard, repoPath, ['checkout', '--quiet', '-b', 'arena-baseline', commit])
   // The trial must not be able to push or fetch into the user's repository by accident.
-  await git.run(repoPath, ['remote', 'remove', 'origin'])
-  await configureRepo(git, repoPath)
+  await guardedGit(git, guard, repoPath, ['remote', 'remove', 'origin'])
+  await configureRepo(git, guard, repoPath)
   await runSetup(setup, repoPath)
   await assertNoEvaluatorFiles(repoPath, evaluatorDir)
 

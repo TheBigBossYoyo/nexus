@@ -23,3 +23,6 @@ re-renders caused by copying untouched slices and by notifying on no-ops.
   state).
 - A seeded random action sequence is compared with a small independent model after every step, so all rules
   must hold in combination. Only exported names are used.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

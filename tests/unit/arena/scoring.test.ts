@@ -4,7 +4,7 @@ import {
   buildMatrix,
   compareStrategies,
   compareTrials,
-  detectRegressions,
+  trialOutcome,
   mergeScoring,
   resultNotes,
   scoreTrial,
@@ -87,23 +87,28 @@ describe('scoreTrial', () => {
 })
 
 describe('comparison, matrix, notes', () => {
-  const trial = (strategy: 'SINGLE' | 'BUILD', passed: boolean, over: Partial<ArenaTrialMetrics> = {}) => ({
+  const trial = (strategy: 'SINGLE' | 'BUILD', passed: boolean, over: Partial<ArenaTrialMetrics> = {}, caseId = 'c1') => ({
     strategy,
+    caseId,
     passed,
     metrics: metrics(over),
   })
+  // trials spread over three cases so the evidence label is not capped
+  const spread = (strategy: 'SINGLE' | 'BUILD', passed: boolean, i: number, over: Partial<ArenaTrialMetrics> = {}) =>
+    trial(strategy, passed, over, `case-${i % 3}`)
 
   it('summarises per strategy with Wilson intervals and labels', () => {
     const rows = compareStrategies([
-      ...Array.from({ length: 6 }, (_, i) => trial('BUILD', i < 5, { wallClockMs: (i + 1) * 1000, repairs: i % 2, quotaPauses: 1 })),
+      ...Array.from({ length: 6 }, (_, i) => spread('BUILD', i < 5, i, { wallClockMs: (i + 1) * 1000, repairs: i % 2, quotaPauses: 1 })),
       trial('SINGLE', false),
     ])
     const build = rows.find((r) => r.strategy === 'BUILD')!
     expect(build.n).toBe(6)
     expect(build.passed).toBe(5)
     expect(build.passInterval!.low).toBeGreaterThan(0.4)
-    expect(build.medianWallClockMs).toBe(3500)
-    expect(build.meanRepairs).toBe(0.5)
+    // efficiency columns are summarised over PASSED trials only (the sixth, failing one is left out)
+    expect(build.medianWallClockMs).toBe(3000)
+    expect(build.meanRepairs).toBe(0.4)
     expect(build.meanObservedTokens).toBe(1500)
     expect(build.quotaPauses).toBe(6)
     expect(build.label).toBe('WEAK')
@@ -113,8 +118,8 @@ describe('comparison, matrix, notes', () => {
 
   it('says the evidence does not separate overlapping strategies, and nothing below n=5', () => {
     const rows = compareStrategies([
-      ...Array.from({ length: 6 }, (_, i) => trial('BUILD', i < 4)),
-      ...Array.from({ length: 6 }, (_, i) => trial('SINGLE', i < 3)),
+      ...Array.from({ length: 6 }, (_, i) => spread('BUILD', i < 4, i)),
+      ...Array.from({ length: 6 }, (_, i) => spread('SINGLE', i < 3, i)),
     ])
     expect(resultNotes(rows).join(' ')).toContain('The evidence does not separate SINGLE and BUILD on pass rate (intervals overlap)')
     const thin = compareStrategies([trial('BUILD', true), trial('SINGLE', false)])
@@ -126,8 +131,8 @@ describe('comparison, matrix, notes', () => {
 
   it('separates strategies only when the intervals do not overlap', () => {
     const rows = compareStrategies([
-      ...Array.from({ length: 30 }, () => trial('BUILD', true)),
-      ...Array.from({ length: 30 }, () => trial('SINGLE', false)),
+      ...Array.from({ length: 30 }, (_, i) => spread('BUILD', true, i)),
+      ...Array.from({ length: 30 }, (_, i) => spread('SINGLE', false, i)),
     ])
     expect(resultNotes(rows).join(' ')).toContain('BUILD passes more often than SINGLE')
   })
@@ -149,15 +154,45 @@ describe('comparison, matrix, notes', () => {
     ])
   })
 
-  it('flags a regression only when the intervals are separated', () => {
-    const group = (name: string, passes: number, n: number) => ({
-      group: name,
-      trials: Array.from({ length: n }, (_, i) => trial('BUILD', i < passes)),
-    })
-    const established = detectRegressions(group('0.2', 30, 30), group('0.3', 5, 30))
-    expect(established[0]!.label).toBe('ORCHESTRATION REGRESSION')
-    const lower = detectRegressions(group('0.2', 8, 10), group('0.3', 6, 10))
-    expect(lower[0]!.label).toBe('Lower, not established')
-    expect(detectRegressions(group('0.2', 8, 10), group('0.3', 9, 10))).toEqual([])
+  it('counts blocked-by-run and timed-out trials as failures and excludes harness blocks (survivorship)', () => {
+    expect(trialOutcome({ state: 'passed', blockKind: null })).toBe('pass')
+    expect(trialOutcome({ state: 'failed', blockKind: null })).toBe('fail')
+    expect(trialOutcome({ state: 'blocked', blockKind: 'run' })).toBe('fail')
+    expect(trialOutcome({ state: 'blocked', blockKind: 'timeout' })).toBe('fail')
+    expect(trialOutcome({ state: 'blocked', blockKind: 'infrastructure' })).toBe('excluded')
+    expect(trialOutcome({ state: 'blocked', blockKind: null })).toBe('excluded')
+    expect(trialOutcome({ state: 'cancelled', blockKind: null })).toBe('ignored')
+    expect(trialOutcome({ state: 'queued', blockKind: null })).toBe('ignored')
+    const rows = compareStrategies([
+      spread('BUILD', true, 0),
+      spread('BUILD', true, 1),
+      spread('BUILD', false, 2), // blocked by the run: a failure
+      { ...spread('BUILD', false, 0), infrastructure: true },
+      { ...spread('BUILD', false, 1), infrastructure: true },
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ n: 3, passed: 2, cases: 3, excludedInfrastructure: 2 })
+    expect(resultNotes(rows).join(' ')).toContain('2 trials were left out because the harness blocked them')
+  })
+
+  it('caps the label at WEAK below three distinct cases and says why', () => {
+    const oneCase = compareStrategies(Array.from({ length: 40 }, () => trial('BUILD', true)))
+    expect(oneCase[0]).toMatchObject({ n: 40, cases: 1, label: 'WEAK' })
+    const notes = resultNotes(oneCase).join(' ')
+    expect(notes).toContain('all 40 trials come from 1 case; repetitions of one case are not independent')
+    const three = compareStrategies(Array.from({ length: 40 }, (_, i) => spread('BUILD', true, i)))
+    expect(three[0]).toMatchObject({ cases: 3, label: 'STRONG' })
+    expect(resultNotes(three).join(' ')).not.toContain('not independent')
+    // below five stays INSUFFICIENT
+    expect(compareStrategies([trial('BUILD', true)])[0]!.label).toBe('INSUFFICIENT')
+  })
+
+  it('adds a multiple-comparison caveat above two strategies and the agent-cap note', () => {
+    const strategies = ['SINGLE', 'BUILD', 'SWARM'] as const
+    const rows = compareStrategies(strategies.flatMap((s) => Array.from({ length: 12 }, (_, i) => ({ ...spread('BUILD', i < 6, i), strategy: s }))))
+    const notes = resultNotes(rows, { agentCaps: [{ strategy: 'SWARM', cap: 2, usual: 8 }] }).join(' ')
+    expect(notes).toContain('With 3 strategies there are 3 pairwise comparisons; a single non-overlap can occur by chance')
+    expect(notes).toContain('SWARM ran with at most 2 agents in this campaign; its usual limit is 8')
+    expect(notes).toContain('summarised over passed trials only')
   })
 })

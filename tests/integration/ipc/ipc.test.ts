@@ -43,6 +43,8 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'usage.resumeNow': {},
   'usage.endWait': {},
   'arena.cases': {},
+  'arena.status': {},
+  'arena.cleanup': { campaignId: 'c1' },
   'arena.importCase': {},
   'arena.trustCase': { caseVersionId: 'v1' },
   'arena.campaigns': {},

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -11,6 +11,9 @@ import {
   trustCaseVersion,
 } from '@main/modules/arena/case-format'
 import { definition, writeCase } from './helpers'
+import { loadVerifiedCase, listFilesRecursive } from '@main/modules/arena/case-format'
+import { cleanEnv } from '@main/modules/arena/env'
+import { nothingRan, testsReported } from '@main/modules/arena/evaluator'
 import { openMemory } from '../../integration/persistence/fixtures'
 
 const dirs: string[] = []
@@ -111,5 +114,87 @@ describe('case format', () => {
     registerCases(repos, writeCase(root) && root, 'builtin')
     const other = tmp()
     expect(() => importCase(repos, writeCase(other))).toThrow(/already registered as builtin/)
+  })
+
+  describe('the whole definition is pinned (setup, checks, prompt)', () => {
+    it('refuses a changed setup under the same version at sync, trust, provisioning and re-import', () => {
+      const { repos } = openMemory()
+      const root = tmp()
+      const dir = writeCase(root, { setup: ['node --version'] })
+      const imported = importCase(repos, dir)
+      const original = imported.summary.version
+      // the commands shown to the user are what was stored
+      expect(original.definition.setup).toEqual(['node --version'])
+
+      writeFileSync(join(dir, 'case.json'), JSON.stringify(definition({ setup: ['node -e process.exit(0)'] })))
+      expect(() => trustCaseVersion(repos, original.id)).toThrow(/changed on disk/)
+      expect(() => importCase(repos, dir)).toThrow(/changed without a version bump/)
+      expect(() => loadVerifiedCase(dir, original)).toThrow(/bump its version and review it again/)
+      expect(repos.arenaCaseVersions.require(original.id).trusted).toBe(false)
+    })
+
+    it('refuses a changed prompt, check or budget, and executes the stored definition', () => {
+      const { repos } = openMemory()
+      const root = tmp()
+      const dir = writeCase(root)
+      const stored = importCase(repos, dir).summary.version
+      for (const over of [{ taskPrompt: 'Something else.' }, { checks: { build: null, test: 'node other.js', lint: null, typecheck: null } }, { budgets: { maxWallClockMinutes: 21, maxAgentSessions: 20, maxAgentsPerTrial: 2, maxTurnsPerAgent: 60 } }]) {
+        writeFileSync(join(dir, 'case.json'), JSON.stringify(definition(over)))
+        expect(() => loadVerifiedCase(dir, stored)).toThrow(/changed since it was registered/)
+      }
+      writeFileSync(join(dir, 'case.json'), JSON.stringify(definition()))
+      // key order does not matter, the canonical JSON does
+      expect(loadVerifiedCase(dir, stored).definition).toEqual(stored.definition)
+    })
+
+    it('a builtin definition changed under the same version is refused at sync', () => {
+      const { repos } = openMemory()
+      const root = tmp()
+      writeCase(root)
+      registerCases(repos, root, 'builtin')
+      writeFileSync(join(root, 'demo-case', 'case.json'), JSON.stringify(definition({ setup: ['node --version'] })))
+      expect(() => registerCases(repos, root, 'builtin')).toThrow(/changed without a version bump/)
+    })
+  })
+
+  it('rejects any .git entry in a fixture or an evaluator, at any depth', () => {
+    const root = tmp()
+    const dir = writeCase(root)
+    mkdirSync(join(dir, 'fixture', 'sub', '.git'), { recursive: true })
+    writeFileSync(join(dir, 'fixture', 'sub', '.git', 'config'), '[core]\n  fsmonitor = calc.exe\n')
+    expect(() => loadCaseDirectory(dir)).toThrow(/\.git entry/)
+    rmSync(join(dir, 'fixture', 'sub'), { recursive: true })
+    writeFileSync(join(dir, 'evaluator', '.git'), 'gitdir: elsewhere')
+    expect(() => loadCaseDirectory(dir)).toThrow(/\.git entry/)
+    // a repository scan may skip it explicitly
+    expect(listFilesRecursive(dir, { skipGit: true })).not.toContain('evaluator/.git')
+  })
+
+  it('caps the number of files of a case directory', () => {
+    const root = tmp()
+    const dir = writeCase(root)
+    mkdirSync(join(dir, 'fixture', 'many'))
+    for (let i = 0; i < 5100; i++) writeFileSync(join(dir, 'fixture', 'many', 'f' + i + '.txt'), '')
+    expect(() => loadCaseDirectory(dir)).toThrow(/more than 5000 files/)
+  })
+})
+
+describe('evaluator environment and output', () => {
+  it('withholds credentials and Node redirection from case commands', () => {
+    const env = cleanEnv({ ANTHROPIC_API_KEY: 'k', ANTHROPIC_AUTH_TOKEN: 't', CLAUDE_CODE_OAUTH_TOKEN: 'o', NODE_OPTIONS: '--require x', NODE_PATH: '/x', PATH: '/bin', HOME: '/h' })
+    expect(env).toEqual({ PATH: '/bin', HOME: '/h' })
+  })
+
+  it('reads the Node test runner summary and treats a run of nothing as infrastructure', () => {
+    expect(testsReported('ℹ tests 12\nℹ pass 12')).toBe(12)
+    expect(testsReported('# tests 0\n# pass 0')).toBe(0)
+    expect(testsReported('nothing')).toBeNull()
+    const cmd = 'node --test hidden-tests/a.test.mjs'
+    expect(nothingRan(cmd, 'ℹ tests 0\nℹ pass 0', 0)).toBe(true)
+    expect(nothingRan(cmd, "Could not find 'hidden-tests/a.test.mjs'", 1)).toBe(true)
+    expect(nothingRan(cmd, 'no summary', 0)).toBe(true)
+    expect(nothingRan(cmd, 'ℹ tests 3\nℹ fail 1', 1)).toBe(false)
+    expect(nothingRan(cmd, 'ℹ tests 0', 1, true)).toBe(false)
+    expect(nothingRan('python -m pytest', 'ℹ tests 0', 0)).toBe(false)
   })
 })

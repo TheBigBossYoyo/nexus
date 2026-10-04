@@ -99,4 +99,49 @@ describe('built-in Arena suite', () => {
       expect(visibleAfter.exitCode, visibleAfter.output.slice(-1500)).toBe(0)
     }, 300_000)
   }
+
+  it('every built-in case is version 2 with a node-version-independent, glob-free evaluation command', () => {
+    const repos = createRepositories(openDatabase(':memory:'))
+    for (const r of registerCases(repos, CASES_DIR, 'builtin')) {
+      const d = r.version.definition
+      expect(d.version, d.id).toBe(2)
+      expect(d.hiddenEvaluation.command, d.id).toBe(`node --test hidden-tests/${d.id}.test.mjs`)
+      expect(d.budgets.maxAgentsPerTrial, d.id).toBe(8)
+    }
+  })
+
+  /** Evaluates fixture + overlay for one built-in case; returns whether the hidden evaluator passed. */
+  async function evaluateOverlay(id: string, overlayDir: string, tag: string): Promise<{ passed: boolean; output: string }> {
+    const dir = join(CASES_DIR, id)
+    const repos = createRepositories(openDatabase(':memory:'))
+    registerCases(repos, CASES_DIR, 'builtin')
+    const version = repos.arenaCaseVersions.latest(id)!
+    const trialDir = join(work, 'variants', id, tag)
+    const p = await provisionTrial({ caseVersion: version, sourcePath: dir, trialDir, git })
+    overlay(overlayDir, p.repoPath)
+    await git.run(p.repoPath, ['checkout', '-q', '-b', 'integration'])
+    const commit = await git.commitAll(p.repoPath, 'variant', { name: 'v', email: 'v@example.invalid' })
+    const out = await evaluateTrial({ repoPath: p.repoPath, resultCommit: commit ?? p.baselineCommit, caseVersion: version, sourcePath: dir, trialDir, git })
+    return { passed: out.passed, output: out.output }
+  }
+
+  it('performance-optimization: a quadratic dedupe fails, two different linear implementations pass', async () => {
+    const base = join(SOLUTIONS_DIR, 'performance-optimization-variants')
+    const quadratic = await evaluateOverlay('performance-optimization', join(base, 'quadratic-dedupe'), 'quadratic')
+    expect(quadratic.passed, 'a quadratic dedupeEvents must fail the evaluator').toBe(false)
+    expect(quadratic.output).toContain('dedupeEvents')
+    for (const v of ['linear-a', 'linear-b']) {
+      const r = await evaluateOverlay('performance-optimization', join(base, v), v)
+      expect(r.passed, `${v}: ${r.output.slice(-1500)}`).toBe(true)
+    }
+  }, 300_000)
+
+  it('testing-gap: suites that hash or grep the sources fail; the reference suite passes', async () => {
+    const base = join(SOLUTIONS_DIR, 'testing-gap-cheats')
+    for (const v of ['source-hash', 'normalized-hash']) {
+      const r = await evaluateOverlay('testing-gap', join(base, v), v)
+      expect(r.passed, `${v} must fail the evaluator`).toBe(false)
+      expect(r.output).toContain('behaviour-preserving')
+    }
+  }, 300_000)
 })

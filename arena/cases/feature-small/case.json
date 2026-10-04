@@ -1,13 +1,17 @@
 {
   "id": "feature-small",
-  "version": 1,
+  "version": 2,
   "name": "Add groupSummary to the report builder",
   "description": "Add a well-specified group-by-and-sort summary function to a small report library.",
   "category": "feature",
   "complexity": "small",
   "risk": "low",
-  "languages": ["JavaScript"],
-  "frameworks": ["node:test"],
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
   "taskPrompt": "Our sales-report library needs a way to summarise rows per group. Add and export from src/index.js a function `groupSummary(rows, options)` with these exact semantics.\n\nrows: an array of plain objects (anything else, including non-object elements, throws TypeError). options is an object with:\n- by (required): non-empty string, the field to group on. Rows where that field is missing, undefined or null are grouped together under the key null.\n- sum (required): non-empty string, the numeric field to total. Values that are not finite numbers still count towards `count` but add nothing to `total`.\n- sort (optional, default 'key'): 'key', 'total' or 'count'. Sorting by 'key' compares String(key) with the < and > operators (plain code-unit order); 'total' and 'count' compare numerically.\n- order (optional, default 'asc'): 'asc' or 'desc'. Groups that tie on the sort field must stay in the order their key first appeared in rows, for both ascending and descending order.\n- limit (optional): positive integer; keep only the first `limit` groups after sorting.\nMissing or non-string by/sum, or a missing options object, throws TypeError. An unknown sort or order, or a limit that is not a positive integer, throws RangeError.\n\nThe result is a new array of `{ key, count, total }` objects, one per group, and the input rows must not be modified. An empty rows array gives an empty array. Add tests next to the existing ones and mention the function in the README.",
   "visibleAcceptance": [
     "groupSummary(rows, { by, sum, sort, order, limit }) is exported from src/index.js and returns { key, count, total } objects",
@@ -15,9 +19,28 @@
     "Invalid arguments throw TypeError or RangeError exactly as specified",
     "Existing tests keep passing and new tests cover the function"
   ],
-  "checks": { "build": null, "test": "node --test", "lint": null, "typecheck": null },
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
   "setup": [],
-  "hiddenEvaluation": { "command": "node --test hidden-tests/**/*.test.mjs", "timeoutSeconds": 120 },
-  "budgets": { "maxWallClockMinutes": 20, "maxAgentSessions": 20, "maxAgentsPerTrial": 4, "maxTurnsPerAgent": 60 },
-  "allowedStrategies": ["SINGLE", "BUILD", "SWARM", "CONSENSUS", "SPECULATIVE"]
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/feature-small.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 20,
+    "maxAgentSessions": 20,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 60
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
 }

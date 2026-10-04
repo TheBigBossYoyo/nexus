@@ -52,8 +52,9 @@ describe('campaign creation and persistence', () => {
       '1:case-a:SINGLE',
       '1:case-a:BUILD',
       '1:case-b:BUILD',
-      '2:case-a:SINGLE',
+      // counterbalanced: the strategy order of a case rotates with (case index + repetition)
       '2:case-a:BUILD',
+      '2:case-a:SINGLE',
       '2:case-b:BUILD',
     ])
     expect(trials.map((t) => t.ordinal)).toEqual([0, 1, 2, 3, 4, 5])
@@ -92,7 +93,7 @@ describe('running a campaign', () => {
     rig = makeRig()
     rig.host.behavior = (_i, input) => (input.strategy === 'BUILD' ? 'solve' : 'wrong')
     const c = await create(rig)
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'campaign completion')
     await rig.service.idle()
 
@@ -154,15 +155,18 @@ describe('running a campaign', () => {
       },
     })
     const c = await create(rig)
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     const trials = rig.repos.arenaTrials.listByCampaign(c.id)
     expect(trials[0]!.state).toBe('blocked')
     expect(trials[0]!.detail).toContain('disk full')
+    expect(trials[0]!.blockKind).toBe('infrastructure')
     expect(rig.repos.arenaEvaluations.latestForTrial(trials[0]!.id)).toBeNull()
     expect(trials[1]!.state).toBe('passed')
     // an unrun trial does not count against its strategy
-    expect(rig.service.campaignDetail(c.id).comparison.map((r) => r.n)).toEqual([1])
+    const rows = rig.service.campaignDetail(c.id).comparison
+    expect(rows.map((r) => [r.strategy, r.n, r.excludedInfrastructure])).toEqual([['SINGLE', 0, 1], ['BUILD', 1, 0]])
+    expect(rig.service.results({ campaignId: c.id }).notes.join(' ')).toContain('left out because the harness blocked it')
   })
 
   it('a failed run is a failed trial with the evaluator not run; the evaluator never sees an unfinished run', async () => {
@@ -170,7 +174,7 @@ describe('running a campaign', () => {
     const behaviors: Behavior[] = ['fail', 'nocommit']
     rig.host.behavior = (i) => behaviors[i]!
     const c = await create(rig)
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     const [failed, nocommit] = rig.repos.arenaTrials.listByCampaign(c.id)
     expect(failed!.state).toBe('failed')
@@ -205,7 +209,7 @@ describe('running a campaign', () => {
       } as never)
     }
     const c = await create(rig, { maxConcurrentTrials: 2 })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     const [a, b] = rig.repos.arenaTrials.listByCampaign(c.id)
     expect(a!.projectId).not.toBe(b!.projectId)
@@ -243,7 +247,7 @@ describe('running a campaign', () => {
       return orig(input)
     }
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD', 'SWARM', 'CONSENSUS'], maxConcurrentTrials: 2 })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     expect(peak).toBeLessThanOrEqual(2)
     expect(peak).toBe(2)
@@ -257,7 +261,7 @@ describe('budgets', () => {
     rig = makeRig()
     rig.host.sessionsPerRun = 2
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD', 'SWARM', 'CONSENSUS'], maxAgentSessions: 3 })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     const s = states(rig, c.id)
     expect(s.filter((x) => x === 'passed')).toHaveLength(2)
@@ -271,11 +275,14 @@ describe('budgets', () => {
     rig = makeRig({ overrides: { minuteMs: 25 }, cases: (dir) => writeDemoCase(dir, 'demo-case', { budgets: { maxWallClockMinutes: 4, maxAgentSessions: 20, maxAgentsPerTrial: 2, maxTurnsPerAgent: 60 } }) })
     rig.host.behavior = () => 'hang'
     const c = await create(rig, { strategies: ['SINGLE'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     const t = rig.repos.arenaTrials.listByCampaign(c.id)[0]!
     expect(t.state).toBe('blocked')
     expect(t.detail).toContain('wall-clock budget')
+    expect(t.blockKind).toBe('timeout')
+    // a timeout is a failure of the strategy: it is IN n (not passed), not dropped
+    expect(rig.service.campaignDetail(c.id).comparison[0]).toMatchObject({ strategy: 'SINGLE', n: 1, passed: 0, excludedInfrastructure: 0 })
     expect(rig.host.cancelled).toContain(t.runId)
     expect(rig.repos.arenaMetrics.getByTrial(t.id)).not.toBeNull()
     expect(rig.repos.arenaEvaluations.latestForTrial(t.id)!.passed).toBe(false)
@@ -285,7 +292,7 @@ describe('budgets', () => {
     rig = makeRig({ overrides: { minuteMs: 30 } })
     rig.host.behavior = () => 'hang'
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD'], maxWallClockMinutes: 3 })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     expect(rig.repos.arenaCampaigns.require(c.id).error).toContain('maxWallClockMinutes')
     expect(states(rig, c.id).every((s) => s === 'cancelled')).toBe(true)
@@ -294,7 +301,7 @@ describe('budgets', () => {
   it('caps agents per trial with the lower of the campaign and the case limit', async () => {
     rig = makeRig()
     const c = await create(rig, { strategies: ['SINGLE'], maxAgentsPerTrial: 1 })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
     expect(rig.host.created[0]!.overrides).toMatchObject({ maxParallelAgents: 1 })
   })
@@ -305,7 +312,7 @@ describe('control', () => {
     rig = makeRig()
     rig.host.behavior = () => 'hang'
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD', 'SWARM'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => rig!.host.created.length === 1, 'first run')
     rig.service.cancel(c.id)
     expect(campaignState(rig, c.id)).toBe('cancelled')
@@ -321,7 +328,7 @@ describe('control', () => {
     rig = makeRig()
     rig.host.delayMs = 60
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD', 'SWARM'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => rig!.host.created.length === 1, 'first run')
     rig.service.pause(c.id)
     await rig.service.idle()
@@ -339,8 +346,8 @@ describe('control', () => {
     const c = await create(rig, { strategies: ['SINGLE'] })
     expect(() => rig!.service.pause(c.id)).toThrow(NexusError)
     expect(() => rig!.service.resume(c.id)).toThrow(NexusError)
-    rig.service.start(c.id)
-    expect(() => rig!.service.start(c.id)).toThrow(NexusError)
+    await rig.service.start(c.id)
+    await expect(rig!.service.start(c.id)).rejects.toThrow(NexusError)
     await waitFor(() => campaignState(rig!, c.id) === 'completed', 'completion')
   })
 })
@@ -350,7 +357,7 @@ describe('quota', () => {
     rig = makeRig()
     rig.host.behavior = (i) => (i === 0 ? 'quota' : 'solve')
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => campaignState(rig!, c.id) === 'paused', 'quota pause')
     expect(rig.repos.arenaCampaigns.require(c.id).pauseReason).toBe('quota')
     await sleep(150)
@@ -382,7 +389,7 @@ describe('quota', () => {
       },
     })
     const c = await create(rig, { strategies: ['SINGLE'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     expect(rig.repos.arenaCampaigns.require(c.id)).toMatchObject({ state: 'paused', pauseReason: 'quota' })
     await sleep(100)
     expect(rig.host.created).toHaveLength(0)
@@ -397,7 +404,7 @@ describe('quota', () => {
     const listeners = new Set<() => void>()
     rig = makeRig({ overrides: { usage: { canDispatch: () => open, onChange: (l) => (listeners.add(l), () => listeners.delete(l)) } } })
     const c = await create(rig, { strategies: ['SINGLE'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     rig.service.pause(c.id)
     open = true
     for (const l of listeners) l()
@@ -422,7 +429,7 @@ describe('recovery after a restart', () => {
     // trial 1: provisioning forever. trial 2: run never ends. trial 3: run ends, evaluation never returns. trial 4: queued.
     rig.host.behavior = (_i, input) => (input.strategy === 'BUILD' ? 'hang' : 'solve')
     const c = await create(rig, { strategies: ['SINGLE', 'BUILD', 'SWARM', 'CONSENSUS'], maxConcurrentTrials: 3 })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => states(rig!, c.id).join() === 'provisioning,running,evaluating,queued', 'mid-flight states', 15_000).catch((e) => {
       throw new Error(`${e.message}: ${states(rig!, c.id).join()}`)
     })
@@ -458,7 +465,7 @@ describe('recovery after a restart', () => {
     rig = makeRig()
     rig.host.behavior = () => 'hang'
     const c = await create(rig, { strategies: ['SINGLE'] })
-    rig.service.start(c.id)
+    await rig.service.start(c.id)
     await waitFor(() => rig!.host.created.length === 1, 'run')
     const trial = rig.repos.arenaTrials.listByCampaign(c.id)[0]!
     rig.service.dispose()

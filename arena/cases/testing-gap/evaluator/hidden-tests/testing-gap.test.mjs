@@ -1,8 +1,10 @@
 // Mutation check of the agent-written tests.
 //
-// The project is copied to a temporary directory three ways: with the pristine sources (the agent's
-// tests must pass), and once per mutant (the agent's tests must fail for most of them). Sources are
-// always taken from ./pristine, never mutated in place, so edits the agent made under src/ are ignored.
+// The project is copied to a temporary directory several ways: with the pristine sources (the agent's tests
+// must pass), with behaviour-PRESERVING edits (comments, renamed locals, reordered independent statements,
+// equivalent expressions: the tests must still pass, so a suite that hashes or greps the sources fails), and
+// once per behavioural mutant (the tests must fail for most of them, by a failing test and not by a crash of
+// the test file). Sources are always taken from ./pristine, never mutated in place.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -31,6 +33,43 @@ const MUTANTS = [
   { id: 'skip-first-of-month', file: 'src/next.js', from: 't = Date.UTC(year, month + 1, 1)', to: 't = Date.UTC(year, month + 1, 2)', note: 'jumping to the next month skips its first day' },
   { id: 'limit-one-year', file: 'src/next.js', from: 'limitYears = 5', to: 'limitYears = 1', note: 'the default search horizon shrinks to a year' },
 ]
+
+/** Behaviour-preserving edits. The agent's tests must still PASS on every one of these. */
+const EQUIVALENTS = [
+  { id: 'comment-everywhere', all: true, append: '\n// reviewed: no behaviour change\n' },
+  { id: 'step-comparison-flipped', file: 'src/field.js', from: 'if (step < 1)', to: 'if (1 > step)' },
+  {
+    id: 'local-renamed',
+    file: 'src/field.js',
+    fromAll: /\bresolve\(/g,
+    to: 'resolveToken(',
+    also: [['const resolve =', 'const resolveToken =']],
+  },
+  {
+    id: 'independent-consts-swapped',
+    file: 'src/next.js',
+    fromRe: /(const month = d\.getUTCMonth\(\))(\r?\n\s*)(const day = d\.getUTCDate\(\))/,
+    to: '$3$2$1',
+  },
+  {
+    id: 'independent-consts-swapped-2',
+    file: 'src/matches.js',
+    fromRe: /(const domOk = [^\r\n]+)(\r?\n\s*)(const dowOk = [^\r\n]+)/,
+    to: '$3$2$1',
+  },
+  {
+    id: 'alias-entries-swapped',
+    file: 'src/cron.js',
+    fromRe: /(\s*'@yearly': '0 0 1 1 \*',)(\s*'@annually': '0 0 1 1 \*',)/,
+    to: '$2$1',
+  },
+  {
+    id: 'parenthesised-expression',
+    file: 'src/cron.js',
+    from: 'ALIASES[trimmed.toLowerCase()] ?? trimmed',
+    to: '(ALIASES[trimmed.toLowerCase()]) ?? (trimmed)',
+  },
+]
 const REQUIRED_KILLS = 10
 
 function copyProject(withSourcesFrom = pristine) {
@@ -48,8 +87,31 @@ function copyProject(withSourcesFrom = pristine) {
 function runAgentTests(dir) {
   const env = { ...process.env }
   delete env.NODE_TEST_CONTEXT
+  delete env.NODE_OPTIONS
   const r = spawnSync(process.execPath, ['--test'], { cwd: dir, env, encoding: 'utf8', timeout: 30000 })
-  return { status: r.status, signal: r.signal, output: `${r.stdout ?? ''}${r.stderr ?? ''}` }
+  const output = `${r.stdout ?? ''}${r.stderr ?? ''}`
+  // Failing tests by name (spec reporter): a name ending in .js/.mjs is the test FILE failing to run at all.
+  const failing = [...output.matchAll(/^\s*✖ (.+?) \(\d/gm)].map((m) => m[1])
+  const behavioural = failing.some((n) => !/\.(c|m)?js$/.test(n))
+  return { status: r.status, signal: r.signal, output, behavioural }
+}
+
+function applyEquivalent(dir, e) {
+  const files = e.all ? ['src/cron.js', 'src/errors.js', 'src/field.js', 'src/index.js', 'src/matches.js', 'src/names.js', 'src/next.js'] : [e.file]
+  for (const f of files) {
+    const target = join(dir, f)
+    let text = readFileSync(target, 'utf8')
+    const before = text
+    if (e.append) text += e.append
+    if (e.from) text = text.replace(e.from, () => e.to)
+    if (e.fromRe) text = text.replace(e.fromRe, e.to)
+    if (e.fromAll) {
+      text = text.replace(e.fromAll, e.to)
+      for (const [x, y] of e.also ?? []) text = text.replace(x, y)
+    }
+    if (text === before) throw new Error(`${e.id}: the edit changed nothing in ${f}`)
+    writeFileSync(target, text)
+  }
 }
 
 test('mutant definitions are valid against the pristine sources', () => {
@@ -58,6 +120,21 @@ test('mutant definitions are valid against the pristine sources', () => {
     assert.equal(source.split(m.from).length - 1, 1, `${m.id}: pattern must occur exactly once in ${m.file}`)
     assert.notEqual(m.from, m.to)
   }
+})
+
+test('the agent tests also pass on behaviour-preserving edits of the sources', () => {
+  const failed = []
+  for (const e of EQUIVALENTS) {
+    const dir = copyProject()
+    try {
+      applyEquivalent(dir, e)
+      const r = runAgentTests(dir)
+      if (r.status !== 0) failed.push(e.id)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  assert.deepEqual(failed, [], `tests must describe behaviour, not the text of the sources; they failed on equivalent edits: ${failed.join(', ')}`)
 })
 
 test('the agent tests pass on the unmodified sources', () => {
@@ -81,7 +158,7 @@ test(`the agent tests detect at least ${REQUIRED_KILLS} of ${MUTANTS.length} mut
       const target = join(dir, m.file)
       writeFileSync(target, readFileSync(target, 'utf8').replace(m.from, () => m.to))
       const r = runAgentTests(dir)
-      if (r.status !== 0) killed++
+      if (r.status !== 0 && r.behavioural) killed++
       else survivors.push(`${m.id} (${m.note})`)
     } finally {
       rmSync(dir, { recursive: true, force: true })

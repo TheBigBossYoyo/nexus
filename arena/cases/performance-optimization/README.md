@@ -23,3 +23,6 @@ event (rolling window), one pass per distinct service (service table) and one so
   `keyOf`, keeping the first duplicate in input order, many distinct services, and `percentile` not
   reordering its caller's array.
 - Only public exports are used; no internal helper names are required.
+
+## Version 2
+Scaling is now measured behaviourally: each operation is timed in-process at n and 4n items (best of several runs after a warm-up) and must stay well below the quadratic ratio. Nothing counts calls of built-ins or property reads, so any linear or n log n implementation passes. A quadratic de-duplication that merely caches its keys fails; two different linear variants pass (see `tests/fixtures/arena-solutions/performance-optimization-variants/`).

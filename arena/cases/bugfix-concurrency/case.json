@@ -1,23 +1,46 @@
 {
   "id": "bugfix-concurrency",
-  "version": 1,
+  "version": 2,
   "name": "Fix races and leaks in async coordination helpers",
   "description": "A semaphore, job queue, read-through cache and mapLimit helper misbehave under concurrency, failure and cancellation. Find and fix the defects without changing the public API.",
   "category": "bugfix",
   "complexity": "large",
   "risk": "high",
-  "languages": ["JavaScript"],
-  "frameworks": ["node:test"],
-  "taskPrompt": "We have been seeing odd behaviour in production from the small async helpers in this repo (see README for the intended behaviour): the cache sometimes calls the same loader several times at once, a queue's `onIdle()` occasionally never resolves after a job failed, a semaphore seems to lose capacity over time until everything stalls, cancelling a waiting `acquire` makes things worse, and `mapLimit` keeps starting work after an item has already failed.\n\nPlease find and fix the root causes. Keep the public API and the documented behaviour; do not add timers or polling. Specifically, when you are done: concurrent `AsyncCache.get` calls for one key share a single load; a failed load rejects all of its waiters and must not be remembered; `invalidate(key)` and `clear()` during an in-flight load mean the result of that load is not cached (and must never overwrite a newer load), while the callers already waiting still receive their value, and a `get` after the invalidation starts a fresh load; permits of `Semaphore` are always returned whether a task succeeds or fails; a cancelled waiting `acquire` leaves the queue and never consumes a permit; `JobQueue.pending`/`onIdle()` stay correct for failed and cancelled jobs; `mapLimit` rejects with the first error and starts no further items after it. Add regression tests for what you fix.",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "We have been seeing odd behaviour in production from the small async helpers in this repo (see README for the intended behaviour): the cache sometimes calls the same loader several times at once, a queue's `onIdle()` occasionally never resolves after a job failed, a semaphore seems to lose capacity over time until everything stalls, cancelling a waiting `acquire` makes things worse, and `mapLimit` keeps starting work after an item has already failed.\n\nPlease find and fix the root causes. Keep the public API and the documented behaviour; do not add timers or polling. Specifically, when you are done: concurrent `AsyncCache.get` calls for one key share a single load; a failed load rejects all of its waiters and must not be remembered; `invalidate(key)` and `clear()` during an in-flight load mean the result of that load is not cached (and must never overwrite a newer load), while the callers already waiting still receive their value, and a `get` after the invalidation starts a fresh load; permits of `Semaphore` are always returned whether a task succeeds or fails; a cancelled waiting `acquire` leaves the queue and never consumes a permit; `JobQueue.pending`/`onIdle()` stay correct for failed and cancelled jobs; `mapLimit` rejects with the first error and starts no further items after it. Add regression tests for what you fix. A cancelled waiter (`Semaphore.acquire`, `Semaphore.run` or `JobQueue.add` with an aborted signal) rejects with an Error whose `name` is 'AbortError'.",
   "visibleAcceptance": [
     "Concurrent cache gets for the same key trigger exactly one loader call, and failures are not cached",
     "Semaphore permits are never leaked by failing tasks or cancelled waiters",
     "JobQueue.onIdle() resolves and pending reaches 0 after failed or cancelled jobs",
     "mapLimit rejects with the first error and does not start further items; existing tests still pass and regression tests are added"
   ],
-  "checks": { "build": null, "test": "node --test", "lint": null, "typecheck": null },
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
   "setup": [],
-  "hiddenEvaluation": { "command": "node --test hidden-tests/**/*.test.mjs", "timeoutSeconds": 120 },
-  "budgets": { "maxWallClockMinutes": 30, "maxAgentSessions": 40, "maxAgentsPerTrial": 4, "maxTurnsPerAgent": 70 },
-  "allowedStrategies": ["SINGLE", "BUILD", "SWARM", "CONSENSUS", "SPECULATIVE"]
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/bugfix-concurrency.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 30,
+    "maxAgentSessions": 40,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 70
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
 }

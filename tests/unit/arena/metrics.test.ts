@@ -36,6 +36,7 @@ const trialRow = (runId: string): ArenaTrial => ({
   taskProfileId: null,
   models: {},
   detail: null,
+  blockKind: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   startedAt: null,
   finishedAt: null,
@@ -155,7 +156,8 @@ describe('collectTrialMetrics', () => {
     expect(m.acceptancePassed).toBe(1)
     expect([m.criticalFindings, m.highFindings, m.mediumFindings]).toEqual([0, 1, 1])
     expect(m.repairs).toBe(2)
-    expect(m.wallClockMs).toBe(120_000)
+    // 120 s of run time minus the 20 s spent waiting for a usage reset
+    expect(m.wallClockMs).toBe(100_000)
     expect(m.sessions).toBe(3)
     expect(m.turns).toBe(8)
     expect(m.toolCalls).toBe(8)

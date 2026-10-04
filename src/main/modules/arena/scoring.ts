@@ -7,11 +7,10 @@ import {
   type ArenaTrial,
   type ArenaTrialMetrics,
   type ConcreteStrategy,
+  type EvidenceLabel,
   type Interval,
-  type RegressionFlag,
   type ScoringConfig,
   type StrategyComparisonRow,
-  type TrialState,
 } from '@shared/v3'
 import { betterByBand, evidenceLabel, intervalsSeparated, mean, median, wilsonInterval } from '../policy/stats'
 
@@ -156,43 +155,77 @@ export function scoreTrial(
 
 // ───────────────────────────── comparison ─────────────────────────────
 
-/** One finished and evaluated trial, as the statistics see it. */
+/** One finished trial, as the statistics see it. */
 export interface ComparisonTrial {
   strategy: ConcreteStrategy
+  caseId: string
   passed: boolean
+  /** Blocked by the harness (provisioning, evaluator, ...): says nothing about the strategy, excluded from n. */
+  infrastructure?: boolean
   metrics: ArenaTrialMetrics | null
 }
 
 const STRATEGY_ORDER = new Map<string, number>(CONCRETE_STRATEGIES.map((s, i) => [s, i]))
 const byStrategy = (a: ConcreteStrategy, b: ConcreteStrategy): number => (STRATEGY_ORDER.get(a) ?? 99) - (STRATEGY_ORDER.get(b) ?? 99)
 
-/** Trials in these states carry an evaluation and count in pass proportions (cancelled and queued ones do not). */
-export const COUNTED_STATES: readonly TrialState[] = ['passed', 'failed', 'blocked']
+/**
+ * How a trial counts in a comparison. `passed` and `failed` trials are observations; so are trials blocked by
+ * the run (needed an intervention) or by the case's time budget: they are failures OF THE STRATEGY and dropping
+ * them would be survivorship bias. A trial blocked by the harness (`infrastructure`, or blocked without a
+ * recorded kind) is excluded and counted separately. Queued, running and cancelled trials are not observations.
+ */
+export function trialOutcome(t: Pick<ArenaTrial, 'state' | 'blockKind'>): 'pass' | 'fail' | 'excluded' | 'ignored' {
+  if (t.state === 'passed') return 'pass'
+  if (t.state === 'failed') return 'fail'
+  if (t.state === 'blocked') return t.blockKind === 'run' || t.blockKind === 'timeout' ? 'fail' : 'excluded'
+  return 'ignored'
+}
 
+/** Strategies shown with fewer distinct cases than this are capped at WEAK: repetitions of one case are not independent. */
+export const MIN_CASES_FOR_EVIDENCE = 3
+
+const LABEL_RANK: Record<EvidenceLabel, number> = { INSUFFICIENT: 0, WEAK: 1, MODERATE: 2, STRONG: 3 }
+
+/**
+ * Per strategy: n, passes, Wilson interval, label. Time, sessions, tokens and repairs are summarised over PASSED
+ * trials only (a fast failure is not efficient); findings and quota pauses over all counted trials.
+ */
 export function compareStrategies(rows: readonly ComparisonTrial[]): StrategyComparisonRow[] {
   const groups = new Map<ConcreteStrategy, ComparisonTrial[]>()
   for (const r of rows) groups.set(r.strategy, [...(groups.get(r.strategy) ?? []), r])
-  return [...groups.keys()].sort(byStrategy).map((strategy) => {
-    const trials = groups.get(strategy)!
+  return [...groups.keys()].sort(byStrategy).flatMap((strategy) => {
+    const all = groups.get(strategy)!
+    const excluded = all.filter((t) => t.infrastructure).length
+    const trials = all.filter((t) => !t.infrastructure)
     const n = trials.length
-    const passed = trials.filter((t) => t.passed).length
+    if (n === 0 && excluded === 0) return []
+    const passedTrials = trials.filter((t) => t.passed)
+    const passed = passedTrials.length
     const interval = wilsonInterval(passed, n)
     const metrics = trials.flatMap((t) => (t.metrics ? [t.metrics] : []))
-    const tokens = metrics.map(observedTokens).filter((v): v is number => v !== null)
-    return {
-      strategy,
-      n,
-      passed,
-      passRate: n > 0 ? passed / n : null,
-      passInterval: interval,
-      medianWallClockMs: median(metrics.map((m) => m.wallClockMs).filter((v): v is number => v !== null)),
-      meanSessions: mean(metrics.map((m) => m.sessions)),
-      meanObservedTokens: mean(tokens),
-      meanRepairs: mean(metrics.map((m) => m.repairs)),
-      criticalHighFindings: metrics.reduce((sum, m) => sum + m.criticalFindings + m.highFindings, 0),
-      quotaPauses: metrics.reduce((sum, m) => sum + m.quotaPauses, 0),
-      label: evidenceLabel(n, interval),
-    }
+    const passedMetrics = passedTrials.flatMap((t) => (t.metrics ? [t.metrics] : []))
+    const tokens = passedMetrics.map(observedTokens).filter((v): v is number => v !== null)
+    const cases = new Set(trials.map((t) => t.caseId)).size
+    let label = evidenceLabel(n, interval)
+    if (cases < MIN_CASES_FOR_EVIDENCE && LABEL_RANK[label] > LABEL_RANK.WEAK) label = 'WEAK'
+    return [
+      {
+        strategy,
+        n,
+        cases,
+        excludedInfrastructure: excluded,
+        passed,
+        passRate: n > 0 ? passed / n : null,
+        passInterval: interval,
+        medianWallClockMs: median(passedMetrics.map((m) => m.wallClockMs).filter((v): v is number => v !== null)),
+        meanSessions: mean(passedMetrics.map((m) => m.sessions)),
+        meanObservedTokens: mean(tokens),
+        meanRepairs: mean(passedMetrics.map((m) => m.repairs)),
+        criticalHighFindings: metrics.reduce((sum, m) => sum + m.criticalFindings + m.highFindings, 0),
+        quotaPauses: metrics.reduce((sum, m) => sum + m.quotaPauses, 0),
+        label,
+      },
+    ]
   })
 }
 
@@ -221,12 +254,23 @@ const range = (i: Interval): string => `${pct(i.low)}-${pct(i.high)}`
  * Plain-language statements about what the rows do and do not show. Two strategies are called different only
  * when their Wilson intervals do not overlap; below five trials nothing is concluded.
  */
-export function resultNotes(rows: readonly StrategyComparisonRow[]): string[] {
+export function resultNotes(rows: readonly StrategyComparisonRow[], context: { agentCaps?: { strategy: ConcreteStrategy; cap: number; usual: number }[] } = {}): string[] {
   if (rows.length === 0) return ['No finished trials yet; nothing is concluded.']
   const notes: string[] = []
   const thin = rows.filter((r) => r.label === 'INSUFFICIENT')
   if (thin.length > 0) {
     notes.push(`n is below 5 for ${thin.map((r) => `${r.strategy} (n=${r.n})`).join(', ')}; nothing is concluded for ${thin.length === 1 ? 'it' : 'them'}.`)
+  }
+  for (const r of rows) {
+    if (r.n > 0 && r.cases < MIN_CASES_FOR_EVIDENCE) {
+      notes.push(
+        `${r.strategy}: all ${r.n} trial${r.n === 1 ? '' : 's'} come from ${r.cases} case${r.cases === 1 ? '' : 's'}; repetitions of one case are not independent, so the label is capped at WEAK.`,
+      )
+    }
+  }
+  const excluded = rows.reduce((n, r) => n + r.excludedInfrastructure, 0)
+  if (excluded > 0) {
+    notes.push(`${excluded} trial${excluded === 1 ? ' was' : 's were'} left out because the harness blocked ${excluded === 1 ? 'it' : 'them'} (provisioning, evaluator or run start); that says nothing about the strategies.`)
   }
   const usable = rows.filter((r) => r.label !== 'INSUFFICIENT' && r.passInterval)
   for (let i = 0; i < usable.length; i++) {
@@ -243,43 +287,14 @@ export function resultNotes(rows: readonly StrategyComparisonRow[]): string[] {
       }
     }
   }
-  if (usable.length === 1 && thin.length === 0) notes.push('Only one strategy has results; there is nothing to compare.')
-  return notes
-}
-
-// ───────────────────────────── regression ─────────────────────────────
-
-export interface RegressionGroup {
-  /** Label of the group (e.g. a NEXUS version). */
-  group: string
-  trials: ComparisonTrial[]
-}
-
-/**
- * Compares the same strategy across two groups (older vs newer). Flags `ORCHESTRATION REGRESSION` only when the
- * newer group's upper Wilson bound is below the older group's lower bound; a lower rate inside overlapping
- * intervals is reported as "Lower, not established". Groups with fewer than 5 trials are skipped.
- */
-export function detectRegressions(older: RegressionGroup, newer: RegressionGroup): RegressionFlag[] {
-  const out: RegressionFlag[] = []
-  for (const strategy of CONCRETE_STRATEGIES) {
-    const a = older.trials.filter((t) => t.strategy === strategy)
-    const b = newer.trials.filter((t) => t.strategy === strategy)
-    if (a.length < 5 || b.length < 5) continue
-    const ia = wilsonInterval(a.filter((t) => t.passed).length, a.length)
-    const ib = wilsonInterval(b.filter((t) => t.passed).length, b.length)
-    if (!ia || !ib) continue
-    const ra = a.filter((t) => t.passed).length / a.length
-    const rb = b.filter((t) => t.passed).length / b.length
-    if (rb >= ra) continue
-    const established = ib.high < ia.low
-    out.push({
-      strategy,
-      baseline: { group: older.group, n: a.length, passRate: ra, interval: ia },
-      current: { group: newer.group, n: b.length, passRate: rb, interval: ib },
-      verdict: established ? 'established' : 'lower',
-      label: established ? 'ORCHESTRATION REGRESSION' : 'Lower, not established',
-    })
+  if (usable.length > 2) {
+    const pairs = (usable.length * (usable.length - 1)) / 2
+    notes.push(`With ${usable.length} strategies there are ${pairs} pairwise comparisons; a single non-overlap can occur by chance.`)
   }
-  return out
+  if (usable.length === 1 && thin.length === 0) notes.push('Only one strategy has results; there is nothing to compare.')
+  for (const c of context.agentCaps ?? []) {
+    notes.push(`${c.strategy} ran with at most ${c.cap} agents in this campaign; its usual limit is ${c.usual}.`)
+  }
+  notes.push('Time, sessions, tokens and repairs are summarised over passed trials only; blocked-by-run and timed-out trials count as failures.')
+  return notes
 }

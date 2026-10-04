@@ -813,8 +813,9 @@ export interface ArenaCampaignBudgets {
 
 export const ARENA_BUDGET_DEFAULTS: Record<ArenaBudgetPreset, Omit<ArenaCampaignBudgets, 'preset'>> = {
   eco: { maxWallClockMinutes: 120, maxTrials: 12, maxConcurrentTrials: 1, maxAgentSessions: 120, maxAgentsPerTrial: 2 },
-  balanced: { maxWallClockMinutes: 360, maxTrials: 40, maxConcurrentTrials: 1, maxAgentSessions: 400, maxAgentsPerTrial: 4 },
-  research: { maxWallClockMinutes: 720, maxTrials: 120, maxConcurrentTrials: 2, maxAgentSessions: 1500, maxAgentsPerTrial: 6 },
+  // BALANCED and RESEARCH never cap a strategy below its own parallelism (SWARM uses up to 8); ECO does, and says so in the results.
+  balanced: { maxWallClockMinutes: 360, maxTrials: 40, maxConcurrentTrials: 1, maxAgentSessions: 400, maxAgentsPerTrial: 8 },
+  research: { maxWallClockMinutes: 720, maxTrials: 120, maxConcurrentTrials: 2, maxAgentSessions: 1500, maxAgentsPerTrial: 8 },
 }
 
 export const CAMPAIGN_STATES = ['draft', 'running', 'paused', 'completed', 'cancelled', 'failed'] as const

@@ -1,6 +1,6 @@
 {
   "id": "recovery-persistence",
-  "version": 1,
+  "version": 2,
   "name": "Crash recovery of a journaled store",
   "description": "An embedded key/value store with a journal and snapshots that loses data or refuses to start after a crash; the agent must make recovery correct without changing the public API or on-disk format.",
   "category": "infrastructure",
@@ -28,13 +28,13 @@
   },
   "setup": [],
   "hiddenEvaluation": {
-    "command": "node --test hidden-tests/**/*.test.mjs",
+    "command": "node --test hidden-tests/recovery-persistence.test.mjs",
     "timeoutSeconds": 120
   },
   "budgets": {
     "maxWallClockMinutes": 40,
     "maxAgentSessions": 50,
-    "maxAgentsPerTrial": 4,
+    "maxAgentsPerTrial": 8,
     "maxTurnsPerAgent": 80
   },
   "allowedStrategies": [

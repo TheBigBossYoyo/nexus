@@ -26,3 +26,6 @@ ignored). It then runs `node --test` with `process.execPath` (no shell):
   the five-year horizon, `runsPerDay`).
 - Three mutants may be missed without penalty; the shipped tests alone kill 1 of 13.
 - Tests that assert nothing, or that fail on the real code, cannot score.
+
+## Version 2
+The evaluator now also applies behaviour-preserving edits (comments, renamed locals, reordered independent statements, equivalent expressions) and requires the agent's tests to still pass on them: a suite that hashes or greps the sources fails. A mutant only counts as killed when an individual test fails, not when the test file crashes.

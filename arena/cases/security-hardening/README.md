@@ -28,3 +28,6 @@ valid designs (reject vs confine) are accepted for hostile upload names. Superfi
 with a trailing separator but no decoding handling, single-pass `replace('../', '')`, `timingSafeEqual` on
 unequal lengths (throws on multi-byte input), escaping only `<` and `>`, or blocking the key `__proto__` but
 not `constructor`.
+
+## Version 2
+The task prompt now states the requirements the evaluator checks that were previously implicit: the shape of `saveUpload`'s returned name and its confinement, the ignored prototype keys, own-property-only template lookups (objects render empty), and `false` for non-string or empty predicate arguments.

@@ -13,3 +13,6 @@ Why the hidden tests are fair:
 - Superficial implementations that fail: only extending the model and service (storage still drops the fields, so reloads lose data); bumping to version 2 without accepting version 1; rendering without the OVERDUE rule or applying it to done tasks; wiring flags in the command layer without validation; sorting the service's internal array in place; non-stable or reversed tie ordering.
 - Date validation is by real calendar date (leap day accepted, 2025-02-30 rejected), not just a regex.
 - No test depends on the wall clock; `today` is always passed explicitly.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

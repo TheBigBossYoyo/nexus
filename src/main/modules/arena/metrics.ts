@@ -74,11 +74,18 @@ export function collectTrialMetrics(
   // A repair is a repair child task or a mission-level fix task; each counts once.
   const repairs = tasks.filter((t) => t.parentTaskId !== null || t.kind === 'repair' || t.key.startsWith('mission-fix-')).length
 
+  // limit behaviour (run-scoped pauses only; a global gate pause has no run)
+  const pauses = repos.quotaPauses.listByRun(runId)
+  const quotaWaitMs = pauses.reduce((sum, p) => {
+    const end = p.endedAt ?? run.finishedAt ?? now
+    return sum + Math.max(0, Date.parse(end) - Date.parse(p.pausedAt))
+  }, 0)
   // efficiency
   const agents = repos.agents.listByRun(runId)
   const sessions = agents.reduce((n, a) => n + repos.sessions.listByAgent(a.id).length, 0)
+  // Time spent waiting for a usage reset is not time the strategy took: it feeds ranking, the time score and medians.
   const wallClockMs =
-    run.startedAt && run.finishedAt ? Math.max(0, Date.parse(run.finishedAt) - Date.parse(run.startedAt)) : null
+    run.startedAt && run.finishedAt ? Math.max(0, Date.parse(run.finishedAt) - Date.parse(run.startedAt) - quotaWaitMs) : null
 
   // autonomy and stability
   const interventions = repos.events.listByTypes(runId, ['user.intervention'], 2000)
@@ -88,12 +95,6 @@ export function collectTrialMetrics(
   const approvals = repos.approvals.listByRun(runId).filter((a) => a.status !== 'pending').length
   const blockers = repos.messages.listByRun(runId).filter((m) => m.type === 'blocker').length
 
-  // limit behaviour (run-scoped pauses only; a global gate pause has no run)
-  const pauses = repos.quotaPauses.listByRun(runId)
-  const quotaWaitMs = pauses.reduce((sum, p) => {
-    const end = p.endedAt ?? run.finishedAt ?? now
-    return sum + Math.max(0, Date.parse(end) - Date.parse(p.pausedAt))
-  }, 0)
   const autoResumes = repos.quotaResumes.listByRun(runId).filter((r) => r.kind === 'resume' && r.result === 'resumed').length
   const throttles = repos.usageEvents.listByRun(runId, { limit: 500 }).filter((e) => e.eventType === 'throttle').length
 

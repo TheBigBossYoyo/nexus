@@ -11,3 +11,6 @@ Why the hidden tests are fair:
 - A frozen (deep-frozen) order must flow through `priceOrder`, `Inventory.reserve`, `processOrder` and `mergeLines`; any correct non-mutating implementation passes.
 - Superficial fix that fails: cloning the order inside `priceOrder` only (the symptom the prompt mentions first) still leaves `Inventory.reserve` and `processOrder` mutating the order and inflating reservations on retry. Likewise de-duplicating in each consumer fails the `mergeLines` direct tests.
 - Merge ordering (first-seen), SKU normalisation, all-or-nothing reservation and invoice content are re-asserted so rewrites that change them fail.
+
+## Version 2
+The hidden evaluation command now names its test file explicitly (no glob expansion, works on Node 20 and newer without a shell) and the case allows up to 8 agents so it never caps a strategy's own parallelism.

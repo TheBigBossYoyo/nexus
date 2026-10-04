@@ -91,6 +91,14 @@ export interface ArenaCaseSummary {
   version: ArenaCaseVersion
 }
 
+/** Whether this computer can run Arena cases: they are Node.js projects run with the `node` on PATH. */
+export interface ArenaStatus {
+  nodeFound: boolean
+  nodeVersion: string | null
+  ok: boolean
+  message: string
+}
+
 export interface ArenaCampaignSummary {
   campaign: ArenaCampaign
   counts: Record<TrialState, number>

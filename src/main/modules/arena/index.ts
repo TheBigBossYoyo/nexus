@@ -5,6 +5,10 @@ export {
   describeCommands,
   hashDirectory,
   hashEvaluator,
+  hashCaseEvaluator,
+  canonicalJson,
+  MAX_CASE_FILES,
+  MAX_CASE_BYTES,
   importCase,
   listCaseDirectories,
   listFilesRecursive,
@@ -15,22 +19,25 @@ export {
   trustCaseVersion,
 } from './case-format'
 export type { CaseCommands, CaseOrigin, ImportedCase, LoadedCase, RegisteredCase } from './case-format'
-export { BASELINE_AUTHOR, assertNoEvaluatorFiles, provisionTrial } from './fixtures'
+export { BASELINE_AUTHOR, assertNoEvaluatorFiles, gitGuard, guardedGit, provisionTrial } from './fixtures'
 export type { ProvisionInput, ProvisionedTrial } from './fixtures'
-export { EVALUATION_OUTPUT_CAP_BYTES, evaluateTrial } from './evaluator'
+export { EVALUATION_OUTPUT_CAP_BYTES, evaluateTrial, nothingRan, testsReported } from './evaluator'
 export type { EvaluateInput, EvaluationOutcome } from './evaluator'
+export { cleanEnv } from './env'
+export { MIN_NODE_MAJOR, checkNode } from './preflight'
+export type { NodeStatus } from './preflight'
 export { collectTrialMetrics } from './metrics'
 export {
-  COUNTED_STATES,
+  MIN_CASES_FOR_EVIDENCE,
+  trialOutcome,
   buildMatrix,
   compareStrategies,
   compareTrials,
   defaultScoring,
-  detectRegressions,
   mergeScoring,
   observedTokens,
   resultNotes,
   scoreTrial,
   verificationPassed,
 } from './scoring'
-export type { ComparisonTrial, RankedTrial, RegressionGroup, ScoreResult } from './scoring'
+export type { ComparisonTrial, RankedTrial, ScoreResult } from './scoring'
