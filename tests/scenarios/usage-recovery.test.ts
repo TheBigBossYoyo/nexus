@@ -46,6 +46,9 @@ describe('scenario: quota pause and automatic resume', () => {
     expect(h.eventsOfType(run.id, 'task.failed')).toHaveLength(0)
     expect(h.eventsOfType(run.id, 'task.retry')).toHaveLength(0)
     expect(sessionsOf(h, 'worker')).toHaveLength(1)
+    // The agent that hit the limit ended as stopped, not failed (Arena crashedAgents and the Overnight report count failures).
+    expect(h.repos.agents.listByTask(task.id).map((a) => a.state)).toEqual(['stopped'])
+    expect(h.eventsOfType(run.id, 'agent.failed')).toHaveLength(0)
 
     // A checkpoint, a global wait and a run wait; the gate is closed and the status says why.
     expect(h.repos.checkpoints.listByRun(run.id).some((c) => c.reason === 'quota')).toBe(true)
@@ -107,6 +110,23 @@ describe('scenario: quota pause and automatic resume', () => {
     expect(stack.usage.dispatchLimit(4)).toBe(1)
     clock.advance(61_000)
     expect(stack.usage.dispatchLimit(4)).toBe(4)
+  })
+
+  it('the exact reset survives the SDK second rejection signal (the plan is reset + delay, not a blind backoff)', async () => {
+    const clock = new ManualClock()
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('big')]), worker: limitedOnce(clock, 45 * MIN) }) })
+    stack = attachUsage(h, { clock })
+    const run = await h.startRun()
+    await h.waitForState(run.id, 'paused')
+    await h.waitFor(() => liveRows() === 2, 'the quota pause rows')
+    // two agent.rate_limited events: the one with the reset, then the one without
+    const signals = h.eventsOfType(run.id, 'agent.rate_limited').map((e) => e.payload.resetsAt)
+    expect(signals).toHaveLength(2)
+    expect(signals[0]).not.toBeNull()
+    expect(signals[1]).toBeNull()
+    expect(h.repos.quotaPauses.liveGlobal()).toMatchObject({ resetConfidence: 'EXACT', limitType: 'five_hour' })
+    expect(Date.parse(h.repos.quotaPauses.liveGlobal()?.nextCheckAt ?? '') - clock.now()).toBe(46 * MIN)
+    expect(stack.usage.overview().nextResetAt).toMatchObject({ confidence: 'EXACT' })
   })
 
   it('15: an unknown reset is probed conservatively: the first probe fails, a later one succeeds', async () => {
@@ -315,6 +335,119 @@ describe('scenario: quota pause and automatic resume', () => {
     clock.advance(24 * 60 * MIN)
     await stack.controller.tick()
     expect(h.runtime.usage.probes).toBe(0)
+  })
+
+  it('an ended wait stays ended across a restart: no reopen, no notice, no automatic resume', async () => {
+    const clock = new ManualClock()
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('big')]), worker: limitedOnce(clock, 60 * MIN) }) })
+    stack = attachUsage(h, { clock })
+    const run = await h.startRun()
+    await h.waitForState(run.id, 'paused')
+    await h.waitFor(() => liveRows() === 2, 'the quota pause rows')
+    stack.controller.endWait(run.id)
+    expect(liveRows()).toBe(0)
+    stack.dispose()
+    h.pushes.length = 0
+    stack = attachUsage(h, { clock }) // the application restarted: controller.recover()
+    expect(liveRows()).toBe(0)
+    expect(stack.usage.canDispatch()).toBe(true)
+    expect(h.pushes.filter((m) => m.kind === 'usage.notice')).toHaveLength(0)
+    clock.advance(61 * MIN)
+    await stack.controller.tick()
+    expect(h.runtime.usage.probes).toBe(0)
+    expect(h.repos.runs.require(run.id)).toMatchObject({ state: 'paused', pauseReason: 'quota' })
+  })
+
+  it('a run Claude keeps rejecting after automatic resumes continues ONE backoff, then the wait ends', async () => {
+    const clock = new ManualClock()
+    const alwaysLimited: FakeScript = async (_spec, ctx) => {
+      await ctx.rateLimit({ status: 'rejected', resetsAt: null, limitType: 'five_hour' })
+      await ctx.completeTurn({ text: 'usage limit reached', outcome: 'quota' })
+    }
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('big')]), worker: alwaysLimited }) })
+    stack = attachUsage(h, { clock })
+    const run = await h.startRun()
+    await h.waitForState(run.id, 'paused')
+    await h.waitFor(() => liveRows() === 2, 'the quota pause rows')
+    const gaps: number[] = []
+    for (let i = 0; i < 12; i++) {
+      const g = h.repos.quotaPauses.liveGlobal()
+      if (!g) break
+      gaps.push(Math.round((Date.parse(g.nextCheckAt ?? '') - clock.now()) / MIN))
+      clock.advance(Date.parse(g.nextCheckAt ?? '') - clock.now())
+      await stack.controller.tick() // the probe says available, the run resumes, Claude rejects it again
+      await h.waitFor(() => {
+        const next = h.repos.quotaPauses.liveGlobal()
+        return next ? next.id !== g.id : h.repos.quotaPauses.listByRun(run.id).some((p) => p.state === 'ended')
+      }, 'the next wait or the end of the wait')
+    }
+    expect(gaps).toEqual([5, 10, 20, 30, 30, 30])
+    const globals = h.repos.quotaPauses.listRecent({ limit: 50 }).filter((p) => p.scope === 'global')
+    expect(new Set(globals.map((p) => p.pausedAt)).size).toBe(1) // one wait, started once
+    expect(h.repos.quotaPauses.listLive()).toHaveLength(0)
+    expect(globals.map((p) => p.state).filter((s) => s === 'resumed')).toHaveLength(6)
+    expect(h.repos.quotaPauses.listByRun(run.id).at(-1)).toMatchObject({ state: 'ended' })
+    expect(h.repos.quotaPauses.listByRun(run.id).at(-1)?.endReason).toMatch(/rejected the work again/)
+    expect(h.repos.runs.require(run.id)).toMatchObject({ state: 'paused', pauseReason: 'quota' })
+    expect(h.pushes.find((m) => m.kind === 'usage.notice' && m.notice === 'wait_ended')).toBeTruthy()
+    expect(h.task(run.id, 'big')).toMatchObject({ attempt: 1, error: null })
+    expect(stack.usage.canDispatch()).toBe(true)
+  })
+
+  it('a rejection that names no limit is not settled by the usage report: one minimal session decides', async () => {
+    const clock = new ManualClock()
+    let hit = false
+    const worker: FakeScript = async (spec, ctx) => {
+      if (!hit) {
+        hit = true
+        ctx.usage.limit(clock.now() + 3 * MIN)
+        await ctx.rateLimit({ status: 'rejected', resetsAt: ctx.usage.resetAtSeconds(), limitType: null })
+        await ctx.completeTurn({ text: 'credit balance too low', outcome: 'quota' })
+        return
+      }
+      await fileWorker(spec, ctx)
+    }
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('big')]), worker }) })
+    stack = attachUsage(h, { clock })
+    const run = await h.startRun()
+    await h.waitForState(run.id, 'paused')
+    await h.waitFor(() => liveRows() === 2, 'the quota pause rows')
+    expect(h.repos.quotaPauses.liveGlobal()?.limitType).toBeNull()
+    clock.advance(5 * MIN)
+    await stack.controller.tick()
+    expect(stack.probe.stats).toEqual({ reports: 1, sessions: 1 })
+    expect((await h.waitForState(run.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+  })
+
+  it('after a resume the ramp also limits how many orphaned tasks restart at once', async () => {
+    const clock = new ManualClock()
+    let hits = 0
+    let resumed = false
+    const worker: FakeScript = async (_spec, ctx) => {
+      if (!resumed) {
+        await ctx.sleep(80)
+        if (hits++ === 0) ctx.usage.limit(clock.now() + 5 * MIN)
+        await ctx.rateLimit({ status: 'rejected', resetsAt: ctx.usage.resetAtSeconds(), limitType: 'five_hour' })
+        await ctx.completeTurn({ text: 'usage limit reached', outcome: 'quota' })
+        return
+      }
+      await ctx.sleep(60 * MIN) // keeps its slot until the session is stopped
+    }
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('a'), plannedTask('b'), plannedTask('c')]), worker }) })
+    stack = attachUsage(h, { clock })
+    const run = await h.startRun({ overrides: { maxParallelAgents: 3 } })
+    await h.waitForState(run.id, 'paused')
+    await h.waitFor(() => liveRows() === 2 && sessionsOf(h, 'worker').length === 3, 'three limited workers and the pause rows')
+    await h.orchestrator.idle(run.id)
+    resumed = true
+    clock.advance(6 * MIN)
+    await stack.controller.tick()
+    await h.waitFor(() => sessionsOf(h, 'worker').length === 4, 'the first restarted worker')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(sessionsOf(h, 'worker')).toHaveLength(4) // one new session at a time during the ramp
+    clock.advance(61_000)
+    stack.usage.tickRamp()
+    await h.waitFor(() => sessionsOf(h, 'worker').length === 6, 'the rest after the ramp')
   })
 
   it('a quota hit while the planner runs pauses planning and resumes into planning', async () => {

@@ -329,7 +329,7 @@ The overrides apply to the controller only. The Overnight supervisor reads the s
   usage report probe (`probe.ts` checks the percentage, not the reset).
 - The Overnight probe does not pass the rejected window type (`limitType` is null on `overnight` rows), so
   the "rejected window with no percentage" rule applies only to ordinary runs.
-- `allowLocalTasksWhileWaiting` is a stored setting with no effect in 0.3.
+- While dispatch is closed no task starts, local or not; checks and merges already running finish. There is no setting for this.
 - Resume depends on the SDK session still being resumable; otherwise the 0.2.1 handoff is used.
 - Auth and runtime failures are not waited out by the controller beyond the backoff re-plan; authentication
   is fixed by a person.

@@ -131,6 +131,25 @@ describe('usage machine: transitions', () => {
     expect(run([{ type: 'quota_checkpointed' }], probing()).status).toBe('PROBING')
   })
 
+  it('a second rejection without a reset (the SDK reports one limit twice) never erases the known reset or limit type', () => {
+    const reset = T0 + 2 * 60 * MIN
+    const first = quotaPaused(reset)
+    const second = run([sig(classifyUsageSignal({ kind: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null }, T0))], first)
+    expect(second).toMatchObject({ status: 'QUOTA_PAUSED', resetAt: reset, limitType: 'five_hour' })
+    const viaError = run([sig(classifyUsageSignal({ kind: 'assistant_error', error: 'rate_limit' }, T0))], first)
+    expect(viaError.resetAt).toBe(reset)
+    // a fresh pause (from AVAILABLE) with no reset stays unknown, nothing is invented
+    expect(run([sig(classifyUsageSignal({ kind: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null }, T0))]).resetAt).toBeNull()
+  })
+
+  it('WAITING_FOR_RESET and PROBING that nothing owns self-heal (no quota row, no overnight wait)', () => {
+    for (const s of [waiting(), probing()]) {
+      expect(reduceUsage(s, { type: 'tick', hasLiveWait: true }, T0 + 5 * MIN).status).toBe(s.status)
+      expect(reduceUsage(s, { type: 'tick', hasLiveWait: false }, T0 + 29_000).status).toBe(s.status)
+      expect(reduceUsage(s, { type: 'tick', hasLiveWait: false }, T0 + 30_000).status).toBe('AVAILABLE')
+    }
+  })
+
   it('a QUOTA_PAUSED status nobody picked up falls back after 30 s (no run paused)', () => {
     const q = quotaPaused()
     expect(reduceUsage(q, { type: 'tick', hasLiveWait: false }, T0 + 29_000).status).toBe('QUOTA_PAUSED')

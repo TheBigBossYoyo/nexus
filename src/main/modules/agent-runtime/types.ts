@@ -134,7 +134,7 @@ export type AgentEvent =
       surpassedThreshold?: number | null
     }
   /** A transient throttle (overloaded / server error). Never a quota condition. */
-  | { type: 'throttle'; kind: 'overloaded' | 'server_error' }
+  | { type: 'throttle'; kind: 'overloaded' | 'server_error' | 'rate_limit' }
   | { type: 'status'; status: string }
   | { type: 'turn.completed'; result: TurnResult }
   /** The session process ended. No further events follow. */

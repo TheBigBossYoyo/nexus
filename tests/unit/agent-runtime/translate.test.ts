@@ -178,9 +178,42 @@ describe('translateSdkMessage', () => {
     expect(run([assistant([{ type: 'text', text: 'oops' }], { error: 'server_error' })])).toEqual([{ type: 'throttle', kind: 'server_error' }])
   })
 
-  it('surfaces assistant rate_limit/billing errors as rate_limit and suppresses the synthetic text', () => {
-    const events = run([assistant([{ type: 'text', text: 'Limit reached' }], { error: 'rate_limit' })])
+  it('billing_error is a usage limit and its synthetic text is suppressed', () => {
+    const events = run([assistant([{ type: 'text', text: 'Credit balance is too low' }], { error: 'billing_error' })])
     expect(events).toEqual([{ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null }])
+  })
+
+  it('an assistant rate_limit error after a rejected rate_limit_event is the same usage limit', () => {
+    const state = createTranslatorState({ expectStructuredOutput: false })
+    const events = run(
+      [
+        msg<'rate_limit_event'>({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1700000000, rateLimitType: 'five_hour' } }),
+        assistant([{ type: 'text', text: 'Limit reached' }], { error: 'rate_limit' }),
+      ],
+      state,
+    )
+    expect(events.map((e) => e.type)).toEqual(['rate_limit', 'rate_limit'])
+    expect(events[1]).toMatchObject({ status: 'rejected', resetsAt: null })
+    expect(state.quotaSignal).toBe(true)
+  })
+
+  it("an assistant rate_limit error whose text is a documented usage-limit message is a usage limit", () => {
+    const events = run([assistant([{ type: 'text', text: "You've hit your limit. Resets 3pm" }], { error: 'rate_limit' })])
+    expect(events).toEqual([{ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null }])
+  })
+
+  it('a bare 429 (rate_limit error with no usage-limit evidence) is a transient throttle, not a quota outcome', () => {
+    const state = createTranslatorState({ expectStructuredOutput: false })
+    const events = run(
+      [
+        assistant([{ type: 'text', text: 'API Error: 429 too many requests' }], { error: 'rate_limit' }),
+        result({ subtype: 'error_during_execution', errors: ['429'] }),
+      ],
+      state,
+    )
+    expect(events[0]).toEqual({ type: 'throttle', kind: 'rate_limit' })
+    expect(state.quotaSignal).toBe(false)
+    expect(turn(events).outcome).toBe('error')
   })
 });
 

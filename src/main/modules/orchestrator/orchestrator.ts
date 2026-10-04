@@ -675,7 +675,11 @@ export class Orchestrator implements PipelineHost {
     }
 
     const gateClosed = this.dispatchClosed()
-    if (!gateClosed) this.restartOrphans(run)
+    if (!gateClosed) {
+      // After a resume the gate limits how many pipelines restart at once (the ramp); the rest wait for the next tick.
+      const running = [...this.active.values()].filter((p) => p.runId === runId).length
+      this.restartOrphans(run, this.gate ? Math.max(0, this.gate.limit(run.config.maxParallelAgents) - running) : Number.POSITIVE_INFINITY)
+    }
 
     let tasks = repos.tasks.listByRun(runId)
     const dependencies = repos.dependencies.listByRun(runId)
@@ -754,9 +758,10 @@ export class Orchestrator implements PipelineHost {
   }
 
   /** Tasks left mid-pipeline by a pause or restart resume at the stage their state records. */
-  private restartOrphans(run: Run): void {
+  private restartOrphans(run: Run, capacity: number = Number.POSITIVE_INFINITY): void {
     const { repos } = this.deps
     const tasks = repos.tasks.listByRun(run.id)
+    let launched = 0
     for (const task of tasks) {
       if (this.active.has(task.id) || task.parentTaskId) continue
       let stage: Stage | null = null
@@ -788,7 +793,10 @@ export class Orchestrator implements PipelineHost {
         default:
           break
       }
-      if (stage) this.launch(run.id, task.id, stage)
+      if (stage && launched < capacity) {
+        launched += 1
+        this.launch(run.id, task.id, stage)
+      }
     }
   }
 
@@ -1121,6 +1129,8 @@ export class Orchestrator implements PipelineHost {
     })
     this.closeProposals(runId, 'The run was cancelled before this proposal was decided.')
     await this.stopRunSessions(runId, 'cancelled')
+    // Candidate repositories of a speculative stage have no worktree rows; a cancelled run needs none of them.
+    await this.pipeline.speculation.cleanupRun(repos.runs.require(runId), { force: true }).catch((e) => this.core.log(`candidate cleanup: ${errorMessage(e)}`))
     return repos.runs.require(runId)
   }
 
@@ -1362,6 +1372,11 @@ export class Orchestrator implements PipelineHost {
     }
   }
 
+  /** The stage a task's pipeline restarts at after a pause or a restart (see TaskPipeline.resumeStage). */
+  stageToResume(task: Pick<Task, 'id' | 'state'>): Stage {
+    return this.pipeline.resumeStage(task)
+  }
+
   private deliverLive(taskId: string, message: Message): boolean {
     // A repair child's debugger runs under its parent's pipeline control.
     const pipeline = this.active.get(taskId) ?? this.activeForChild(taskId)
@@ -1480,7 +1495,7 @@ export class Orchestrator implements PipelineHost {
       }
     }
     // Speculative candidates have no worktree rows of their own.
-    await this.pipeline.speculation.cleanupRun(run)
+    await this.pipeline.speculation.cleanupRun(run, { force: true })
     this.integrations.delete(runId)
   }
 

@@ -154,6 +154,69 @@ describe('usage service: provenance (no fabricated percentage)', () => {
   })
 })
 
+describe('usage service: audit fixes', () => {
+  let ctx: ReturnType<typeof setup>
+  afterEach(() => ctx?.usage.dispose())
+
+  it('a window whose reset passed, or that is old, withholds its percentage and is marked stale', () => {
+    ctx = setup()
+    const at = new Date(T0).toISOString()
+    const put = (limitType: string, resetAt: string | null, observedAt: string) =>
+      ctx.repos.usageWindows.upsert({ id: 'w-' + limitType, limitType, status: 'allowed', utilizationPercent: 80, resetAt, source: 'RUNTIME', confidence: 'EXACT', observedAt, updatedAt: observedAt })
+    put('five_hour', new Date(T0 + 3_600_000).toISOString(), at)
+    let o = ctx.usage.overview()
+    expect(o.windows[0]).toMatchObject({ utilizationPercent: 80, confidence: 'EXACT', stale: false })
+    expect(o.subscriptionUtilizationPercent).toMatchObject({ value: 80, confidence: 'EXACT' })
+    ctx.setNow(T0 + 3_600_001) // its reset has passed
+    o = ctx.usage.overview()
+    expect(o.windows[0]).toMatchObject({ utilizationPercent: null, confidence: 'UNKNOWN', stale: true, observedAt: at })
+    expect(o.subscriptionUtilizationPercent.value).toBeNull()
+    expect(percentViolations(o)).toEqual([])
+    ctx.setNow(T0)
+    put('seven_day', null, new Date(T0 - 31 * 60_000).toISOString()) // observed long ago
+    o = ctx.usage.overview()
+    expect(o.windows.find((w) => w.limitType === 'seven_day')).toMatchObject({ stale: true, utilizationPercent: null })
+  })
+
+  it('agent text from any run does not clear AUTH_REQUIRED; a started session does', () => {
+    ctx = setup()
+    ctx.bus.emit({ runId: ctx.run.id, type: 'run.paused', payload: { reason: 'user', cause: 'auth', detail: 'auth' } })
+    expect(ctx.usage.status()).toBe('AUTH_REQUIRED')
+    ctx.bus.emit({ runId: ctx.run.id, type: 'agent.message', payload: { preview: 'hello' } })
+    expect(ctx.usage.status()).toBe('AUTH_REQUIRED')
+    ctx.bus.emit({ runId: ctx.run.id, type: 'agent.started', payload: { role: 'worker', model: 'm', sessionId: 's' } })
+    expect(ctx.usage.status()).toBe('AVAILABLE')
+  })
+
+  it('leaving an overnight quota wait by any route releases the gate', () => {
+    for (const to of ['RUNNING', 'FINALIZING']) {
+      ctx = setup()
+      ctx.bus.emit({ runId: ctx.run.id, type: 'agent.rate_limited', payload: { status: 'rejected', resetsAt: Math.floor(T0 / 1000) + 600, limitType: 'five_hour' } })
+      ctx.bus.emit({ runId: ctx.run.id, type: 'overnight.quota', payload: { action: 'waiting', resetsAt: null, resumeAt: null } })
+      expect(ctx.usage.status()).toBe('WAITING_FOR_RESET')
+      expect(ctx.usage.canDispatch()).toBe(false)
+      ctx.bus.emit({ runId: ctx.run.id, type: 'overnight.state_changed', payload: { from: 'QUOTA_PAUSED', to } })
+      expect(ctx.usage.status()).toBe('AVAILABLE')
+      expect(ctx.usage.canDispatch()).toBe(true)
+      ctx.usage.dispose()
+    }
+  })
+
+  it('the ramp-end notification fires once and uses the shared ramp length', () => {
+    ctx = setup()
+    let calls = 0
+    ctx.usage.onChange(() => void (calls += 1))
+    ctx.usage.apply({ type: 'restore_wait', resetAt: null, limitType: null })
+    ctx.usage.apply({ type: 'probe_result', outcome: 'available', resetAt: null })
+    const before = calls
+    expect(ctx.usage.limit(4)).toBe(1)
+    ctx.setNow(T0 + 60_000)
+    ctx.usage.tickRamp()
+    expect(calls).toBe(before + 1)
+    expect(ctx.usage.limit(4)).toBe(4)
+  })
+})
+
 describe('usage service: aggregation', () => {
   let ctx: ReturnType<typeof setup>
   afterEach(() => ctx?.usage.dispose())

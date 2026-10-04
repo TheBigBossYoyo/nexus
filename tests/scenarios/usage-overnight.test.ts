@@ -191,6 +191,50 @@ describe('scenario: Overnight quota wait with probing', () => {
     expect(record.terminalDetail).toMatch(/switched off/)
   })
 
+  it('a manual resume of an Overnight run during its quota wait releases the usage gate', async () => {
+    await setup(limitedOnce(10 * MINUTE), { useStack: true })
+    const run = await o.start()
+    await h.waitForState(run.id, 'paused')
+    await o.waitForOvernight(run.id, 'QUOTA_PAUSED')
+    expect(stack?.usage.canDispatch()).toBe(false)
+    h.runtime.usage.restore()
+    await h.orchestrator.resumeRun(run.id)
+    await o.supervisor.idle()
+    expect(stack?.usage.canDispatch()).toBe(true)
+    expect(stack?.usage.status()).toBe('AVAILABLE')
+    expect(rowsOf(run.id).map((p) => p.state)).toEqual(['cancelled'])
+    await h.waitForState(run.id, 'completed')
+  })
+
+  it('an Overnight wait ended by the deadline releases the usage gate', async () => {
+    await setup(limitedOnce(null), { useStack: true })
+    const run = await o.start({ policy: { forceCloseApplications: true } })
+    await h.waitForState(run.id, 'paused')
+    await o.waitForOvernight(run.id, 'QUOTA_PAUSED')
+    expect(stack?.usage.canDispatch()).toBe(false)
+    o.advance(8 * 60 * MINUTE + 1000)
+    await o.waitForOvernight(run.id, 'POWER_ACTION_SCHEDULED')
+    expect(stack?.usage.canDispatch()).toBe(true)
+  })
+
+  it('a recovered Overnight wait keeps the gate closed after a restart, and a self-healing tick releases a gate nobody owns', async () => {
+    await setup(limitedOnce(10 * MINUTE), { useStack: true })
+    const run = await o.start()
+    await h.waitForState(run.id, 'paused')
+    await o.waitForOvernight(run.id, 'QUOTA_PAUSED')
+    stack?.dispose()
+    stack = attachUsage(h, { clock: { now: o.now }, isOvernightRun: (id) => h.repos.overnight.getByRun(id) !== null })
+    expect(stack.usage.status()).toBe('WAITING_FOR_RESET')
+    expect(stack.usage.canDispatch()).toBe(false)
+    // The record leaves the wait without any event reaching the service (for example it was edited): the next ticks heal it.
+    h.repos.overnight.update(run.id, { state: 'RUNNING' })
+    h.repos.quotaPauses.close(rowsOf(run.id)[0]?.id ?? '', 'cancelled', new Date(o.now()).toISOString(), 'test')
+    await stack.controller.tick()
+    o.advance(31_000)
+    await stack.controller.tick()
+    expect(stack.usage.canDispatch()).toBe(true)
+  })
+
   it('a deadline reached while waiting finalizes as TIME_LIMIT and closes the open wait row', async () => {
     await setup(limitedOnce(null))
     const run = await o.start({ policy: { forceCloseApplications: true } })

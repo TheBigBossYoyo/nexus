@@ -239,7 +239,6 @@ once a second (`PUSH_INTERVAL_MS`, trailing). Notices (`usage.notice`: `limit_re
 | `unknownResetProbeMaxMinutes` | 30 | 5 to 720 | Cap of that schedule (never lower than the base) |
 | `maxQuotaWaitMinutes` | 0 | 0 to 10080 | Longest wait before the plan ends it. 0 = no limit of its own |
 | `pauseAllOnGlobalLimit` | `true` | | Pause every other active run when one hits the limit |
-| `allowLocalTasksWhileWaiting` | `true` | | Shown in Settings. No code outside the settings page reads it; see "Limits" |
 | `notifyOnResume` | `true` | | Push a notice after an automatic resume |
 | `overnightWaitForReset` | `true` | | Overnight runs wait for a reset; off: they end as `QUOTA_EXHAUSTED` |
 | `useRuntimeUsageReport` | `true` | | Ask the runtime's usage report. Off: probes and refresh use no report; probes use one minimal session |
@@ -270,7 +269,7 @@ once a second (`PUSH_INTERVAL_MS`, trailing). Notices (`usage.notice`: `limit_re
 - `RUNTIME_UNAVAILABLE` is entered only from a probe outcome of `runtime` (a probe session that crashed,
   timed out or ended in an error). No production code feeds the machine a `crashed` turn signal, so a
   worker crash outside a probe does not change the status.
-- `allowLocalTasksWhileWaiting` has no effect in 0.3: while the gate is closed, no task starts, local or
+- There is no setting to let local tasks start during a wait: while the gate is closed, no task starts, local or
   not (see [ORCHESTRATION.md](ORCHESTRATION.md), "Dispatch gate").
 - The per-window `status` for a usage report is derived from the percentage (100 and 90), not stated by
   the runtime.

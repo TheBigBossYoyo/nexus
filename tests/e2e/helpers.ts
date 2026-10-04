@@ -47,7 +47,7 @@ export interface Launched {
 }
 
 /** Launches the built app against `dataDir` with the scripted runtime; the folder picker returns `pickPath`. */
-export async function launchApp(dataDir: string, pickPath: string | null): Promise<Launched> {
+export async function launchApp(dataDir: string, pickPath: string | null, extraEnv: Record<string, string> = {}): Promise<Launched> {
   mkdirSync(dataDir, { recursive: true })
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
@@ -57,6 +57,7 @@ export async function launchApp(dataDir: string, pickPath: string | null): Promi
   if (process.env['NEXUS_E2E_SHOW'] !== '1') env['NEXUS_WINDOW_OFFSCREEN'] = '1'
   // The scripted runtime always comes with the fake power controller; a faster supervisor pass keeps the tests short.
   env['NEXUS_OVERNIGHT_TICK_MS'] = '500'
+  Object.assign(env, extraEnv)
   delete env['ELECTRON_RENDERER_URL']
   delete env['ELECTRON_RUN_AS_NODE']
   const app = await electron.launch({ args: ['.'], cwd: REPO_ROOT, env })

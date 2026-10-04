@@ -39,6 +39,8 @@ export interface FakeSessionContext {
     resetsAt?: number | null
     limitType?: string | null
     utilization?: number | null
+    /** Emit only the one event. By default a rejection reproduces the real SDK: the event with the reset, then an error signal without one. */
+    single?: boolean
   }): Promise<void>
   /** The runtime's simulated account availability (shared by every session of this runtime). */
   readonly usage: FakeUsageSim
@@ -189,7 +191,8 @@ export class FakeUsageSim {
         {
           limitType: 'five_hour',
           utilizationPercent: ok ? (this.state.utilizationPercent ?? 0) : 100,
-          resetsAt: ok ? null : this.state.resetAt,
+          // A window that is still limited has a reset ahead (or none); a reset in the past would be stale.
+          resetsAt: ok || !this.state.resetAt || Date.parse(this.state.resetAt) <= this.now() ? null : this.state.resetAt,
         },
       ],
     }
@@ -363,14 +366,18 @@ class FakeHandle implements AgentSessionHandle {
         throw new FakeCrash(typeof error === 'string' ? error : error.message)
       },
       usage: this.usage,
-      rateLimit: (info = {}) =>
-        this.emit({
+      rateLimit: async (info = {}) => {
+        await this.emit({
           type: 'rate_limit',
           status: info.status ?? 'rejected',
           resetsAt: info.resetsAt ?? null,
           limitType: info.limitType ?? null,
           ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
-        }),
+        })
+        if ((info.status ?? 'rejected') === 'rejected' && info.single !== true) {
+          await this.emit({ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null })
+        }
+      },
       useTool: async (toolName, input, run) => {
         const toolUseId = newId()
         await this.emit({ type: 'tool.started', toolUseId, toolName, input })

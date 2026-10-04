@@ -170,9 +170,15 @@ async function bootstrap(): Promise<void> {
 
   // The scripted runtime exists for UI tests only and cannot be enabled in a packaged build.
   const useFake = !app.isPackaged && process.env['NEXUS_FAKE_RUNTIME'] === '1'
-  const runtime: AgentRuntime = useFake
-    ? new FakeAgentRuntime({ script: createDemoScript() })
-    : new ClaudeSdkRuntime({
+  const fakeRuntime = useFake ? new FakeAgentRuntime({ script: createDemoScript() }) : null
+  // UI tests choose what the scripted runtime says about usage: `unknown` = no usage report at all (what a
+  // runtime without that method looks like), a number = the plan window's reported percentage.
+  const fakeUsage = process.env['NEXUS_FAKE_USAGE']
+  if (fakeRuntime && fakeUsage === 'unknown') fakeRuntime.usage.set({ reportSupported: false })
+  else if (fakeRuntime && fakeUsage && Number.isFinite(Number(fakeUsage))) fakeRuntime.usage.set({ utilizationPercent: Number(fakeUsage) })
+  const runtime: AgentRuntime =
+    fakeRuntime ??
+    new ClaudeSdkRuntime({
         executablePath: settings.claude.executablePath || undefined,
         resolveExecutable: () => resolveClaudeExecutable({ resourcesPath: process.resourcesPath }),
         debug: settings.advanced.debugSdk,
@@ -527,8 +533,10 @@ async function bootstrap(): Promise<void> {
         // agent sessions have ended, so what they used is still recorded.
         arena.dispose()
         recovery.dispose()
-        return orchestrator.shutdown()
+        // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.
+        return recovery.idle()
       })
+      .then(() => orchestrator.shutdown())
       .then(() => {
         usage.dispose()
       })

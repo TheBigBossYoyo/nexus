@@ -640,9 +640,9 @@ export class OvernightSupervisor {
     // The runtime can report the limit twice (a rate-limit event with the reset time, then an error
     // without one): take the newest rejection since the run last resumed that says when it resets.
     const since = repos.events.latestOfType(runId, 'run.resumed')?.seq ?? 0
-    const limited = repos.events
-      .recentOfType(runId, 'agent.rate_limited', 20)
-      .find((e) => e.seq > since && e.payload.status === 'rejected' && normalizeEpochMs(e.payload.resetsAt) !== null)
+    const rejections = repos.events.recentOfType(runId, 'agent.rate_limited', 20).filter((e) => e.seq > since && e.payload.status === 'rejected')
+    const limited = rejections.find((e) => normalizeEpochMs(e.payload.resetsAt) !== null)
+    const limitType = limited?.payload.limitType ?? rejections.find((e) => e.payload.limitType)?.payload.limitType ?? null
     const resetsAt = limited ? normalizeEpochMs(limited.payload.resetsAt) : null
     const waits = record.quota?.waits ?? 0
     const deadline = Date.parse(record.deadlineAt)
@@ -664,13 +664,13 @@ export class OvernightSupervisor {
       return this.doFinalize(runId, 'QUOTA_EXHAUSTED', decision.why)
     }
     const next = this.update(record.id, { quota: { pausedAt: iso(now), resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt), waits: waits + 1 } })
-    if (this.deps.probe) this.openQuotaRow(runId, now, resetsAt, decision.resumeAt)
+    if (this.deps.probe) this.openQuotaRow(runId, now, resetsAt, decision.resumeAt, limitType)
     this.setState(next, 'QUOTA_PAUSED', `Claude usage limit; resuming at ${iso(decision.resumeAt)}`)
     bus.emit({ runId, type: 'overnight.quota', payload: { action: 'waiting', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt) } })
   }
 
   /** The same quota_pauses row the controller writes for ordinary runs, so history is uniform (scope 'overnight'). */
-  private openQuotaRow(runId: string, now: number, resetsAt: number | null, checkAt: number): void {
+  private openQuotaRow(runId: string, now: number, resetsAt: number | null, checkAt: number, limitType: string | null = null): void {
     const { repos } = this.deps
     try {
       if (repos.quotaPauses.liveForRun(runId)) return
@@ -681,7 +681,7 @@ export class OvernightSupervisor {
         scope: 'overnight',
         state: 'waiting',
         pausedAt: iso(now),
-        limitType: null,
+        limitType,
         resetAt: resetsAt !== null ? iso(resetsAt) : null,
         resetConfidence: resetsAt !== null ? 'EXACT' : 'UNKNOWN',
         nextCheckAt: iso(checkAt),

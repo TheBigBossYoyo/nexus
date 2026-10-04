@@ -7,6 +7,7 @@ import {
   EMPTY_USAGE_TOTALS,
   measured,
   unknownValue,
+  USAGE_WINDOW_MAX_AGE_MS,
   type ConcreteStrategy,
   type Strategy,
   type UsageBreakdownRow,
@@ -16,6 +17,7 @@ import {
   type UsageStatus,
   type UsageTotals,
   type UsageWindow,
+  type UsageWindowView,
 } from '@shared/v3'
 import type { RunUsage, StrategyEfficiencyRow, UsageEfficiency, UsageLimitHistory } from '@shared/v3-read'
 import type { EventBus } from '../events'
@@ -24,7 +26,7 @@ import type { UsageFilter } from '../persistence/repositories/v3'
 import type { AgentRuntime, RuntimeUsageReport } from '../agent-runtime/types'
 import { evidenceLabel, mean, median, wilsonInterval } from '../policy/stats'
 import { classifyUsageSignal, limitingWindow, type UsageSignal } from './classify'
-import { initialUsageState, isDispatchBlocked, rampLimit, reduceUsage, type UsageMachineEvent, type UsageMachineState } from './machine'
+import { initialUsageState, isDispatchBlocked, rampLimit, RAMP_MS, reduceUsage, type UsageMachineEvent, type UsageMachineState } from './machine'
 import type { ProbeResult } from './probe'
 
 export interface UsageServiceDeps {
@@ -174,10 +176,15 @@ export class UsageIntelligenceService {
   /** The ramp window ended without an event: tell the scheduler so it can use the full limit again. */
   tickRamp(): void {
     if (this.state.resumedAt === null) return
-    if (this.now() - this.state.resumedAt >= 60_000) {
+    if (this.now() - this.state.resumedAt >= RAMP_MS) {
       this.state = { ...this.state, resumedAt: null }
       this.notify()
     }
+  }
+
+  /** Tell the scheduler the gate may have changed (a wait row was closed outside the machine). */
+  notifyGate(): void {
+    this.notify()
   }
 
   private notify(): void {
@@ -200,9 +207,16 @@ export class UsageIntelligenceService {
           return this.onRateLimited(event as RunEvent<'agent.rate_limited'>)
         case 'agent.usage':
           return this.onAgentUsage(event as RunEvent<'agent.usage'>)
-        case 'agent.message':
+        case 'agent.started':
+          // A session initialized: the account works. (Text from any agent is not evidence of that.)
           this.apply({ type: 'session_ok' })
           return
+        case 'overnight.state_changed': {
+          // Every exit from an overnight quota wait (resume by hand, deadline, cancel, ...) releases the gate.
+          const p = event.payload as RunEvent<'overnight.state_changed'>['payload']
+          if (p.from === 'QUOTA_PAUSED' && !this.deps.repos.quotaPauses.liveGlobal()) this.apply({ type: 'wait_ended' })
+          return
+        }
         case 'agent.stopped':
         case 'agent.failed':
           if (event.agentId) this.sessions.delete(event.agentId)
@@ -536,10 +550,16 @@ export class UsageIntelligenceService {
     const { repos } = this.deps
     if (!this.account && !this.accountLoading) void this.loadAccount()
     const s = this.state
-    const windows = repos.usageWindows.list()
+    const now = this.now()
+    // A window whose reset passed, or that was observed long ago, withholds its percentage and says it is stale.
+    const windows = repos.usageWindows.list().map((w): UsageWindowView => {
+      const resetPassed = w.resetAt !== null && Date.parse(w.resetAt) <= now
+      const old = now - Date.parse(w.observedAt) > USAGE_WINDOW_MAX_AGE_MS
+      if (!resetPassed && !old) return { ...w, stale: false }
+      return { ...w, stale: true, utilizationPercent: null, confidence: 'UNKNOWN' }
+    })
     const pause = repos.quotaPauses.liveGlobal()
     const live = repos.quotaPauses.listLive()
-    const now = this.now()
 
     // A percentage only from a window whose utilization the runtime supplied.
     let top: UsageWindow | null = null

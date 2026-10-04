@@ -48,21 +48,21 @@ export class RuntimeAvailabilityProbe implements AvailabilityProbe {
 
   probe(hint?: { limitType: string | null }): Promise<ProbeResult> {
     if (!this.inFlight) {
-      this.inFlight = this.run(hint?.limitType ?? null).finally(() => {
+      this.inFlight = this.run(hint).finally(() => {
         this.inFlight = null
       })
     }
     return this.inFlight
   }
 
-  private async run(rejectedType: string | null): Promise<ProbeResult> {
+  private async run(hint: { limitType: string | null } | undefined): Promise<ProbeResult> {
     const settings = this.options.settings()
     if (settings.usage.useRuntimeUsageReport && this.options.runtime.getUsageReport) {
       this.stats.reports += 1
       const report = await this.options.runtime
         .getUsageReport({ subscriptionMode: settings.claude.subscriptionMode })
         .catch(() => null)
-      const answered = report ? this.fromReport(report, rejectedType) : null
+      const answered = report ? this.fromReport(report, hint) : null
       if (answered) return answered
     }
     this.stats.sessions += 1
@@ -70,28 +70,45 @@ export class RuntimeAvailabilityProbe implements AvailabilityProbe {
   }
 
   /** Null when the report carries no usable percentage: the caller falls back to a session. */
-  private fromReport(report: RuntimeUsageReport, rejectedType: string | null): ProbeResult | null {
+  private fromReport(report: RuntimeUsageReport, hint: { limitType: string | null } | undefined): ProbeResult | null {
     if (!report.rateLimitsAvailable) return null
     const now = (this.options.now ?? Date.now)()
-    // The window that was rejected, reporting no percentage but a reset still ahead: still limited.
-    const rejected = rejectedType ? report.windows.find((x) => x.limitType === rejectedType) : undefined
-    if (rejected && rejected.utilizationPercent === null && rejected.resetsAt && Date.parse(rejected.resetsAt) > now) {
-      return { available: false, method: 'usage_report', resetAt: rejected.resetsAt, detail: `${rejected.limitType} window resets ${rejected.resetsAt}`, outcome: 'limited', windows: report.windows, report }
+    const resetOf = (w: RuntimeUsageReport['windows'][number]): number | null => {
+      const ms = w.resetsAt ? Date.parse(w.resetsAt) : Number.NaN
+      return Number.isFinite(ms) ? ms : null
     }
-    const w = limitingWindow(report)
-    if (!w) return null
-    const percent = w.utilizationPercent as number
-    const limited = percent >= REPORT_LIMITED_PERCENT
-    // A window at its limit whose reset is still in the future is still limited; one that passed is not evidence either way.
-    return {
+    const result = (w: RuntimeUsageReport['windows'][number], limited: boolean): ProbeResult => ({
       available: !limited,
       method: 'usage_report',
       resetAt: limited ? w.resetsAt : null,
-      detail: limited ? `${w.limitType} window at ${percent}%` : `${w.limitType} window at ${percent}%; capacity available`,
+      detail: limited ? `${w.limitType} window at ${w.utilizationPercent ?? 'an unknown share of'}%` : `${w.limitType} window at ${w.utilizationPercent}%; capacity available`,
       outcome: limited ? 'limited' : 'available',
       windows: report.windows,
       report,
+    })
+    if (hint) {
+      // A rejection that names no window (billing, overage, no limit type) cannot be explained by the report:
+      // do not trust it alone, ask with one minimal session instead.
+      if (hint.limitType === null) return null
+      const w = report.windows.find((x) => x.limitType === hint.limitType)
+      if (!w) return null
+      const reset = resetOf(w)
+      if (w.utilizationPercent === null) {
+        // No percentage: only a reset still ahead is evidence (of a limit); otherwise the report says nothing.
+        return reset !== null && reset > now ? result(w, true) : null
+      }
+      // A window at 100% whose reset time has passed is stale, not a limit.
+      const stale = reset !== null && reset <= now
+      return result(w, w.utilizationPercent >= REPORT_LIMITED_PERCENT && !stale)
     }
+    // No hint (a manual check): the highest window that is not stale.
+    const fresh: RuntimeUsageReport = { ...report, windows: report.windows.filter((w) => {
+      const reset = resetOf(w)
+      return reset === null || reset > now
+    }) }
+    const w = limitingWindow(fresh)
+    if (!w) return null
+    return result(w, (w.utilizationPercent as number) >= REPORT_LIMITED_PERCENT)
   }
 
   private async minimalSession(settings: Settings): Promise<ProbeResult> {

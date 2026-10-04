@@ -45,6 +45,10 @@ export interface QuotaRecoveryOptions {
 
 const DEFAULT_TICK_MS = 10_000
 const MAX_CHECKPOINTS = 50
+/** A run rejected again within this long after an automatic resume continues the same wait. */
+const RESUME_CARRY_MS = 10 * 60_000
+/** After this many automatic resumes that Claude rejected again, the wait ends and the runs stay paused. */
+export const MAX_FAILED_RESUMES = 6
 
 export interface ResumeNowResult {
   /** False when there was no open wait. */
@@ -91,6 +95,11 @@ export class QuotaRecoveryController {
     this.timer = null
   }
 
+  /** Resolves when no tick or probe is in flight. Call after `dispose()` and before closing the database. */
+  async idle(): Promise<void> {
+    await Promise.allSettled([this.ticking, this.probing].filter((p) => p !== null) as Promise<unknown>[])
+  }
+
   private log(line: string): void {
     this.o.logger?.(`quota-recovery: ${line}`)
   }
@@ -132,12 +141,23 @@ export class QuotaRecoveryController {
     }
   }
 
+  /** The person (or the max-wait rule) ended this run's wait after it paused: a restart must not reopen it. */
+  private waitEndedSincePause(runId: string): boolean {
+    const { repos } = this.o
+    const last = repos.quotaPauses.listByRun(runId).at(-1)
+    if (!last || last.state !== 'ended' || !last.endedAt) return false
+    const pausedAt = repos.events.latestOfType(runId, 'run.paused')?.createdAt ?? ''
+    return last.endedAt >= pausedAt
+  }
+
   /** A run paused for quota: checkpoint it, open its wait, and (when configured) pause the others. */
-  private handleQuotaPause(runId: string): void {
+  private handleQuotaPause(runId: string, source: 'event' | 'recover' = 'event'): void {
     const { repos, bus, usage, push } = this.o
     const run = repos.runs.get(runId)
     if (!run || run.state !== 'paused' || run.pauseReason !== 'quota') return
     if (repos.quotaPauses.liveForRun(runId)) return
+    // An ended wait is durable: such a run is resumed only by the person.
+    if (source === 'recover' && this.waitEndedSincePause(runId)) return
     const settings = this.settings()
     const now = this.now()
     const machine = usage.machineState()
@@ -150,33 +170,51 @@ export class QuotaRecoveryController {
     bus.emit({ runId, type: 'checkpoint.saved', payload: { checkpointId: checkpoint.id, reason: 'quota' } })
 
     const createdGlobal = !global
+    let endWhy: string | null = null
     if (!global) {
-      const plan = planQuotaWait({ now, resetAt, probes: 0, settings, deadline: null, pausedAt: now })
-      global = repos.quotaPauses.insert(this.newRow(null, 'global', now, limitType, resetAt, plan.action === 'wait' && settings.autoResume ? plan.checkAt : null, null, null))
-      if (plan.action === 'end') {
-        this.endWaitInternal(plan.why, false)
-        return
+      // A run rejected again soon after an automatic resume continues the SAME wait: the probe count and the
+      // original start carry over, so the backoff and the maximum wait accumulate instead of restarting.
+      const previous = repos.quotaPauses
+        .listRecent({ limit: 30 })
+        .find((p) => p.scope === 'global' && p.state === 'resumed' && p.endedAt !== null && now - Date.parse(p.endedAt) <= RESUME_CARRY_MS)
+      let probes = 0
+      let pausedAtMs = now
+      if (previous) {
+        const chain = repos.quotaPauses.listRecent({ limit: 200 }).filter((p) => p.scope === 'global' && p.state === 'resumed' && p.pausedAt === previous.pausedAt).length
+        probes = previous.probes + 1
+        pausedAtMs = Date.parse(previous.pausedAt)
+        if (chain >= MAX_FAILED_RESUMES) endWhy = `Claude accepted ${chain} automatic resumes and rejected the work again each time.`
       }
+      const plan = planQuotaWait({ now, resetAt, probes, settings, deadline: null, pausedAt: pausedAtMs })
+      if (plan.action === 'end') endWhy = endWhy ?? plan.why
+      const checkAt = plan.action === 'wait' && settings.autoResume && endWhy === null ? plan.checkAt : null
+      global = repos.quotaPauses.insert({ ...this.newRow(null, 'global', now, limitType, resetAt, checkAt, null, null), pausedAt: this.iso(pausedAtMs), probes })
     }
 
     const nextCheckAt = global.nextCheckAt
     repos.quotaPauses.insert(this.newRow(runId, 'run', now, limitType, resetAt, nextCheckAt ? Date.parse(nextCheckAt) : null, checkpoint.id, run.resumeState))
     usage.apply({ type: 'quota_checkpointed' })
     bus.emit({ runId, type: 'usage.quota_paused', payload: { pauseId: global.id, resetAt: global.resetAt, nextCheckAt, limitType } })
+    if (endWhy !== null) {
+      // The run's row is written (and closed with the reason), the event and the notice say so; the run stays paused.
+      this.endWaitInternal(endWhy, true)
+      return
+    }
 
     let others = 0
     if (settings.pauseAllOnGlobalLimit) others = this.pauseOthers(runId)
     if (createdGlobal) {
       const resumeAt = settings.autoResume && nextCheckAt ? Date.parse(nextCheckAt) : null
-      const when =
-        resumeAt === null
-          ? 'Resume the runs from their pages when Claude is available again.'
-          : `Automatic resume: ${resetAt !== null ? clockTime(resumeAt) : 'when Claude is available again'}.`
+      const window = limitType ? ` (${limitType.replace(/_/g, ' ')} limit)` : ''
+      let when: string
+      if (resumeAt === null) when = 'Resume the runs from their pages when Claude is available again.'
+      else if (resetAt !== null) when = `Automatic resume: ${clockTime(resumeAt)}.`
+      else when = `Claude did not say when it resets: NEXUS checks again every ${settings.unknownResetProbeMinutes} to ${Math.max(settings.unknownResetProbeMinutes, settings.unknownResetProbeMaxMinutes)} minutes (no sooner), and keeps doing so until Claude is available or you end the wait.`
       push({
         kind: 'usage.notice',
         notice: 'limit_reached',
         title: 'Claude usage limit reached',
-        detail: `NEXUS has safely paused ${plural(1 + others, 'run')}. ${when} No work has been lost.`,
+        detail: `NEXUS has safely paused ${plural(1 + others, 'run')}${window}. ${when} No work has been lost.`,
       })
     }
   }
@@ -259,11 +297,37 @@ export class QuotaRecoveryController {
     const { repos, usage } = this.o
     usage.tickRamp()
     this.reconcile()
-    usage.apply({ type: 'tick', hasLiveWait: repos.quotaPauses.listLive().length > 0 })
+    usage.apply({ type: 'tick', hasLiveWait: this.anyWait() })
     const global = repos.quotaPauses.liveGlobal()
-    if (!global || !this.settings().autoResume || !global.nextCheckAt) return
+    if (!global || !this.settings().autoResume) return
+    // Auto-resume switched on during a wait (or a wait that was never scheduled): plan it now.
+    if (!global.nextCheckAt) {
+      this.ensureScheduled(global)
+      return
+    }
     if (this.now() < Date.parse(global.nextCheckAt)) return
     await this.probeAndResume(global.id)
+  }
+
+  /** Any wait that owns the gate: an open quota row, or an Overnight run waiting for its reset. */
+  private anyWait(): boolean {
+    const { repos } = this.o
+    return repos.quotaPauses.listLive().length > 0 || repos.overnight.listLive().some((r) => r.state === 'QUOTA_PAUSED')
+  }
+
+  /** Give a live wait without a next check a schedule, or end it when the plan says so. */
+  private ensureScheduled(global: QuotaPause): void {
+    const { repos } = this.o
+    const settings = this.settings()
+    const now = this.now()
+    const plan = planQuotaWait({ now, resetAt: global.resetAt ? Date.parse(global.resetAt) : null, probes: global.probes, settings, deadline: null, pausedAt: Date.parse(global.pausedAt) })
+    if (plan.action === 'end') {
+      this.endWaitInternal(plan.why, true)
+      return
+    }
+    const at = this.iso(plan.checkAt)
+    repos.quotaPauses.update(global.id, { nextCheckAt: at, updatedAt: this.iso(now) })
+    for (const row of repos.quotaPauses.listLive()) if (row.scope === 'run') repos.quotaPauses.update(row.id, { nextCheckAt: at, updatedAt: this.iso(now) })
   }
 
   /** The person asked to look now: probe at once and resume if Claude is available. */
@@ -301,6 +365,8 @@ export class QuotaRecoveryController {
     } catch (e) {
       result = { available: false, method: 'none', resetAt: null, detail: errorMessage(e), outcome: 'runtime' }
     }
+    // Shutdown began while the probe ran: write nothing and resume nothing (the database may be closing).
+    if (this.disposed) return { hadWait: true, probe: result, resumed: 0 }
     const now = this.now()
     const waitedMs = Math.max(0, now - Date.parse(global.pausedAt))
     // The wait may have been closed meanwhile (every run cancelled or resumed by hand): nothing to update.
@@ -360,6 +426,8 @@ export class QuotaRecoveryController {
     if (!global) return 0
     // Claiming the global row first is what makes the resume idempotent: a second caller finds it closed.
     if (!repos.quotaPauses.close(globalId, 'resumed', this.iso(), null)) return 0
+    // The gate listeners (the scheduler) last looked while this row was still open.
+    this.o.usage.notifyGate()
     const rows = repos.quotaPauses.listLive().filter((p) => p.scope === 'run').sort((a, b) => a.pausedAt.localeCompare(b.pausedAt))
     let resumed = 0
     for (const row of rows) {
@@ -445,7 +513,11 @@ export class QuotaRecoveryController {
     this.reconcile()
     // Runs paused for quota whose rows were never written (a crash between the pause and the row).
     for (const run of repos.runs.listByState('paused')) {
-      if (run.pauseReason === 'quota' && !this.o.isOvernightRun(run.id)) this.handleQuotaPause(run.id)
+      if (run.pauseReason === 'quota' && !this.o.isOvernightRun(run.id)) this.handleQuotaPause(run.id, 'recover')
+    }
+    // An Overnight run waiting for its reset: the supervisor owns it, but the gate must stay closed across the restart.
+    for (const record of repos.overnight.listLive()) {
+      if (record.state === 'QUOTA_PAUSED') usage.apply({ type: 'restore_wait', resetAt: record.quota?.resetsAt ? Date.parse(record.quota.resetsAt) : null, limitType: null })
     }
     const global = repos.quotaPauses.liveGlobal()
     const runRows = repos.quotaPauses.listLive().filter((p) => p.scope === 'run')
@@ -462,10 +534,7 @@ export class QuotaRecoveryController {
     const resetMs = global.resetAt ? Date.parse(global.resetAt) : null
     // A probe that was in flight when the app stopped did not complete: back to waiting.
     if (global.state === 'probing') repos.quotaPauses.update(global.id, { state: 'waiting', updatedAt: this.iso(now) })
-    if (!global.nextCheckAt && settings.autoResume) {
-      const plan = planQuotaWait({ now, resetAt: resetMs, probes: global.probes, settings, deadline: null, pausedAt: Date.parse(global.pausedAt) })
-      if (plan.action === 'wait') repos.quotaPauses.update(global.id, { nextCheckAt: this.iso(plan.checkAt), updatedAt: this.iso(now) })
-    }
     usage.apply({ type: 'restore_wait', resetAt: resetMs, limitType: global.limitType })
+    if (!global.nextCheckAt && settings.autoResume) this.ensureScheduled(global)
   }
 }

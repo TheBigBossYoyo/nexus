@@ -257,7 +257,6 @@ export const UsageSettingsSchema = z.object({
   /** 0 = no limit of its own (an Overnight run is still bounded by its deadline). */
   maxQuotaWaitMinutes: z.number().int().min(0).max(10080),
   pauseAllOnGlobalLimit: z.boolean(),
-  allowLocalTasksWhileWaiting: z.boolean(),
   notifyOnResume: z.boolean(),
   overnightWaitForReset: z.boolean(),
   /** Ask the runtime for its (experimental) usage report. Off: probes use one minimal session. */
@@ -272,7 +271,6 @@ export const DEFAULT_USAGE_SETTINGS: UsageSettings = {
   unknownResetProbeMaxMinutes: 30,
   maxQuotaWaitMinutes: 0,
   pauseAllOnGlobalLimit: true,
-  allowLocalTasksWhileWaiting: true,
   notifyOnResume: true,
   overnightWaitForReset: true,
   useRuntimeUsageReport: true,

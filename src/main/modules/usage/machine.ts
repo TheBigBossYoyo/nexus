@@ -102,14 +102,18 @@ function onSignal(s: UsageMachineState, signal: UsageSignal, now: number): Usage
   }
 
   switch (signal.availability) {
-    case 'QUOTA_EXHAUSTED':
+    case 'QUOTA_EXHAUSTED': {
+      // The SDK reports one limit twice: a rate_limit_event with the reset, then an assistant error with none.
+      // A later signal without a reset never erases a known one (nor the limit type) of the same pause.
+      const same = s.status === 'QUOTA_PAUSED'
       return enter(s, 'QUOTA_PAUSED', now, {
-        limitType: signal.limitType ?? s.limitType,
-        resetAt: resetMs,
-        retryAfterMs: signal.retryAfterMs,
+        limitType: signal.limitType ?? (same ? s.limitType : null),
+        resetAt: resetMs ?? (same ? s.resetAt : null),
+        retryAfterMs: signal.retryAfterMs ?? (same ? s.retryAfterMs : null),
         lastLimitAt: now,
         ...(percent !== null ? { utilizationPercent: percent } : {}),
       })
+    }
     case 'THROTTLED':
       if (s.status === 'AVAILABLE' || s.status === 'LIMIT_APPROACHING') {
         return enter(s, 'THROTTLED', now, { retryAfterMs: signal.retryAfterMs })
@@ -201,7 +205,8 @@ export function reduceUsage(state: UsageMachineState, event: UsageMachineEvent, 
       if (state.status === 'LIMIT_APPROACHING' && state.resetAt !== null && now >= state.resetAt) {
         return enter(state, 'AVAILABLE', now, { resetAt: null, utilizationPercent: null })
       }
-      if (state.status === 'QUOTA_PAUSED' && !event.hasLiveWait && now - state.since >= ORPHAN_QUOTA_MS) {
+      // A closed status nobody owns (no quota row, no overnight wait) must not stay closed: self-heal.
+      if ((state.status === 'QUOTA_PAUSED' || state.status === 'WAITING_FOR_RESET' || state.status === 'PROBING') && !event.hasLiveWait && now - state.since >= ORPHAN_QUOTA_MS) {
         return enter(state, 'AVAILABLE', now, { resetAt: null })
       }
       return state

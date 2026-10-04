@@ -464,13 +464,6 @@ export function UsageSection({ draft, set, error }: SectionProps) {
         data-testid="usage-pause-all"
       />
       <Toggle
-        checked={u.allowLocalTasksWhileWaiting}
-        onChange={(v) => patch({ allowLocalTasksWhileWaiting: v })}
-        label="Allow deterministic local tasks while waiting"
-        description="Tasks that need no Claude session, such as running checks, may continue."
-        data-testid="usage-allow-local"
-      />
-      <Toggle
         checked={u.notifyOnResume}
         onChange={(v) => patch({ notifyOnResume: v })}
         label="Notify when resumed"

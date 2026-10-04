@@ -201,7 +201,8 @@ test.describe('Overnight Mode', () => {
     const { app, page } = await launchApp(dataDir, repo)
     try {
       const projectId = await openProject(page)
-      const runId = await startOvernight(page, projectId, 'Build the modules. [demo:quota]', { forceCloseApplications: true })
+      // The policy says to end the run on a usage limit (the default, WAIT_AND_RETRY, keeps probing until the deadline).
+      const runId = await startOvernight(page, projectId, 'Build the modules. [demo:quota]', { forceCloseApplications: true, quotaPolicy: 'END_RUN' })
       const scheduled = await waitForOvernight(page, runId, ['POWER_ACTION_SCHEDULED'])
       expect(scheduled.terminalReason).toBe('QUOTA_EXHAUSTED')
       const detail = await invoke(page, 'runs.get', { runId })
