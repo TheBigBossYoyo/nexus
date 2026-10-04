@@ -76,7 +76,7 @@ export function NewProgramDialog({
       footer={
         <>
           <div className="mr-auto flex min-w-0 items-center" role="status" data-testid="program-validation-hint">
-            {check.reason ? <span className="text-small text-warning">{check.reason}</span> : null}
+            {check.reason ? <span className={touched.size > 0 ? 'text-small text-warning' : 'text-small text-text-muted'}>{check.reason}</span> : null}
           </div>
           <Button onClick={onClose}>Cancel</Button>
           <Button disabled={!check.ok} loading={create.isPending} onClick={() => submit(false)} data-testid="program-create">
@@ -88,8 +88,8 @@ export function NewProgramDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-4">
-        <p className="m-0 text-text-secondary">
+      <div className="flex flex-col gap-3">
+        <p className="m-0 text-small text-text-secondary">
           A program pursues one engineering goal across several milestones. NEXUS plans the milestones, runs a mission for each, verifies the result and
           reassesses the plan as it goes. The work accumulates on a program branch; your working tree is never touched.
         </p>
@@ -128,7 +128,7 @@ export function NewProgramDialog({
           {(id) => (
             <Textarea
               id={id}
-              rows={4}
+              rows={3}
               value={form.goal}
               onChange={(e) => patch({ goal: e.target.value })}
               onBlur={() => touch('goal')}
@@ -138,12 +138,12 @@ export function NewProgramDialog({
           )}
         </Field>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Success criteria (optional)" hint="One per line." error={err('successCriteria')}>
             {(id) => (
               <Textarea
                 id={id}
-                rows={3}
+                rows={2}
                 value={form.successCriteria}
                 onChange={(e) => patch({ successCriteria: e.target.value })}
                 onBlur={() => touch('successCriteria')}
@@ -155,7 +155,7 @@ export function NewProgramDialog({
             {(id) => (
               <Textarea
                 id={id}
-                rows={3}
+                rows={2}
                 value={form.constraints}
                 onChange={(e) => patch({ constraints: e.target.value })}
                 onBlur={() => touch('constraints')}
@@ -165,7 +165,7 @@ export function NewProgramDialog({
           </Field>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1">
           <span className="text-small font-medium text-text-secondary">Policy</span>
           <SegmentedControl
             label="Policy preset"
@@ -176,7 +176,7 @@ export function NewProgramDialog({
           />
           <p className="m-0 text-small text-text-muted">{PRESET_HINT[form.preset]}</p>
           <dl
-            className="m-0 grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-md border bg-surface-muted px-3 py-2 text-small"
+            className="m-0 grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-md border bg-surface-muted px-3 py-1.5 text-small"
             aria-label={`What the ${PRESET_LABEL[form.preset]} preset means`}
             data-testid="program-preset-summary"
           >

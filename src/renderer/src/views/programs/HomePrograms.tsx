@@ -39,7 +39,7 @@ export function HomePrograms() {
                 <div className="mt-0.5 truncate text-small text-text-muted">{r.milestones.active ?? 'No current milestone'}</div>
                 <div className="mt-1 flex items-center gap-3">
                   <ProgressBar value={r.milestones.completed} max={Math.max(1, r.milestones.total)} label="Milestones completed" className="max-w-64" />
-                  <span className="tnum shrink-0 text-small text-text-secondary">{progressText(r.milestones)}</span>
+                  <span className="tnum shrink-0 whitespace-nowrap text-small text-text-secondary">{progressText(r.milestones)}</span>
                 </div>
               </div>
               <ArrowRightIcon size={14} className="shrink-0 text-text-muted" />

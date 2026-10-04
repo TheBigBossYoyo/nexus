@@ -1,7 +1,7 @@
 import type { Milestone, MilestoneEvidence } from '@shared/program'
 import { cn } from '../../lib/cn'
 import { Badge, CheckIcon, StatusBadge, XIcon } from '../../components/ui'
-import { expertiseLabel, gateLabel, milestoneStateInfo } from './programsModel'
+import { evidenceSummary, expertiseLabel, gateLabel, milestoneStateInfo } from './programsModel'
 import { Empty } from './programsUi'
 
 function Pass({ ok }: { ok: boolean }) {
@@ -136,7 +136,9 @@ function MilestoneRow({ m, isCurrent, last }: { m: Milestone; isCurrent: boolean
         ) : null}
         {m.evidence ? (
           <details className="mt-2 rounded-md border bg-surface-muted px-3 py-2" {...(settled ? {} : { open: true })}>
-            <summary className="cursor-pointer font-medium text-text-primary">Verification evidence</summary>
+            <summary className="cursor-pointer font-medium text-text-primary" data-testid={`milestone-${m.key}-evidence-summary`}>
+              Verification evidence <span className="font-normal text-text-secondary">· {evidenceSummary(m.evidence)}</span>
+            </summary>
             <div className="mt-2">
               <EvidenceView evidence={m.evidence} />
             </div>

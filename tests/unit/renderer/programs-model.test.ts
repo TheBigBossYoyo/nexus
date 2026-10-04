@@ -7,7 +7,10 @@ import {
   budgetText,
   clockWithDay,
   decisionLabel,
+  activeTimeText,
   diffSummary,
+  evidenceSummary,
+  isAwaitingApproval,
   healthInfo,
   isOpenBacklog,
   planDiffRows,
@@ -69,6 +72,11 @@ describe('program actions', () => {
     expect(programActions('PAUSED')).toMatchObject({ pause: false, resume: true, replan: true })
     expect(programActions('BLOCKED')).toMatchObject({ resume: true, pause: false })
     expect(programActions('WAITING_FOR_QUOTA')).toMatchObject({ pause: true, resume: false })
+    // Paused for a plan decision: Accept and Reject are the only actions; resume and reassess are hidden.
+    expect(programActions('PAUSED', true)).toMatchObject({ resume: false, replan: false, cancel: true })
+    expect(isAwaitingApproval({ state: 'PAUSED', pauseReason: 'approval' }, false)).toBe(true)
+    expect(isAwaitingApproval({ state: 'PAUSED', pauseReason: 'user' }, true)).toBe(true)
+    expect(isAwaitingApproval({ state: 'ACTIVE', pauseReason: null }, true)).toBe(false)
     for (const s of ['COMPLETED', 'FAILED', 'CANCELLED'] as const)
       expect(programActions(s)).toEqual({ start: false, pause: false, resume: false, cancel: false, replan: false })
   })
@@ -93,6 +101,9 @@ describe('state labels', () => {
 describe('progress and budgets', () => {
   it('words progress, budgets and active time', () => {
     expect(progressText({ total: 5, completed: 2, active: null })).toBe('2 of 5 milestones')
+    expect(progressText({ total: 0, completed: 0, active: null })).toBe('No plan yet')
+    expect(activeTimeText(program({ activeMs: 400, activeSince: null }), 0)).toBe('less than a minute')
+    expect(activeTimeText(program({ activeMs: 120_000, activeSince: null }), 0)).toBe('2m 00s')
     expect(budgetText(3, 30)).toBe('3 of 30')
     const now = Date.parse('2026-01-01T01:00:00.000Z')
     expect(activeTimeMs(program({ activeMs: 60_000, activeSince: '2026-01-01T00:59:00.000Z' }), now)).toBe(120_000)
@@ -250,5 +261,17 @@ describe('program form', () => {
       schedule: { windows: [{ days: [1, 5], start: '22:00', end: '07:00' }] },
       start: true,
     })
+  })
+})
+
+describe('evidence summary', () => {
+  const gate = (name: string, passed: boolean) => ({ name, passed, detail: '' }) as never
+  it('counts gates and criteria for an accepted milestone', () => {
+    const e = { verdict: 'accepted', gates: [gate('a', true), gate('b', true)], judgment: { criteria: [{ met: true }, { met: true }, { met: false }] } } as never
+    expect(evidenceSummary(e)).toBe('Accepted · 2 of 2 gates passed · 2 of 3 criteria met')
+  })
+  it('names the failed gate for a rejected one', () => {
+    const e = { verdict: 'rejected', gates: [gate('mission_completed', true), gate('checks_passed', false)], judgment: null } as never
+    expect(evidenceSummary(e)).toBe('Rejected · gate checks_passed failed')
   })
 })

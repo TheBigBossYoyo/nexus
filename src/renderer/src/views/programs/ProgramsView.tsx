@@ -9,13 +9,15 @@ import { BlockSkeleton, ReadError } from '../usage/shared'
 import { BackgroundCard } from './BackgroundCard'
 import { NewProgramDialog } from './NewProgramDialog'
 import { ProgramPage } from './ProgramPage'
-import { progressText, windowTextAt } from './programsModel'
+import { healthInfo, programStateInfo, progressText, windowTextAt } from './programsModel'
 import { HealthBadge, ProgramStateBadge } from './programsUi'
 
 function ProgramRow({ row, projectName, now, onOpen }: { row: ProgramSummary; projectName: string | null; now: number; onOpen: (id: string) => void }) {
   const p = row.program
   const health = programHealth(p, row.window)
   const window = windowTextAt(p, now)
+  // The health badge only earns its place when it says something the state badge does not.
+  const showHealth = health.level !== 'ended' && healthInfo(health.level).label.toLowerCase() !== programStateInfo(p.state, p.pauseReason).label.toLowerCase()
   return (
     <li>
       <button
@@ -30,7 +32,7 @@ function ProgramRow({ row, projectName, now, onOpen }: { row: ProgramSummary; pr
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="min-w-0 truncate text-heading font-semibold">{p.name}</span>
             <ProgramStateBadge program={p} />
-            <HealthBadge level={health.level} />
+            {showHealth ? <HealthBadge level={health.level} /> : null}
             {projectName ? <span className="text-small text-text-muted">{projectName}</span> : null}
           </div>
           <p className="m-0 mt-0.5 truncate text-text-secondary" title={p.goal.statement}>
@@ -40,7 +42,7 @@ function ProgramRow({ row, projectName, now, onOpen }: { row: ProgramSummary; pr
           <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-small text-text-secondary">
             <span className="flex min-w-44 items-center gap-2">
               <ProgressBar value={row.milestones.completed} max={Math.max(1, row.milestones.total)} label="Milestones completed" className="w-24" tone={p.state === 'COMPLETED' ? 'success' : 'accent'} />
-              <span className="tnum" data-testid={`program-progress-${p.id}`}>
+              <span className="tnum whitespace-nowrap" data-testid={`program-progress-${p.id}`}>
                 {progressText(row.milestones)}
               </span>
             </span>

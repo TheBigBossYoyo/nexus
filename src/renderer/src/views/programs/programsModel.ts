@@ -2,6 +2,7 @@ import {
   TERMINAL_PROGRAM_STATES,
   windowStatus,
   type BacklogStatus,
+  type MilestoneEvidence,
   type MilestoneState,
   type PlanDiff,
   type Program,
@@ -95,19 +96,25 @@ export interface ProgramActions {
 }
 
 /** Which controls apply in a state. Controls that cannot apply are hidden, never disabled. */
-export function programActions(state: ProgramState): ProgramActions {
+export function programActions(state: ProgramState, awaitingApproval = false): ProgramActions {
+  // A program paused for a plan decision is moved on by Accept or Reject only; resume and reassess do not apply.
+  const approval = state === 'PAUSED' && awaitingApproval
   return {
     start: state === 'DRAFT',
     pause: state === 'PLANNING' || state === 'ACTIVE' || state === 'WAITING_FOR_QUOTA' || state === 'REPLANNING',
-    resume: state === 'PAUSED' || state === 'BLOCKED',
+    resume: (state === 'PAUSED' || state === 'BLOCKED') && !approval,
     cancel: !isTerminalProgram(state),
-    replan: state === 'ACTIVE' || state === 'PAUSED' || state === 'BLOCKED' || state === 'WAITING_FOR_QUOTA',
+    replan: (state === 'ACTIVE' || state === 'PAUSED' || state === 'BLOCKED' || state === 'WAITING_FOR_QUOTA') && !approval,
   }
 }
 
+/** True when a paused program waits for a plan decision (the approval pause, or a proposed revision). */
+export const isAwaitingApproval = (program: Pick<Program, 'state' | 'pauseReason'>, planProposed: boolean): boolean =>
+  program.state === 'PAUSED' && (program.pauseReason === 'approval' || planProposed)
+
 // ───────────────────────────── progress, window, time ─────────────────────────────
 
-export const progressText = (m: ProgramSummary['milestones']): string => `${m.completed} of ${m.total} milestones`
+export const progressText = (m: ProgramSummary['milestones']): string => (m.total === 0 ? 'No plan yet' : `${m.completed} of ${m.total} milestones`)
 
 export const hasWindows = (program: Pick<Program, 'schedule'>): boolean => !!program.schedule && program.schedule.windows.length > 0
 
@@ -145,8 +152,10 @@ export function activeTimeMs(program: Pick<Program, 'activeMs' | 'activeSince'>,
   const since = program.activeSince ? Date.parse(program.activeSince) : NaN
   return program.activeMs + (Number.isNaN(since) ? 0 : Math.max(0, now - since))
 }
-export const activeTimeText = (program: Pick<Program, 'activeMs' | 'activeSince'>, now: number): string =>
-  formatDuration(activeTimeMs(program, now))
+export const activeTimeText = (program: Pick<Program, 'activeMs' | 'activeSince'>, now: number): string => {
+  const ms = activeTimeMs(program, now)
+  return ms < 60_000 ? 'less than a minute' : formatDuration(ms)
+}
 
 export const budgetText = (used: number, budget: number): string => `${used} of ${budget}`
 
@@ -476,6 +485,16 @@ export function activePrograms(rows: readonly ProgramSummary[]): ProgramSummary[
 /** The current milestone's title, from the roadmap when the detail is known. */
 export function currentMilestoneTitle(program: Pick<Program, 'currentMilestoneId'>, roadmap: readonly { id: string; title: string }[]): string | null {
   return roadmap.find((m) => m.id === program.currentMilestoneId)?.title ?? null
+}
+
+/** One line for a milestone's evidence: "Accepted · 6 of 6 gates passed · 5 of 5 criteria met", or "Rejected · gate checks_passed failed". */
+export function evidenceSummary(e: Pick<MilestoneEvidence, 'verdict' | 'gates' | 'judgment'>): string {
+  const parts = [e.verdict === 'accepted' ? 'Accepted' : 'Rejected']
+  const failed = e.gates.filter((g) => !g.passed)
+  if (failed.length > 0) parts.push(`${failed.length === 1 ? 'gate' : 'gates'} ${failed.map((g) => g.name).join(', ')} failed`)
+  else parts.push(`${e.gates.length} of ${e.gates.length} gates passed`)
+  if (e.judgment) parts.push(`${e.judgment.criteria.filter((c) => c.met).length} of ${e.judgment.criteria.length} criteria met`)
+  return parts.join(' · ')
 }
 
 /** Gate names in plain words. */

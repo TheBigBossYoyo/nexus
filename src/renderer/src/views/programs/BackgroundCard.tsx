@@ -37,8 +37,7 @@ export function BackgroundCard() {
     >
       <div className="flex flex-col gap-3">
         <p className="m-0 text-text-secondary" data-testid="background-note">
-          Off by default. A background job only reads the project and never changes a file. Its only output is proposals in the backlog, which you can accept or reject. It uses your Claude usage like any session, and
-          nothing runs on a schedule.
+          Off until you turn it on. It only reads the project, and its only output is backlog proposals. Nothing runs on a schedule.
         </p>
         {settings.isPending ? (
           <BlockSkeleton rows={2} testId="background-loading" />
@@ -60,7 +59,7 @@ export function BackgroundCard() {
                 {BACKGROUND_JOB_KINDS.map((kind) => {
                   const on = s.kinds.includes(kind)
                   return (
-                    <li key={kind} className="flex items-center justify-between gap-2">
+                    <li key={kind} className="flex items-center gap-3">
                       <Check
                         checked={on}
                         disabled={!s.enabled || setSettings.isPending}

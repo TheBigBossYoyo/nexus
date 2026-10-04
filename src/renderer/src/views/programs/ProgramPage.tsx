@@ -35,6 +35,7 @@ import {
 import { BlockSkeleton, ReadError } from '../usage/shared'
 import {
   activeTimeText,
+  isAwaitingApproval,
   budgetText,
   currentMilestoneTitle,
   healthInfo,
@@ -84,7 +85,7 @@ function PlanApproval({ detail, revision }: { detail: ProgramDetail; revision: P
     <Card
       title={revision.trigger === 'initial' ? 'Plan awaiting your approval' : `Plan revision ${revision.version} awaiting your approval`}
       description={`${revisionTriggerText(revision.trigger)} · version ${revision.version}`}
-      className="border-review/40 ring-1 ring-review/20"
+      className="border-tone-review/40 ring-1 ring-tone-review/20"
       data-testid="program-plan-approval"
       actions={
         <>
@@ -98,6 +99,11 @@ function PlanApproval({ detail, revision }: { detail: ProgramDetail; revision: P
       }
     >
       <div className="flex flex-col gap-3">
+        <p className="m-0 text-small text-text-secondary" data-testid="program-plan-consequence">
+          {revision.trigger === 'initial'
+            ? 'Accepting makes this the plan the program works from; rejecting means no plan; resume to plan again.'
+            : 'Accepting makes this the plan the program works from; rejecting keeps the current plan.'}
+        </p>
         <div>
           <h3 className="m-0 mb-0.5 text-caption font-medium text-text-muted">Reason</h3>
           <p className="m-0" data-testid="program-plan-reason">
@@ -105,16 +111,17 @@ function PlanApproval({ detail, revision }: { detail: ProgramDetail; revision: P
           </p>
           {revision.strategyNote ? <p className="m-0 mt-1 text-small text-text-secondary">Approach: {revision.strategyNote}</p> : null}
         </div>
-        <div>
-          <h3 className="m-0 mb-1 text-caption font-medium text-text-muted">What changes in the remaining roadmap</h3>
-          <PlanDiffList diff={revision.diff} titleOf={(k) => titles.get(k) ?? null} testId="program-plan-diff" />
-        </div>
+        {revision.trigger === 'initial' ? null : (
+          <div>
+            <h3 className="m-0 mb-1 text-caption font-medium text-text-muted">What changes in the remaining roadmap</h3>
+            <PlanDiffList diff={revision.diff} titleOf={(k) => titles.get(k) ?? null} testId="program-plan-diff" />
+          </div>
+        )}
         <div>
           <h3 className="m-0 mb-1 text-caption font-medium text-text-muted">Proposed milestones ({revision.milestones.length})</h3>
           <ProposedMilestones milestones={revision.milestones} deferred={revision.deferred} />
         </div>
         {decide.isError ? <ErrorNote error={decide.error} /> : null}
-        <p className="m-0 text-small text-text-muted">Accepting makes this the plan. Rejecting keeps the current plan; completed milestones are never changed.</p>
       </div>
     </Card>
   )
@@ -207,15 +214,18 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
   }
 
   const p = d.program
-  const actions = programActions(p.state)
   const proposed = d.revisions.find((r) => r.status === 'proposed') ?? null
+  const actions = programActions(p.state, isAwaitingApproval(p, !!proposed))
+  const showApproval = !!proposed && p.state !== 'COMPLETED' && p.state !== 'CANCELLED' && p.state !== 'FAILED'
   const windowText = windowTextAt(p, now)
   const reset = usage.overview ? exactResetAt(usage.overview) : null
-  const notice = stateNotice(p, {
+  // The approval card is the notice for a plan waiting for a decision.
+  const rawNotice = stateNotice(p, {
     quotaResetText: reset ? `at ${clockText(reset, now)}` : null,
     windowText,
     planProposed: !!proposed,
   })
+  const notice = showApproval && p.state === 'PAUSED' && p.pauseReason === 'approval' ? null : rawNotice
   const milestone = currentMilestoneTitle(p, d.roadmap) ?? d.milestones.active
   const health = d.health
   const openBacklog = d.backlog.filter((b) => isOpenBacklog(b.status)).length
@@ -277,7 +287,7 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
           {p.error && p.state !== 'FAILED' ? <ErrorNote error={p.error} /> : null}
           {lastError ? <ErrorNote error={lastError} /> : null}
 
-          {proposed && p.state !== 'COMPLETED' && p.state !== 'CANCELLED' && p.state !== 'FAILED' ? <PlanApproval detail={d} revision={proposed} /> : null}
+          {showApproval && proposed ? <PlanApproval detail={d} revision={proposed} /> : null}
 
           <Card data-testid="program-summary">
             <dl className="m-0 grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -359,32 +369,34 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
             active={tab}
             onChange={setTab}
             tabs={[
-              { id: 'roadmap', label: 'Roadmap', badge: <span className="tnum text-text-muted">{d.roadmap.length}</span>, testId: 'program-tab-roadmap' },
-              { id: 'missions', label: 'Missions', badge: <span className="tnum text-text-muted">{d.missions.length}</span>, testId: 'program-tab-missions' },
-              { id: 'revisions', label: 'Plan history', badge: <span className="tnum text-text-muted">{d.revisions.length}</span>, testId: 'program-tab-revisions' },
-              { id: 'decisions', label: 'Decisions', badge: <span className="tnum text-text-muted">{d.decisions.length}</span>, testId: 'program-tab-decisions' },
-              { id: 'backlog', label: 'Backlog', badge: <span className="tnum text-text-muted">{d.backlog.length}</span>, testId: 'program-tab-backlog' },
-              { id: 'memory', label: 'Memory', badge: <span className="tnum text-text-muted">{d.memory.length}</span>, testId: 'program-tab-memory' },
-              { id: 'expertise', label: 'Expertise', testId: 'program-tab-expertise' },
+              { id: 'roadmap', label: 'Roadmap', badge: <span className="tnum text-text-muted">{d.roadmap.length}</span>, testId: 'program-tab-roadmap', domId: 'program-tabbtn-roadmap', controls: 'program-panel-roadmap' },
+              { id: 'missions', label: 'Missions', badge: <span className="tnum text-text-muted">{d.missions.length}</span>, testId: 'program-tab-missions', domId: 'program-tabbtn-missions', controls: 'program-panel-missions' },
+              { id: 'revisions', label: 'Plan history', badge: <span className="tnum text-text-muted">{d.revisions.length}</span>, testId: 'program-tab-revisions', domId: 'program-tabbtn-revisions', controls: 'program-panel-revisions' },
+              { id: 'decisions', label: 'Decisions', badge: <span className="tnum text-text-muted">{d.decisions.length}</span>, testId: 'program-tab-decisions', domId: 'program-tabbtn-decisions', controls: 'program-panel-decisions' },
+              { id: 'backlog', label: 'Backlog', badge: <span className="tnum text-text-muted">{d.backlog.length}</span>, testId: 'program-tab-backlog', domId: 'program-tabbtn-backlog', controls: 'program-panel-backlog' },
+              { id: 'memory', label: 'Memory', badge: <span className="tnum text-text-muted">{d.memory.length}</span>, testId: 'program-tab-memory', domId: 'program-tabbtn-memory', controls: 'program-panel-memory' },
+              { id: 'expertise', label: 'Expertise', testId: 'program-tab-expertise', domId: 'program-tabbtn-expertise', controls: 'program-panel-expertise' },
             ]}
           />
-          {tab === 'roadmap' ? (
-            <div data-testid="program-roadmap">
-              <Roadmap roadmap={d.roadmap} currentMilestoneId={p.currentMilestoneId} />
-            </div>
-          ) : tab === 'missions' ? (
-            <MissionsSection detail={d} />
-          ) : tab === 'revisions' ? (
-            <RevisionsSection detail={d} />
-          ) : tab === 'decisions' ? (
-            <DecisionsSection detail={d} />
-          ) : tab === 'backlog' ? (
-            <BacklogSection detail={d} />
-          ) : tab === 'memory' ? (
-            <MemorySection detail={d} />
-          ) : (
-            <ExpertiseSection projectId={p.projectId} />
-          )}
+          <div role="tabpanel" id={`program-panel-${tab}`} aria-labelledby={`program-tabbtn-${tab}`} tabIndex={0} className="rounded-md outline-offset-2">
+            {tab === 'roadmap' ? (
+              <div data-testid="program-roadmap">
+                <Roadmap roadmap={d.roadmap} currentMilestoneId={p.currentMilestoneId} />
+              </div>
+            ) : tab === 'missions' ? (
+              <MissionsSection detail={d} />
+            ) : tab === 'revisions' ? (
+              <RevisionsSection detail={d} />
+            ) : tab === 'decisions' ? (
+              <DecisionsSection detail={d} />
+            ) : tab === 'backlog' ? (
+              <BacklogSection detail={d} />
+            ) : tab === 'memory' ? (
+              <MemorySection detail={d} />
+            ) : (
+              <ExpertiseSection projectId={p.projectId} />
+            )}
+          </div>
         </div>
       </div>
       <ReplanDialog open={replanOpen} onClose={() => setReplanOpen(false)} programId={programId} />

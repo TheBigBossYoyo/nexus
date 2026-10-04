@@ -123,15 +123,17 @@ export function BacklogSection({ detail }: { detail: ProgramDetail }) {
                 <span className="min-w-0 flex-1 font-medium">{b.title}</span>
                 <Badge tone="neutral">{categoryLabel(b.category)}</Badge>
                 <Badge tone={severityTone(b.severity)}>Severity: {b.severity}</Badge>
+                <span className="inline-flex w-32 shrink-0">
                 <Select
                   value={b.status}
                   disabled={set.isPending && set.variables?.itemId === b.id}
                   onChange={(status) => set.mutate({ itemId: b.id, status })}
                   options={BACKLOG_STATUSES.map((s) => ({ value: s, label: BACKLOG_STATUS_LABEL[s] }))}
                   aria-label={`Status of ${b.title}`}
-                  className="w-32"
+                  className="w-full"
                   data-testid={`backlog-status-${b.id}`}
                 />
+                </span>
               </div>
               <p className="m-0 mt-1 text-text-secondary">{b.description}</p>
               <p className="m-0 mt-1.5 text-small text-text-secondary">

@@ -7,6 +7,10 @@ export interface TabItem<T extends string> {
   /** Small count/indicator after the label. */
   badge?: ReactNode
   testId?: string
+  /** DOM id of the tab button, for a panel's aria-labelledby. */
+  domId?: string
+  /** DOM id of the panel this tab controls (set on the selected tab only). */
+  controls?: string
 }
 
 /** Controlled underline tab strip; the caller renders the active panel. */
@@ -51,6 +55,8 @@ export function Tabs<T extends string>({
             key={t.id}
             role="tab"
             type="button"
+            id={t.domId}
+            aria-controls={selected ? t.controls : undefined}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             data-testid={t.testId}
