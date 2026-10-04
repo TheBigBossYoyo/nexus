@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PushMessage } from '@shared/events'
+import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT, type OvernightRun } from '@shared/overnight'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import { FakeAgentRuntime, completeWith } from '@main/modules/agent-runtime/fake-runtime'
 import { EventBus } from '@main/modules/events'
@@ -44,7 +45,7 @@ function world(usageSettings: Partial<typeof DEFAULT_SETTINGS.usage> = {}) {
     bus.emit({ runId: run.id, type: 'run.paused', payload: { reason: 'quota', cause: 'quota' } })
     return run
   }
-  return { db, repos, bus, usage, controller, make, pushes, t, resumes, quotaPausedRun, release: (r: ProbeResult) => release?.(r), settle: () => new Promise((r) => setTimeout(r, 5)) }
+  return { db, repos, bus, usage, project, controller, make, pushes, t, resumes, quotaPausedRun, release: (r: ProbeResult) => release?.(r), settle: () => new Promise((r) => setTimeout(r, 5)) }
 }
 
 describe('quota recovery controller (audit fixes)', () => {
@@ -118,6 +119,53 @@ describe('quota recovery controller (audit fixes)', () => {
     const global = w.repos.quotaPauses.liveGlobal()
     expect(Date.parse(global?.nextCheckAt ?? '') - T0).toBe(11 * MIN) // reset + 60 s
     expect(w.repos.quotaPauses.liveForRun(run.id)?.nextCheckAt).toBe(global?.nextCheckAt)
+  })
+
+  it('a restart restores the closed gate for an overnight mission that waits, and not for an overnight campaign', () => {
+    const record = (id: string, workloadType: 'mission' | 'arena_campaign'): OvernightRun => ({
+      id,
+      runId: id,
+      workloadType,
+      projectId: 'p',
+      state: 'QUOTA_PAUSED',
+      policy: DEFAULT_OVERNIGHT_POLICY,
+      authorization: { runId: id, authorizedAt: new Date(T0).toISOString(), confirmation: OVERNIGHT_CONFIRMATION_TEXT, policy: DEFAULT_OVERNIGHT_POLICY },
+      startedAt: new Date(T0).toISOString(),
+      deadlineAt: new Date(T0 + 480 * MIN).toISOString(),
+      failsafe: null,
+      terminalReason: null,
+      terminalDetail: null,
+      finalReport: null,
+      reportPath: null,
+      reportSavedAt: null,
+      powerAction: null,
+      quota: { pausedAt: new Date(T0).toISOString(), resetsAt: new Date(T0 + 30 * MIN).toISOString(), resumeAt: new Date(T0 + 32 * MIN).toISOString(), waits: 1 },
+      watchdog: [],
+      amendments: [],
+      error: null,
+      createdAt: new Date(T0).toISOString(),
+      updatedAt: new Date(T0).toISOString(),
+      finishedAt: null,
+    })
+    // A campaign's wait belongs to this controller (the rows of its trial runs). With no such row, nothing would
+    // ever probe, so the gate must not be closed on the campaign's behalf.
+    w = world()
+    w.repos.overnight.insert(record('campaign-1', 'arena_campaign'))
+    w.controller.dispose()
+    w.controller = w.make()
+    w.controller.recover()
+    expect(w.usage.canDispatch()).toBe(true)
+    w.controller.dispose()
+    w.usage.dispose()
+
+    // A mission's wait belongs to the supervisor, which probes and resumes: the gate stays closed across the restart.
+    w = world()
+    const run = w.repos.runs.insert(makeRun(w.project.id, { state: 'paused', pauseReason: 'quota', resumeState: 'executing' }))
+    w.repos.overnight.insert(record(run.id, 'mission'))
+    w.controller.dispose()
+    w.controller = new QuotaRecoveryController({ repos: w.repos, bus: w.bus, usage: w.usage, probe: { probe: () => new Promise(() => undefined) }, orchestrator: { pauseRun: async () => undefined, resumeRun: async () => undefined }, push: () => undefined, now: () => w.t.now, tickIntervalMs: 0, isOvernightRun: (id) => id === run.id })
+    w.controller.recover()
+    expect(w.usage.canDispatch()).toBe(false)
   })
 
   it('a plan that ends on recover() closes the rows instead of leaving them unscheduled', () => {

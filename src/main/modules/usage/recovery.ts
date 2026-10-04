@@ -515,9 +515,11 @@ export class QuotaRecoveryController {
     for (const run of repos.runs.listByState('paused')) {
       if (run.pauseReason === 'quota' && !this.o.isOvernightRun(run.id)) this.handleQuotaPause(run.id, 'recover')
     }
-    // An Overnight run waiting for its reset: the supervisor owns it, but the gate must stay closed across the restart.
+    // An Overnight mission waiting for its reset: the supervisor owns it, but the gate must stay closed across the
+    // restart. Only a mission: the wait of a campaign's trial runs is this controller's own (their rows are restored
+    // below), and closing the gate for a wait nobody probes would leave it closed.
     for (const record of repos.overnight.listLive()) {
-      if (record.state === 'QUOTA_PAUSED') usage.apply({ type: 'restore_wait', resetAt: record.quota?.resetsAt ? Date.parse(record.quota.resetsAt) : null, limitType: null })
+      if (record.workloadType === 'mission' && record.state === 'QUOTA_PAUSED') usage.apply({ type: 'restore_wait', resetAt: record.quota?.resetsAt ? Date.parse(record.quota.resetsAt) : null, limitType: null })
     }
     const global = repos.quotaPauses.liveGlobal()
     const runRows = repos.quotaPauses.listLive().filter((p) => p.scope === 'run')
