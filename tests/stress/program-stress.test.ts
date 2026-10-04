@@ -41,7 +41,19 @@ class World {
   readonly project = this.repos.projects.insert(makeProject({ rootPath: 'C:\\stress\\repo' }))
   /** In-memory Git: refs to commit ids. A commit id encodes its parent chain length only. */
   readonly refs = new Map<string, string>([['HEAD', 'c0']])
+  /** Parent of every commit, so ancestry can be answered. */
+  readonly parents = new Map<string, string | null>([['c0', null]])
   commits = 1
+
+  private resolve(rev: string): string | null {
+    const name = rev.replace('refs/heads/', '')
+    return this.refs.get(name) ?? (this.parents.has(name) ? name : null)
+  }
+
+  private isAncestor(ancestor: string, descendant: string): boolean {
+    for (let c: string | null = descendant; c !== null; c = this.parents.get(c) ?? null) if (c === ancestor) return true
+    return false
+  }
   offset = 0
   gateOpen = true
   engine: ProgramEngine
@@ -66,19 +78,23 @@ class World {
             }
           case 'resolveCommit':
             return async (_repo: string, rev: string) => {
-              const found = this.refs.get(rev) ?? (rev.startsWith('c') ? rev : null)
+              const found = this.resolve(rev)
               if (!found) throw new Error(`unknown revision ${rev}`)
               return found
+            }
+          case 'isAncestor':
+            return async (_repo: string, ancestor: string, descendant: string) => this.isAncestor(this.resolve(ancestor) ?? ancestor, this.resolve(descendant) ?? descendant)
+          case 'fastForwardBranch':
+            return async (_repo: string, branch: string, to: string, from: string) => {
+              const current = this.refs.get(branch)
+              if (current !== from) throw new Error(`branch ${branch} moved`)
+              if (!this.isAncestor(from, to)) throw new Error(`${to} does not contain the current tip of ${branch}; moving the branch would drop commits`)
+              this.refs.set(branch, to)
             }
           case 'changedFiles':
             return async (_repo: string, base: string, head: string) => (base === head ? [] : ['src/file.ts'])
           case 'diff':
             return async () => ({ files: [{ path: 'src/file.ts' }], patch: '+ work', truncated: false })
-          case 'run':
-            return async (_repo: string, args: string[]) => {
-              if (args[0] === 'update-ref' && args[1] && args[2]) this.refs.set(args[1].replace('refs/heads/', ''), args[2])
-              return { exitCode: 0, output: '', stdout: '', stderr: '' }
-            }
           default:
             return async () => {
               throw new Error(`git.${prop} is not available in the stress`)
@@ -95,7 +111,7 @@ class World {
       if (!LIVE_PROGRAM_STATES.includes(state) || state === 'WAITING_FOR_QUOTA') this.violations.push(`a ${kind} run was created while the program was ${state}`)
       const open = this.created.filter((c) => !['completed', 'failed', 'cancelled'].includes(this.repos.runs.require(c.run.id).state))
       if (open.length > 0) this.violations.push(`a ${kind} run was created while ${open.length} run(s) of the program were still open`)
-      const baseCommit = this.refs.get(input.baseRef ?? 'HEAD') ?? input.baseRef ?? 'c0'
+      const baseCommit = this.resolve(input.baseRef ?? 'HEAD') ?? 'c0'
       const run = this.repos.runs.insert({
         id: newId(),
         projectId: input.projectId,
@@ -184,9 +200,8 @@ class World {
     }
     const branch = `nexus/integration-${runId.slice(0, 8)}`
     const commit = `c${this.commits++}`
+    this.parents.set(commit, run.baseCommit ?? 'c0')
     this.refs.set(branch, commit)
-    this.refs.set(commit, commit)
-    void run
     this.repos.verifications.insert({ id: newId(), runId, taskId: null, agentId: null, attempt: 1, kind: 'checks', passed: how === 'complete', summary: how, criteria: [], commands: [], failures: [], createdAt: nowIso() })
     this.repos.runs.update(runId, { state: 'completed', integrationBranch: branch, finishedAt: nowIso() })
     this.bus.emit({ runId, type: 'run.completed', payload: { summary: 'done' } })
@@ -276,12 +291,19 @@ async function runSeed(seed: number): Promise<void> {
     if (completed.length < completedBefore) fail('a completed milestone stopped being completed')
     completedBefore = completed.length
     for (const m of completed) if (m.evidence?.verdict !== 'accepted' || m.evidence.judgment === null) fail(`milestone ${m.key} is completed without an accepted judgment`)
-    // The program branch is exactly the accepted work.
+    // The program branch is exactly the accepted work: it points at an accepted result (or the start), and it
+    // CONTAINS every accepted result. A branch that was moved to a result built on an older tip would drop the
+    // milestones accepted in between.
     if (p.branch) {
       const accepted = completed.map((m) => m.evidence?.resultCommit).filter((c): c is string => Boolean(c))
-      const head = world.refs.get(p.branch)
+      const head = world.refs.get(p.branch) ?? null
       const expected = accepted.length > 0 ? accepted : [p.baseCommit]
-      if (!expected.includes(head ?? null)) fail(`the program branch points at ${String(head)}, which is not accepted work (${expected.join(', ')})`)
+      if (!expected.includes(head)) fail(`the program branch points at ${String(head)}, which is not accepted work (${expected.join(', ')})`)
+      for (const commit of accepted) {
+        let c: string | null = head
+        while (c !== null && c !== commit) c = world.parents.get(c) ?? null
+        if (c === null) fail(`the program branch (${String(head)}) does not contain the accepted result ${commit}`)
+      }
     }
     // Budgets hold.
     const missions = world.created.filter((c) => c.kind === 'mission').length

@@ -35,6 +35,7 @@ CREATE TABLE programs (
 );
 CREATE INDEX idx_programs_project ON programs(project_id, created_at);
 CREATE INDEX idx_programs_state ON programs(state);
+CREATE INDEX idx_programs_current_run ON programs(current_run_id);
 
 CREATE TABLE program_workstreams (
   id TEXT PRIMARY KEY,
@@ -189,4 +190,5 @@ CREATE TABLE background_jobs (
   finished_at TEXT
 );
 CREATE INDEX idx_background_jobs_project ON background_jobs(project_id, created_at);
+CREATE INDEX idx_background_jobs_run ON background_jobs(run_id);
 `

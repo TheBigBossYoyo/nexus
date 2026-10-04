@@ -37,11 +37,14 @@ describe('program and milestone state machines', () => {
     }
   })
 
-  it('a usage wait is entered from working states only and never leads to FAILED', () => {
+  it('a usage wait is entered from working states, or by a user who resumes during a limit, and never leads to FAILED', () => {
     expect(canTransitionProgram('ACTIVE', 'WAITING_FOR_QUOTA')).toBe(true)
     expect(canTransitionProgram('PLANNING', 'WAITING_FOR_QUOTA')).toBe(true)
     expect(canTransitionProgram('REPLANNING', 'WAITING_FOR_QUOTA')).toBe(true)
-    expect(canTransitionProgram('PAUSED', 'WAITING_FOR_QUOTA')).toBe(false)
+    // A paused or blocked program the user resumes while Claude is still limited waits for the reset.
+    expect(canTransitionProgram('PAUSED', 'WAITING_FOR_QUOTA')).toBe(true)
+    expect(canTransitionProgram('BLOCKED', 'WAITING_FOR_QUOTA')).toBe(true)
+    expect(canTransitionProgram('DRAFT', 'WAITING_FOR_QUOTA')).toBe(false)
     expect(canTransitionProgram('WAITING_FOR_QUOTA', 'FAILED')).toBe(false)
     expect(canTransitionProgram('WAITING_FOR_QUOTA', 'ACTIVE')).toBe(true)
   })

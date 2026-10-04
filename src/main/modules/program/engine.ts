@@ -40,7 +40,7 @@ import type { EventBus } from '@main/modules/events'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
 import { selectMemory, validateMemory } from './memory'
-import { buildMissionPrompt, buildPlanPrompt, buildReplanPrompt, buildVerifyPrompt, parseJudgment, parsePlan, parseReplan } from './reasoning'
+import { buildMissionPrompt, buildPlanPrompt, buildReplanPrompt, buildVerifyPrompt, parseJudgment, parsePlan, parseReplan, REASONING_MARKERS } from './reasoning'
 
 /** What the engine needs from the orchestrator. Missions and reasoning sessions are ordinary runs. */
 export interface ProgramRunHost {
@@ -157,12 +157,12 @@ export class ProgramEngine {
       program,
       milestones: { total: milestones.filter((m) => m.state !== 'CANCELLED').length, completed: milestones.filter((m) => m.state === 'COMPLETED').length, active: active?.title ?? null },
       backlogOpen: this.repos.backlog.countOpen(program.id),
-      window: windowStatus(program.schedule, this.now()),
+      window: windowStatus(program.policy.respectWorkWindows ? program.schedule : null, this.now()),
     }
   }
 
   list(options: { projectId?: string; limit?: number; offset?: number } = {}): { programs: ProgramSummary[]; total: number } {
-    return { programs: this.repos.programs.list(options).map((p) => this.summary(p)), total: this.repos.programs.count() }
+    return { programs: this.repos.programs.list(options).map((p) => this.summary(p)), total: this.repos.programs.count(options.projectId) }
   }
 
   detail(programId: string): ProgramDetail {
@@ -245,8 +245,16 @@ export class ProgramEngine {
   pause(programId: string, reason: ProgramPauseReason = 'user'): Promise<Program> {
     return this.serial(programId, async () => {
       const program = this.repos.programs.require(programId)
-      if (program.state === 'PAUSED') return program
-      if (TERMINAL_PROGRAM_STATES.includes(program.state) || program.state === 'DRAFT') throw new NexusError('invalid_state', `The program is ${program.state}; it cannot be paused`)
+      if (program.state === 'PAUSED') {
+        // Paused by the schedule, then by the user: the user's pause wins, so an opening window does not resume it.
+        if (reason === 'user' && program.pauseReason === 'work_window') {
+          this.patch(programId, { pauseReason: 'user' })
+          this.decide(programId, 'paused', 'Paused by the user.')
+          this.announce(programId)
+        }
+        return this.repos.programs.require(programId)
+      }
+      if (TERMINAL_PROGRAM_STATES.includes(program.state) || program.state === 'DRAFT' || program.state === 'BLOCKED') throw new NexusError('invalid_state', `The program is ${program.state}; it cannot be paused`)
       await this.enterPause(program, reason, reason === 'user' ? 'Paused by the user.' : `Paused (${reason}).`)
       return this.repos.programs.require(programId)
     })
@@ -315,8 +323,12 @@ export class ProgramEngine {
           return this.repos.programs.require(programId)
         }
       }
-      this.patch(programId, { pauseReason: null })
-      if (this.repos.programs.require(programId).state === 'PAUSED') this.setState(programId, 'ACTIVE')
+      // Only the pause that waited for this decision ends with it; a pause the user asked for stays.
+      const current = this.repos.programs.require(programId)
+      if (current.state === 'PAUSED' && current.pauseReason === 'approval') {
+        this.patch(programId, { pauseReason: null })
+        this.setState(programId, 'ACTIVE')
+      }
       await this.step(programId)
       return this.repos.programs.require(programId)
     })
@@ -387,6 +399,7 @@ export class ProgramEngine {
     for (const program of this.repos.programs.listOpen()) {
       await this.serial(program.id, async () => {
         const current = this.repos.programs.require(program.id)
+        await this.cancelUnrecordedRuns(current)
         if (!LIVE_PROGRAM_STATES.includes(current.state)) return
         // The clock did not run while NEXUS was closed.
         if (current.activeSince) this.patch(current.id, { activeSince: this.iso() })
@@ -538,15 +551,17 @@ export class ProgramEngine {
       .list({ projectId: program.projectId, limit: 6 })
       .filter((p) => p.id !== program.id)
       .map((p) => `Program "${p.name}" ${p.state}${p.outcome ? `: ${p.outcome.milestonesCompleted}/${p.outcome.milestonesTotal} milestones` : ''}`)
+    // Newest first; the six most recent missions.
     const runs = this.repos.runs
       .listByProject(program.projectId)
       .filter((r) => r.mode !== 'ask')
-      .slice(-6)
+      .slice(0, 6)
       .map((r) => `Mission ${r.state}: ${r.prompt.replace(/\s+/g, ' ').slice(0, 120)}`)
     return [...earlier, ...runs]
   }
 
   private async startReasoning(program: Program, kind: 'planner' | 'replanner' | 'verifier', prompt: string, baseRef?: string): Promise<void> {
+    this.markStarting(program.id, kind)
     const run = await this.deps.host.createRun({
       projectId: program.projectId,
       mode: 'ask',
@@ -556,6 +571,7 @@ export class ProgramEngine {
       ...(baseRef ? { baseRef } : {}),
     })
     this.patch(program.id, { currentRunId: run.id, currentRunKind: kind })
+    this.repos.settings.deleteValue(startingKey(program.id))
     this.announce(program.id)
   }
 
@@ -578,11 +594,8 @@ export class ProgramEngine {
     const remaining = milestones.filter((m) => !TERMINAL_MILESTONE_STATES.includes(m.state))
     const last = this.repos.programDecisions.recent(program.id, 6).reverse()
     const userRequest = this.repos.settings.getValue<string>(userReplanKey(program.id)) ?? null
-    if (userRequest) {
-      this.repos.settings.deleteValue(userReplanKey(program.id))
-      // Recorded now so that the revision this session produces carries the trigger `user`.
-      this.decide(program.id, 'replan_requested', 'Reassessing the plan with the request of the user.', { detail: { trigger: 'user' } })
-    }
+    // Recorded now so that the revision this session produces carries the trigger `user`.
+    if (userRequest) this.decide(program.id, 'replan_requested', 'Reassessing the plan with the request of the user.', { detail: { trigger: 'user' } })
     const prompt = buildReplanPrompt({
       program,
       userRequest,
@@ -593,8 +606,10 @@ export class ProgramEngine {
       backlog: this.repos.backlog.list({ programId: program.id, statuses: OPEN_BACKLOG, limit: 20 }),
       memory: this.repos.programMemory.listActive(program.id),
     })
-    this.patch(program.id, { replans: program.replans + 1 })
     await this.startReasoning(program, 'replanner', prompt, program.branch ?? undefined)
+    // Counted, and the user's note consumed, only once the session exists.
+    this.patch(program.id, { replans: program.replans + 1 })
+    if (userRequest) this.repos.settings.deleteValue(userReplanKey(program.id))
   }
 
   private replanTrigger(programId: string): ProgramPlanRevision['trigger'] {
@@ -608,6 +623,33 @@ export class ProgramEngine {
     await this.enterPause(program, 'approval', 'A plan is waiting for your approval.')
   }
 
+  /** Written just before a run is created and removed once the program row knows the run. */
+  private markStarting(programId: string, kind: string): void {
+    this.repos.settings.setValue(startingKey(programId), { kind, at: new Date().toISOString() })
+  }
+
+  /**
+   * NEXUS stopped between creating a run and recording it: the run exists and the program does not know it.
+   * Such a run is cancelled (it cannot be told apart from work the program never asked for), so a restart never
+   * leaves two runs working for one program.
+   */
+  private async cancelUnrecordedRuns(program: Program): Promise<void> {
+    const marker = this.repos.settings.getValue<{ kind: string; at: string }>(startingKey(program.id))
+    if (!marker) return
+    this.repos.settings.deleteValue(startingKey(program.id))
+    const recorded = new Set(this.repos.programMissions.listByProgram(program.id).map((m) => m.runId))
+    // Only a run this program would have started: a mission of this program, or one of its reasoning sessions.
+    const mine = (run: Run): boolean =>
+      marker.kind === 'mission' ? run.mode !== 'ask' && run.prompt.includes(`of the program "${program.name}".`) : run.mode === 'ask' && Object.values(REASONING_MARKERS).some((m) => run.prompt.startsWith(m))
+    for (const run of this.repos.runs.listByProject(program.projectId)) {
+      if (recorded.has(run.id) || run.id === program.currentRunId || TERMINAL_RUN.includes(run.state)) continue
+      // Run rows are stamped with the wall clock, like the marker.
+      if (run.createdAt < marker.at || !mine(run)) continue
+      await Promise.resolve(this.deps.host.cancelRun(run.id)).catch((e: unknown) => this.log(`cancel unrecorded run ${run.id}: ${errorMessage(e)}`))
+      this.decide(program.id, 'recovered', `A ${marker.kind} run that was started just before NEXUS stopped was cancelled; the program starts it again.`, { runId: run.id })
+    }
+  }
+
   /** The text a reasoning run produced: the result of its single task. */
   private answerOf(run: Run | null): string | null {
     if (!run) return null
@@ -617,6 +659,9 @@ export class ProgramEngine {
 
   private async onRunEnded(program: Program, run: Run | null): Promise<void> {
     const kind = program.currentRunKind
+    // A mission's result is recorded in the same transaction that forgets the run (onMissionEnded). The answer
+    // of a reasoning run stays readable in the run itself, and its step is simply taken again after a crash.
+    if (kind === 'mission') return this.onMissionEnded(program, run)
     this.patch(program.id, { currentRunId: null, currentRunKind: null })
     const fresh = this.repos.programs.require(program.id)
     switch (kind) {
@@ -626,8 +671,6 @@ export class ProgramEngine {
         return this.onReplannerEnded(fresh, run)
       case 'verifier':
         return this.onVerifierEnded(fresh, run)
-      case 'mission':
-        return this.onMissionEnded(fresh, run)
       default:
         return
     }
@@ -684,7 +727,12 @@ export class ProgramEngine {
     const remaining = milestones.filter((m) => !TERMINAL_MILESTONE_STATES.includes(m.state))
     const parsed =
       run?.state === 'completed'
-        ? parseReplan(this.answerOf(run), completed.map((m) => m.key), remaining.map((m) => m.key))
+        ? parseReplan(
+            this.answerOf(run),
+            completed.map((m) => m.key),
+            remaining.map((m) => m.key),
+            milestones.filter((m) => m.state === 'CANCELLED').map((m) => m.key),
+          )
         : ({ ok: false, error: `The reassessment run ${run?.state ?? 'is missing'}` } as const)
     const keep = (why: string): void => {
       this.decide(program.id, 'replan_kept', why, { runId: run?.id ?? null })
@@ -772,9 +820,22 @@ export class ProgramEngine {
     }
     const done = new Set(milestones.filter((m) => m.state === 'COMPLETED').map((m) => m.key))
     for (const m of milestones) {
-      // ACTIVE without a run: the mission never started or its record was lost; it is simply ready again.
-      if (m.state === 'ACTIVE') this.setMilestone(m.id, 'READY')
-      else if (m.state === 'PLANNED' && m.dependsOn.every((d) => done.has(d) || !milestones.some((x) => x.key === d && x.state !== 'CANCELLED'))) this.setMilestone(m.id, 'READY')
+      if (m.state === 'ACTIVE') {
+        // ACTIVE without a current run. If its mission did run to an end that was never recorded (NEXUS stopped
+        // in between), that end is processed now, so a finished mission is verified and not thrown away.
+        const unrecorded = this.repos.programMissions.listByMilestone(m.id).find((x) => x.outcome === 'running')
+        const run = unrecorded ? this.repos.runs.get(unrecorded.runId) : null
+        if (unrecorded && (!run || TERMINAL_RUN.includes(run.state))) {
+          this.patch(program.id, { currentMilestoneId: m.id })
+          return this.onMissionEnded(this.repos.programs.require(program.id), run)
+        }
+        if (unrecorded && run) {
+          // The mission is still running: the program simply lost track of it. Take it back.
+          this.patch(program.id, { currentRunId: run.id, currentRunKind: 'mission', currentMilestoneId: m.id })
+          return
+        }
+        this.setMilestone(m.id, 'READY')
+      } else if (m.state === 'PLANNED' && m.dependsOn.every((d) => done.has(d) || !milestones.some((x) => x.key === d && x.state !== 'CANCELLED'))) this.setMilestone(m.id, 'READY')
     }
     const next = this.repos.milestones.listByProgram(program.id).find((m) => m.state === 'READY')
     if (!next) {
@@ -783,9 +844,9 @@ export class ProgramEngine {
         return this.block(program, `No milestone can be worked on: ${open.map((m) => `${m.key} is ${m.state}${m.blockedReason ? ` (${m.blockedReason})` : ''}`).join('; ')}.`, 'blocked')
       }
       const completed = milestones.filter((m) => m.state === 'COMPLETED').length
-      const total = milestones.filter((m) => m.state !== 'CANCELLED').length
+      const dropped = milestones.length - completed
       if (completed === 0) return this.finish(program.id, 'FAILED', 'failed', 'No milestone was completed.')
-      return this.finish(program.id, 'COMPLETED', 'completed', `${completed} of ${total} milestone(s) completed and verified.`)
+      return this.finish(program.id, 'COMPLETED', 'completed', `${completed} of ${milestones.length} milestone(s) completed and verified${dropped > 0 ? `; ${dropped} cancelled or deferred by plan revisions` : ''}.`)
     }
     if (program.missions >= program.policy.maxTotalMissions) {
       return this.block(program, `Budget: the program used its ${program.policy.maxTotalMissions} missions.`, 'budget')
@@ -803,10 +864,19 @@ export class ProgramEngine {
     const all = repos.milestones.listByProgram(program.id)
     const memory = selectMemory(repos.programMemory.listActive(program.id), milestone)
     const note = repos.planRevisions.listByProgram(program.id).filter((r) => r.status === 'accepted' && r.strategyNote).at(-1)?.strategyNote ?? null
-    const { prompt, acceptanceCriteria } = buildMissionPrompt({ program, milestone, completed: all.filter((m) => m.state === 'COMPLETED'), memory: memory.map((m) => m.entry), strategyNote: note })
-    // A retry continues from the previous attempt's result; a first attempt starts from the accepted work.
+    // A first attempt starts from the accepted work (the program branch). A retry continues from the previous
+    // attempt's result, but only when that result contains everything accepted so far; if other milestones were
+    // accepted in between, it starts from the accepted work instead, so its result can be fast-forwarded onto it.
+    const project = repos.projects.require(program.projectId)
     const previous = repos.programMissions.listByMilestone(milestone.id).filter((m) => m.resultCommit).at(-1)
-    const baseRef = previous?.resultCommit ?? program.branch ?? undefined
+    let continues = false
+    if (previous?.resultCommit && program.branch) {
+      const tip = await this.deps.git.resolveCommit(project.rootPath, `refs/heads/${program.branch}`).catch(() => null)
+      continues = tip !== null && (await this.deps.git.isAncestor(project.rootPath, tip, previous.resultCommit).catch(() => false))
+    }
+    const baseRef = continues ? (previous?.resultCommit ?? undefined) : (program.branch ?? undefined)
+    const { prompt, acceptanceCriteria } = buildMissionPrompt({ program, milestone, completed: all.filter((m) => m.state === 'COMPLETED'), memory: memory.map((m) => m.entry), strategyNote: note, continuesPreviousAttempt: continues })
+    this.markStarting(program.id, 'mission')
     const strategy: Strategy = program.policy.missionStrategy === 'SPECULATIVE' && !program.policy.speculation ? 'BUILD' : program.policy.missionStrategy
     const run = await this.deps.host.createRun({
       projectId: program.projectId,
@@ -818,6 +888,7 @@ export class ProgramEngine {
       overrides: { requirePlanApproval: false, maxParallelAgents: program.policy.maxAgents },
       ...(baseRef ? { baseRef } : {}),
     })
+    this.repos.settings.deleteValue(startingKey(program.id))
     repos.transaction(() => {
       const attempt = milestone.attempts + 1
       repos.programMissions.insert({ id: newId(), programId: program.id, milestoneId: milestone.id, runId: run.id, attempt, strategy: null, outcome: 'running', baseCommit: run.baseCommit, resultCommit: null, createdAt: this.iso(), finishedAt: null })
@@ -840,7 +911,10 @@ export class ProgramEngine {
     const project = repos.projects.require(program.projectId)
     const resultCommit = run?.integrationBranch ? await this.deps.git.resolveCommit(project.rootPath, run.integrationBranch).catch(() => null) : null
     const outcome = run?.state === 'completed' ? 'completed' : run?.state === 'cancelled' ? 'cancelled' : 'failed'
-    if (mission) repos.programMissions.update(mission.id, { outcome, strategy: run?.config.strategy?.resolved ?? null, resultCommit, finishedAt: this.iso() })
+    repos.transaction(() => {
+      if (mission) repos.programMissions.update(mission.id, { outcome, strategy: run?.config.strategy?.resolved ?? null, resultCommit, finishedAt: this.iso() })
+      if (repos.programs.require(program.id).currentRunId === (run?.id ?? program.currentRunId)) repos.programs.update(program.id, { currentRunId: null, currentRunKind: null, updatedAt: this.iso() })
+    })
     this.decide(program.id, 'mission_ended', `Mission ${outcome}${run?.error ? `: ${run.error.replace(/\s+/g, ' ').slice(0, 200)}` : ''}.`, { milestoneId: milestone?.id ?? null, runId: run?.id ?? null })
     if (!milestone) return
     if (outcome === 'completed') {
@@ -869,7 +943,10 @@ export class ProgramEngine {
     const missionVerifier = verifications.filter((v) => v.kind === 'verifier' && v.taskId === null).at(-1)
     const latestReview = new Map<string, 'approved' | 'changes_requested'>()
     for (const r of repos.reviews.listByRun(run.id)) latestReview.set(r.taskId, r.verdict)
-    const openReviews = [...latestReview.values()].filter((v) => v === 'changes_requested').length
+    // A review that requested changes is open only while its task is not done: once the task completed, its
+    // repair was reviewed or verified by the mission's own pipeline.
+    const settled = new Set(repos.tasks.listByRun(run.id).filter((t) => t.state === 'completed' || t.state === 'cancelled').map((t) => t.id))
+    const openReviews = [...latestReview.entries()].filter(([taskId, verdict]) => verdict === 'changes_requested' && !settled.has(taskId)).length
     const resultCommit = run.integrationBranch ? await this.deps.git.resolveCommit(project.rootPath, run.integrationBranch).catch(() => null) : null
     const changed = resultCommit && run.baseCommit ? await this.deps.git.changedFiles(project.rootPath, run.baseCommit, resultCommit).catch(() => []) : []
     const gates: MilestoneGate[] = [
@@ -883,6 +960,8 @@ export class ProgramEngine {
       { name: 'no_blocking_findings', passed: openReviews === 0, detail: openReviews === 0 ? 'No review is left requesting changes.' : `${openReviews} task review(s) still request changes.` },
       { name: 'changes_present', passed: changed.length > 0, detail: changed.length > 0 ? `${changed.length} file(s) changed.` : 'The mission changed no file.' },
     ]
+    // A mission with an integration branch whose commit cannot be read has a result nobody can verify or keep.
+    if (run.integrationBranch && !resultCommit) gates.push({ name: 'result_readable', passed: false, detail: `The result branch ${run.integrationBranch} could not be read.` })
     // `changes_present` is recorded for the verifier and the user; a milestone may legitimately need no change.
     const hardFailure = gates.find((g) => !g.passed && g.name !== 'changes_present') ?? null
     return { gates, resultCommit, hardFailure }
@@ -924,7 +1003,16 @@ export class ProgramEngine {
       return this.block(program, `Milestone "${milestone.title}" could not be verified: ${parsed.error}`, 'blocked')
     }
     this.retries.delete(program.id)
-    const judgment = parsed.value
+    let judgment = parsed.value
+    // The verdict is about THIS milestone's criteria. A judgment that lists fewer criteria than the milestone has
+    // (or others) did not judge them, whatever its verdict says.
+    const wanted = milestone.acceptanceCriteria
+    const covered = judgment.criteria.length >= wanted.length
+    const gate: MilestoneGate = { name: 'criteria_judged', passed: covered, detail: `The judgment covers ${Math.min(judgment.criteria.length, wanted.length)} of ${wanted.length} acceptance criteria.` }
+    if (!covered && judgment.verdict === 'accepted') {
+      judgment = { ...judgment, verdict: 'rejected', gaps: [`The verification judged ${judgment.criteria.length} of ${wanted.length} acceptance criteria; every criterion must be judged.`, ...judgment.gaps].slice(0, 10) }
+    }
+    milestone.evidence.gates = [...milestone.evidence.gates.filter((g) => g.name !== 'criteria_judged'), gate]
     const evidence: MilestoneEvidence = { ...milestone.evidence, verifierRunId: run?.id ?? null, judgment, verdict: judgment.verdict, reason: judgment.verdict === 'accepted' ? 'Every acceptance criterion was judged met.' : `The verifier rejected the milestone: ${judgment.gaps[0] ?? 'criteria not met'}`, createdAt: this.iso() }
     const provenance: BacklogProvenance = { source: 'milestone_verifier', runId: evidence.runId, milestoneKey: milestone.key, jobId: null }
     const added = this.addBacklog(program.projectId, program.id, judgment.backlog, provenance)
@@ -946,9 +1034,15 @@ export class ProgramEngine {
     const { repos } = this
     const project = repos.projects.require(program.projectId)
     if (evidence.resultCommit && program.branch) {
-      // Move the program branch to the accepted result. It is not checked out anywhere, so no working tree changes.
-      const moved = await this.deps.git.run(project.rootPath, ['update-ref', `refs/heads/${program.branch}`, evidence.resultCommit]).catch((e: unknown) => ({ exitCode: 1, output: errorMessage(e) }))
-      if (moved.exitCode !== 0) return this.block(program, `The accepted result of "${milestone.title}" could not be recorded on ${program.branch}: ${String(moved.output).slice(0, 200)}`, 'blocked')
+      // The program branch moves forward to the accepted result, and only forward: the result must contain
+      // everything accepted so far. A result that does not (it was built on an older tip) is not accepted work
+      // of this program as a whole, and accepting it would silently drop the milestones accepted since.
+      try {
+        const tip = await this.deps.git.resolveCommit(project.rootPath, `refs/heads/${program.branch}`)
+        await this.deps.git.fastForwardBranch(project.rootPath, program.branch, evidence.resultCommit, tip)
+      } catch (e) {
+        return this.block(program, `The accepted result of "${milestone.title}" could not be recorded on ${program.branch}: ${errorMessage(e).slice(0, 300)}`, 'blocked')
+      }
     }
     this.setMilestone(milestone.id, 'COMPLETED', { evidence, gaps: [], completedAt: this.iso() })
     await this.updateExpertise(program, milestone, evidence, true)
@@ -1048,7 +1142,7 @@ export class ProgramEngine {
     const milestones = this.repos.milestones.listByProgram(programId)
     const at = this.iso()
     this.patch(programId, {
-      outcome: { result, summary, milestonesCompleted: milestones.filter((m) => m.state === 'COMPLETED').length, milestonesTotal: milestones.filter((m) => m.state !== 'CANCELLED' || result === 'cancelled').length, missions: program.missions, replans: program.replans, finishedAt: at },
+      outcome: { result, summary, milestonesCompleted: milestones.filter((m) => m.state === 'COMPLETED').length, milestonesTotal: milestones.length, missions: program.missions, replans: program.replans, finishedAt: at },
       finishedAt: at,
       currentRunId: null,
       currentRunKind: null,
@@ -1057,6 +1151,8 @@ export class ProgramEngine {
       error: state === 'FAILED' ? summary : null,
     })
     this.setState(programId, state)
+    this.repos.settings.deleteValue(userReplanKey(programId))
+    this.repos.settings.deleteValue(startingKey(programId))
     this.decide(programId, result, summary)
     this.checkpoint(programId, result)
   }
@@ -1156,6 +1252,7 @@ export class ProgramEngine {
 }
 
 const userReplanKey = (programId: string): string => `program-user-replan:${programId}`
+const startingKey = (programId: string): string => `program-starting:${programId}`
 
 const slug = (text: string): string =>
   text

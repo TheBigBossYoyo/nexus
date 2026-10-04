@@ -15,6 +15,7 @@ import { exactResetAt } from '../../lib/usageModel'
 import { cn } from '../../lib/cn'
 import { useNow } from '../../lib/useNow'
 import { useUiStore } from '../../store/ui'
+import { HomePrograms } from '../programs/HomePrograms'
 import { IndicatorGlyph, useUsageIndicator } from '../../app/UsagePopover'
 import {
   ArrowRightIcon,
@@ -512,6 +513,7 @@ export function HomeView() {
               <div className={cn('grid gap-5', '@3xl:grid-cols-[minmax(0,1fr)_340px]')}>
                 <div className="flex min-w-0 flex-col gap-5">
                   <ActiveMissions data={data} />
+                  <HomePrograms />
                   <RecentMissions data={data} />
                 </div>
                 <div className="flex min-w-0 flex-col gap-5">

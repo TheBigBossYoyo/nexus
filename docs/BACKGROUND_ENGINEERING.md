@@ -12,7 +12,7 @@ Source: `src/main/modules/program/background.ts`.
 | Off unless the user turns it on | `BackgroundSettings.enabled` is false by default; `start` refuses while it is off |
 | Only the kinds the user enabled | `start` refuses a kind that is not in `BackgroundSettings.kinds` |
 | A job runs when someone asks for it | Nothing schedules a job in 0.4. `background.start` is the only way |
-| Read-only | A job is an `ask` run: no worktree, an agent without write tools |
+| Read-only | A job is an `ask` run: no worktree, and an agent without the file-writing tools. The agent keeps the shell tools, restricted by the command classifier as for every read-only role (SECURITY.md); that is a lexical filter, not a sandbox |
 | Proposals, not changes | The session's answer is parsed as `{ summary, proposals[] }`; proposals become backlog items with the status `proposed` and the provenance `background_job`. Nothing else is done with them |
 | One job of a kind per project at a time | `start` refuses a second one |
 

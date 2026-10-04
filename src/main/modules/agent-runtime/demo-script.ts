@@ -209,10 +209,9 @@ export function createDemoScript(): FakeScript {
 
   /**
    * Program-level reasoning (0.4): the read-only sessions that plan milestones, judge a milestone and reassess
-   * the plan answer with JSON in a fenced block, as the real ones are asked to. The first milestone judged is
-   * rejected once, so the demo shows a rejection, a retry, a backlog proposal and a memory entry.
+   * the plan answer with JSON in a fenced block, as the real ones are asked to. The first milestone is
+   * rejected on its first attempt, so the demo shows a rejection, a retry, a backlog proposal and a memory entry.
    */
-  let judged = 0
   const fence = (value: unknown): string => `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``
   const demoMilestone = (key: string, title: string, objective: string, dependsOn: string[] = []): Record<string, unknown> => ({
     key,
@@ -241,7 +240,8 @@ export function createDemoScript(): FakeScript {
       return
     }
     if (p.includes('NEXUS MILESTONE VERIFIER')) {
-      const first = judged++ === 0
+      // Decided from the prompt, not from a counter, so a restart of the app does not make it reject again.
+      const first = p.includes('<milestone>\nModule foundation\n') && p.includes('<previous_gaps>\n- none\n')
       await ctx.completeTurn({
         text: fence({
           verdict: first ? 'rejected' : 'accepted',

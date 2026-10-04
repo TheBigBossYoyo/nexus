@@ -445,7 +445,7 @@ export const MilestoneJudgmentSchema = z
 export type MilestoneJudgment = z.infer<typeof MilestoneJudgmentSchema>
 
 export interface MilestoneGate {
-  name: 'mission_completed' | 'checks_passed' | 'no_blocking_findings' | 'mission_verified' | 'changes_present' | 'criteria_judged'
+  name: 'mission_completed' | 'checks_passed' | 'no_blocking_findings' | 'mission_verified' | 'changes_present' | 'result_readable' | 'criteria_judged'
   passed: boolean
   detail: string
 }

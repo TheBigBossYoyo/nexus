@@ -68,7 +68,8 @@ export class ProgramRepository extends Table<Program> {
       : this.query('ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?', [limit, offset])
   }
 
-  count(): number {
+  count(projectId?: string): number {
+    if (projectId) return (prepare(this.db, 'SELECT COUNT(*) AS n FROM programs WHERE project_id = ?').get(projectId) as { n: number }).n
     return (prepare(this.db, 'SELECT COUNT(*) AS n FROM programs').get() as { n: number }).n
   }
 

@@ -260,3 +260,33 @@ export const ArrowRightIcon = (p: IconProps) => (
     <path d="M3 8h10M9 4l4 4-4 4" />
   </Svg>
 )
+
+export const ProgramsIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="3.5" cy="3.5" r="1.5" />
+    <circle cx="8" cy="8" r="1.5" />
+    <circle cx="12.5" cy="12.5" r="1.5" />
+    <path d="M3.5 5v1.5a1.5 1.5 0 0 0 1.5 1.5h1.5M8 9.5V11a1.5 1.5 0 0 0 1.5 1.5H11" />
+  </Svg>
+)
+export const MinusIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 8h10" />
+  </Svg>
+)
+export const EditIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m10.5 2.75 2.75 2.75-7.5 7.5H3v-2.75z" />
+  </Svg>
+)
+export const SwapIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5" />
+  </Svg>
+)
+export const CopyIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.25" />
+    <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
+  </Svg>
+)

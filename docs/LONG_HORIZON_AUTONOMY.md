@@ -58,7 +58,9 @@ The engine and its agents never call the power controller. Only the supervisor d
 See PROGRAMS.md, "Restart". A program is rebuilt from its tables; the checkpoint is a record of where it stood,
 not the source of truth. The engine's own state is the current run id and kind on the program row, so a
 restart between two steps resumes at the step that was not finished: a milestone in `VERIFYING` without a run
-is verified again, a milestone `ACTIVE` without a run is made `READY`.
+is verified again; a milestone `ACTIVE` without a run is first checked for a mission whose end was never
+recorded (that end is processed) or that is still running (the program takes it back), and only otherwise
+made `READY`.
 
 ## What stops a program
 

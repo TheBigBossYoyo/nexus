@@ -367,6 +367,31 @@ export class GitService {
     return sha
   }
 
+  /** True when `ancestor` is `descendant` or one of its ancestors. */
+  async isAncestor(repo: string, ancestor: string, descendant: string): Promise<boolean> {
+    this.assertRevision(ancestor, 'revision')
+    this.assertRevision(descendant, 'revision')
+    const r = await this.run(repo, ['merge-base', '--is-ancestor', ancestor, descendant], { okCodes: [0, 1] })
+    return r.exitCode === 0
+  }
+
+  /**
+   * Fast-forwards a branch that is not checked out to `to`. Refused when the branch is checked out in any
+   * worktree (moving it would change what that working tree is on), when `to` does not descend from the
+   * branch's tip (it would drop commits), or when the tip is no longer `from` (somebody else moved it).
+   */
+  async fastForwardBranch(repo: string, branch: string, to: string, from: string): Promise<void> {
+    await this.assertValidBranchName(repo, branch)
+    const target = await this.resolveCommit(repo, to)
+    const current = await this.resolveCommit(repo, `refs/heads/${branch}`)
+    if (current !== from) throw new NexusError('git_failed', `Branch ${branch} is at ${current.slice(0, 10)}, not at ${from.slice(0, 10)}: it was moved outside NEXUS.`)
+    if ((await this.listWorktrees(repo)).some((w) => w.branch === branch)) throw new NexusError('git_failed', `Branch ${branch} is checked out in a working tree; it is not moved.`)
+    if (!(await this.isAncestor(repo, current, target))) throw new NexusError('git_failed', `${target.slice(0, 10)} does not contain the current tip of ${branch}; moving the branch would drop commits.`)
+    if (current === target) return
+    // The old value makes the update fail if the ref changed since it was read.
+    await this.run(repo, ['update-ref', `refs/heads/${branch}`, target, current])
+  }
+
   /** Deletes a branch with `-d`: git refuses when it is not fully merged. */
   async deleteBranch(repo: string, name: string): Promise<void> {
     await this.assertValidBranchName(repo, name)

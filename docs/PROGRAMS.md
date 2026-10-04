@@ -80,10 +80,16 @@ A program has a branch, `nexus/program-<id>`, created at the commit that was che
 started. It is never checked out in the user's working tree.
 
 - The first mission of a milestone starts from the program branch.
-- A retry starts from the previous attempt's result, so it continues that work.
-- Only an accepted milestone moves the program branch (to the mission's result commit).
+- A retry starts from the previous attempt's result, so it continues that work, but only when that result
+  contains everything accepted so far. If other milestones were accepted in between (a revision reordered the
+  roadmap), the retry starts from the program branch and is told that the earlier attempt's work is not there.
+- Only an accepted milestone moves the program branch, and only forward: the result must contain the branch's
+  current tip. The move is a compare-and-swap. It is refused, and the program is blocked with the reason, when
+  the result does not descend from the tip, when the branch was moved outside NEXUS, or when the branch is
+  checked out in a working tree.
 
-The user's checkout and branches are not touched. To use the result, merge the program branch.
+The user's checkout and branches are not touched. To use the result, merge the program branch. Do not check
+the program branch out or commit to it while the program is running; NEXUS will then refuse to move it.
 
 ## Milestone verification
 
@@ -96,13 +102,17 @@ Deterministic gates first:
 | `mission_completed` | The mission run is `completed` |
 | `checks_passed` | The last check run on the integration branch passed (or no check command is configured, which the gate says) |
 | `mission_verified` | The mission-level verifier passed, when the mission had one |
-| `no_blocking_findings` | No task review is left requesting changes |
+| `no_blocking_findings` | No review requests changes on a task that is not finished |
+| `result_readable` | Added, as a failure, when the mission has a result branch whose commit cannot be read |
 | `changes_present` | The mission changed at least one file. Recorded, not blocking |
+| `criteria_judged` | Added after the judgment: it lists at least as many criteria as the milestone has |
 
 A failed blocking gate rejects the milestone without a verifier session. Otherwise a verifier session receives
 the milestone, its criteria, the gates, the mission's recorded evidence and the diff, and returns a judgment:
 a verdict, each criterion with evidence, the gaps, and optional backlog and memory proposals. `accepted` with
-an unmet criterion is treated as `rejected`. A judgment that cannot be read is asked for once more; after that
+an unmet criterion is treated as `rejected`, and so is a judgment that lists fewer criteria than the milestone
+has. The engine checks the count, not the wording: it does not prove that each listed criterion is the
+milestone's own. A judgment that cannot be read is asked for once more; after that
 the program is `BLOCKED` and the milestone stays in `VERIFYING`. A milestone is never accepted without a
 judgment. The evidence (gates, judgment, verdict, result commit) is stored on the milestone.
 
@@ -113,8 +123,10 @@ diff (clipped at 12 KB) and as the recorded evidence.
 
 After an accepted milestone (when milestones remain), a rejected one, a failed mission, or a milestone that
 used all its missions. The reassessment may keep the plan, or return every remaining milestone as it should be
-from now on: added, split, reordered, changed, deferred or dropped. Completed milestones are fixed and their
-keys cannot be reused.
+from now on: added, split, reordered, changed, deferred or dropped. Completed milestones are fixed. The key of
+a completed or cancelled milestone cannot be reused, a milestone cannot depend on a cancelled one, and a
+revision must keep at least one milestone to work on (a program is ended by cancelling it, not by an empty
+plan). A deferred milestone can be brought back under its key.
 
 The user can ask for a reassessment at any time (`program.replan`, "Reassess plan" on the program page) with a
 note saying what should change. It happens at the next point where no run is in flight, before the next
@@ -141,8 +153,11 @@ open item with the same title is not stored twice.
 Durable facts worth keeping across milestones: architecture decisions, rejected approaches, hazards,
 performance baselines, interfaces, security constraints, important failures, user decisions. Entries come from
 milestone verification and are validated before they are stored. Refused: anything that looks like a
-transcript, an instruction addressed to a later agent, an entry whose evidence only repeats it, and a
-duplicate.
+transcript, an entry whose evidence only repeats it, a duplicate, and text that matches a list of patterns
+for instructions and command lines (in the title, the content, the evidence or the tags). The pattern list
+catches the obvious cases; it is not a guarantee. The second line of defence is that every stored entry, the
+gaps of a rejected attempt and the approach note reach a mission prompt as quoted data under a line saying
+they are not instructions, and every `<` inside quoted data is escaped so the text cannot close its block.
 
 A mission does not receive the memory. It receives at most six entries relevant to its milestone, selected by
 shared words in title, tags and content and weighted by kind (`selectMemory`). Which entries were selected,
@@ -180,6 +195,9 @@ normal Agent SDK sessions.
 | Balanced | first plan | wait | 30, 3 per milestone | ADAPTIVE |
 | Autonomous | none | wait | 100, 4 per milestone | ADAPTIVE, speculation allowed |
 
+When a program ends as `COMPLETED`, its outcome counts every milestone that was ever planned and says how many
+were cancelled or deferred by revisions.
+
 A budget that runs out blocks the program with the reason. Resuming a blocked program gives its blocked
 milestones another round of attempts.
 
@@ -187,6 +205,11 @@ An error inside the engine blocks the program with the error as the reason. A pr
 busy while nothing drives it.
 
 ## Restart
+
+A run is created before the program row records it. If NEXUS stops in between, the next start finds the
+marker written just before the creation and cancels the run nobody recorded, so two runs never work for one
+program. A mission that ran to its end while NEXUS was stopped, or whose end was not recorded, is picked up:
+its result is verified, and it is not run again.
 
 Runs that were active are paused by the orchestrator at startup. A program on the Conservative preset, or one
 that asks for approval of every plan, is paused with the reason `restart` and waits for the user. Any other
@@ -210,6 +233,8 @@ again.
 
 - One mission at a time per program.
 - The milestone verifier judges from the diff and the recorded evidence; it does not run the result.
+- A mission run the user cancels counts as a failed mission of its milestone.
+- The retry counter of an unreadable answer is kept in memory; a restart gives one more retry.
 - Program reasoning sessions return JSON as text. An answer that does not parse is retried once.
 - The reassessment after every milestone costs one session per milestone.
 - A program's result stays on its branch. NEXUS does not merge it into the user's branch.

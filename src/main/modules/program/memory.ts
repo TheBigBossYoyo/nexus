@@ -74,6 +74,15 @@ export function selectMemory(entries: readonly ProgramMemoryEntry[], milestone: 
     .slice(0, limit)
 }
 
+const INSTRUCTION_PATTERNS: readonly RegExp[] = [
+  /\b(ignore|disregard|forget|override)\b[^.\n]{0,40}\b(instruction|instructions|rules|prompt|constraints|criteria)\b/i,
+  /\b(you must now|from now on|in every (later|future|following) (mission|milestone|task)|always (run|execute|call|add|include)|before (each|every) (mission|task|commit))\b/i,
+  /\bsystem prompt\b/i,
+  /\b(curl|wget|invoke-webrequest|iwr)\b[^\n]{0,200}\|\s*(sh|bash|iex|powershell)/i,
+  /\b(rm\s+-rf|shutdown(\.exe)?\s+\/|format\s+[a-z]:|del\s+\/[sq]|powershell(\.exe)?\s+-e(nc|ncodedcommand)?\b)/i,
+  /\b(api[_ -]?key|password|secret|token)\b[^\n]{0,40}\b(send|post|upload|exfiltrate)\b/i,
+]
+
 export type MemoryRejection = 'transcript' | 'no_evidence' | 'duplicate' | 'instruction'
 
 /**
@@ -85,7 +94,11 @@ export function validateMemory(proposal: MemoryProposal, existing: readonly Prog
   const content = proposal.content
   const speakerTurns = (content.match(/^(user|assistant|human|agent|claude)\s*:/gim) ?? []).length
   if (speakerTurns >= 2 || content.split('\n').length > 25) return 'transcript'
-  if (/\b(ignore (all|any|the|previous)|disregard (all|the|previous)|you must now|system prompt|shutdown \/|rm -rf)\b/i.test(`${proposal.title} ${content}`)) return 'instruction'
+  // A memory is a statement about the project. Text addressed to a later agent, or a command line to run, is
+  // refused wherever it appears. This is a filter for the obvious cases, not a guarantee: the mission prompt
+  // also quotes every stored entry as data.
+  const everything = [proposal.title, content, proposal.evidence, ...proposal.tags].join('\n')
+  if (INSTRUCTION_PATTERNS.some((pattern) => pattern.test(everything))) return 'instruction'
   const evidence = proposal.evidence.trim().toLowerCase()
   if (evidence.length < 8 || evidence === content.trim().toLowerCase() || evidence === proposal.title.trim().toLowerCase()) return 'no_evidence'
   const title = proposal.title.trim().toLowerCase()
