@@ -99,7 +99,11 @@ describe('scenario: Overnight quota wait with probing', () => {
     expect(h.runtime.usage.probes).toBe(1)
     let record = o.record(run.id)
     expect(record.state).toBe('QUOTA_PAUSED')
-    expect(Date.parse(record.quota?.resumeAt ?? '') - o.now()).toBe(5 * MINUTE) // the past reset continues on the backoff schedule
+    // The past reset continues on the backoff schedule: five minutes after the failed probe. The harness
+    // clock is real time plus an offset, so the few milliseconds the probe took are allowed for.
+    const untilResume = Date.parse(record.quota?.resumeAt ?? '') - o.now()
+    expect(untilResume).toBeLessThanOrEqual(5 * MINUTE)
+    expect(untilResume).toBeGreaterThan(5 * MINUTE - 5000)
     expect(o.power.calls).toHaveLength(callsBefore) // a temporary window never triggers the power action
     expect(rowsOf(run.id)[0]).toMatchObject({ state: 'waiting', probes: 1 })
 
