@@ -48,7 +48,7 @@ const env = { ...process.env, NEXUS_DATA_DIR: dataDir }
 delete env.NEXUS_FAKE_RUNTIME
 const app = await electron.launch(exe ? { executablePath: exe, env } : { args: ['.'], cwd: root, env })
 const page = await app.firstWindow()
-await page.waitForSelector('[data-testid="open-project"]', { timeout: 30_000 })
+await page.waitForSelector('[data-testid="app-shell"]', { timeout: 30_000 })
 const call = async (channel, input = {}) => {
   const result = await page.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
   if (!result.ok) throw new Error(`${channel}: ${result.error.code} ${result.error.message}`)
