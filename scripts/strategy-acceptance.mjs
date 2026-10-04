@@ -124,7 +124,7 @@ try {
     runError: detail.run.error,
     strategy: detail.run.config.strategy,
     tasks: detail.tasks.map((t) => ({ key: t.key, role: t.role, kind: t.kind, state: t.state, attempt: t.attempt, repairCycles: t.repairCycles })),
-    sessions: sessions.map(({ handoff, ...s }) => s),
+    sessions: sessions.map(({ handoff: _handoff, ...s }) => s),
     resolvedModels: routing.map((r) => ({ role: r.role, purpose: r.purpose, task: taskKey(r.taskId), requestedPolicy: r.requestedPolicy, tier: r.resolvedTier, model: r.resolvedModel, reasons: r.reasons })),
     reviews: reviews.map((r) => ({ task: taskKey(r.taskId), verdict: r.verdict, findings: r.findings.length, summary: r.summary.slice(0, 300) })),
     verifications: verifications.map((v) => ({ task: taskKey(v.taskId) ?? '(mission)', kind: v.kind, passed: v.passed, summary: v.summary.slice(0, 300) })),
