@@ -47,6 +47,7 @@ describe('decide: evidence override', () => {
     expect(d.reason).toContain('11 of 20')
     expect(d.reason).toContain('SWARM averaged 1.8x the sessions of BUILD')
     expect(d.reason).toContain('Evidence: MODERATE')
+    expect(d.reason).not.toContain('Evidence: WEAK')
     expect(d.reason).not.toMatch(/\d+\.\d{2,}%/)
     expect(d.evidenceContextKey).toBe(CTX)
     expect(d.evidenceSummary.map((r) => r.strategy).sort()).toEqual(['BUILD', 'SWARM'])
@@ -93,8 +94,8 @@ describe('decide: suppression', () => {
     expect(d.reason).toContain('BUILD is suppressed')
   })
 
-  it('two stability failures suppress a strategy', () => {
-    const stats = statsFor(CTX, { BUILD: { pass: 6, fail: 0, crashed: 2 } })
+  it('a majority of stability failures (at least two) suppresses a strategy', () => {
+    const stats = statsFor(CTX, { BUILD: { pass: 1, fail: 0, crashed: 3 } })
     const d = decide(decideInput(CTX, { stats }))
     expect(d.strategy).not.toBe('BUILD')
   })

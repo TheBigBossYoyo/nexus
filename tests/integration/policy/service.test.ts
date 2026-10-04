@@ -59,7 +59,7 @@ function setup() {
       const trial = repos.arenaTrials.insert({
         id: newId(),
         campaignId: campaign.id,
-        caseId: 'case',
+        caseId: `case-${ordinal % 5}`,
         caseVersionId: 'cv',
         strategy,
         repetition: ordinal,
@@ -74,6 +74,7 @@ function setup() {
         taskProfileId: profile.id,
         models: {},
         detail: null,
+        blockKind: null,
         createdAt: new Date(NOW).toISOString(),
         startedAt: null,
         finishedAt: new Date(NOW - 1000).toISOString(),
@@ -464,5 +465,99 @@ describe('policy service: mission outcomes', () => {
     expect(stats.map((s) => `${s.strategy}/${s.kind}`)).toEqual(['BUILD/mission'])
     expect(stats[0]).toMatchObject({ n: 1, effectiveN: 0.5 })
     expect(env.service.overview().evidence.missions).toBe(1)
+  })
+})
+
+describe('policy service: audit regressions', () => {
+  it('does not re-propose a rejected candidate until the challenger has five more Arena trials', () => {
+    const { service, seedStrongSwarm, addTrials } = setup()
+    seedStrongSwarm()
+    const cand = service.learn().candidates.find((c) => c.contextKey === CTX)!
+    service.reject(cand.id)
+    const again = service.learn()
+    expect(again.candidates.filter((c) => c.contextKey === CTX)).toEqual([])
+    expect(again.notes.join(' ')).toContain('was rejected on this policy')
+    addTrials(CTX, 'SWARM', 4, 0)
+    expect(service.learn().candidates.filter((c) => c.contextKey === CTX)).toEqual([])
+    addTrials(CTX, 'SWARM', 1, 0)
+    const back = service.learn().candidates.filter((c) => c.contextKey === CTX)
+    expect(back).toHaveLength(1)
+    expect(back[0]!.id).not.toBe(cand.id)
+  })
+
+  it('learn judges against the head, not a pinned snapshot, and promote refuses a stale candidate', () => {
+    const { service, seedStrongSwarm } = setup()
+    const v1 = service.ensureDefault()
+    seedStrongSwarm()
+    service.pin(v1.id)
+    service.setConfig({ exploration: 'off' }) // head moves to a new snapshot while v1 stays pinned
+    const head = service.pointer().activeId
+    expect(head).not.toBe(v1.id)
+    const cand = service.learn().candidates.find((c) => c.contextKey === CTX)!
+    expect(cand.baseSnapshotId).toBe(head)
+    // The head moves again after the candidate was proposed: the candidate is now stale.
+    service.setConfig({ exploration: 'balanced' })
+    expect(() => service.promote(cand.id)).toThrow(/stale candidate: run learn again/)
+    const fresh = service.learn()
+    expect(fresh.candidates.find((c) => c.id === cand.id)).toBeUndefined()
+    const next = fresh.candidates.find((c) => c.contextKey === CTX)!
+    expect(next.baseSnapshotId).toBe(service.pointer().activeId)
+    expect(() => service.promote(next.id)).not.toThrow()
+  })
+
+  it('an orphan Arena run (named by its strategy info, no trial row) is not counted as a mission', () => {
+    const env = setup()
+    const run = env.repos.runs.insert(makeRun(env.project.id, { state: 'completed', startedAt: new Date(NOW - 1000).toISOString(), finishedAt: new Date(NOW).toISOString() }))
+    const decided = env.service.decideForRun({ project: env.project, prompt: 'x', runId: run.id, preset: 'balanced', requested: 'BUILD', user: USER, arenaTrialId: 'gone-trial' })
+    env.repos.runs.update(run.id, { config: { ...run.config, strategy: decided.info } })
+    expect(env.service.recordOutcome(run.id)).toMatchObject({ isArena: true })
+    expect(env.repos.missionOutcomes.countMissions()).toBe(0)
+  })
+
+  it('a blocked run that later completes is one outcome, and only the later state counts', () => {
+    const env = setup()
+    const run = env.repos.runs.insert(makeRun(env.project.id, { state: 'executing', startedAt: new Date(NOW - 1000).toISOString() }))
+    const decided = env.service.decideForRun({ project: env.project, prompt: 'x', runId: run.id, preset: 'balanced', requested: 'BUILD', user: USER })
+    env.repos.runs.update(run.id, { state: 'paused', pauseReason: 'user', config: { ...run.config, strategy: decided.info } })
+    env.repos.events.insert({ runId: run.id, type: 'run.paused', payload: { reason: 'user', cause: 'intervention' } })
+    expect(env.service.recordOutcome(run.id)?.terminal).toBe('blocked')
+    env.repos.runs.update(run.id, { state: 'completed', finishedAt: new Date(NOW).toISOString() })
+    expect(env.service.recordOutcome(run.id)?.terminal).toBe('completed')
+    expect(env.repos.missionOutcomes.countMissions()).toBe(1)
+    env.service.learn()
+    const stats = env.repos.strategyStatistics.list().filter((s) => s.contextKey === CTX && s.kind === 'mission')
+    expect(stats[0]).toMatchObject({ n: 1, successes: 1, stabilityFailures: 0 })
+  })
+
+  it('treats an unreadable usage service as unavailable and says so', () => {
+    const { repos, project } = setup()
+    const service = new PolicyService({
+      repos,
+      nexusVersion: 'x',
+      seed: () => 1,
+      usage: {
+        status: () => {
+          throw new Error('boom')
+        },
+        recentLimitWithin: () => false,
+      },
+    })
+    service.setConfig({ exploration: 'off' })
+    const r = service.decideForRun({ project, prompt: 'Add a thing', runId: 'u1', preset: 'balanced', requested: 'ADAPTIVE', user: USER })
+    expect(r.decision?.usageStatus).toBe('RUNTIME_UNAVAILABLE')
+    expect(r.decision?.resourceNotes.join(' ')).toContain('could not be read')
+    expect(r.decision?.strategy).not.toBe('SWARM')
+    expect(r.decision?.strategy).not.toBe('SPECULATIVE')
+  })
+
+  it('evidence statistics carry distinct case counts and exclude harness-blocked trials', () => {
+    const { service, repos, addTrials } = setup()
+    addTrials(CTX, 'BUILD', 6, 0)
+    const trial = repos.arenaTrials.listFinishedSince(new Date(0).toISOString())[0]!
+    repos.arenaTrials.insert({ ...trial, id: newId(), repetition: 99, ordinal: 99, state: 'blocked', blockKind: 'infrastructure', caseId: 'infra-case' })
+    service.learn()
+    const row = repos.strategyStatistics.list().find((s) => s.contextKey === CTX && s.strategy === 'BUILD' && s.kind === 'arena')!
+    expect(row.n).toBe(6)
+    expect(row.distinctUnits).toBe(5)
   })
 })

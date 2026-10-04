@@ -81,13 +81,43 @@ describe('candidate tournament', () => {
     expect(result.comparisons[0]?.criterion).toContain('label')
   })
 
-  it('does not let an unmeasured value win or lose a rule', () => {
-    const result = rankCandidates([
+  it('places a value that was not measured after every measured one, and never above a known pass', () => {
+    const sized = rankCandidates([
       { label: 'a', evidence: evidence({ linesChanged: null, filesChanged: null }) },
       { label: 'b', evidence: evidence({ linesChanged: 5, filesChanged: 1 }) },
     ])
-    expect(result.winner).toBe('a')
-    expect(result.comparisons[0]?.criterion).toContain('label')
+    expect(sized.winner).toBe('b')
+    expect(sized.confidence).toBe('marginal')
+
+    // Checks not measured sits between passed and failed.
+    const checks = rankCandidates([
+      { label: 'a', evidence: evidence({ checksPassed: null, checksFailedCount: null }) },
+      { label: 'b', evidence: evidence({ checksPassed: false, checksFailedCount: 1 }) },
+      { label: 'c', evidence: evidence({ checksPassed: true }) },
+    ])
+    expect(checks.ranking).toEqual(['c', 'a', 'b'])
+  })
+
+  it('is a total order: the winner never depends on the order candidates are given in', () => {
+    // The case an audit found: with "not measured" treated as a tie, a candidate whose checks FAILED could win.
+    const entries = [
+      { label: 'a', evidence: evidence({ checksPassed: true, linesChanged: 100 }) },
+      { label: 'b', evidence: evidence({ checksPassed: null, checksFailedCount: null, linesChanged: 10 }) },
+      { label: 'c', evidence: evidence({ checksPassed: false, checksFailedCount: 1, linesChanged: 5 }) },
+    ]
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ]
+    for (const order of orders) {
+      const result = rankCandidates(order.map((i) => entries[i]!))
+      expect(result.ranking, order.join('')).toEqual(['a', 'b', 'c'])
+      expect(result.confidence).toBe('decisive')
+    }
   })
 
   it('ranks three candidates consistently and is independent of input order', () => {

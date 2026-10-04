@@ -137,4 +137,28 @@ describe('policy simulator scenarios', () => {
     expect(trace.steps[trace.steps.length - 1]!.strategy).toBe('SWARM')
     expect(trace.steps[0]!.strategy).toBe('BUILD')
   })
+
+  it('harness-blocked trials never suppress a strategy or count as failures', () => {
+    const world: SimWorld = { contexts: [{ contextKey: CTX, truth: { BUILD: truth(0.7), SWARM: { ...truth(0.9), infraRate: 1 } } }] }
+    const sim = new PolicySimulator(17, world, 'research')
+    for (let i = 0; i < 10; i++) sim.arenaTrial(CTX, 'SWARM')
+    for (let i = 0; i < 8; i++) sim.arenaTrial(CTX, 'BUILD')
+    sim.learn()
+    expect(sim.stats.some((r) => r.strategy === 'SWARM')).toBe(false)
+    let swarm = false
+    for (let i = 0; i < 300 && !swarm; i++) swarm = sim.decideFor(CTX).strategy === 'SWARM'
+    expect(swarm).toBe(true) // still reachable by exploration: nothing suppressed it
+  })
+
+  it('a strong strategy in one context does not borrow evidence from repetitions of a single case', () => {
+    const world: SimWorld = { contexts: [{ contextKey: CTX, cases: 1, truth: { BUILD: truth(0.4), SWARM: truth(0.95) } }] }
+    const sim = new PolicySimulator(23, world, 'off')
+    for (let i = 0; i < 40; i++) {
+      sim.arenaTrial(CTX, 'BUILD')
+      sim.arenaTrial(CTX, 'SWARM')
+    }
+    const { candidates, notes } = sim.learn()
+    expect(candidates).toEqual([])
+    expect(notes.join(' ')).toContain('evidence comes from 1 case')
+  })
 })

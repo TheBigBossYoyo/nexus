@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { completeWith, scriptsByRole, type FakeScript } from '@main/modules/agent-runtime/fake-runtime'
+import { runProcess } from '@main/modules/process'
 import { approvedReview, createHarness, git, passedVerification, plan, plannedTask, writeFiles, type Harness } from './harness'
 
 /** Exits 0 only when answer.txt holds the right answer: the objective check a tournament decides on. */
@@ -113,7 +115,7 @@ describe('v0.3 strategies', () => {
     expect(done.state).toBe('completed')
 
     const [spec] = h.repos.speculativeRuns.listByRun(run.id)
-    expect(spec).toMatchObject({ state: 'decided', candidateCount: 2 })
+    expect(spec).toMatchObject({ candidateCount: 2 })
     const candidates = h.repos.candidateResults.listBySpeculativeRun(spec!.id)
     expect(candidates.map((c) => [c.label, c.outcome, c.rank, c.evidence.checksPassed])).toEqual([
       ['a', 'rejected', 2, false],
@@ -124,6 +126,7 @@ describe('v0.3 strategies', () => {
     expect(new Set(candidates.map((c) => c.worktreePath)).size).toBe(2)
     expect(new Set(candidates.map((c) => c.branch)).size).toBe(2)
     expect(spec!.baseCommit).toMatch(/^[0-9a-f]{40}$/)
+    expect(spec!.state).toBe('adopted')
 
     // Same task, same criteria; a prompt names only the candidate's own worktree.
     const [promptA, promptB] = [prompts.get('a')!, prompts.get('b')!]
@@ -149,6 +152,7 @@ describe('v0.3 strategies', () => {
     expect(a.cleanedAt).not.toBeNull()
     expect(b.cleanedAt).not.toBeNull()
     for (const c of candidates) expect(existsSync(c.worktreePath)).toBe(false)
+    // Candidates were clones: the user's repository never had a branch for them.
     const branches = await git(h.repoDir, 'branch', '--list', 'nexus/*')
     expect(branches).not.toContain('-cand-')
 
@@ -177,7 +181,7 @@ describe('v0.3 strategies', () => {
     const done = await h.waitForState(run.id, ['completed', 'failed', 'paused'])
     expect(done.state).toBe('completed')
     const [spec] = h.repos.speculativeRuns.listByRun(run.id)
-    expect(spec?.state).toBe('decided')
+    expect(spec?.state).toBe('adopted')
     expect(h.repos.tournamentDecisions.getBySpeculativeRun(spec!.id)?.confidence).toBe('marginal')
     expect(h.repos.tasks.listByRun(run.id).filter((t) => t.parentTaskId !== null)).toHaveLength(1)
     expect(readFileSync(join(h.integration(run.id).path, 'answer.txt'), 'utf8').trim()).toBe('right')
@@ -233,6 +237,147 @@ describe('v0.3 strategies', () => {
     expect(bRuns[1]?.resumeSessionId).toBe(h.repos.sessions.listByAgent(bSession!)[0]?.sdkSessionId)
     expect(h.task(run.id, 'implement').attempt).toBe(1)
     expect(readFileSync(join(h.integration(run.id).path, 'answer.txt'), 'utf8').trim()).toBe('right')
+  })
+
+  it('SPECULATIVE: a candidate cannot see another candidate through Git, and a message reaches every candidate', async () => {
+    const seen: Record<string, { branches: string; otherCommitVisible: boolean; remotes: string }> = {}
+    const instructions: Record<string, string[]> = { a: [], b: [] }
+    let aHead: string | null = null
+    let release = false
+    const gitIn = async (cwd: string, ...args: string[]) => runProcess('git', args, { cwd })
+    const worker: FakeScript = async (spec, ctx) => {
+      const label = candidateOf(spec.cwd) as 'a' | 'b'
+      if (label === 'a') {
+        // Candidate a commits its work early, so there is something for b to look for.
+        await writeFiles(spec, ctx, { 'answer.txt': 'wrong' })
+        await gitIn(spec.cwd, 'add', '-A')
+        await gitIn(spec.cwd, '-c', 'user.name=a', '-c', 'user.email=a@example.com', 'commit', '-q', '-m', 'candidate a work')
+        aHead = (await gitIn(spec.cwd, 'rev-parse', 'HEAD')).stdout.trim()
+      } else {
+        while (aHead === null) await ctx.sleep(20)
+        // Everything an agent could ask Git: all branches, all remotes, and the other candidate's commit itself.
+        seen['b'] = {
+          branches: (await gitIn(spec.cwd, 'branch', '-a', '--format=%(refname)')).stdout,
+          remotes: (await gitIn(spec.cwd, 'remote', '-v')).stdout,
+          otherCommitVisible: (await gitIn(spec.cwd, 'cat-file', '-e', `${aHead}^{commit}`)).exitCode === 0,
+        }
+        await writeFiles(spec, ctx, { 'answer.txt': 'right' })
+      }
+      // Both wait for the user's instruction, which must reach each of them.
+      while (!release) {
+        await ctx.sleep(20)
+        if (ctx.signal.aborted) return
+      }
+      const message = await ctx.nextMessage()
+      if (message) instructions[label]!.push(message)
+      await ctx.completeTurn({ text: `Candidate ${label} finished` })
+    }
+    h = await createHarness({ script: scriptsByRole({ worker, reviewer, verifier }), files: { 'check.mjs': CHECK_SCRIPT }, commands: { test: 'node check.mjs' } })
+    const run = await h.orchestrator.createRun({ projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'Answer', strategy: 'SPECULATIVE' })
+    await h.waitFor(() => seen['b'] !== undefined, 'candidate b to have inspected its repository')
+    await h.orchestrator.instruct(h.task(run.id, 'implement').id, 'Use lower case.')
+    release = true
+    expect((await h.waitForState(run.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+
+    // Candidate b's repository holds no branch, remote or object of candidate a.
+    expect(seen['b']!.branches).not.toContain('-cand-a')
+    // Its only branches are the project's checked-out branch and its own.
+    expect(seen['b']!.branches.trim().split('\n').sort()).toEqual(['refs/heads/main', expect.stringMatching(/-cand-b$/)])
+    expect(seen['b']!.remotes.trim()).toBe('')
+    expect(seen['b']!.otherCommitVisible).toBe(false)
+    // The same instruction reached both candidates.
+    expect(instructions['a']!.join(' ')).toContain('Use lower case.')
+    expect(instructions['b']!.join(' ')).toContain('Use lower case.')
+    // No candidate branch ever existed in the user's repository.
+    expect(await git(h.repoDir, 'branch', '--list', 'nexus/*-cand-*')).toBe('')
+  })
+
+  it('SPECULATIVE: a pause after the LAST candidate finished still runs the tournament (never checks the empty task worktree)', async () => {
+    let stall = true
+    const stalled = new Set<string>()
+    const worker: FakeScript = async (spec, ctx) => {
+      const label = candidateOf(spec.cwd)
+      // The inverse of the previous scenario: the candidate created first is the one still working.
+      if (label === 'a' && stall) {
+        stalled.add('a')
+        await ctx.sleep(120_000)
+        if (ctx.signal.aborted) return
+      }
+      await writeFiles(spec, ctx, { 'answer.txt': label === 'a' ? 'wrong' : 'right' })
+      await ctx.completeTurn({ text: `Candidate ${label ?? '?'} finished` })
+    }
+    h = await createHarness({ script: scriptsByRole({ worker, reviewer, verifier }), files: { 'check.mjs': CHECK_SCRIPT }, commands: { test: 'node check.mjs' } })
+    const run = await h.orchestrator.createRun({ projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'Answer', strategy: 'SPECULATIVE' })
+    await h.waitFor(() => stalled.has('a'), 'candidate a to be working')
+    await h.waitFor(() => h.repos.candidateResults.listByRun(run.id).some((c) => c.label === 'b' && c.headCommit !== null), 'candidate b to finish')
+    await h.orchestrator.pauseRun(run.id)
+    expect(h.pipelineStage(h.task(run.id, 'implement'))).toBe('implement')
+
+    stall = false
+    await h.orchestrator.resumeRun(run.id)
+    const done = await h.waitForState(run.id, ['completed', 'failed', 'paused'])
+    expect(done.state).toBe('completed')
+    const [spec] = h.repos.speculativeRuns.listByRun(run.id)
+    expect(spec?.state).toBe('adopted')
+    expect(h.repos.tournamentDecisions.getBySpeculativeRun(spec!.id)).toMatchObject({ winnerLabel: 'b', confidence: 'decisive' })
+    // No repair was needed: the checks never ran on an empty worktree.
+    expect(h.repos.tasks.listByRun(run.id).filter((t) => t.parentTaskId !== null)).toEqual([])
+    expect(readFileSync(join(h.integration(run.id).path, 'answer.txt'), 'utf8').trim()).toBe('right')
+    for (const c of h.repos.candidateResults.listBySpeculativeRun(spec!.id)) expect(existsSync(c.worktreePath)).toBe(false)
+  })
+
+  it('SPECULATIVE: a restart after the tournament but before adoption adopts the stored winner', async () => {
+    const worker: FakeScript = async (spec, ctx) => {
+      await writeFiles(spec, ctx, { 'answer.txt': candidateOf(spec.cwd) === 'a' ? 'wrong' : 'right' })
+      await ctx.completeTurn({ text: 'finished' })
+    }
+    const script = scriptsByRole({ worker, reviewer: async (_s, ctx) => ctx.sleep(120_000), verifier })
+    h = await createHarness({ script, files: { 'check.mjs': CHECK_SCRIPT }, commands: { test: 'node check.mjs' } })
+    const run = await h.orchestrator.createRun({ projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'Answer', strategy: 'SPECULATIVE' })
+    await h.waitFor(() => h.repos.speculativeRuns.listByRun(run.id)[0]?.state === 'adopted', 'the winner to be adopted')
+    await h.orchestrator.pauseRun(run.id)
+    const [spec] = h.repos.speculativeRuns.listByRun(run.id)
+    const winner = h.repos.candidateResults.get(spec!.winnerCandidateId!)!
+    // Put the durable state back to "decided, not yet adopted", as a crash right after the tournament leaves it:
+    // the task worktree at its base commit, the winner's repository still there.
+    const task = h.task(run.id, 'implement')
+    const worktree = h.repos.worktrees.get(task.worktreeId!)!
+    await git(worktree.path, 'reset', '--hard', spec!.baseCommit)
+    h.repos.speculativeRuns.update(spec!.id, { state: 'decided', finishedAt: null })
+    await git(h.repoDir, 'clone', '--quiet', '--no-hardlinks', '--no-checkout', h.repoDir, winner.worktreePath)
+    await git(winner.worktreePath, 'checkout', '--quiet', '-B', winner.branch, spec!.baseCommit)
+    await writeFile(join(winner.worktreePath, 'answer.txt'), 'right\n')
+    await git(winner.worktreePath, 'add', '-A')
+    await git(winner.worktreePath, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'winner')
+    h.repos.candidateResults.update(winner.id, { headCommit: await git(winner.worktreePath, 'rev-parse', 'HEAD'), cleanedAt: null })
+
+    h = await h.restart(scriptsByRole({ worker, reviewer, verifier }))
+    h.orchestrator.recoverOnStartup()
+    await h.orchestrator.recover(run.id, 'resume')
+    expect((await h.waitForState(run.id, ['completed', 'failed'])).state).toBe('completed')
+    expect(h.repos.speculativeRuns.listByRun(run.id).map((s) => s.state)).toEqual(['adopted'])
+    // The stored winner was adopted; no candidate was run again and nothing was re-implemented.
+    expect(h.runtime.sessions.filter((s) => s.role === 'worker')).toEqual([])
+    expect(readFileSync(join(h.integration(run.id).path, 'answer.txt'), 'utf8').trim()).toBe('right')
+    expect(existsSync(winner.worktreePath)).toBe(false)
+  })
+
+  it('SPECULATIVE: cancelling the run removes the candidate repositories', async () => {
+    const started = new Set<string>()
+    const worker: FakeScript = async (spec, ctx) => {
+      started.add(candidateOf(spec.cwd) ?? '?')
+      await ctx.sleep(120_000)
+    }
+    h = await createHarness({ script: scriptsByRole({ worker, reviewer, verifier }) })
+    const run = await h.orchestrator.createRun({ projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'Answer', strategy: 'SPECULATIVE' })
+    await h.waitFor(() => started.size === 2, 'both candidates to be working')
+    const paths = h.repos.candidateResults.listByRun(run.id).map((c) => c.worktreePath)
+    expect(paths.every((p) => existsSync(p))).toBe(true)
+    await h.orchestrator.cancelRun(run.id)
+    await h.orchestrator.idle(run.id)
+    expect(paths.some((p) => existsSync(p))).toBe(false)
+    expect(h.repos.speculativeRuns.listByRun(run.id).map((s) => s.state)).toEqual(['cancelled'])
+    expect(h.repos.candidateResults.listByRun(run.id).every((c) => c.cleanedAt !== null)).toBe(true)
   })
 
   it('SPECULATIVE: if no candidate produces a result the task retries as a normal single implementation', async () => {

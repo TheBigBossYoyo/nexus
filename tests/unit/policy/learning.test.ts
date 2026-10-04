@@ -71,12 +71,14 @@ describe('aggregateEvidence', () => {
     expect(row.effectiveSuccesses).toBeCloseTo(2)
   })
 
-  it('halves the weight when the recorded model differs from the current one', () => {
-    const trials = trialsFor(CTX, { BUILD: { pass: 4, fail: 0, models: { worker: 'claude-sonnet-4' } } })
-    const same = find(agg({ trials, currentModels: { worker: 'sonnet' } }), CTX, 'BUILD', 'arena')!
+  it('halves the weight of evidence recorded with a model that differs from the newest recorded one (exact ids)', () => {
+    const older = trialsFor(CTX, { BUILD: { pass: 4, fail: 0, ageDays: 10, models: { worker: 'claude-sonnet-4' } } }, 'old')
+    const newer = trialsFor(CTX, { BUILD: { pass: 2, fail: 0, models: { worker: 'claude-sonnet-4-5' } } }, 'new')
+    const row = find(agg({ trials: [...older, ...newer] }), CTX, 'BUILD', 'arena')!
+    // Substring-similar ids are different models: the 4 older trials are halved (and slightly decayed by age).
+    expect(row.effectiveN).toBeCloseTo(4 * 0.5 * Math.pow(0.5, 10 / 90) + 2, 3)
+    const same = find(agg({ trials: [...trialsFor(CTX, { BUILD: { pass: 4, fail: 0, models: { worker: 'm1' } } }, 'a')] }), CTX, 'BUILD', 'arena')!
     expect(same.effectiveN).toBeCloseTo(4)
-    const drift = find(agg({ trials, currentModels: { worker: 'opus' } }), CTX, 'BUILD', 'arena')!
-    expect(drift.effectiveN).toBeCloseTo(2)
   })
 
   it('drops evidence older than the window', () => {
@@ -116,7 +118,9 @@ describe('summarize and suppression', () => {
     expect(isSuppressed({ effectiveN: 3, effectiveSuccesses: 0, stabilityFailures: 0 })).toBe(true)
     expect(isSuppressed({ effectiveN: 2.9, effectiveSuccesses: 0, stabilityFailures: 0 })).toBe(false)
     expect(isSuppressed({ effectiveN: 10, effectiveSuccesses: 1, stabilityFailures: 1 })).toBe(false)
-    expect(isSuppressed({ effectiveN: 10, effectiveSuccesses: 9, stabilityFailures: 2 })).toBe(true)
+    expect(isSuppressed({ effectiveN: 10, effectiveSuccesses: 9, stabilityFailures: 2 })).toBe(false) // 2 of 10 is not a majority
+    expect(isSuppressed({ effectiveN: 4, effectiveSuccesses: 1, stabilityFailures: 3 })).toBe(true)
+    expect(isSuppressed({ effectiveN: 4, effectiveSuccesses: 1, stabilityFailures: 1.9 })).toBe(false)
   })
 
   it('old failures decay below the suppression sample size', () => {
@@ -178,7 +182,9 @@ describe('proposeCandidates', () => {
   })
 
   it('does not propose a suppressed or non-eligible challenger', () => {
-    expect(propose({ BUILD: { pass: 2, fail: 14 }, SWARM: { pass: 14, fail: 0, crashed: 2 } }).candidates).toEqual([])
+    const suppressed = propose({ BUILD: { pass: 0, fail: 14 }, SWARM: { pass: 8, fail: 0, crashed: 9 } })
+    expect(suppressed.candidates).toEqual([])
+    expect(suppressed.notes.join(' ')).toContain('suppressed')
     expect(propose({ BUILD: { pass: 10, fail: 10 }, SPECULATIVE: { pass: 29, fail: 1 } }).candidates).toEqual([])
     const allowed = snapshot({}, [], { speculation: 'AUTO' })
     expect(propose({ BUILD: { pass: 10, fail: 10 }, SPECULATIVE: { pass: 29, fail: 1 } }, allowed).candidates).toHaveLength(1)

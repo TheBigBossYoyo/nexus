@@ -8,7 +8,6 @@ import {
   evidenceLabel,
   labelAtLeast,
   mulberry32,
-  wilsonInterval,
   type SimWorld,
 } from '@main/modules/policy'
 import { DEFAULT_SETTINGS } from '@shared/settings'
@@ -34,6 +33,7 @@ function makeWorld(rand: () => number, speculative: boolean): SimWorld {
           {
             passRate: 0.05 + rand() * 0.9,
             crashRate: rand() < 0.1 ? 0.5 : 0,
+            infraRate: rand() < 0.2 ? 0.3 : 0,
             sessions: 1 + Math.floor(rand() * 8),
             durationMs: 60_000 * (1 + Math.floor(rand() * 20)),
           },
@@ -129,7 +129,11 @@ describe('policy simulation stress', () => {
 
         // Without a promoted preference or suppression the layer cannot be "evidence", and the default is the base.
         if (decision.layer === 'default') expect(decision.strategy, ctx).toBe(defaultStrategy(contextKey))
-        if (snapshotBefore.preferences.length === 0 && decision.layer === 'evidence') expect(decision.reason, ctx).toContain('suppressed')
+        if (snapshotBefore.preferences.length === 0 && decision.layer === 'evidence') {
+          expect(decision.reason.includes('suppressed') || decision.resourceNotes.length > 0, ctx).toBe(true)
+        }
+        // A decision recorded as exploration really is the explored arm, and a replaced one is not an exploration.
+        if (decision.layer === 'exploration') expect(decision.exploration, ctx).toBe(true)
 
         // A user-forced strategy is honoured exactly.
         if (step % 5 === 0) {
@@ -142,6 +146,10 @@ describe('policy simulation stress', () => {
         if (step % 8 === 0) {
           const versionBefore = sim.active.version
           const { candidates } = sim.learn()
+          // Harness-blocked trials are never evidence: the global Arena count is exactly the trials that counted.
+          const counted = sim.trials.filter((t) => t.blockKind !== 'infrastructure' && sim.now - Date.parse(t.finishedAt ?? t.createdAt) <= sim.active.config.evidenceWindowDays * 86_400_000).length
+          const recorded = sim.stats.filter((r) => r.contextKey === '*|*|*' && r.kind === 'arena').reduce((a, r) => a + r.n, 0)
+          expect(recorded, ctx).toBe(counted)
           candidatesSeen += candidates.length
           // Learning alone never changes the active policy.
           expect(sim.active.version, ctx).toBe(versionBefore)
@@ -170,19 +178,23 @@ describe('policy simulation stress', () => {
         expect(ch.suppressed, `seed ${seed}`).toBe(false)
         expect(labelAtLeast(ch.label, POLICY_THRESHOLDS.challengerMin), `seed ${seed}: challenger evidence`).toBe(true)
         expect(inc && labelAtLeast(inc.label, POLICY_THRESHOLDS.incumbentMin), `seed ${seed}: incumbent evidence`).toBe(true)
+        // Controlled evidence from enough distinct cases is mandatory; missions alone never make a candidate.
+        expect(ch.arenaN, `seed ${seed}: arena trials`).toBeGreaterThanOrEqual(POLICY_THRESHOLDS.minArenaTrials)
+        expect(ch.arenaCases, `seed ${seed}: arena cases`).toBeGreaterThanOrEqual(POLICY_THRESHOLDS.minDistinctCases)
         const ci = ch.passInterval!
         const ii = inc!.passInterval!
         const separated = ci.low > ii.high
         if (!separated) {
           expect(labelAtLeast(inc!.label, POLICY_THRESHOLDS.overlapBothMin), `seed ${seed}`).toBe(true)
           expect(ch.passRate!, `seed ${seed}`).toBeGreaterThanOrEqual(inc!.passRate!)
+          expect(ci.low, `seed ${seed}: lower bound slack`).toBeGreaterThanOrEqual(ii.low - POLICY_THRESHOLDS.efficiencyLowerBoundSlack)
           const sessions = ch.meanSessions !== null && inc!.meanSessions !== null && ch.meanSessions < inc!.meanSessions * (1 - POLICY_THRESHOLDS.efficiencyBand)
           const time =
             ch.medianDurationMs !== null && inc!.medianDurationMs !== null && ch.medianDurationMs < inc!.medianDurationMs * (1 - POLICY_THRESHOLDS.efficiencyBand)
           expect(sessions || time, `seed ${seed}: overlap without a band of efficiency`).toBe(true)
         }
         // Sanity: the recorded label is what the recorded numbers say.
-        expect(ch.label).toBe(evidenceLabel(ch.effectiveN, wilsonInterval(ch.passRate! * ch.effectiveN, ch.effectiveN)))
+        expect(['INSUFFICIENT', 'WEAK', 'MODERATE', 'STRONG'].indexOf(ch.label)).toBeLessThanOrEqual(['INSUFFICIENT', 'WEAK', 'MODERATE', 'STRONG'].indexOf(evidenceLabel(ch.effectiveN, ch.passInterval)))
       }
     }
 

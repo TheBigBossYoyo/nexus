@@ -64,6 +64,8 @@ export interface Harness {
   eventsOfType<T extends EventType>(runId: string, type: T): RunEvent<T>[]
   /** The run's integration worktree row. */
   integration(runId: string): Worktree
+  /** The stage a paused or recovered task would restart at. */
+  pipelineStage(task: Task): string
   /**
    * Close this app instance and open a new one on the same database and repository. With `crash`
    * the new instance starts from a snapshot of the database taken while the old one was still
@@ -227,6 +229,9 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     },
     eventsOfType<T extends EventType>(runId: string, type: T) {
       return repos.events.listByRun(runId, 0, 100_000).filter((e): e is RunEvent<T> => e.type === type)
+    },
+    pipelineStage(task) {
+      return orchestrator.stageToResume(task)
     },
     integration(runId) {
       const found = repos.worktrees.listByRun(runId).find((w) => w.taskId === null)

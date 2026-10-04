@@ -32,12 +32,16 @@ export interface SimTruth {
   passRate: number
   /** Hidden probability that a run crashes (a stability failure), on top of failing. */
   crashRate?: number
+  /** Hidden probability that the harness (not the strategy) blocks a trial. Such trials are not evidence. */
+  infraRate?: number
   sessions: number
   durationMs: number
 }
 
 export interface SimContext {
   contextKey: string
+  /** Distinct Arena cases this context has (default 4); trials rotate through them. */
+  cases?: number
   /** Relative frequency of this kind of task among simulated missions. */
   weight?: number
   truth: Partial<Record<ConcreteStrategy, SimTruth>>
@@ -139,6 +143,7 @@ export class PolicySimulator {
   private previous: PolicySnapshot | null = null
   private counter = 0
   private arenaCursor = 0
+  private readonly caseCursors = new Map<string, number>()
 
   constructor(
     readonly seed: number,
@@ -174,6 +179,14 @@ export class PolicySimulator {
     return featuresForContext(contextKey)
   }
 
+  /** Rotates each (context, strategy) through the context's cases, so every strategy meets every case. */
+  private nextCase(contextKey: string, strategy: ConcreteStrategy): string {
+    const key = `${contextKey}/${strategy}`
+    const i = this.caseCursors.get(key) ?? 0
+    this.caseCursors.set(key, i + 1)
+    return `case-${contextKey}-${i % (this.world.contexts.find((c) => c.contextKey === contextKey)?.cases ?? 4)}`
+  }
+
   advanceDays(days: number): void {
     this.now += days * DAY_MS
   }
@@ -186,13 +199,16 @@ export class PolicySimulator {
   arenaTrial(contextKey: string, strategy: ConcreteStrategy, at: number = this.now): EvidenceTrial {
     const truth = this.truthOf(contextKey, strategy)
     const crashed = this.rng() < (truth.crashRate ?? 0)
-    const passed = !crashed && this.rng() < truth.passRate
+    const infrastructure = this.rng() < (truth.infraRate ?? 0)
+    const passed = !crashed && !infrastructure && this.rng() < truth.passRate
     const trial = syntheticTrial({
       id: this.nextId('trial'),
       contextKey,
       strategy,
       passed,
-      crashed,
+      crashed: crashed && !infrastructure,
+      infrastructure,
+      caseId: this.nextCase(contextKey, strategy),
       sessions: truth.sessions,
       durationMs: truth.durationMs,
       at,
@@ -393,6 +409,9 @@ export function syntheticTrial(o: {
   strategy: ConcreteStrategy
   passed: boolean
   crashed?: boolean
+  /** Blocked by the harness, not by the strategy: excluded from evidence. */
+  infrastructure?: boolean
+  caseId?: string
   sessions?: number
   durationMs?: number
   repairs?: number
@@ -405,12 +424,13 @@ export function syntheticTrial(o: {
   return {
     id: o.id,
     campaignId: 'sim-campaign',
-    caseId: `case-${o.contextKey}`,
+    caseId: o.caseId ?? `case-${o.contextKey}`,
     caseVersionId: 'sim-case-version',
     strategy: o.strategy,
     repetition: 0,
     ordinal: 0,
-    state: o.crashed ? 'blocked' : o.passed ? 'passed' : 'failed',
+    state: o.crashed || o.infrastructure ? 'blocked' : o.passed ? 'passed' : 'failed',
+    blockKind: o.infrastructure ? 'infrastructure' : o.crashed ? 'run' : null,
     projectId: null,
     runId: null,
     repoPath: null,

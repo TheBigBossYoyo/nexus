@@ -24,17 +24,23 @@ export interface TournamentResult {
 
 interface Rule {
   name: string
-  /** Negative when `a` is better, positive when `b` is, 0 for a tie or when either side was not measured. */
+  /** Negative when `a` is better, positive when `b` is, 0 for a tie. */
   compare(a: CandidateEvidence, b: CandidateEvidence): number
   describe(e: CandidateEvidence): string
   /** Rules about correctness make a decision decisive; size and label are only tie-breakers. */
   correctness: boolean
 }
 
-const flag = (v: boolean | null): number | null => (v === null ? null : v ? 0 : 1)
+/**
+ * Every rule maps a candidate to one number, lower is better, so the rules together are a lexicographic key
+ * and the ranking is a total order whatever the input order. "Not measured" has a fixed place: for a
+ * yes/no rule it sits between yes and no (it is not known to be good, and not known to be bad); for a
+ * count it sorts after every measured count.
+ */
+const flag = (v: boolean | null): number => (v === null ? 0.5 : v ? 0 : 1)
+const amount = (v: number | null): number => (v === null ? Number.POSITIVE_INFINITY : v)
 
-/** Lower is better. A side that was not measured never wins or loses on that rule. */
-const lower = (a: number | null, b: number | null): number => (a === null || b === null ? 0 : a - b)
+const lower = (a: number, b: number): number => (a === b ? 0 : a < b ? -1 : 1)
 
 const yesNo = (v: boolean | null): string => (v === null ? 'not measured' : v ? 'yes' : 'no')
 const count = (v: number | null): string => (v === null ? 'not measured' : String(v))
@@ -61,31 +67,31 @@ export const TOURNAMENT_RULES: readonly Rule[] = [
   },
   {
     name: 'fewer failing check commands',
-    compare: (a, b) => lower(a.checksFailedCount, b.checksFailedCount),
+    compare: (a, b) => lower(amount(a.checksFailedCount), amount(b.checksFailedCount)),
     describe: (e) => count(e.checksFailedCount),
     correctness: true,
   },
   {
     name: 'fewer critical review findings',
-    compare: (a, b) => lower(a.criticalFindings, b.criticalFindings),
+    compare: (a, b) => lower(amount(a.criticalFindings), amount(b.criticalFindings)),
     describe: (e) => count(e.criticalFindings),
     correctness: true,
   },
   {
     name: 'fewer high review findings',
-    compare: (a, b) => lower(a.highFindings, b.highFindings),
+    compare: (a, b) => lower(amount(a.highFindings), amount(b.highFindings)),
     describe: (e) => count(e.highFindings),
     correctness: true,
   },
   {
     name: 'smaller change (lines)',
-    compare: (a, b) => lower(a.linesChanged, b.linesChanged),
+    compare: (a, b) => lower(amount(a.linesChanged), amount(b.linesChanged)),
     describe: (e) => count(e.linesChanged),
     correctness: false,
   },
   {
     name: 'fewer files changed',
-    compare: (a, b) => lower(a.filesChanged, b.filesChanged),
+    compare: (a, b) => lower(amount(a.filesChanged), amount(b.filesChanged)),
     describe: (e) => count(e.filesChanged),
     correctness: false,
   },

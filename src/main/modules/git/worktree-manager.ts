@@ -105,6 +105,18 @@ export class WorktreeManager {
     await rmdir(resolve(path, '..')).catch(() => undefined) // drop the run dir once empty
   }
 
+  /**
+   * Removes a NEXUS-owned directory under the root that is not a registered worktree (a speculative
+   * candidate's clone). Never touches paths outside the root.
+   */
+  async removeDirectory(path: string): Promise<void> {
+    if (!(await isPathInside(path, this.worktreesRoot)) || (await pathKey(path)) === (await pathKey(this.worktreesRoot))) {
+      throw new NexusError('path_violation', `Refusing to remove a directory outside ${this.worktreesRoot}: ${path}`, { path })
+    }
+    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
+    await rmdir(resolve(path, '..')).catch(() => undefined) // drop the run dir once empty
+  }
+
   async findOrphans(repoRoot: string, knownPaths: readonly string[]): Promise<OrphanReport> {
     const registered = await this.git.listWorktrees(repoRoot)
     const known = new Set(await Promise.all(knownPaths.map((p) => pathKey(p))))

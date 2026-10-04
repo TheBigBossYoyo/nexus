@@ -13,7 +13,7 @@ import {
 } from '@shared/v3'
 import { configureStrategy } from '@main/modules/strategy/strategies'
 import { defaultReason, defaultStrategy } from './defaults'
-import { compareSentence, summarize, suppressedStrategies } from './learning'
+import { compareSentence, describeCounts, summarize, suppressedStrategies } from './learning'
 import { preferenceFor } from './snapshots'
 import { mulberry32, sampleBeta } from './stats'
 
@@ -37,6 +37,8 @@ export interface DecideInput {
   settings: Settings
   /** Requested candidate count for SPECULATIVE. */
   candidates?: number
+  /** Why the usage status is what it is, when the caller had to fall back (e.g. the usage service failed). Goes into resourceNotes. */
+  usageNote?: string
   /** A strategy the user forced: skips every other layer. */
   forced?: ConcreteStrategy | null
   /** Decision id and clock, supplied by the caller so the function stays pure. */
@@ -89,6 +91,8 @@ export function decide(input: DecideInput): PolicyDecision {
   let layer: PolicyDecision['layer'] = 'default'
   let exploration = false
   let seed: number | null = null
+  let exploitStrategy: ConcreteStrategy | null = null
+  let exploitLayer: PolicyDecision['layer'] = 'default'
 
   if (input.forced) {
     strategy = input.forced
@@ -124,7 +128,7 @@ export function decide(input: DecideInput): PolicyDecision {
       const was = rowOf(strategy)
       if (replacement) {
         reasons.push(
-          `${strategy} is suppressed (${was ? describe(was) : 'repeated failures'}); using ${replacement} instead.`,
+          `${strategy} is suppressed (${was ? describeCounts(was) : 'repeated failures'}); using ${replacement} instead.`,
         )
         strategy = replacement
         layer = 'evidence'
@@ -133,6 +137,8 @@ export function decide(input: DecideInput): PolicyDecision {
       }
     }
 
+    exploitStrategy = strategy
+    exploitLayer = layer
     // EXPLORATION
     const rate = EXPLORATION_RATES[config.exploration]
     const highRisk = features.risk.value === 'high'
@@ -165,6 +171,8 @@ export function decide(input: DecideInput): PolicyDecision {
   }
 
   // RESOURCE AVAILABILITY
+  if (input.usageNote && !input.forced) resourceNotes.push(input.usageNote)
+  const beforeResource = strategy
   const available = input.usageStatus === 'AVAILABLE' && !input.recentLimit
   if (!input.forced && !available) {
     const why = input.recentLimit ? 'a usage limit was hit within the last hour' : `the usage status is ${input.usageStatus}`
@@ -184,6 +192,14 @@ export function decide(input: DecideInput): PolicyDecision {
         resourceNotes.push(`SWARM could not be deferred: ${why}, but every alternative is suppressed by failures.`)
       }
     }
+  }
+
+  if (strategy !== beforeResource) {
+    // The resource layer replaced what the earlier layers chose: the decision is no longer an exploration draw, and
+    // its layer names what actually decided (the recorded notes say why it moved).
+    if (exploration) resourceNotes.push(`The explored strategy ${beforeResource} was replaced, so this is not recorded as an exploration.`)
+    exploration = false
+    layer = strategy === defaultStrategy(features) ? 'default' : strategy === exploitStrategy ? exploitLayer : 'evidence'
   }
 
   const plan = configureStrategy(strategy, { preset, settings, candidates: input.candidates })
@@ -221,6 +237,3 @@ export function decide(input: DecideInput): PolicyDecision {
   }
 }
 
-function describe(row: EvidenceSummaryRow): string {
-  return `${row.arenaN + row.missionN > 0 ? `${Math.round(row.arenaSuccesses + row.missionSuccesses)} passes in ${row.arenaN + row.missionN} observations` : 'no passes'}`
-}

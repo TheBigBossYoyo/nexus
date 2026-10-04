@@ -22,6 +22,7 @@ import { applyPromotion, baseStrategyFor, preferenceFor } from './snapshots'
 import {
   betterByBand,
   distribution,
+  EVIDENCE_THRESHOLDS,
   evidenceLabel,
   intervalsSeparated,
   labelAtLeast,
@@ -54,8 +55,16 @@ export const POLICY_THRESHOLDS = {
   efficiencyBand: 0.2,
   /** Suppression: this many effective samples with no success... */
   suppressMinEffectiveSamples: 3,
-  /** ...or this many scheduler/stability failures. */
+  /** ...or this many stability failures that are also more than half of the observations. */
   suppressStabilityFailures: 2,
+  /** A candidate needs controlled evidence from at least this many distinct Arena cases at its context level... */
+  minDistinctCases: 3,
+  /** ...and at least this many Arena trials (EVIDENCE_THRESHOLDS.weak). */
+  minArenaTrials: EVIDENCE_THRESHOLDS.weak,
+  /** Efficiency tie-break: the challenger's Wilson lower bound may not be below the incumbent's by more than this. */
+  efficiencyLowerBoundSlack: 0.05,
+  /** A rejected candidate is proposed again only after this many more Arena trials for the challenger. */
+  reproposeAfterArenaTrials: 5,
 } as const
 
 const DAY_MS = 86_400_000
@@ -69,7 +78,10 @@ export interface AggregateInput {
   outcomes: MissionOutcome[]
   config: PolicyConfig
   now: number
-  /** Role → model the tiers resolve to today. Recorded models that differ are down-weighted. */
+  /**
+   * Fallback only: role -> configured model alias. Recorded models are resolved ids, so an alias can never be
+   * compared with them exactly; it is used only when no evidence item in the window records any model.
+   */
   currentModels: Record<string, string>
 }
 
@@ -77,6 +89,8 @@ interface Observation {
   contextKey: string
   strategy: ConcreteStrategy
   kind: EvidenceKind
+  /** Arena case id (arena) or run id (mission): the unit that counts as independent. */
+  unit: string
   success: boolean
   weight: number
   stability: boolean
@@ -84,83 +98,105 @@ interface Observation {
   sessions: number | null
   tokens: number | null
   repairs: number | null
+  models: Record<string, string>
   at: number
 }
 
-/** Aliases ("opus") and resolved ids ("claude-opus-4-1") name the same model when one contains the other. */
-export function sameModel(a: string, b: string): boolean {
-  const x = a.trim().toLowerCase()
-  const y = b.trim().toLowerCase()
-  if (x === '' || y === '') return true // unknown on one side: no evidence of drift
-  return x === y || x.includes(y) || y.includes(x)
-}
-
-/** True when any role recorded a model that differs from the one configured for that role now. */
+/** True when a recorded role->model map differs from the current one, compared exactly (resolved ids, no substring matching). */
 export function modelDrifted(recorded: Record<string, string>, current: Record<string, string>): boolean {
   return Object.entries(recorded).some(([role, model]) => {
     const now = current[role]
-    return now !== undefined && !sameModel(model, now)
+    return now !== undefined && now !== model
   })
 }
 
 const sumTokens = (input: number | null, output: number | null): number | null =>
   input === null && output === null ? null : (input ?? 0) + (output ?? 0)
 
-function observe(input: AggregateInput): Observation[] {
-  const { config, now, currentModels } = input
-  const windowMs = config.evidenceWindowDays * DAY_MS
-  const out: Observation[] = []
-  const weightOf = (at: number, base: number, models: Record<string, string>): number | null => {
-    const age = now - at
-    if (age > windowMs) return null
-    const drift = modelDrifted(models, currentModels) ? config.modelDriftWeight : 1
-    return base * recencyWeight(age / DAY_MS, config.recencyHalfLifeDays) * drift
+type RawObservation = Omit<Observation, 'weight'> & { base: number }
+
+/**
+ * Whether an Arena trial is evidence about its strategy, and how it counts. Infrastructure blocks (and legacy
+ * blocked rows with no block kind and no ended run) say nothing about the strategy and are excluded entirely.
+ */
+function trialCounts(t: EvidenceTrial): { counts: boolean; passed: boolean; stability: boolean } {
+  if (t.state === 'cancelled' || t.state === 'queued' || t.state === 'running' || t.state === 'provisioning' || t.state === 'evaluating') {
+    return { counts: false, passed: false, stability: false }
   }
+  const m = t.metrics
+  if (t.state === 'blocked') {
+    const kind = t.blockKind ?? (m !== null && t.runId !== null ? 'run' : 'infrastructure')
+    if (kind === 'infrastructure') return { counts: false, passed: false, stability: false }
+  }
+  // A trial that passed is never a stability failure, whatever happened to an agent on the way (a recovered crash).
+  const passed = m?.hiddenPassed === true
+  const stability = !passed && (t.blockKind === 'run' || (m ? m.crashedAgents > 0 || m.schedulerFailures > 0 : false))
+  return { counts: true, passed, stability }
+}
+
+function observe(input: AggregateInput): Observation[] {
+  const { config, now } = input
+  const windowMs = config.evidenceWindowDays * DAY_MS
+  const raw: RawObservation[] = []
   for (const t of input.trials) {
-    if (t.state === 'cancelled' || t.state === 'queued' || t.state === 'running' || t.state === 'provisioning' || t.state === 'evaluating') continue
+    const c = trialCounts(t)
+    if (!c.counts) continue
     const at = Date.parse(t.finishedAt ?? t.createdAt)
-    const weight = weightOf(at, 1, t.models)
-    if (weight === null) continue
+    if (now - at > windowMs) continue
     const m = t.metrics
-    out.push({
+    // Efficiency figures describe passing runs only: a fast failure is not efficient.
+    raw.push({
       contextKey: t.contextKey,
       strategy: t.strategy,
       kind: 'arena',
-      success: m?.hiddenPassed === true,
-      weight,
-      stability: t.state === 'blocked' || (m ? m.crashedAgents > 0 || m.schedulerFailures > 0 : false),
-      durationMs: m?.wallClockMs ?? null,
-      sessions: m ? m.sessions : null,
-      tokens: m ? sumTokens(m.inputTokens, m.outputTokens) : null,
+      unit: t.caseId,
+      success: c.passed,
+      base: 1,
+      stability: c.stability,
+      durationMs: c.passed ? (m?.wallClockMs ?? null) : null,
+      sessions: c.passed && m ? m.sessions : null,
+      tokens: c.passed && m ? sumTokens(m.inputTokens, m.outputTokens) : null,
       repairs: m ? m.repairs : null,
+      models: t.models,
       at,
     })
   }
   for (const o of input.outcomes) {
     if (o.isArena || o.terminal === 'cancelled') continue
     const at = Date.parse(o.createdAt)
-    const weight = weightOf(at, config.missionWeight, o.models)
-    if (weight === null) continue
-    out.push({
+    if (now - at > windowMs) continue
+    raw.push({
       contextKey: o.contextKey,
       strategy: o.strategy,
       kind: 'mission',
+      unit: o.runId,
       success: o.success,
-      weight,
-      stability: o.terminal === 'blocked',
-      durationMs: o.elapsedMs,
-      sessions: o.sessions,
-      tokens: sumTokens(o.inputTokens, o.outputTokens),
+      base: config.missionWeight,
+      stability: !o.success && o.terminal === 'blocked',
+      durationMs: o.success ? o.elapsedMs : null,
+      sessions: o.success ? o.sessions : null,
+      tokens: o.success ? sumTokens(o.inputTokens, o.outputTokens) : null,
       repairs: o.repairs,
+      models: o.models,
       at,
     })
   }
-  return out
+  // The models "currently" in use are the resolved ones recorded on the newest evidence item that records any.
+  // An item that records none is unknown, never down-weighted.
+  let newest: RawObservation | null = null
+  for (const r of raw) if (Object.keys(r.models).length > 0 && (!newest || r.at > newest.at)) newest = r
+  const current = newest ? newest.models : input.currentModels
+  return raw.map(({ base, ...r }) => ({
+    ...r,
+    weight: base * recencyWeight((now - r.at) / DAY_MS, config.recencyHalfLifeDays) * (modelDrifted(r.models, current) ? config.modelDriftWeight : 1),
+  }))
 }
 
 /**
  * One row per (context, strategy, kind), for the exact context and for each fallback level. Raw counts and
- * weighted counts are kept side by side; the Wilson interval and label are on the raw counts.
+ * weighted counts are kept side by side; the Wilson interval and label are on the raw counts. Efficiency means
+ * cover passed runs only. `stabilityFailures` is weighted like the effective counts (recency, model drift,
+ * mission weight), so old crashes fade the same way old results do.
  */
 export function aggregateEvidence(input: AggregateInput): StrategyStatistic[] {
   const groups = new Map<string, { contextKey: string; strategy: ConcreteStrategy; kind: EvidenceKind; obs: Observation[] }>()
@@ -187,6 +223,7 @@ export function aggregateEvidence(input: AggregateInput): StrategyStatistic[] {
       kind: g.kind,
       n,
       successes,
+      distinctUnits: new Set(g.obs.map((o) => o.unit)).size,
       effectiveN: g.obs.reduce((a, o) => a + o.weight, 0),
       effectiveSuccesses: g.obs.reduce((a, o) => a + (o.success ? o.weight : 0), 0),
       passRate: n > 0 ? successes / n : null,
@@ -197,7 +234,7 @@ export function aggregateEvidence(input: AggregateInput): StrategyStatistic[] {
       meanObservedTokens: mean(nums(g.obs.map((o) => o.tokens))),
       meanRepairs: mean(nums(g.obs.map((o) => o.repairs))),
       repairDistribution: distribution(nums(g.obs.map((o) => o.repairs))),
-      stabilityFailures: g.obs.filter((o) => o.stability).length,
+      stabilityFailures: g.obs.reduce((a, o) => a + (o.stability ? o.weight : 0), 0),
       label: evidenceLabel(n, interval),
       newestAt: new Date(Math.max(...times)).toISOString(),
       oldestAt: new Date(Math.min(...times)).toISOString(),
@@ -216,18 +253,39 @@ export function aggregateEvidence(input: AggregateInput): StrategyStatistic[] {
 export interface Suppressible {
   effectiveN: number
   effectiveSuccesses: number
+  /** Weighted like effectiveN. */
   stabilityFailures: number
 }
 
-/** At least 3 effective samples with no success, or at least 2 stability failures. */
+/**
+ * Evaluated on one context level's own evidence. Either at least 3 effective samples and no success, or at
+ * least 2 (weighted) stability failures that are also more than half of the effective observations: a
+ * strategy that crashes twice among thirty good runs is not unstable.
+ */
 export function isSuppressed(row: Suppressible): boolean {
   return (
     (row.effectiveN >= POLICY_THRESHOLDS.suppressMinEffectiveSamples && row.effectiveSuccesses <= 0) ||
-    row.stabilityFailures >= POLICY_THRESHOLDS.suppressStabilityFailures
+    (row.stabilityFailures >= POLICY_THRESHOLDS.suppressStabilityFailures && row.stabilityFailures > row.effectiveN / 2)
   )
 }
 
 // ───────────────────────────── summaries ─────────────────────────────
+
+const LABEL_ORDER: EvidenceLabel[] = ['INSUFFICIENT', 'WEAK', 'MODERATE', 'STRONG']
+
+/** Controlled evidence from fewer distinct cases than this caps the Arena label at WEAK. */
+function capLabel(label: EvidenceLabel, row: { arenaN: number; arenaCases: number }): EvidenceLabel {
+  if (row.arenaN > 0 && row.arenaCases < POLICY_THRESHOLDS.minDistinctCases && LABEL_ORDER.indexOf(label) > 1) return 'WEAK'
+  return label
+}
+
+/** "evidence comes from 1 case" when the caveat applies, else null. */
+export function caseCaveat(row: { arenaN: number; arenaCases: number }): string | null {
+  if (row.arenaN > 0 && row.arenaCases < POLICY_THRESHOLDS.minDistinctCases) {
+    return `evidence comes from ${row.arenaCases} case${row.arenaCases === 1 ? '' : 's'}`
+  }
+  return null
+}
 
 function poolRow(strategy: ConcreteStrategy, arena: StrategyStatistic | undefined, mission: StrategyStatistic | undefined): EvidenceSummaryRow & Suppressible {
   const effectiveN = (arena?.effectiveN ?? 0) + (mission?.effectiveN ?? 0)
@@ -238,12 +296,19 @@ function poolRow(strategy: ConcreteStrategy, arena: StrategyStatistic | undefine
     if (a !== null) return a
     return mission && mission.n > 0 ? pick(mission) : null
   }
-  const interval = wilsonInterval(effectiveSuccesses, effectiveN)
+  // The point estimate used for ranking is the weighted pass rate; the interval used for "separated" is the Wilson
+  // interval on RAW Arena counts (controlled evidence), because a Wilson interval on fractional weighted counts
+  // would claim a precision the data does not have. Mission-only rows use their raw counts.
+  const interval =
+    arena && arena.n > 0 ? wilsonInterval(arena.successes, arena.n) : mission && mission.n > 0 ? wilsonInterval(mission.successes, mission.n) : null
   const stabilityFailures = (arena?.stabilityFailures ?? 0) + (mission?.stabilityFailures ?? 0)
   const pooled: Suppressible = { effectiveN, effectiveSuccesses, stabilityFailures }
+  const arenaN = arena?.n ?? 0
+  const arenaCases = arena?.distinctUnits ?? 0
   return {
     strategy,
-    arenaN: arena?.n ?? 0,
+    arenaN,
+    arenaCases,
     arenaSuccesses: arena?.successes ?? 0,
     missionN: mission?.n ?? 0,
     missionSuccesses: mission?.successes ?? 0,
@@ -253,7 +318,7 @@ function poolRow(strategy: ConcreteStrategy, arena: StrategyStatistic | undefine
     meanSessions: first((s) => s.meanSessions),
     meanObservedTokens: first((s) => s.meanObservedTokens),
     medianDurationMs: first((s) => s.medianDurationMs),
-    label: evidenceLabel(effectiveN, interval),
+    label: capLabel(evidenceLabel(effectiveN, interval), { arenaN, arenaCases }),
     suppressed: isSuppressed(pooled),
     effectiveSuccesses,
     stabilityFailures,
@@ -271,10 +336,23 @@ export function rowsAt(stats: StrategyStatistic[], contextKey: string): (Evidenc
   return rows
 }
 
-/** Strategies that are suppressed by evidence at the context or any of its fallback levels. */
+/** The context level a decision for `contextKey` takes its evidence from: the first level with sufficient evidence. */
+export function evidenceLevelOf(stats: StrategyStatistic[], contextKey: string): string | null {
+  for (const level of contextFallbacks(contextKey)) {
+    if (rowsAt(stats, level).some((r) => labelAtLeast(r.label, POLICY_THRESHOLDS.levelSufficient))) return level
+  }
+  return null
+}
+
+/**
+ * Strategies suppressed for a decision in `contextKey`. Each level is judged on its own evidence, and only the
+ * levels the decision uses count: the exact context (always) and the evidence level it falls back to. There is
+ * no union over other levels, so a catastrophe in one context never suppresses a strategy in an unrelated one.
+ */
 export function suppressedStrategies(stats: StrategyStatistic[], contextKey: string): Set<ConcreteStrategy> {
   const out = new Set<ConcreteStrategy>()
-  for (const level of contextFallbacks(contextKey)) for (const r of rowsAt(stats, level)) if (r.suppressed) out.add(r.strategy)
+  const levels = new Set([contextKey, evidenceLevelOf(stats, contextKey) ?? contextKey])
+  for (const level of levels) for (const r of rowsAt(stats, level)) if (r.suppressed) out.add(r.strategy)
   return out
 }
 
@@ -287,6 +365,7 @@ export interface EvidenceSummary {
 const toPublicRow = (r: EvidenceSummaryRow & Suppressible, suppressed: boolean): EvidenceSummaryRow => ({
   strategy: r.strategy,
   arenaN: r.arenaN,
+  arenaCases: r.arenaCases,
   arenaSuccesses: r.arenaSuccesses,
   missionN: r.missionN,
   missionSuccesses: r.missionSuccesses,
@@ -303,15 +382,10 @@ const toPublicRow = (r: EvidenceSummaryRow & Suppressible, suppressed: boolean):
 /** Evidence for a context along the fallback chain; a fallback level counts only with its own sufficient evidence. */
 export function summarize(stats: StrategyStatistic[], contextKey: string): EvidenceSummary {
   const suppressed = suppressedStrategies(stats, contextKey)
-  for (const level of contextFallbacks(contextKey)) {
-    const rows = rowsAt(stats, level)
-    if (rows.some((r) => labelAtLeast(r.label, POLICY_THRESHOLDS.levelSufficient))) {
-      return { evidenceContextKey: level, rows: rows.map((r) => toPublicRow(r, suppressed.has(r.strategy))) }
-    }
-  }
+  const level = evidenceLevelOf(stats, contextKey)
   return {
-    evidenceContextKey: null,
-    rows: rowsAt(stats, contextKey).map((r) => toPublicRow(r, suppressed.has(r.strategy))),
+    evidenceContextKey: level,
+    rows: rowsAt(stats, level ?? contextKey).map((r) => toPublicRow(r, suppressed.has(r.strategy))),
   }
 }
 
@@ -374,6 +448,22 @@ export function judgeChallenger(
 ): Verdict {
   const T = POLICY_THRESHOLDS
   if (challenger.suppressed) return { ok: false, rule: null, why: `${challenger.strategy} is suppressed by its failures` }
+  // A candidate needs controlled evidence. Missions count toward the comparison but can never produce one alone.
+  if (challenger.arenaN < T.minArenaTrials)
+    return {
+      ok: false,
+      rule: null,
+      why:
+        challenger.missionN > 0
+          ? `${challenger.strategy}: only observational evidence; run an Arena campaign for this context (${describeCounts(challenger)})`
+          : `${challenger.strategy} has ${challenger.arenaN} Arena trial${challenger.arenaN === 1 ? '' : 's'}; at least ${T.minArenaTrials} are required`,
+    }
+  if (challenger.arenaCases < T.minDistinctCases)
+    return {
+      ok: false,
+      rule: null,
+      why: `${challenger.strategy}: ${caseCaveat(challenger)}, and at least ${T.minDistinctCases} distinct cases are required (repetitions of one case are not independent)`,
+    }
   if (!labelAtLeast(challenger.label, T.challengerMin))
     return {
       ok: false,
@@ -396,6 +486,9 @@ export function judgeChallenger(
     return { ok: false, rule: null, why: `the pass intervals overlap and both strategies need ${T.overlapBothMin} evidence to compare efficiency` }
   const passOk = (challenger.passRate ?? 0) >= (incumbent.passRate ?? 0)
   if (!passOk) return { ok: false, rule: null, why: `the pass intervals overlap and ${challenger.strategy}'s pass proportion is lower` }
+  // Efficiency only breaks a tie: a challenger whose lower bound sits clearly below the incumbent's is not "as good".
+  if (ci && ii && ci.low < ii.low - T.efficiencyLowerBoundSlack)
+    return { ok: false, rule: null, why: `the pass intervals overlap and ${challenger.strategy}'s lower bound is more than ${T.efficiencyLowerBoundSlack} below ${incumbent.strategy}'s` }
   const sessions = betterByBand(challenger.meanSessions, incumbent.meanSessions, T.efficiencyBand)
   const time = betterByBand(challenger.medianDurationMs, incumbent.medianDurationMs, T.efficiencyBand)
   if (sessions || time) return { ok: true, rule: 'overlap-efficiency', why: 'the intervals overlap, but the challenger is at least one band better on sessions or time with no lower pass proportion' }
@@ -428,7 +521,8 @@ export function proposeCandidates(input: ProposeInput): ProposeResult {
     if (rows.length === 0) continue
     const incumbentStrategy = preferenceFor(active, contextKey)?.strategy ?? defaultStrategy(contextKey)
     const incumbent = rows.find((r) => r.strategy === incumbentStrategy) ?? emptyRow(incumbentStrategy)
-    const suppressed = suppressedStrategies(stats, contextKey)
+    // Judged on this level's own evidence only.
+    const suppressed = new Set(rows.filter((r) => r.suppressed).map((r) => r.strategy))
     const pub = (r: EvidenceSummaryRow & Suppressible): EvidenceSummaryRow => toPublicRow(r, suppressed.has(r.strategy))
     const incPub = pub(incumbent)
 
@@ -517,13 +611,18 @@ export function shadowEvaluate(
 // ───────────────────────────── regressions ─────────────────────────────
 
 export interface RegressionGroup {
-  /** Label of the (NEXUS version, policy version, model) group. */
+  /** Label of the group, e.g. its (NEXUS version, model signature). */
   group: string
+  nexusVersion?: string
+  /** Resolved models of the group, e.g. sorted role=model pairs. */
+  modelSignature?: string
   /** Older groups have a lower order. */
   order: number
   strategy: ConcreteStrategy
-  /** Identifies the set of cases: only groups with the same case set are compared. */
-  caseKey: string
+  /** Identifies the set of cases (or pass `caseIds`): only groups with the same case set are compared. */
+  caseKey?: string
+  /** The case ids behind the group; order does not matter. Takes precedence over `caseKey`. */
+  caseIds?: string[]
   n: number
   successes: number
 }
@@ -533,7 +632,8 @@ export function detectRegressions(groups: RegressionGroup[]): RegressionFlag[] {
   const flags: RegressionFlag[] = []
   const buckets = new Map<string, RegressionGroup[]>()
   for (const g of groups) {
-    const key = `${g.strategy}\u0000${g.caseKey}`
+    const cases = g.caseIds ? [...new Set(g.caseIds)].sort().join(',') : (g.caseKey ?? '')
+    const key = `${g.strategy}|${cases}`
     buckets.set(key, [...(buckets.get(key) ?? []), g])
   }
   for (const list of buckets.values()) {
@@ -541,6 +641,7 @@ export function detectRegressions(groups: RegressionGroup[]): RegressionFlag[] {
     for (let i = 1; i < sorted.length; i++) {
       const older = sorted[i - 1]!
       const newer = sorted[i]!
+      if (older.group === newer.group) continue // the same group is not a comparison
       const oi = wilsonInterval(older.successes, older.n)
       const ni = wilsonInterval(newer.successes, newer.n)
       if (!oi || !ni) continue

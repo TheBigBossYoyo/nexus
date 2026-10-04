@@ -20,6 +20,10 @@ export interface Cell {
   /** Days before NOW. */
   ageDays?: number
   crashed?: number
+  /** Blocked by the harness (excluded from evidence). */
+  infra?: number
+  /** Distinct Arena cases the trials rotate through (default 5). */
+  cases?: number
   models?: Record<string, string>
 }
 
@@ -28,8 +32,10 @@ export function trialsFor(contextKey: string, spec: Partial<Record<ConcreteStrat
   const out: EvidenceTrial[] = []
   for (const [strategy, cell] of Object.entries(spec) as [ConcreteStrategy, Cell][]) {
     const at = NOW - (cell.ageDays ?? 0) * DAY
-    for (let i = 0; i < cell.pass + cell.fail + (cell.crashed ?? 0); i++) {
-      const crashed = i >= cell.pass + cell.fail
+    const total = cell.pass + cell.fail + (cell.crashed ?? 0) + (cell.infra ?? 0)
+    for (let i = 0; i < total; i++) {
+      const crashed = i >= cell.pass + cell.fail && i < cell.pass + cell.fail + (cell.crashed ?? 0)
+      const infrastructure = i >= cell.pass + cell.fail + (cell.crashed ?? 0)
       out.push(
         syntheticTrial({
           id: `${prefix}-${contextKey}-${strategy}-${i}`,
@@ -37,6 +43,8 @@ export function trialsFor(contextKey: string, spec: Partial<Record<ConcreteStrat
           strategy,
           passed: i < cell.pass,
           crashed,
+          infrastructure,
+          caseId: `case-${contextKey}-${i % (cell.cases ?? 5)}`,
           sessions: cell.sessions,
           durationMs: cell.durationMs,
           at,

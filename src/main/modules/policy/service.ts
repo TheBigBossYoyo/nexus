@@ -33,6 +33,7 @@ import { configureStrategy, type StrategyPlan } from '@main/modules/strategy/str
 import { defaultStrategy } from './defaults'
 import { decide } from './engine'
 import {
+  POLICY_THRESHOLDS,
   aggregateEvidence,
   compareSentence,
   proposeCandidates,
@@ -238,7 +239,8 @@ export class PolicyService {
 
   /** Recompute the statistics and propose candidates. Nothing about the active policy changes. */
   learn(): LearnResult {
-    const active = this.active()
+    // Candidates are judged against the pointer's active snapshot, not a pinned one: promotion builds on the head.
+    const active = this.head()
     const settings = this.repos.settings.get()
     const now = this.clock()
     const since = new Date(now - active.config.evidenceWindowDays * DAY_MS).toISOString()
@@ -254,7 +256,16 @@ export class PolicyService {
     const stats = aggregateEvidence({ trials, outcomes, config: active.config, now, currentModels: this.currentModels(settings) })
 
     const contexts = [...new Set(stats.map((s) => s.contextKey))].filter((k) => k !== '*|*|*')
-    const { candidates: proposed, notes } = proposeCandidates({ stats, active, knownContexts: contexts, now })
+    const { candidates: allProposed, notes } = proposeCandidates({ stats, active, knownContexts: contexts, now })
+    // A rejected proposal comes back only when its challenger has gained enough new controlled evidence.
+    const history = this.repos.policyCandidates.listRecent(500)
+    const proposed = allProposed.filter((c) => {
+      const last = history.find((h) => h.contextKey === c.contextKey && h.fromStrategy === c.fromStrategy && h.toStrategy === c.toStrategy)
+      if (!last || last.status !== 'rejected' || last.baseSnapshotId !== c.baseSnapshotId) return true
+      if (c.arenaTrials >= last.arenaTrials + POLICY_THRESHOLDS.reproposeAfterArenaTrials) return true
+      notes.push(`${c.contextKey}: ${c.toStrategy} over ${c.fromStrategy} was rejected on this policy; it is proposed again after ${POLICY_THRESHOLDS.reproposeAfterArenaTrials} more Arena trials (now ${c.arenaTrials}, was ${last.arenaTrials} when rejected).`)
+      return false
+    })
     const profiles = this.repos.taskProfiles.listRecent(500)
     const allOutcomes = this.repos.missionOutcomes.listRecent({ limit: 500 })
 
@@ -313,6 +324,7 @@ export class PolicyService {
   promote(candidateId: string): PolicyOverview {
     const candidate = this.repos.policyCandidates.require(candidateId)
     if (candidate.status !== 'proposed') throw new Error(`Candidate is ${candidate.status}, not proposed`)
+    if (candidate.baseSnapshotId !== this.head().id) throw new Error('stale candidate: run learn again')
     this.repos.transaction(() => {
       const base = this.head()
       const pointer = this.pointer()
@@ -397,14 +409,19 @@ export class PolicyService {
 
   // ───────────────────────────── decisions ─────────────────────────────
 
-  private usageNow(): { status: UsageStatus; recentLimit: boolean } {
+  private usageNow(): { status: UsageStatus; recentLimit: boolean; note?: string } {
     const u = this.deps.usage
     if (!u) return { status: 'AVAILABLE', recentLimit: false }
     try {
       return { status: u.status(), recentLimit: u.recentLimitWithin(HOUR_MS) }
-    } catch {
-      // An unreadable usage service must not stop a run from being created; stay conservative (no speculation or swarm).
-      return { status: 'AVAILABLE', recentLimit: true }
+    } catch (e) {
+      // An unreadable usage service must not stop a run from being created, but nothing is known about availability:
+      // treat it as unavailable (no SPECULATIVE, no SWARM) and say so in the decision.
+      return {
+        status: 'RUNTIME_UNAVAILABLE',
+        recentLimit: false,
+        note: `The usage service could not be read (${errorMessage(e)}); availability is treated as unknown, so no SPECULATIVE or SWARM.`,
+      }
     }
   }
 
@@ -432,6 +449,7 @@ export class PolicyService {
       seed: this.drawSeed(),
       usageStatus: usage.status,
       recentLimit: usage.recentLimit,
+      usageNote: usage.note,
       preset: settings.execution.defaultPreset,
       settings,
       id: 'preview',
@@ -469,6 +487,7 @@ export class PolicyService {
           seed: this.drawSeed(),
           usageStatus: usage.status,
           recentLimit: usage.recentLimit,
+          usageNote: usage.note,
           preset: input.preset,
           settings,
           candidates: input.candidates,
@@ -597,7 +616,8 @@ export class PolicyService {
       humanInterventions: repos.events.countByTypes(run.id, ['user.intervention']),
       terminal,
       success,
-      isArena: repos.arenaTrials.getByRun(run.id) !== null,
+      // An orphan Arena run (its trial row gone) still names its trial in the run's strategy info.
+      isArena: repos.arenaTrials.getByRun(run.id) !== null || Boolean(info.arenaTrialId),
       nexusVersion: this.deps.nexusVersion,
       createdAt: new Date(now).toISOString(),
     }
