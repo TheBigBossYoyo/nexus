@@ -90,7 +90,7 @@
 
   /* Type scale. Sizes are rem so the "font size" setting scales everything: 13 px at the default. */
   --text-title: 1.385rem; /* 18 px page title, 600 */
-  --text-title--line-height: 1.5rem;
+  --text-title--line-height: 1.85rem; /* room for descenders: the title is truncated with overflow hidden */
   --text-heading: 1rem; /* 13 px section heading, 600 */
   --text-heading--line-height: 1.25rem;
   --text-body: 1rem; /* 13 px */

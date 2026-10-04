@@ -214,8 +214,10 @@ test.describe('NEXUS 0.3 UI', () => {
       const history = await invoke(page, 'usage.limitHistory', {})
       const pause = history.pauses.find((p) => p.runId === runId)
       expect(pause).toMatchObject({ state: 'resumed' })
-      expect(pause?.resumes.some((r) => r.kind === 'probe' && r.result === 'available')).toBe(true)
-      expect(pause?.resumes.filter((r) => r.kind === 'resume' && r.result === 'resumed')).toHaveLength(1)
+      // The availability check belongs to the wait as a whole (the global row); the resume to the run.
+      const attempts = history.pauses.flatMap((p) => p.resumes)
+      expect(attempts.some((r) => r.kind === 'probe' && r.result === 'available')).toBe(true)
+      expect(attempts.filter((r) => r.kind === 'resume' && r.result === 'resumed' && r.runId === runId)).toHaveLength(1)
 
       await page.getByTestId('nav-usage').click()
       await expect(page.getByTestId('usage-limits')).toContainText(/resumed/i)
@@ -241,7 +243,7 @@ test.describe('NEXUS 0.3 UI', () => {
 
       const banner = page.getByTestId('quota-banner')
       await expect(banner).toBeVisible({ timeout: 60_000 })
-      await expect(banner).toContainText(/not reported|unknown/i)
+      await expect(banner).toContainText(/gave no reset time/i)
       const waiting = await invoke(page, 'usage.overview', {})
       // Nothing is invented: the reset is unknown, and the planned check is labelled an estimate.
       expect(waiting.nextResetAt).toMatchObject({ value: null, confidence: 'UNKNOWN' })
@@ -254,7 +256,7 @@ test.describe('NEXUS 0.3 UI', () => {
       const pause = history.pauses.find((p) => p.runId === runId)
       expect(pause).toMatchObject({ state: 'resumed', resetAt: null })
       // The first check still found the limit; a later one succeeded. Never more than one check per interval.
-      const probes = pause?.resumes.filter((r) => r.kind === 'probe') ?? []
+      const probes = history.pauses.flatMap((p) => p.resumes).filter((r) => r.kind === 'probe')
       expect(probes.map((r) => r.result)).toEqual(['still_limited', 'available'])
       await expect(banner).toBeHidden()
     } finally {
@@ -332,11 +334,14 @@ test.describe('NEXUS 0.3 UI', () => {
         if (strategy === 'SINGLE' || strategy === 'BUILD') await box.check()
         else await box.uncheck()
       }
-      await expect(dialog.getByTestId('arena-trial-summary')).toContainText('2')
+      await dialog.getByTestId('arena-repetitions').fill('1')
+      await expect(dialog.getByTestId('arena-trial-summary')).toContainText('2 trials')
       await dialog.getByTestId('arena-create-start').click()
+      await expect.poll(async () => (await invoke(page, 'arena.campaigns', {})).total, { timeout: 30_000 }).toBe(1)
+      await expect(dialog).toBeHidden()
+      await screenshot(page, 'v3-arena-after-create')
 
-      // The campaign runs both strategies on the same case, one trial each.
-      await page.locator('[data-testid^="arena-campaign-row-"]').first().click()
+      // The campaign page opens by itself; it runs both strategies on the same case, one trial each.
       await expect(page.getByTestId('arena-campaign')).toBeVisible()
       await expect(page.getByTestId('arena-matrix')).toBeVisible()
       const campaigns = await invoke(page, 'arena.campaigns', {})

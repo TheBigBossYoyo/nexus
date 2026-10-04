@@ -85,8 +85,17 @@ export function createDemoScript(): FakeScript {
           const seconds = Number(process.env['NEXUS_USAGE_DEMO_RESET_S'] ?? 6)
           ctx.usage.limit(ctx.usage.now() + seconds * 1000)
         } else {
-          ctx.usage.limit(null)
-          ctx.usage.probeFailures = 1
+          // No reset time: the account stays limited through the first availability check and is available
+          // again after it, so the second check succeeds.
+          const sim = ctx.usage
+          const checksBefore = sim.probes
+          sim.limit(null)
+          const watch = setInterval(() => {
+            if (sim.probes <= checksBefore) return
+            sim.restore()
+            clearInterval(watch)
+          }, 100)
+          watch.unref()
         }
         await ctx.rateLimit({ status: 'rejected', resetsAt: ctx.usage.resetAtSeconds(), limitType: 'five_hour' })
         await ctx.completeTurn({ text: 'Usage limit reached.', outcome: 'quota' })
