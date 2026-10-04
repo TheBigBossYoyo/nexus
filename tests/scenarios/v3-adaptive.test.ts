@@ -55,8 +55,9 @@ function seedTrials(h: Harness, contextKey: string, strategy: ConcreteStrategy, 
     const trial = repos.arenaTrials.insert({
       id: newId(),
       campaignId: campaign.id,
-      caseId: 'seeded-case',
-      caseVersionId: 'seeded-case@1',
+      // Evidence from one case repeated is not independent: the seeded trials rotate through four cases.
+      caseId: `seeded-case-${i % 4}`,
+      caseVersionId: `seeded-case-${i % 4}@1`,
       strategy,
       repetition: offset + i,
       ordinal: offset + i,
@@ -70,6 +71,7 @@ function seedTrials(h: Harness, contextKey: string, strategy: ConcreteStrategy, 
       taskProfileId: profile.id,
       models: {},
       detail: null,
+      blockKind: null,
       createdAt: nowIso(),
       startedAt: null,
       finishedAt: nowIso(),
@@ -177,7 +179,8 @@ describe('v0.3 ADAPTIVE strategy through the orchestrator', () => {
     seedTrials(h, context, incumbent, 0, 3)
     const weak = policy.learn()
     expect(weak.candidates).toEqual([])
-    expect(weak.notes.join(' ')).toMatch(/insufficient|not enough|needs|below/i)
+    // The learning step says why, per context, instead of staying silent.
+    expect(weak.notes.join(' ')).toMatch(/no candidate/i)
     expect(policy.preview({ projectId: h.project.id, prompt: PROMPT }).decision.strategy).toBe(incumbent)
 
     // Enough controlled evidence, clearly separated: a candidate appears, and still nothing changes.

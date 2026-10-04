@@ -491,6 +491,7 @@ const arenaTrialCodec: Codec<ArenaTrial> = {
     taskProfileId: 'text',
     models: 'json',
     detail: 'text',
+    blockKind: 'text',
     createdAt: 'text',
     startedAt: 'text',
     finishedAt: 'text',
@@ -534,10 +535,11 @@ export class ArenaTrialRepository extends Table<ArenaTrial> {
 
   /** Finished trials (any campaign), oldest first, for evidence aggregation. Bounded by `sinceIso`. */
   listFinishedSince(sinceIso: string, limit = 20000): ArenaTrial[] {
+    // When the window holds more than the limit, the NEWEST trials are the ones kept.
     return this.query(
-      `WHERE state IN ('passed', 'failed', 'blocked') AND finished_at >= ? ORDER BY finished_at, rowid LIMIT ?`,
+      `WHERE state IN ('passed', 'failed', 'blocked') AND finished_at >= ? ORDER BY finished_at DESC, rowid DESC LIMIT ?`,
       [sinceIso, limit],
-    )
+    ).reverse()
   }
 
   count(): number {
@@ -909,6 +911,7 @@ const strategyStatisticCodec: Codec<StrategyStatistic> = {
     kind: 'text',
     n: 'num',
     successes: 'num',
+    distinctUnits: 'num',
     effectiveN: 'num',
     effectiveSuccesses: 'num',
     passRate: 'num',

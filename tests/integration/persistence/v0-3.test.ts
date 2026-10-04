@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
@@ -156,6 +156,7 @@ function trial(campaignId: string, over: Partial<ArenaTrial> = {}): ArenaTrial {
     taskProfileId: null,
     models: {},
     detail: null,
+    blockKind: null,
     createdAt: nowIso(),
     startedAt: null,
     finishedAt: null,
@@ -194,6 +195,23 @@ describe('migration 004 (v0.3)', () => {
     const again = openDatabase(path)
     open.push(again)
     expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 4 })
+
+    // The database as the older release left it was kept next to the upgraded one, complete and readable.
+    const backup = `${path}.v${version}.bak`
+    expect(existsSync(backup)).toBe(true)
+    const old = new BetterSqlite3(backup, { readonly: true })
+    open.push(old)
+    expect(old.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: version })
+    expect(old.prepare('SELECT prompt FROM runs WHERE id = ?').get(seeded.runId)).toEqual({ prompt: `A schema-${version} mission` })
+  })
+
+  it('makes no backup for a new database or one that is already current', () => {
+    const path = tempDb()
+    const db = openDatabase(path)
+    db.close()
+    const again = openDatabase(path)
+    open.push(again)
+    for (const v of [0, 1, 2, 3, 4]) expect(existsSync(`${path}.v${v}.bak`)).toBe(false)
   })
 
   it('does not alter any table or index of the earlier schemas and adds exactly the 0.3 tables', () => {
@@ -343,6 +361,29 @@ describe('v0.3 repositories', () => {
     // Deleting a campaign removes its trials.
     repos.arenaCampaigns.delete(c.id)
     expect(repos.arenaTrials.count()).toBe(0)
+  })
+
+  it('keeps the runs and events of Arena trials out of the user feeds in SQL, before the limit applies', () => {
+    setup()
+    const mine = repos.projects.insert(makeProject({ rootPath: 'C:\mine' }))
+    const hidden = repos.projects.insert(makeProject({ rootPath: 'C:\arena\t\repo' }))
+    const myRun = repos.runs.insert(makeRun(mine.id, { createdAt: '2026-01-01T00:00:00.000Z' }))
+    repos.events.insert({ runId: myRun.id, type: 'run.started', payload: {} })
+    const c = repos.arenaCampaigns.insert(campaign())
+    // Far more trial runs than any feed limit, all newer than the user's run.
+    for (let i = 0; i < 70; i++) {
+      const run = repos.runs.insert(makeRun(hidden.id, { createdAt: new Date(Date.UTC(2026, 5, 1, 0, i)).toISOString() }))
+      repos.arenaTrials.insert(trial(c.id, { ordinal: i, repetition: i, projectId: hidden.id, runId: run.id }))
+      repos.events.insert({ runId: run.id, type: 'run.started', payload: {} })
+    }
+    expect(repos.runs.listRecent(60).some((r) => r.id === myRun.id)).toBe(false)
+    expect(repos.runs.listRecentUser(60).map((r) => r.id)).toEqual([myRun.id])
+    expect(repos.events.listRecent(50).map((e) => e.runId)).toEqual([myRun.id])
+    // The newest finished trials are the ones kept when a window holds more than the limit.
+    for (const t of repos.arenaTrials.listByCampaign(c.id)) {
+      repos.arenaTrials.update(t.id, { state: 'passed', finishedAt: new Date(Date.UTC(2026, 5, 2, 0, t.ordinal)).toISOString() })
+    }
+    expect(repos.arenaTrials.listFinishedSince('2000-01-01T00:00:00.000Z', 3).map((t) => t.ordinal)).toEqual([67, 68, 69])
   })
 
   it('keeps one metrics row per trial and the newest evaluation', () => {

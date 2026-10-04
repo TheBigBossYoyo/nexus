@@ -91,6 +91,15 @@ export class RunRepository extends Table<Run> {
     return this.query('ORDER BY created_at DESC, rowid DESC LIMIT ?', [Math.min(Math.max(1, limit), 500)])
   }
 
+  /** The newest runs of the user's own projects (runs of Arena trials are left out in SQL, before the limit). */
+  listRecentUser(limit = 50): Run[] {
+    return this.query(
+      `WHERE id NOT IN (SELECT run_id FROM arena_trials WHERE run_id IS NOT NULL)
+       ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      [Math.min(Math.max(1, limit), 500)],
+    )
+  }
+
   /** Runs in any non-terminal state (including paused), oldest first. */
   listActive(): Run[] {
     const terminal: SqlValue[] = [...TERMINAL_RUN_STATES]

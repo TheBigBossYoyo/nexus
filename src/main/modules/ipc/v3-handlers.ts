@@ -77,6 +77,8 @@ export interface V3Context {
   overnight?: OvernightSupervisor
   /** Native folder picker (lives in main). */
   pickDirectory: () => Promise<string | null>
+  /** Native confirmation shown before an imported Arena case is trusted. Absent in tests. */
+  confirmTrust?: (message: string, detail: string) => Promise<boolean>
   activeAgentCount: () => number
 }
 
@@ -180,7 +182,18 @@ export function createV3Handlers(ctx: V3Context): V3Handlers {
       if (!dir) return null
       return arena().importCase(dir)
     },
-    'arena.trustCase': ({ caseVersionId }) => arena().trustCase(caseVersionId),
+    'arena.trustCase': async ({ caseVersionId }) => {
+      // Trusting a case lets NEXUS run its commands. The renderer's own dialog is a convenience; this native
+      // one is the control, because a script running in the renderer cannot click it.
+      const version = repos.arenaCaseVersions.require(caseVersionId)
+      if (!version.trusted && ctx.confirmTrust) {
+        const d = version.definition
+        const commands = [...d.setup, ...Object.values(d.checks).filter((c): c is string => typeof c === 'string'), d.hiddenEvaluation.command]
+        const ok = await ctx.confirmTrust(`Trust the Arena case "${d.name}"?`, `NEXUS will run these commands on this computer:\n\n${commands.map((c) => `  ${c}`).join('\n')}`)
+        if (!ok) throw new NexusError('invalid_state', 'The case was not trusted.')
+      }
+      return arena().trustCase(caseVersionId)
+    },
     'arena.campaigns': ({ limit, offset }) => arena().listCampaigns({ limit: limit ?? 25, offset: offset ?? 0 }),
     'arena.createCampaign': async ({ start, ...input }) => {
       const campaign = await arena().createCampaign(input)
@@ -242,9 +255,8 @@ export function createV3Handlers(ctx: V3Context): V3Handlers {
     // ───────────── home and activity ─────────────
     'home.summary': (): HomeSummary => {
       const projects = repos.projects.list()
-      const projectIds = new Set(projects.map((p) => p.id))
       // Runs of Arena trials belong to hidden projects and are shown in the Arena, not here.
-      const runs = repos.runs.listRecent(60).filter((r) => projectIds.has(r.projectId))
+      const runs = repos.runs.listRecentUser(60)
       const active = runs.filter((r) => !TERMINAL_RUN_STATES.includes(r.state))
       const campaigns = ctx.arena ? ctx.arena.listCampaigns({ limit: 1, offset: 0 }) : { campaigns: [], total: 0 }
       const overview = ctx.policy?.overview() ?? null
@@ -271,21 +283,7 @@ export function createV3Handlers(ctx: V3Context): V3Handlers {
         },
       }
     },
-    'activity.recent': ({ limit, beforeSeq }) => {
-      const hidden = new Set(repos.projects.listArena().map((p) => p.id))
-      const events = repos.events.listRecent(limit ?? 200, beforeSeq)
-      if (hidden.size === 0) return events
-      const arenaRuns = new Map<string, boolean>()
-      const isArenaRun = (runId: string): boolean => {
-        let known = arenaRuns.get(runId)
-        if (known === undefined) {
-          known = hidden.has(repos.runs.get(runId)?.projectId ?? '')
-          arenaRuns.set(runId, known)
-        }
-        return known
-      }
-      return events.filter((e) => !isArenaRun(e.runId))
-    },
+    'activity.recent': ({ limit, beforeSeq }) => repos.events.listRecent(limit ?? 200, beforeSeq),
   }
 }
 

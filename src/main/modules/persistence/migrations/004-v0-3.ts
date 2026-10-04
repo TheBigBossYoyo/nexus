@@ -161,6 +161,7 @@ CREATE TABLE arena_trials (
   task_profile_id TEXT,
   models TEXT NOT NULL,
   detail TEXT,
+  block_kind TEXT,
   created_at TEXT NOT NULL,
   started_at TEXT,
   finished_at TEXT,
@@ -169,6 +170,7 @@ CREATE TABLE arena_trials (
 CREATE INDEX idx_arena_trials_campaign ON arena_trials(campaign_id, ordinal);
 CREATE INDEX idx_arena_trials_state ON arena_trials(state);
 CREATE INDEX idx_arena_trials_run ON arena_trials(run_id);
+CREATE INDEX idx_arena_trials_project ON arena_trials(project_id);
 CREATE INDEX idx_arena_trials_case ON arena_trials(case_id, strategy);
 CREATE INDEX idx_arena_trials_finished ON arena_trials(finished_at);
 
@@ -353,6 +355,7 @@ CREATE TABLE strategy_statistics (
   kind TEXT NOT NULL,
   n INTEGER NOT NULL,
   successes INTEGER NOT NULL,
+  distinct_units INTEGER NOT NULL DEFAULT 0,
   effective_n REAL NOT NULL,
   effective_successes REAL NOT NULL,
   pass_rate REAL,
@@ -363,7 +366,7 @@ CREATE TABLE strategy_statistics (
   mean_observed_tokens REAL,
   mean_repairs REAL,
   repair_distribution TEXT NOT NULL,
-  stability_failures INTEGER NOT NULL DEFAULT 0,
+  stability_failures REAL NOT NULL DEFAULT 0,
   label TEXT NOT NULL,
   newest_at TEXT,
   oldest_at TEXT,

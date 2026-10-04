@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
 import { NexusError, errorMessage } from '@shared/result'
@@ -37,6 +37,35 @@ export function runMigrations(db: Database, migrations: readonly Migration[] = M
   })()
 }
 
+/** Schema version of an open database; 0 for a new one. */
+function schemaVersion(db: Database): number {
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get()
+  if (!table) return 0
+  return Number((db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number | null }).v ?? 0)
+}
+
+/**
+ * Before an existing database is upgraded, a copy is kept next to it (`nexus.db.v<old>.bak`). Migrations are
+ * additive and transactional, so the copy is not needed to recover from a failed upgrade; it exists because an
+ * upgraded database cannot be opened by the older version of NEXUS that wrote it. One copy per old version;
+ * never overwritten. A failure to copy is not a reason to refuse the upgrade.
+ */
+function backupBeforeUpgrade(db: Database, path: string): void {
+  if (path === ':memory:') return
+  const current = schemaVersion(db)
+  const latest = MIGRATIONS.reduce((max, m) => Math.max(max, m.version), 0)
+  if (current === 0 || current >= latest) return
+  const target = `${path}.v${current}.bak`
+  if (existsSync(target)) return
+  try {
+    // Everything in the write-ahead log goes into the main file first, so the copy is complete on its own.
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    copyFileSync(path, target)
+  } catch (e) {
+    console.error(`[nexus] database backup before upgrade failed: ${errorMessage(e)}`)
+  }
+}
+
 /** Opens (creating if needed) the NEXUS database and brings it to the latest schema. Accepts ':memory:'. */
 export function openDatabase(path: string): Database {
   let db: Database | null = null
@@ -47,6 +76,7 @@ export function openDatabase(path: string): Database {
     db.pragma('synchronous = NORMAL')
     db.pragma('foreign_keys = ON')
     db.pragma('busy_timeout = 5000')
+    backupBeforeUpgrade(db, path)
     runMigrations(db)
     return db
   } catch (e) {

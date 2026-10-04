@@ -103,6 +103,22 @@ export function killProcessTree(pid: number): Promise<void> {
   })
 }
 
+/** Variables that carry Claude credentials or redirect Node. Project commands never need them. */
+const WITHHELD_ENV = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_OPTIONS', 'NODE_PATH'])
+
+/**
+ * The environment for commands NEXUS itself runs in a project (dependency setup, check commands, Arena
+ * evaluators): the process environment without Claude credentials and without variables that could redirect
+ * the Node runtime. Agent-written code runs in these commands, so it must not see what agents do not see.
+ */
+export function projectCommandEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (value !== undefined && !WITHHELD_ENV.has(key.toUpperCase())) env[key] = value
+  }
+  return env
+}
+
 export function runProcess(file: string, args: readonly string[], opts: RunProcessOptions): Promise<ProcessResult> {
   const max = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT
   const keep = opts.keep ?? 'tail'

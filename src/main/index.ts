@@ -476,6 +476,12 @@ async function bootstrap(): Promise<void> {
         return result.canceled ? null : (result.filePaths[0] ?? null)
       },
       activeAgentCount: () => orchestrator.activeAgentCount(),
+      confirmTrust: async (message, detail) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        const options = { type: 'warning' as const, title: 'NEXUS Arena', message, detail, buttons: ['Trust and allow', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true }
+        const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+        return response === 0
+      },
     }),
   })
 
@@ -517,10 +523,14 @@ async function bootstrap(): Promise<void> {
     void settled
       .then(() => {
         overnight?.dispose()
+        // Nothing new may start: campaigns and quota recovery stop first. The usage service stays until the
+        // agent sessions have ended, so what they used is still recorded.
         arena.dispose()
         recovery.dispose()
-        usage.dispose()
         return orchestrator.shutdown()
+      })
+      .then(() => {
+        usage.dispose()
       })
       .catch((e: unknown) => console.error(`[nexus] shutdown: ${errorMessage(e)}`))
       .finally(() => {

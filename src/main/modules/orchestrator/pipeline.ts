@@ -1074,6 +1074,9 @@ export class TaskPipeline {
    */
   resumeStage(task: Pick<Task, 'id' | 'state'>): Stage {
     if (task.state !== 'running') return 'implement'
+    // Candidates still working, or a winner not yet adopted: the speculative stage has to finish first. One
+    // candidate's completed session says nothing about the task.
+    if (this.speculation.pending(task.id)) return 'implement'
     const agent = this.lastWorkerAgent(task.id)
     const session = agent ? this.core.deps.repos.sessions.latestForAgent(agent.id) : null
     return agent?.state === 'stopped' && session?.endReason === 'completed' ? 'checks' : 'implement'

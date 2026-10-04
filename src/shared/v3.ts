@@ -129,6 +129,18 @@ export interface UsageWindow {
   updatedAt: string
 }
 
+/** A window as the overview shows it. */
+export interface UsageWindowView extends UsageWindow {
+  /**
+   * Set by the usage service when the window's reset has passed or the observation is older than
+   * `USAGE_WINDOW_MAX_AGE_MS`: its percentage is then withheld (null, confidence UNKNOWN); `observedAt` says when it was seen.
+   */
+  stale?: boolean
+}
+
+/** A window observed longer ago than this no longer yields a percentage. */
+export const USAGE_WINDOW_MAX_AGE_MS = 30 * 60_000
+
 export type QuotaPauseState = 'waiting' | 'probing' | 'resumed' | 'ended' | 'cancelled'
 export const LIVE_QUOTA_PAUSE_STATES: readonly QuotaPauseState[] = ['waiting', 'probing']
 
@@ -216,7 +228,7 @@ export interface UsageOverview {
   /** Observed since NEXUS started. */
   session: UsageTotals
   /** Plan windows the runtime reported. Empty when it reported none. */
-  windows: UsageWindow[]
+  windows: UsageWindowView[]
   /** Never a NEXUS estimate: EXACT from a runtime percentage, else UNKNOWN. */
   subscriptionUtilizationPercent: Measured<number>
   nextResetAt: Measured<string>
@@ -305,7 +317,8 @@ export interface SpeculativeRun {
   taskId: string
   baseCommit: string
   candidateCount: number
-  state: 'running' | 'decided' | 'failed' | 'cancelled'
+  /** running: candidates working; decided: tournament stored; adopted: the winner is in the task worktree. */
+  state: 'running' | 'decided' | 'adopted' | 'failed' | 'cancelled'
   winnerCandidateId: string | null
   createdAt: string
   finishedAt: string | null
@@ -458,6 +471,8 @@ export interface StrategyStatistic {
   /** Raw number of observations. */
   n: number
   successes: number
+  /** Distinct Arena cases (kind `arena`) or distinct runs (kind `mission`) behind `n`. Repetitions of one case are not independent. */
+  distinctUnits: number
   /** Recency- and model-weighted counts used by the policy. */
   effectiveN: number
   effectiveSuccesses: number
@@ -549,6 +564,8 @@ export interface PolicyPointer {
 export interface EvidenceSummaryRow {
   strategy: ConcreteStrategy
   arenaN: number
+  /** Distinct Arena cases behind `arenaN`. */
+  arenaCases: number
   arenaSuccesses: number
   missionN: number
   missionSuccesses: number
@@ -841,6 +858,8 @@ export interface ArenaEnvironment {
 export const TRIAL_STATES = ['queued', 'provisioning', 'running', 'evaluating', 'passed', 'failed', 'blocked', 'cancelled'] as const
 export type TrialState = (typeof TRIAL_STATES)[number]
 
+export type TrialBlockKind = 'infrastructure' | 'run' | 'timeout'
+
 export const TERMINAL_TRIAL_STATES: readonly TrialState[] = ['passed', 'failed', 'blocked', 'cancelled']
 
 export interface ArenaTrial {
@@ -865,6 +884,13 @@ export interface ArenaTrial {
   models: Record<string, string>
   /** Why a trial is blocked or failed before evaluation (budget, timeout, run failed, ...). */
   detail: string | null
+  /**
+   * Why a blocked trial is blocked. `infrastructure` (provisioning, starting the run, the evaluator itself) says
+   * nothing about the strategy and is excluded from every comparison and from policy evidence; `run` (the run
+   * needed an intervention) and `timeout` (the case's wall-clock budget) are failures of the strategy. Null
+   * unless the trial is blocked.
+   */
+  blockKind: TrialBlockKind | null
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
@@ -943,6 +969,10 @@ export interface ArenaCell {
 export interface StrategyComparisonRow {
   strategy: ConcreteStrategy
   n: number
+  /** Distinct cases behind `n`. */
+  cases: number
+  /** Trials left out because they were blocked by the harness, not by the strategy. */
+  excludedInfrastructure: number
   passed: number
   passRate: number | null
   passInterval: Interval | null
