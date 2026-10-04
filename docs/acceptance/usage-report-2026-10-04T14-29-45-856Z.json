@@ -1,0 +1,45 @@
+{
+  "kind": "usage-report-smoke",
+  "startedAt": "2026-10-04T14:29:45.856Z",
+  "promptSent": false,
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription"
+  },
+  "usageReport": {
+    "supported": true,
+    "durationMs": 1003,
+    "rateLimitsAvailable": true,
+    "subscriptionType": "<plan>",
+    "windows": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 64,
+        "resetsAt": "2026-10-04T17:09:59.755680+00:00"
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 40,
+        "resetsAt": "2026-10-10T03:59:59.755701+00:00"
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0,
+        "resetsAt": "2026-11-05T07:59:00+00:00"
+      }
+    ]
+  },
+  "classified": {
+    "limitType": "five_hour",
+    "utilization": 64,
+    "utilizationUnit": "percent",
+    "resetAt": "2026-10-04T17:09:59.755Z",
+    "retryAfterMs": null,
+    "source": "RUNTIME",
+    "confidence": "EXACT",
+    "availability": "AVAILABLE",
+    "eventType": "usage_report",
+    "rawClassification": "usage_report:five_hour"
+  }
+}

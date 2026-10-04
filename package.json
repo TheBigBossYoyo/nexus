@@ -19,6 +19,7 @@
     "test:e2e": "electron-vite build && playwright test",
     "smoke:claude": "vitest run -c vitest.smoke.config.ts",
     "smoke:power": "vitest run -c vitest.power-smoke.config.ts",
+    "smoke:usage": "vitest run -c vitest.usage-smoke.config.ts",
     "accept:proposal": "node scripts/dynamic-proposal-acceptance.mjs",
     "accept:rotation": "node scripts/session-rotation-acceptance.mjs",
     "stress": "vitest run -c vitest.stress.config.ts",
