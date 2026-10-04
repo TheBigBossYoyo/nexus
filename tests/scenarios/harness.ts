@@ -31,6 +31,7 @@ import { EventBus } from '@main/modules/events'
 import { createIpcHandlers, dispatchIpc } from '@main/modules/ipc/handlers'
 import { GitService, WorktreeManager } from '@main/modules/git'
 import { Orchestrator } from '@main/modules/orchestrator'
+import { attachOutcomeRecording, PolicyService } from '@main/modules/policy'
 import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
 import { runProcess } from '@main/modules/process'
 
@@ -46,6 +47,8 @@ export interface Harness {
   runtime: FakeAgentRuntime
   orchestrator: Orchestrator
   project: Project
+  /** v0.3: present when the harness was created with `policy: true`. */
+  policy: PolicyService | null
   /** Every durable event emitted by this app instance (since it started). */
   events: RunEvent[]
   /** Ephemeral main → renderer pushes (streamed agent output) of this app instance. */
@@ -79,6 +82,8 @@ export interface HarnessOptions {
   files?: Record<string, string>
   /** Check commands stored in the project profile, and therefore in every run's config. */
   commands?: Partial<CheckCommands>
+  /** v0.3: wire the policy service as the orchestrator's strategy resolver and record mission outcomes. */
+  policy?: boolean
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -124,6 +129,8 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
 
   const gitService = new GitService()
   const runtime = new FakeAgentRuntime({ script: options.script })
+  const policy = options.policy ? new PolicyService({ repos, nexusVersion: '0.3.0-test' }) : null
+  if (policy) attachOutcomeRecording(bus, policy)
   const orchestrator = new Orchestrator({
     repos,
     bus,
@@ -131,6 +138,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
     push: (message) => void pushes.push(message),
+    ...(policy ? { strategies: policy } : {}),
   })
 
   let project: Project
@@ -187,6 +195,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     runtime,
     orchestrator,
     project,
+    policy,
     events,
     pushes,
     async waitForState(runId, states, timeoutMs = 150_000) {
@@ -233,7 +242,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir } })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)

@@ -140,9 +140,17 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       worktrees: repos.worktrees.listByRun(runId),
       pendingApprovals: repos.approvals.listPending(runId),
     }),
-    'runs.create': ({ projectId, mode, preset, prompt, ...overrides }) => {
+    'runs.create': ({ projectId, mode, preset, prompt, strategy, speculativeCandidates, ...overrides }) => {
       const defined = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined))
-      return orchestrator.createRun({ projectId, mode, preset, prompt, overrides: defined })
+      return orchestrator.createRun({
+        projectId,
+        mode,
+        preset,
+        prompt,
+        overrides: defined,
+        ...(strategy ? { strategy } : {}),
+        ...(speculativeCandidates !== undefined ? { speculativeCandidates } : {}),
+      })
     },
     'runs.approvePlan': ({ runId }) => orchestrator.approvePlan(runId),
     'runs.replan': ({ runId, feedback }) => orchestrator.replan(runId, feedback),

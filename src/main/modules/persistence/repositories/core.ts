@@ -86,6 +86,11 @@ export class RunRepository extends Table<Run> {
     return this.query('WHERE project_id = ? ORDER BY created_at DESC, rowid DESC', [projectId])
   }
 
+  /** The newest runs of every project, newest first. */
+  listRecent(limit = 50): Run[] {
+    return this.query('ORDER BY created_at DESC, rowid DESC LIMIT ?', [Math.min(Math.max(1, limit), 500)])
+  }
+
   /** Runs in any non-terminal state (including paused), oldest first. */
   listActive(): Run[] {
     const terminal: SqlValue[] = [...TERMINAL_RUN_STATES]
