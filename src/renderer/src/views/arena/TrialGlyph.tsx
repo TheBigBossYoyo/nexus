@@ -68,14 +68,22 @@ export function GlyphIcon({
   }
 }
 
+const BLOCK_WORDS = {
+  infrastructure: 'Blocked by the harness, not counted',
+  run: 'Run needed intervention',
+  timeout: 'Timed out',
+} as const
+
 /** Icon plus word for a trial state. */
 export function TrialStateText({
   state,
   detail = false,
+  blockKind = null,
   className,
 }: {
   state: TrialState
   detail?: boolean
+  blockKind?: 'infrastructure' | 'run' | 'timeout' | null
   className?: string
 }) {
   const info = trialStateInfo(state)
@@ -88,7 +96,7 @@ export function TrialStateText({
       )}
     >
       <GlyphIcon glyph={info.glyph} />
-      <span>{detail ? DETAIL[state] : info.label}</span>
+      <span>{detail && state === 'blocked' && blockKind ? BLOCK_WORDS[blockKind] : detail ? DETAIL[state] : info.label}</span>
     </span>
   )
 }

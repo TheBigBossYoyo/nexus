@@ -3,6 +3,7 @@ import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { useActiveOvernight, useAppInfo, useRuns } from '../lib/queries'
 import { runStatus } from '../lib/status'
 import { cn } from '../lib/cn'
+import { shortTitle } from '../lib/wording'
 import { useUiStore, type View } from '../store/ui'
 import {
   ActivityIcon,
@@ -115,15 +116,17 @@ function RecentMissions() {
   const selectedRunId = useUiStore((s) => s.runId)
   const view = useUiStore((s) => s.view)
   const openRun = useUiStore((s) => s.openRun)
+  const setView = useUiStore((s) => s.setView)
   if (!project) return null
   const recent = [...(runs.data ?? [])]
     .filter((r) => r.projectId === project.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 5)
-  if (recent.length === 0) return null
+  const total = recent.length
+  const shown = recent.slice(0, 3)
+  if (total === 0) return null
   return (
     <div className="mt-0.5 flex flex-col" aria-label="Recent missions" role="group">
-      {recent.map((r) => {
+      {shown.map((r) => {
         const st = runStatus(r.state)
         const selected = r.id === selectedRunId && view === 'run'
         return (
@@ -141,10 +144,23 @@ function RecentMissions() {
             )}
           >
             <StatusDot tone={st.tone} />
-            <span className="min-w-0 flex-1 truncate">{r.prompt}</span>
+            <span className="min-w-0 flex-1 truncate">{shortTitle(r.prompt)}</span>
           </button>
         )
       })}
+      {total > shown.length ? (
+        <button
+          type="button"
+          onClick={() => {
+            useUiStore.setState({ runId: null, taskId: null })
+            setView('run')
+          }}
+          className="flex h-6 w-full items-center rounded-md pl-[34px] pr-2 text-left text-small text-text-muted hover:bg-surface-hover hover:text-text-primary"
+          data-testid="sidebar-view-all"
+        >
+          View all ({total})
+        </button>
+      ) : null}
     </div>
   )
 }

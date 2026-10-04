@@ -3,6 +3,8 @@ import type { AgentOutput, AgentOutputKind } from '@shared/domain'
 import type { PushMessage, RunEvent } from '@shared/events'
 import { api } from './bridge'
 import { qk } from './queries'
+import { quotaWaitActive } from './usageModel'
+import type { UsageOverview } from '@shared/v3'
 import { useLiveStore } from '../store/live'
 import { toast as defaultToast } from '../store/toasts'
 
@@ -178,9 +180,13 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
           qc.setQueryData(qk.usageOverview(), message.overview)
           schedule([qk.usageRoot(), qk.homeRoot(), qk.runsList()])
           break
-        case 'usage.notice':
+        case 'usage.notice': {
+          // The quota banner is the single surface while a wait is active; do not repeat it as a toast.
+          const o = qc.getQueryData<UsageOverview>(qk.usageOverview())
+          if (o && quotaWaitActive(o)) break
           notify(message.title, message.detail, message.notice)
           break
+        }
         case 'arena':
           schedule([qk.arenaRoot(), qk.arenaCampaign(message.campaignId), qk.homeRoot(), qk.usageRoot()])
           break

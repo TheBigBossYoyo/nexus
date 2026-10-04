@@ -61,10 +61,11 @@ export function CampaignStateBadge({ c }: { c: ArenaCampaignSummary['campaign'] 
   )
 }
 
-export const campaignDuration = (c: ArenaCampaignSummary['campaign'], now: number): string =>
-  c.startedAt
-    ? formatDuration((c.completedAt ? Date.parse(c.completedAt) : now) - Date.parse(c.startedAt))
-    : '—'
+export const campaignDuration = (c: ArenaCampaignSummary['campaign'], now: number): string => {
+  if (!c.startedAt) return '—'
+  const ms = (c.completedAt ? Date.parse(c.completedAt) : now) - Date.parse(c.startedAt)
+  return ms < 1000 ? '—' : formatDuration(ms)
+}
 
 export function CampaignTable({
   rows,

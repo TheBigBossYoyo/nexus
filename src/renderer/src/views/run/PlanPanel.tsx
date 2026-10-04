@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { AgentOutput } from '@shared/domain'
-import { Badge, Button, CheckIcon, Notice, Panel, Spinner, Textarea } from '../../components/ui'
-import { useAgentOutput, useAgentTools, useApprovePlan, useReplan } from '../../lib/queries'
+import { Badge, Button, CheckIcon, Notice, Panel, Spinner } from '../../components/ui'
+import { useAgentOutput, useAgentTools, useApprovePlan } from '../../lib/queries'
 import { useLiveText } from '../../store/live'
 import { clockTimeSeconds, useRunCtx } from './runContext'
 
@@ -27,14 +27,12 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-/** The proposed plan, awaiting the user's decision: approve it or send it back with feedback. */
+/** The proposed plan, awaiting the user's decision: tasks first, then the supporting detail. */
 export function PlanPanel() {
   const { detail } = useRunCtx()
   const { run } = detail
   const plan = run.plan
   const approve = useApprovePlan()
-  const replan = useReplan()
-  const [feedback, setFeedback] = useState('')
 
   return (
     <Panel
@@ -60,32 +58,10 @@ export function PlanPanel() {
           The run is awaiting approval but no plan is stored on it.
         </Notice>
       ) : (
-        <div className="flex flex-col gap-3">
-          <Block title="Summary">
-            <p className="m-0 whitespace-pre-wrap break-words">{plan.summary}</p>
-          </Block>
-          <Block title="Mission acceptance criteria">
-            <List items={plan.acceptanceCriteria} empty="None defined." />
-          </Block>
-          <Block title="Assumptions">
-            <List items={plan.assumptions} empty="None stated." />
-          </Block>
-          <Block title="Risks">
-            {plan.risks.length === 0 ? (
-              <div className="text-text-muted">None identified.</div>
-            ) : (
-              <ul className="m-0 list-disc pl-5">
-                {plan.risks.map((r, i) => (
-                  <li key={i} className="whitespace-pre-wrap break-words">
-                    {r.description}
-                    {r.mitigation ? <span className="text-text-secondary"> Mitigation: {r.mitigation}</span> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Block>
+        <div className="flex flex-col gap-4">
+          <p className="m-0 whitespace-pre-wrap break-words text-text-secondary">{plan.summary}</p>
           <Block title={`Tasks (${plan.tasks.length})`}>
-            <div className="overflow-auto border">
+            <div className="overflow-auto rounded-md border">
               <table className="w-full border-collapse text-left" data-testid="plan-tasks">
                 <thead>
                   <tr className="border-b bg-surface-muted text-caption text-text-muted">
@@ -98,17 +74,17 @@ export function PlanPanel() {
                 </thead>
                 <tbody>
                   {plan.tasks.map((t) => (
-                    <tr key={t.id} className="border-b last:border-b-0 align-top">
-                      <td className="px-2 py-1">
+                    <tr key={t.id} className="border-b align-top last:border-b-0">
+                      <td className="px-3 py-1.5">
                         <div className="font-medium">{t.title}</div>
-                        <div className="font-mono text-small text-text-muted">{t.id}</div>
+                        <div className="font-mono text-code text-text-muted">{t.id}</div>
                       </td>
-                      <td className="px-2 py-1">{t.role}</td>
-                      <td className="px-2 py-1 font-mono text-small">{t.dependencies.length > 0 ? t.dependencies.join(', ') : '—'}</td>
-                      <td className="px-2 py-1">
+                      <td className="px-3 py-1.5">{t.role}</td>
+                      <td className="px-3 py-1.5 font-mono text-code">{t.dependencies.length > 0 ? t.dependencies.join(', ') : '—'}</td>
+                      <td className="px-3 py-1.5">
                         {t.complexity} / {t.risk}
                       </td>
-                      <td className="px-2 py-1">
+                      <td className="px-3 py-1.5">
                         <span className="flex flex-wrap gap-1">
                           {t.parallelizable ? <Badge>parallel</Badge> : null}
                           {t.requiresApproval ? <Badge tone="waiting">approval</Badge> : null}
@@ -120,26 +96,31 @@ export function PlanPanel() {
               </table>
             </div>
           </Block>
-          <Block title="Request replanning">
-            <Textarea
-              rows={3}
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder="What should the planner change?"
-              aria-label="Replanning feedback"
-              data-testid="replan-feedback"
-            />
-            <div>
-              <Button
-                size="sm"
-                loading={replan.isPending}
-                onClick={() => replan.mutate({ runId: run.id, feedback: feedback.trim() }, { onSuccess: () => setFeedback('') })}
-                data-testid="request-replan"
-              >
-                Request replanning
-              </Button>
+          <details className="rounded-md border" data-testid="plan-details">
+            <summary className="cursor-pointer px-3 py-2 font-medium">Criteria, assumptions and risks</summary>
+            <div className="flex flex-col gap-3 border-t p-3">
+              <Block title="Mission acceptance criteria">
+                <List items={plan.acceptanceCriteria} empty="None defined." />
+              </Block>
+              <Block title="Assumptions">
+                <List items={plan.assumptions} empty="None stated." />
+              </Block>
+              <Block title="Risks">
+                {plan.risks.length === 0 ? (
+                  <div className="text-text-muted">None identified.</div>
+                ) : (
+                  <ul className="m-0 list-disc pl-5">
+                    {plan.risks.map((r, i) => (
+                      <li key={i} className="whitespace-pre-wrap break-words">
+                        {r.description}
+                        {r.mitigation ? <span className="text-text-secondary"> — Mitigation: {r.mitigation}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Block>
             </div>
-          </Block>
+          </details>
         </div>
       )}
     </Panel>

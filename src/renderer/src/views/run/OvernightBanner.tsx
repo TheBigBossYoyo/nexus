@@ -25,6 +25,7 @@ import {
   useOvernightReport,
 } from '../../lib/queries'
 import { END_ACTION_LABEL } from '../projects/overnight'
+import { overnightWord } from '../../lib/wording'
 import { bannerModel } from './overnightModel'
 import { useNow } from './runContext'
 
@@ -221,10 +222,8 @@ export function OvernightBanner({ runId }: { runId: string }) {
         </Badge>
         <span className="inline-flex items-center gap-1.5">
           <StatusDot tone={m.tone} pulse={m.live} />
-          <span
-            className={`font-mono font-semibold ${TONE_CLASSES[m.tone].text}`}
-            data-testid="overnight-state"
-          >
+          <span className={`font-semibold ${TONE_CLASSES[m.tone].text}`}>{overnightWord(m.state)}</span>
+          <span className="sr-only" aria-hidden="true" data-testid="overnight-state" data-state={m.state}>
             {m.state}
           </span>
         </span>

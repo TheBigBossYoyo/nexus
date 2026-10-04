@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ErrorNote, IconButton, ChevronDownIcon, ChevronUpIcon, Loading, PageHeader, SegmentedControl, Tabs, type TabItem } from '../../components/ui'
+import { ErrorNote, IconButton, ChevronDownIcon, ChevronUpIcon, Loading, PageHeader, Popover, SegmentedControl, Tabs, XIcon, type TabItem } from '../../components/ui'
 import { PanelGroup, ResizablePanel, ResizeHandle } from '../../components/ui/Resizable'
 import { usePanelRef } from 'react-resizable-panels'
 import { useRunDetail } from '../../lib/queries'
@@ -28,20 +28,80 @@ import { AgentActivityTab } from './tabs/AgentActivity'
 import { Timeline } from './tabs/Timeline'
 import { RunUsageTab } from './tabs/UsageTab'
 
-const BOTTOM_ITEMS: readonly TabItem<BottomTab>[] = (
-  [
-    ['agents', 'Agents'],
-    ['timeline', 'Timeline'],
-    ['communications', 'Messages'],
-    ['tools', 'Tools'],
-    ['diff', 'Diff'],
-    ['reviews', 'Reviews'],
-    ['verification', 'Verification'],
-    ['decisions', 'Decisions'],
-    ['criteria', 'Criteria'],
-    ['usage', 'Usage'],
-  ] as const
-).map(([id, label]) => ({ id, label, testId: `bottom-tab-${id}` }))
+const BOTTOM_LABELS: Record<BottomTab, string> = {
+  agents: 'Agents',
+  timeline: 'Timeline',
+  communications: 'Messages',
+  tools: 'Tools',
+  diff: 'Diff',
+  reviews: 'Reviews',
+  verification: 'Verification',
+  decisions: 'Decisions',
+  criteria: 'Criteria',
+  usage: 'Usage',
+}
+const PRIMARY_BOTTOM: readonly BottomTab[] = ['agents', 'timeline', 'diff', 'reviews', 'usage']
+const MORE_BOTTOM: readonly BottomTab[] = ['communications', 'tools', 'verification', 'decisions', 'criteria']
+const BOTTOM_ITEMS: readonly TabItem<BottomTab>[] = PRIMARY_BOTTOM.map((id) => ({ id, label: BOTTOM_LABELS[id], testId: `bottom-tab-${id}` }))
+
+/** True while the window is narrower than the breakpoint. */
+function useNarrow(px: number): boolean {
+  const query = `(max-width: ${px - 1}px)`
+  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const m = window.matchMedia(query)
+    const on = () => setNarrow(m.matches)
+    on()
+    m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [query])
+  return narrow
+}
+
+function MoreTabs({ tab, onTab }: { tab: BottomTab; onTab: (t: BottomTab) => void }) {
+  const [open, setOpen] = useState(false)
+  const active = MORE_BOTTOM.includes(tab)
+  return (
+    <Popover
+      label="More activity views"
+      align="start"
+      width={200}
+      open={open}
+      onOpenChange={setOpen}
+      content={
+        <div role="menu" className="flex flex-col p-1">
+          {MORE_BOTTOM.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="menuitem"
+              data-testid={`bottom-tab-${id}`}
+              className="rounded-sm px-2 py-1.5 text-left hover:bg-surface-hover"
+              onClick={() => {
+                onTab(id)
+                setOpen(false)
+              }}
+            >
+              {BOTTOM_LABELS[id]}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      {(p) => (
+        <button
+          type="button"
+          {...p}
+          data-testid="bottom-tab-more"
+          className={`-mb-px inline-flex h-[var(--row-h)] shrink-0 items-center gap-1 whitespace-nowrap border-b-2 px-2.5 font-medium ${active ? 'border-accent text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
+        >
+          {active ? BOTTOM_LABELS[tab] : 'More'}
+          <ChevronDownIcon size={12} />
+        </button>
+      )}
+    </Popover>
+  )
+}
 
 const OVERVIEW_ITEM: TabItem<StageView> = { id: 'overview', label: 'Overview', testId: 'stage-tab-overview' }
 const GRAPH_ITEM: TabItem<StageView> = { id: 'graph', label: 'Graph', testId: 'stage-tab-graph' }
@@ -124,7 +184,10 @@ function BottomPanel({
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface" data-testid="run-bottom" data-collapsed={collapsed ? 'true' : 'false'}>
       <div className="flex shrink-0 items-stretch">
-        <Tabs tabs={BOTTOM_ITEMS} active={tab} onChange={onTab} label="Mission activity" className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden px-3 [&::-webkit-scrollbar]:h-1" />
+        <div className="flex min-w-0 flex-1 items-end border-b">
+          <Tabs tabs={BOTTOM_ITEMS} active={tab} onChange={onTab} label="Mission activity" bare className="min-w-0 px-3" />
+          <MoreTabs tab={tab} onTab={onTab} />
+        </div>
         <div className="flex items-center border-b pr-2">
         <IconButton
           label={collapsed ? 'Expand activity panel' : 'Collapse activity panel'}
@@ -171,6 +234,26 @@ function RunWorkspace({ runId }: { runId: string }) {
   // A state change (planning → approval → executing → completed) returns the stage to its natural view.
   useEffect(() => setStageChoice(null), [state])
 
+  // While a plan waits for approval the plan fills the stage: the activity panel folds away, then returns.
+  useEffect(() => {
+    const p = bottomRef.current
+    if (!p) return
+    if (state === 'awaiting_approval') p.collapse()
+    else if (p.isCollapsed()) p.expand()
+  }, [state, bottomRef])
+
+  const narrow = useNarrow(1200)
+  const taskId = useUiStore((st) => st.taskId)
+  const selectTask = useUiStore((st) => st.selectTask)
+  useEffect(() => {
+    if (!narrow || !taskId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') selectTask(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [narrow, taskId, selectTask])
+
   const showStage = useCallback((v: StageView) => setStageChoice(v), [])
   const showBottom = useCallback(
     (t: BottomTab) => {
@@ -201,49 +284,72 @@ function RunWorkspace({ runId }: { runId: string }) {
     )
   }
 
+  const center = (
+    <PanelGroup id="run-center-split" orientation="vertical">
+      <ResizablePanel id="run-stage" minSize="180px">
+        <ErrorBoundary label="Mission stage failed" resetKey={runId}>
+          <Stage choice={stageChoice} onChoose={setStageChoice} />
+        </ErrorBoundary>
+      </ResizablePanel>
+      <ResizeHandle orientation="vertical" />
+      <ResizablePanel
+        id="run-bottom"
+        defaultSize="32%"
+        minSize="120px"
+        collapsible
+        collapsedSize="34px"
+        panelRef={bottomRef}
+        onResize={() => setCollapsed(bottomRef.current?.isCollapsed() ?? false)}
+      >
+        <ErrorBoundary label="Activity panel failed" resetKey={bottom}>
+          <BottomPanel tab={bottom} onTab={(t) => showBottom(t)} events={stream} collapsed={collapsed} onToggle={toggleBottom} />
+        </ErrorBoundary>
+      </ResizablePanel>
+    </PanelGroup>
+  )
+
   return (
     <RunProvider detail={query.data} events={stream.events} showStage={showStage} showBottom={showBottom}>
       <div className="flex h-full min-h-0 flex-col" data-testid="run-view">
         <MissionHeader />
         <OvernightBanner runId={runId} />
-        <div className="min-h-0 flex-1">
-          <PanelGroup id="run-main">
-            <ResizablePanel id="run-center" minSize="35%">
-              <PanelGroup id="run-center-split" orientation="vertical">
-                <ResizablePanel id="run-stage" minSize="180px">
-                  <ErrorBoundary label="Mission stage failed" resetKey={runId}>
-                    <Stage choice={stageChoice} onChoose={setStageChoice} />
-                  </ErrorBoundary>
-                </ResizablePanel>
-                <ResizeHandle orientation="vertical" />
-                <ResizablePanel
-                  id="run-bottom"
-                  defaultSize="32%"
-                  minSize="120px"
-                  collapsible
-                  collapsedSize="34px"
-                  panelRef={bottomRef}
-                  onResize={() => setCollapsed(bottomRef.current?.isCollapsed() ?? false)}
+        <div className="relative min-h-0 flex-1">
+          {narrow ? (
+            <>
+              {center}
+              {taskId ? (
+                <aside
+                  aria-label="Task inspector"
+                  data-testid="inspector-drawer"
+                  className="anim-slide absolute inset-y-0 right-0 z-20 flex w-[min(480px,96%)] flex-col border-l bg-surface shadow-elevated"
                 >
-                  <ErrorBoundary label="Activity panel failed" resetKey={bottom}>
-                    <BottomPanel
-                      tab={bottom}
-                      onTab={(t) => showBottom(t)}
-                      events={stream}
-                      collapsed={collapsed}
-                      onToggle={toggleBottom}
-                    />
-                  </ErrorBoundary>
-                </ResizablePanel>
-              </PanelGroup>
-            </ResizablePanel>
-            <ResizeHandle />
-            <ResizablePanel id="run-inspector" defaultSize="40%" minSize="320px" maxSize="62%">
-              <ErrorBoundary label="Inspector failed">
-                <Inspector />
-              </ErrorBoundary>
-            </ResizablePanel>
-          </PanelGroup>
+                  <div className="flex h-8 shrink-0 items-center justify-between border-b px-3 text-small text-text-muted">
+                    <span>Task details</span>
+                    <IconButton label="Close task details" size="sm" onClick={() => selectTask(null)} data-testid="inspector-close">
+                      <XIcon size={12} />
+                    </IconButton>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <ErrorBoundary label="Inspector failed">
+                      <Inspector />
+                    </ErrorBoundary>
+                  </div>
+                </aside>
+              ) : null}
+            </>
+          ) : (
+            <PanelGroup id="run-main">
+              <ResizablePanel id="run-center" minSize="420px">
+                {center}
+              </ResizablePanel>
+              <ResizeHandle />
+              <ResizablePanel id="run-inspector" defaultSize="500px" minSize="480px" maxSize="60%">
+                <ErrorBoundary label="Inspector failed">
+                  <Inspector />
+                </ErrorBoundary>
+              </ResizablePanel>
+            </PanelGroup>
+          )}
         </div>
       </div>
     </RunProvider>

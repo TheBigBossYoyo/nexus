@@ -3,7 +3,6 @@ import { TERMINAL_RUN_STATES } from '@shared/domain'
 import {
   BranchIcon,
   Button,
-  CheckIcon,
   ChevronDownIcon,
   ConfirmDialog,
   InfoIcon,
@@ -23,11 +22,11 @@ import { formatSpan } from '../../lib/format'
 import { useCleanupRun, useGraphRevisions, useReplan } from '../../lib/queries'
 import { useRunPolicy } from '../../lib/queries-run'
 import { deriveHealth, planVersion } from '../../lib/v2logic'
-import { TONE_CLASSES, runStatus } from '../../lib/status'
+import { runStatus } from '../../lib/status'
 import { useUiStore } from '../../store/ui'
 import { useRunControls } from '../../app/useRunControls'
 import { AddTaskDialog } from './AddTaskDialog'
-import { missionTitle, policyView, promptHasMore, strategyChip, type PolicyView } from './missionModel'
+import { missionTitle, policyView, strategyChip, type PolicyView } from './missionModel'
 import { pauseDetailFromEvents } from './eventText'
 import { useNow, useRunCtx } from './runContext'
 
@@ -147,7 +146,7 @@ function StrategyChip() {
   )
 }
 
-function DetailsPopover() {
+function DetailsPopover({ version }: { version: number }) {
   const { detail } = useRunCtx()
   const { run, tasks, agents, pendingApprovals } = detail
   const health = deriveHealth(run, tasks, pendingApprovals)
@@ -164,12 +163,14 @@ function DetailsPopover() {
     <Popover
       label="Mission details"
       align="end"
-      width={340}
+      width={400}
       testId="run-details"
       content={
         <dl className="m-0 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 p-3 text-small" data-testid="run-meta">
+          {row('Mission', <span className="block max-h-32 overflow-auto whitespace-pre-wrap" data-testid="run-prompt">{run.prompt}</span>)}
           {row('Mode', run.mode)}
           {row('Preset', run.preset)}
+          {row('Plan version', `v${version}`)}
           {row('Planning', (run.config.planningMode ?? 'single').toUpperCase(), 'planning-mode')}
           {row('Review', (run.config.reviewMode ?? 'auto').toUpperCase(), 'review-mode')}
           {row('Agents', `${activeAgents} of ${run.config.maxParallelAgents} active`, 'active-agents')}
@@ -178,7 +179,7 @@ function DetailsPopover() {
             'Health',
             <span className="inline-flex items-center gap-1.5" data-health={health.level}>
               <StatusDot tone={health.tone} />
-              {health.label}
+              {run.state === 'awaiting_approval' ? 'Waiting for you' : health.label}
               {health.reasons.length > 0 ? <span className="text-text-muted">{health.reasons.join(' · ')}</span> : null}
             </span>,
             'run-health',
@@ -267,7 +268,6 @@ export function MissionHeader() {
   const { run, tasks, worktrees } = detail
   const controls = useRunControls()
   const cleanup = useCleanupRun()
-  const [promptOpen, setPromptOpen] = useState(false)
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [confirmCleanup, setConfirmCleanup] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -278,10 +278,8 @@ export function MissionHeader() {
   const pauseDetail = run.state === 'paused' && run.pauseReason !== 'quota' ? pauseDetailFromEvents(events) : null
   const revisions = useGraphRevisions(run.id)
   const version = planVersion(revisions.data ?? [])
-  const health = deriveHealth(run, tasks, detail.pendingApprovals)
   const cleanable = finished && worktrees.some((w) => w.state !== 'removed')
   const title = missionTitle(run.prompt)
-  const more = promptHasMore(run.prompt)
 
   return (
     <div className="shrink-0" data-testid="run-header">
@@ -316,30 +314,11 @@ export function MissionHeader() {
         <span data-testid="plan-version" title="Latest graph revision; v1 is the approved plan">
           Plan v{version}
         </span>
-        <span className="inline-flex items-center gap-1.5" title={health.reasons.join(', ') || 'No failed or blocked tasks, no pending approvals'}>
-          <StatusDot tone={health.tone} />
-          <span className={TONE_CLASSES[health.tone].text}>{health.label}</span>
-        </span>
-        {more ? (
-          <Button size="sm" variant="ghost" onClick={() => setPromptOpen((v) => !v)} aria-expanded={promptOpen} data-testid="prompt-toggle">
-            {promptOpen ? 'Hide full prompt' : 'Show full prompt'}
-          </Button>
-        ) : null}
-        <DetailsPopover />
+        <DetailsPopover version={version} />
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
             {controls.canApprovePlan ? (
               <>
                 <ReplanButton disabled={controls.busy} />
-                <Button
-                  size="sm"
-                  variant="primary"
-                  icon={<CheckIcon size={12} />}
-                  onClick={controls.approvePlan}
-                  disabled={controls.busy}
-                  data-testid="header-approve-plan"
-                >
-                  Approve plan
-                </Button>
               </>
             ) : null}
             {controls.canPause ? (
@@ -376,13 +355,6 @@ export function MissionHeader() {
         </span>
       </div>
 
-      {promptOpen || !more ? (
-        promptOpen ? (
-          <p className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words border-b bg-surface-muted px-5 py-2 text-body text-text-secondary" data-testid="run-prompt">
-            {run.prompt}
-          </p>
-        ) : null
-      ) : null}
       {run.state === 'paused' && pauseDetail ? (
         <div className="border-b bg-warning-subtle px-5 py-1.5 text-small text-warning" data-testid="pause-reason">
           Paused{run.pauseReason ? ` (${run.pauseReason})` : ''}: {pauseDetail}

@@ -71,11 +71,13 @@ export function PolicyView() {
   const o = q.data
   const pinned = !!o?.pointer.pinnedId
   const cfg = o?.active.config
+  const noEvidence = !!o && o.evidence.arenaCampaigns === 0 && o.evidence.arenaTrials === 0 && o.evidence.missions === 0
+  const nothingYet = !!o && o.contexts.length === 0 && o.candidates.length === 0 && o.history.length === 0
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="policy-view">
       <PageHeader
-        title="Adaptive policy"
+        title="Policy"
         context="Intelligence"
         actions={
           <>
@@ -94,6 +96,8 @@ export function PolicyView() {
             <Button
               size="sm"
               loading={learn.isPending}
+              disabled={!o || noEvidence}
+              title={noEvidence ? 'No evidence yet. Run an Arena campaign or complete missions first.' : undefined}
               onClick={() => learn.mutate({}, { onSuccess: setLearned })}
               data-testid="policy-learn"
             >
@@ -110,40 +114,6 @@ export function PolicyView() {
           </>
         }
       />
-      {cfg ? (
-        <div
-          className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b bg-surface px-5 py-2"
-          data-testid="policy-config"
-        >
-          <label className="flex items-center gap-2 text-small text-text-secondary">
-            Exploration
-            <Select
-              aria-label="Exploration mode"
-              className="w-36"
-              value={cfg.exploration}
-              options={EXPLORATION_OPTIONS}
-              onChange={(v) => config.mutate({ exploration: v })}
-              data-testid="policy-exploration"
-              disabled={config.isPending}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-small text-text-secondary">
-            Speculation
-            <Select
-              aria-label="Speculation policy"
-              className="w-44"
-              value={cfg.speculation}
-              options={SPECULATION_OPTIONS}
-              onChange={(v) => config.mutate({ speculation: v })}
-              data-testid="policy-speculation"
-              disabled={config.isPending}
-            />
-          </label>
-          <span className="min-w-0 text-small text-text-muted">
-            {EXPLORATION_HINT[cfg.exploration]}
-          </span>
-        </div>
-      ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-6 py-5">
           {q.isPending ? (
@@ -177,7 +147,7 @@ export function PolicyView() {
                   <Stat
                     label="Last computed"
                     value={
-                      <span className="text-body font-medium">
+                      <span className={o.evidence.computedAt ? 'text-body font-medium' : 'text-body font-normal text-text-muted'}>
                         {o.evidence.computedAt ? formatDateTime(o.evidence.computedAt) : 'Never'}
                       </span>
                     }
@@ -188,21 +158,58 @@ export function PolicyView() {
                 </p>
               </Card>
               {learned ? <LearnResultNote r={learned} onDismiss={() => setLearned(null)} /> : null}
-              {o.contexts.length === 0 && o.candidates.length === 0 && o.history.length === 0 ? (
-                <Card>
-                  <EmptyState
-                    icon={<PolicyIcon size={20} />}
-                    title="The default policy is active"
-                    data-testid="policy-empty"
-                  >
-                    NEXUS has no recorded evidence yet. Run an Arena campaign or complete missions,
-                    then use Learn from evidence.
-                  </EmptyState>
+              {cfg ? (
+                <Card title="Policy settings" description="How NEXUS tries alternatives and whether it may run candidates in parallel." data-testid="policy-config">
+                  <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="font-medium" htmlFor="policy-exploration-select">
+                        Exploration
+                      </label>
+                      <Select
+                        id="policy-exploration-select"
+                        className="w-48!"
+                        value={cfg.exploration}
+                        options={EXPLORATION_OPTIONS}
+                        onChange={(v) => config.mutate({ exploration: v })}
+                        data-testid="policy-exploration"
+                        disabled={config.isPending}
+                      />
+                      <span className="text-small text-text-muted">{EXPLORATION_HINT[cfg.exploration]}</span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="font-medium" htmlFor="policy-speculation-select">
+                        Speculation
+                      </label>
+                      <Select
+                        id="policy-speculation-select"
+                        className="w-48!"
+                        value={cfg.speculation}
+                        options={SPECULATION_OPTIONS}
+                        onChange={(v) => config.mutate({ speculation: v })}
+                        data-testid="policy-speculation"
+                        disabled={config.isPending}
+                      />
+                      <span className="text-small text-text-muted">Whether risky tasks may try two or three candidates side by side.</span>
+                    </div>
+                  </div>
                 </Card>
               ) : null}
-              <ContextsTable rows={o.contexts} />
-              <Candidates candidates={o.candidates} />
-              <HistorySection overview={o} />
+              {nothingYet ? (
+                <Card>
+                  <EmptyState icon={<PolicyIcon size={20} />} title="The default policy is active" data-testid="policy-empty">
+                    <span data-testid="policy-candidates-empty">
+                      NEXUS has no recorded evidence yet, so there are no learned preferences, candidates or history. Run an Arena
+                      campaign or complete missions, then use Learn from evidence.
+                    </span>
+                  </EmptyState>
+                </Card>
+              ) : (
+                <>
+                  <ContextsTable rows={o.contexts} />
+                  <Candidates candidates={o.candidates} />
+                  <HistorySection overview={o} />
+                </>
+              )}
               <Decisions />
             </>
           )}

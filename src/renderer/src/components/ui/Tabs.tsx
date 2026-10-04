@@ -16,18 +16,21 @@ export function Tabs<T extends string>({
   onChange,
   className,
   label,
+  bare = false,
 }: {
   tabs: readonly TabItem<T>[]
   active: T
   onChange: (id: T) => void
   className?: string
   label?: string
+  /** No bottom border, for tab strips that sit inside a bordered row. */
+  bare?: boolean
 }) {
   return (
     <div
       role="tablist"
       aria-label={label}
-      className={cn('flex shrink-0 items-end gap-1 border-b', className)}
+      className={cn('flex shrink-0 items-end gap-1', !bare && 'border-b', className)}
       onKeyDown={(e) => {
         // Arrow keys / Home / End move between tabs.
         const idx = tabs.findIndex((t) => t.id === active)

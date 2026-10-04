@@ -57,7 +57,11 @@ const WINDOW_COLUMNS = (now: number): Column<WindowRow>[] => [
     width: '30%',
     render: (w) =>
       // A bar exists only when the runtime sent a percentage for this window.
-      w.percent !== null ? (
+      w.stale ? (
+        <span className="text-text-muted" data-testid="usage-window-stale">
+          {DASH} Stale, observed {clockText(w.observedAt, now)}
+        </span>
+      ) : w.percent !== null ? (
         <span className="flex items-center gap-2">
           <ProgressBar
             value={w.percent}
@@ -95,10 +99,7 @@ function SubscriptionBlock({ overview }: { overview: UsageOverview | null }) {
     <div className="flex flex-col gap-1.5" data-testid="usage-subscription">
       <div className="flex items-center gap-1.5 text-small text-text-muted">
         <span>Subscription remaining</span>
-        <SourceLabel
-          confidence={sub.kind === 'percent' ? 'EXACT' : 'UNKNOWN'}
-          source={sub.kind === 'percent' ? 'RUNTIME' : 'UNKNOWN'}
-        />
+        {sub.kind === 'percent' ? <SourceLabel confidence="EXACT" source="RUNTIME" /> : null}
       </div>
       {sub.kind === 'percent' ? (
         <>

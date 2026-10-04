@@ -13,9 +13,9 @@ export function ApprovalBar() {
     <div
       data-testid="approval-bar"
       role="status"
-      className="flex min-h-9 shrink-0 items-center gap-3 border-b bg-warning-subtle px-5 py-1"
+      className="flex min-h-8 shrink-0 items-center gap-3 border-b bg-surface-muted px-5 py-0.5 text-small"
     >
-      <CheckIcon size={14} className="shrink-0 text-warning" />
+      <CheckIcon size={13} className="shrink-0 text-text-secondary" />
       <span className="font-semibold text-text-primary">
         {pending.length} approval{pending.length === 1 ? '' : 's'} pending
       </span>
@@ -23,7 +23,7 @@ export function ApprovalBar() {
         {first.action}
         {first.command ? `: ${first.command}` : ''}
       </span>
-      <Button size="sm" onClick={() => setDrawer('approvals')} data-testid="approval-bar-review">
+      <Button size="sm" variant="ghost" onClick={() => setDrawer('approvals')} data-testid="approval-bar-review">
         Review
       </Button>
     </div>

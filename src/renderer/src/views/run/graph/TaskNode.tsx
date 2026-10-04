@@ -46,7 +46,7 @@ function TaskNodeImpl({ data }: NodeProps<TaskFlowNode>) {
         'flex cursor-pointer flex-col justify-center gap-0.5 overflow-hidden rounded-md border bg-surface px-2.5 py-1.5 text-small leading-tight transition-colors hover:border-border-strong',
         task.state === 'failed' && 'border-danger/40 bg-danger-subtle',
         active && 'border-info/50',
-        selected && 'border-accent ring-2 ring-accent',
+        selected && 'border-text-primary ring-1 ring-text-primary',
         highlight === 'added' && 'outline outline-2 -outline-offset-2 outline-success',
         highlight === 'changed' && 'outline outline-2 -outline-offset-2 outline-warning',
         highlight === 'removed' && 'outline outline-2 -outline-offset-2 outline-dashed outline-danger',
@@ -83,10 +83,10 @@ function TaskNodeImpl({ data }: NodeProps<TaskFlowNode>) {
         {task.title}
       </div>
       <div className="flex items-center gap-1.5 text-caption text-text-muted">
-        <span>{task.role}</span>
+        <span className="shrink-0">{agent ? agent.label : task.role}</span>
         <span aria-hidden="true">·</span>
         <span className="min-w-0 flex-1 truncate" title={agent?.model ?? undefined}>
-          {agent?.model ? claudeModelLabel(agent.model) : 'no agent yet'}
+          {agent?.model ? claudeModelLabel(agent.model).replace('Claude · ', '') : 'not started'}
         </span>
         {task.kind === 'repair' ? <span className="text-warning">repair</span> : null}
         <span className="tnum">{formatSpan(task.startedAt, task.finishedAt, now)}</span>

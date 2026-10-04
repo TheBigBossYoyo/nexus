@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useUsageOverview, useUsageRefresh, useUsageResumeNow } from '../../lib/queries'
 import { useNow } from '../../lib/useNow'
-import { clockText, untilText } from '../../lib/usageModel'
 import { Badge, Button, PageHeader, RefreshIcon, StatusDot } from '../../components/ui'
 import { usageHeader } from './usageViewModel'
 import { StatusSection } from './StatusSection'
@@ -23,7 +22,7 @@ export function UsageView() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="usage-view">
       <PageHeader
-        title="Claude usage"
+        title="Usage"
         context="Intelligence"
         actions={
           <>
@@ -57,27 +56,6 @@ export function UsageView() {
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-6 py-5">
-          {o ? (
-            <p
-              className="m-0 flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-text-secondary"
-              data-testid="usage-meta"
-            >
-              <span>
-                Auto-resume <span className="font-medium text-text-primary">{h.autoResume}</span>
-              </span>
-              <span aria-hidden="true" className="text-text-muted">
-                ·
-              </span>
-              <span>
-                Next reset{' '}
-                <span className="font-medium text-text-primary tnum">
-                  {h.nextReset
-                    ? `${clockText(h.nextReset, now)}${untilText(h.nextReset, now) ? ` (in ${untilText(h.nextReset, now)})` : ''}`
-                    : 'Unknown'}
-                </span>
-              </span>
-            </p>
-          ) : null}
           <StatusSection
             overview={o}
             pending={overview.isPending}

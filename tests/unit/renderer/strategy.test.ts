@@ -54,7 +54,7 @@ describe('strategy model', () => {
       },
     } as unknown as PolicyPreview
     const t = previewText(p)
-    expect(t.headline).toBe('Adaptive would choose BUILD')
+    expect(t.headline).toBe('Adaptive would choose Build')
     expect(t.evidence).toBe('No evidence yet, default policy')
     const strong = { decision: { ...p.decision, evidenceSummary: [{ strategy: 'BUILD', label: 'STRONG', suppressed: false }] } } as unknown as PolicyPreview
     expect(previewText(strong).evidence).toBe('Evidence: strong')

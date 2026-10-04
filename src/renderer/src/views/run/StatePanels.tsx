@@ -1,12 +1,12 @@
+import { useState } from 'react'
 import { TERMINAL_RUN_STATES, type Task } from '@shared/domain'
-import { Badge, Button, CodeBlock, ErrorNote, Loading, Notice, PlayIcon, Stat } from '../../components/ui'
+import { Badge, Button, CodeBlock, ErrorNote, Loading, Notice, PlayIcon } from '../../components/ui'
 import { DASH, formatCost, formatDuration } from '../../lib/format'
-import { useResumeRun, useRetryTask, useRunSummary, useUsageOverview } from '../../lib/queries'
+import { useResumeRun, useRetryTask, useRunSummary } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
 import { CandidatesSection } from './CandidatesSection'
 import { pauseDetailFromEvents } from './eventText'
-import { quotaState } from './missionModel'
-import { useNow, useRunCtx } from './runContext'
+import { useRunCtx } from './runContext'
 
 const PAUSE_LABEL = {
   user: 'Paused by you',
@@ -44,32 +44,14 @@ function TaskProblem({ task, canRetry }: { task: Task; canRetry: boolean }) {
   )
 }
 
-/** A quota pause is an expected wait, not an error: calm text, no red, no retry button. */
+/** A quota pause is an expected wait: one calm line. Timing and actions live in the quota banner. */
 function QuotaPaused() {
-  const { detail } = useRunCtx()
-  const { run } = detail
-  const overview = useUsageOverview()
-  const resume = useResumeRun()
-  const now = useNow(true, 30_000)
-  const state = quotaState(run, overview.data, now)
-  if (!state) return null
   return (
-    <div className="shrink-0 border-b bg-surface-muted px-5 py-3" data-testid="run-state-panel" data-kind="quota">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="font-semibold text-text-primary" data-testid="quota-paused-title">
-            {state.title}
-          </div>
-          <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0 text-text-secondary" data-testid="quota-paused-lines">
-            {state.lines.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-        </div>
-        <Button size="sm" icon={<PlayIcon size={12} />} loading={resume.isPending} onClick={() => resume.mutate({ runId: run.id })}>
-          Resume now
-        </Button>
-      </div>
+    <div className="shrink-0 border-b bg-surface-muted px-5 py-2 text-small text-text-secondary" data-testid="run-state-panel" data-kind="quota">
+      <span className="font-medium text-text-primary" data-testid="quota-paused-title">
+        Waiting for the Claude usage limit.
+      </span>{' '}
+      <span data-testid="quota-paused-lines">No work has been lost; the mission resumes when Claude is available.</span>
     </div>
   )
 }
@@ -170,32 +152,53 @@ export function MissionComplete() {
     { label: 'Agent transcripts', onClick: () => setView('agents'), testId: 'link-agents' },
   ]
 
+  const fact = (label: string, value: string, testId?: string, hint?: string) => (
+    <div className="flex items-baseline gap-1.5" data-testid={testId}>
+      <dt className="text-text-muted">{label}</dt>
+      <dd className="tnum m-0 font-medium text-text-primary">
+        {value}
+        {hint ? <span className="ml-1 font-normal text-text-muted">{hint}</span> : null}
+      </dd>
+    </div>
+  )
+
   return (
     <div className="h-full overflow-auto" data-testid="mission-complete">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-5">
-        <div className="flex items-baseline gap-3">
-          <h2 className="m-0 text-title font-semibold text-success">Mission complete</h2>
-          <span className="text-small text-text-muted">{formatDuration(s.durationMs)} in total</span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-lg border bg-surface p-4 md:grid-cols-4">
-          <Stat label="Tasks" value={`${s.tasksCompleted}/${s.tasksTotal}`} data-testid="stat-tasks" />
-          <Stat label="Reviews approved" value={`${s.reviewsApproved}/${s.reviewsTotal}`} data-testid="stat-reviews" />
-          <Stat label="Verification" value={`${s.verificationsPassed} passed`} hint={`${s.verificationsFailed} failed`} data-testid="stat-verification" />
-          <Stat label="Files changed" value={String(s.filesChanged)} hint={`${s.commits} commits`} />
-          <Stat label="Agent sessions" value={String(s.agentSessions)} source={{ confidence: 'OBSERVED', source: 'LOCAL_AGGREGATION' }} />
-          <Stat
-            label="List-price estimate"
-            value={s.costUsd === null ? DASH : formatCost(s.costUsd)}
-            source={{ confidence: 'ESTIMATED', source: 'RUNTIME' }}
-            hint="Not a bill"
-          />
-        </div>
+      <div className="mx-auto flex max-w-4xl flex-col gap-5 p-5">
+        <dl className="m-0 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-body">
+          {fact('Tasks', `${s.tasksCompleted}/${s.tasksTotal}`, 'stat-tasks')}
+          {fact('Reviews approved', `${s.reviewsApproved}/${s.reviewsTotal}`, 'stat-reviews')}
+          {fact('Verification', `${s.verificationsPassed} passed`, 'stat-verification', `${s.verificationsFailed} failed`)}
+          {fact('Files changed', String(s.filesChanged), undefined, `${s.commits} commits`)}
+          {fact('Duration', formatDuration(s.durationMs))}
+          {fact('Agent sessions', String(s.agentSessions), undefined, 'observed')}
+          {fact('List-price estimate', s.costUsd === null ? DASH : formatCost(s.costUsd), undefined, 'estimated, not a bill')}
+        </dl>
         {s.tasksFailed > 0 || s.tasksCancelled > 0 ? (
           <div className="text-text-secondary">
             {s.tasksFailed} task(s) failed and {s.tasksCancelled} cancelled.
           </div>
         ) : null}
+
+        <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4" data-testid="merge-instructions">
+          <h3 className="m-0 text-heading font-semibold">Bring the result into your branch</h3>
+          {run.integrationBranch ? (
+            <>
+              <div className="flex items-stretch gap-2">
+                <div className="min-w-0 flex-1">
+                  <CodeBlock>{`git merge ${run.integrationBranch}`}</CodeBlock>
+                </div>
+                <CopyButton text={`git merge ${run.integrationBranch}`} />
+              </div>
+              <div className="text-small text-text-secondary">
+                This is a manual step: NEXUS does not merge into your branch. From a clean checkout of{' '}
+                <span className="font-mono">{run.baseBranch ?? 'your target branch'}</span>, run the command above when you are ready.
+              </div>
+            </>
+          ) : (
+            <div className="text-text-secondary">This run has no integration branch to merge.</div>
+          )}
+        </section>
 
         <CandidatesSection />
 
@@ -210,26 +213,14 @@ export function MissionComplete() {
                   <li key={`${c.name}-${i}`} className="flex items-center gap-3 border-b px-3 py-1.5 last:border-b-0" data-ok={ok ? 'true' : 'false'}>
                     <Badge tone={ok ? 'success' : 'danger'}>{ok ? 'Passed' : c.timedOut ? 'Timed out' : 'Failed'}</Badge>
                     <span className="text-text-muted">{c.name}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-code">{c.command}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-code" title={c.command}>
+                      {c.command}
+                    </span>
                     <span className="tnum text-text-muted">{formatDuration(c.durationMs)}</span>
                   </li>
                 )
               })}
             </ul>
-          )}
-        </Block>
-
-        <Block title="Bring the result into your branch" testId="merge-instructions">
-          {run.integrationBranch ? (
-            <>
-              <CodeBlock>{`git merge ${run.integrationBranch}`}</CodeBlock>
-              <div className="text-small text-text-secondary">
-                This is a manual step: NEXUS does not merge into your branch. From a clean checkout of{' '}
-                <span className="font-mono">{run.baseBranch ?? 'your target branch'}</span>, run the command above when you are ready.
-              </div>
-            </>
-          ) : (
-            <div className="text-text-secondary">This run has no integration branch to merge.</div>
           )}
         </Block>
 
@@ -242,5 +233,22 @@ export function MissionComplete() {
         </div>
       </div>
     </div>
+  )
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        })
+      }}
+      data-testid="copy-merge"
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
   )
 }

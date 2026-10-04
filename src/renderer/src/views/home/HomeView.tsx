@@ -7,6 +7,7 @@ import {
   useProjects,
   useRuns,
 } from '../../lib/queries'
+import { overnightWord } from '../../lib/wording'
 import { runStatus } from '../../lib/status'
 import { formatSpan, formatTokens, formatCount } from '../../lib/format'
 import { exactResetAt } from '../../lib/usageModel'
@@ -285,8 +286,8 @@ function OvernightCard({ overnight }: { overnight: readonly OvernightStatus[] })
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2" role="status">
             <StatusDot tone="warning" />
-            <span className="font-medium capitalize">
-              {first.state.replace(/_/g, ' ').toLowerCase()}
+            <span className="font-medium">
+              {overnightWord(first.state)}
             </span>
           </div>
           <div className="text-small text-text-secondary">
@@ -437,7 +438,8 @@ function FirstLaunch() {
   const selectProject = useUiStore((s) => s.selectProject)
   const open = useOpenProject()
   return (
-    <Card data-testid="home-first-launch">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 pt-10" data-testid="home-first-launch">
+    <Card>
       <EmptyState
         icon={<FolderIcon size={22} />}
         title="Open a project to start"
@@ -469,6 +471,15 @@ function FirstLaunch() {
         separate worktrees; your working tree is never written to.
       </EmptyState>
     </Card>
+      <ol className="m-0 grid list-none grid-cols-3 gap-3 p-0 text-small text-text-secondary" aria-label="How it works">
+        {['Open a project', 'Describe the mission', 'Review the plan'].map((t, i) => (
+          <li key={t} className="flex items-center gap-2">
+            <span className="tnum inline-flex size-5 items-center justify-center rounded-full border text-caption text-text-muted">{i + 1}</span>
+            {t}
+          </li>
+        ))}
+      </ol>
+    </div>
   )
 }
 

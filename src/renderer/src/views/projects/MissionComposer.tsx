@@ -1,3 +1,4 @@
+import { planningWords, strategyWord } from '../../lib/wording'
 import { useEffect, useState } from 'react'
 import { PRESETS, RUN_MODES, type Preset, type Project, type RunMode } from '@shared/domain'
 import { presetMaxAgents } from '@shared/settings'
@@ -42,7 +43,7 @@ import {
 
 type ComposerMode = RunMode | typeof OVERNIGHT_MODE
 const MODE_OPTIONS: SelectOption<ComposerMode>[] = [
-  ...RUN_MODES.map((m) => ({ value: m as ComposerMode, label: m.toUpperCase() })),
+  ...RUN_MODES.map((m) => ({ value: m as ComposerMode, label: strategyWord(m) })),
   { value: OVERNIGHT_MODE, label: 'OVERNIGHT', testId: 'mode-overnight' },
 ]
 const PLANNING_OPTIONS: { value: PlanningMode; label: string }[] = [
@@ -59,7 +60,7 @@ const CANDIDATE_OPTIONS: SelectOption<'2' | '3'>[] = [
   { value: '2', label: '2 candidates' },
   { value: '3', label: '3 candidates' },
 ]
-const PRESET_OPTIONS = PRESETS.map((p) => ({ value: p, label: p.toUpperCase() }))
+const PRESET_OPTIONS = PRESETS.map((p) => ({ value: p, label: strategyWord(p) }))
 
 export function MissionComposer({ project }: { project: Project }) {
   const settings = useSettings().data
@@ -291,7 +292,7 @@ export function MissionComposer({ project }: { project: Project }) {
                 <div className="flex flex-col gap-0.5 rounded-md border-l-2 border-accent bg-surface-muted px-3 py-2 text-small" data-testid="planning-recommendation">
                   <div className="flex items-center gap-2">
                     <span className="text-text-secondary">Recommended planning mode:</span>
-                    <span className="font-mono">{recommendation.data.mode.toUpperCase()}</span>
+                    <span className="font-medium">{strategyWord(recommendation.data.mode)}</span>
                     {recommendation.data.mode !== planningMode ? (
                       <button
                         type="button"
@@ -305,13 +306,9 @@ export function MissionComposer({ project }: { project: Project }) {
                       <span className="text-text-muted">selected</span>
                     )}
                   </div>
-                  {recommendation.data.reasons.length > 0 ? (
-                    <ul className="m-0 list-disc pl-5 text-text-secondary">
-                      {recommendation.data.reasons.map((r, i) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
-                  ) : null}
+                  <div className="text-text-secondary" title={recommendation.data.reasons.join(' ')}>
+                    {planningWords(recommendation.data.mode)}
+                  </div>
                 </div>
               ) : null}
 
@@ -376,7 +373,7 @@ export function MissionComposer({ project }: { project: Project }) {
               onClick={() => void submit()}
               data-testid="create-run"
             >
-              Start {mode.toUpperCase()} run
+              Start mission
             </Button>
           </div>
         )}

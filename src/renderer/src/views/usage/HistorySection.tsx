@@ -5,11 +5,9 @@ import { useUsageBreakdown } from '../../lib/queries-v3'
 import {
   Card,
   DataTable,
-  EmptyState,
   SegmentedControl,
   SourceLabel,
   Tabs,
-  UsageIcon,
   type Column,
 } from '../../components/ui'
 import { DailyChart } from './DailyChart'
@@ -116,14 +114,9 @@ export function HistorySection({ today }: { today: Date }) {
             onRetry={() => void daily.refetch()}
           />
         ) : !any ? (
-          <EmptyState
-            icon={<UsageIcon size={18} />}
-            title="No usage observed yet"
-            className="py-8"
-            data-testid="usage-history-empty"
-          >
-            Token counts appear here after NEXUS runs its first Claude session.
-          </EmptyState>
+          <p className="m-0 text-small text-text-muted" data-testid="usage-history-empty">
+            No usage observed yet. Token counts appear here after NEXUS runs its first Claude session.
+          </p>
         ) : (
           <DailyChart points={points} />
         )}

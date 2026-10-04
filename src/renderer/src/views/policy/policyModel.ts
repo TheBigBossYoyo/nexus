@@ -9,20 +9,13 @@ import type {
 } from '@shared/v3'
 import type { PolicyDiff, PolicySnapshotSummary } from '@shared/v3-read'
 import { strategyName } from '../arena/arenaModel'
+import { contextWords } from '../../lib/wording'
 
 /** Pure presentation rules for the Adaptive policy page. */
 
-const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
 
 /** `bugfix|medium|low` becomes "Bugfix · medium complexity · low risk". Wildcards read as "any". */
-export function formatContextKey(key: string): string {
-  if (key === '*|*|*') return 'All tasks'
-  const [category = '', complexity = '*', risk = '*'] = key.split('|')
-  const cat = category === '*' ? 'Any category' : cap(category)
-  const cx = complexity === '*' ? 'any complexity' : `${complexity} complexity`
-  const rk = risk === '*' ? 'any risk' : `${risk} risk`
-  return `${cat} · ${cx} · ${rk}`
-}
+export const formatContextKey = contextWords
 
 export const EXPLORATION_OPTIONS: readonly { value: ExplorationMode; label: string }[] = [
   { value: 'off', label: 'Off' },

@@ -115,27 +115,38 @@ const oracle = {
 }
 
 // ---------- scaling, measured behaviourally ----------
-// Each operation is timed at n and 4n items in-process (best of several runs, after a warm-up). Linear and
-// n log n code takes about 4-5x as long; quadratic code about 16x. The threshold sits well between, and the
-// small timing is floored, so a loaded machine does not produce false failures for correct code.
-// Nothing here counts calls of built-ins, so any linear or n log n implementation is accepted.
-const SMALL = 3000
-const LARGE = 12000
-const MAX_RATIO = 8
-const GIVE_UP_MS = 2000
+// Each operation is timed at n and 8n items in-process. Linear code takes about 8x as long and n log n code
+// about 10x; quadratic code takes about 64x. The threshold (24x) sits far from both, so neither a correct
+// implementation on a busy machine nor a quadratic one on an idle machine lands on the wrong side.
+//
+// A single call on the small input lasts well under a millisecond, which a timer cannot measure reliably.
+// So every measurement repeats the call until a batch has run for at least BATCH_MS and divides; and the
+// best of several batches is kept, because other load on the machine can only make a batch slower, never
+// faster. Nothing here counts calls of built-ins, so any linear or n log n implementation is accepted.
+const SMALL = 2000
+const LARGE = 16000
+const MAX_RATIO = 24
+const BATCH_MS = 40
+const BATCHES = 7
+const GIVE_UP_MS = 4000
 
-function timeBest(fn, what) {
+function timePerCall(fn, what) {
   let t0 = performance.now()
-  fn() // warm-up
+  fn() // warm-up, and a guard against an input that is simply far too slow
   const first = performance.now() - t0
   assert.ok(first < GIVE_UP_MS, `${what} took ${first.toFixed(0)} ms for a single run: far too slow for this input size`)
-  let best = first
-  for (let i = 0; i < 5; i++) {
+  let best = Infinity
+  for (let batch = 0; batch < BATCHES; batch++) {
+    let calls = 0
     t0 = performance.now()
-    fn()
-    const dt = performance.now() - t0
-    best = Math.min(best, dt)
-    if (dt > 400) break
+    let elapsed = 0
+    do {
+      fn()
+      calls++
+      elapsed = performance.now() - t0
+    } while (elapsed < BATCH_MS)
+    best = Math.min(best, elapsed / calls)
+    if (elapsed > 1500) break // one call is already long: more batches add nothing
   }
   return best
 }
@@ -143,12 +154,12 @@ function timeBest(fn, what) {
 function assertScalesLinearly(name, makeInput, run) {
   const small = makeInput(SMALL)
   const large = makeInput(LARGE)
-  const ts = timeBest(() => run(small), `${name} (${SMALL} items)`)
-  const tl = timeBest(() => run(large), `${name} (${LARGE} items)`)
-  const ratio = tl / Math.max(ts, 0.5)
+  const ts = timePerCall(() => run(small), `${name} (${SMALL} items)`)
+  const tl = timePerCall(() => run(large), `${name} (${LARGE} items)`)
+  const ratio = tl / ts
   assert.ok(
     ratio < MAX_RATIO,
-    `${name}: ${LARGE} items took ${tl.toFixed(1)} ms against ${ts.toFixed(1)} ms for ${SMALL} (ratio ${ratio.toFixed(1)}; about 4 is linear, about 16 is quadratic)`,
+    `${name}: ${LARGE} items took ${tl.toFixed(2)} ms against ${ts.toFixed(3)} ms for ${SMALL} (ratio ${ratio.toFixed(1)}; about 8 is linear, about 64 is quadratic)`,
   )
 }
 

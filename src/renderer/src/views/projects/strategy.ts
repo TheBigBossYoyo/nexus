@@ -1,3 +1,4 @@
+import { humanizeKeys, strategyWord } from '../../lib/wording'
 import type { RunMode } from '@shared/domain'
 import { DEFAULT_SPECULATIVE_CANDIDATES, STRATEGIES, type Strategy } from '@shared/v3'
 import type { PolicyPreview } from '@shared/v3-read'
@@ -59,5 +60,5 @@ export function previewText(preview: PolicyPreview | null | undefined): PreviewT
   const row = d.evidenceSummary.find((r) => r.strategy === d.strategy)
   const evidence =
     row && !row.suppressed && row.label !== 'INSUFFICIENT' ? `Evidence: ${row.label.toLowerCase()}` : 'No evidence yet, default policy'
-  return { headline: `Adaptive would choose ${d.strategy}`, evidence, reason: d.reason }
+  return { headline: `Adaptive would choose ${strategyWord(d.strategy)}`, evidence, reason: humanizeKeys(d.reason) }
 }

@@ -76,9 +76,11 @@ export interface WindowRow {
   resetAt: string | null
   confidence: Confidence
   source: UsageWindow['source']
+  stale: boolean
+  observedAt: string
 }
 
-export function windowRows(windows: readonly UsageWindow[]): WindowRow[] {
+export function windowRows(windows: readonly (UsageWindow & { stale?: boolean })[]): WindowRow[] {
   return windows.map((w) => {
     const st = WINDOW_STATUS[w.status]
     const p = w.utilizationPercent
@@ -87,7 +89,9 @@ export function windowRows(windows: readonly UsageWindow[]): WindowRow[] {
       name: windowName(w.limitType),
       statusLabel: st.label,
       tone: st.tone,
-      percent: typeof p === 'number' && Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : null,
+      stale: w.stale === true,
+      observedAt: w.observedAt,
+      percent: w.stale === true ? null : typeof p === 'number' && Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : null,
       resetAt: w.resetAt,
       confidence: w.confidence,
       source: w.source,

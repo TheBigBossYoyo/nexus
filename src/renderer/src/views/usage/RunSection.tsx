@@ -2,7 +2,7 @@ import { formatCount, formatDuration, formatTokens } from '../../lib/format'
 import { useRuns } from '../../lib/queries'
 import { useRunUsage } from '../../lib/queries-v3'
 import { useUiStore } from '../../store/ui'
-import { Button, Card, EmptyState, Stat, UsageIcon } from '../../components/ui'
+import { Button, Card, Stat } from '../../components/ui'
 import { isEmptyTotals, pickCurrentRun, strategyTitle } from './usageViewModel'
 import { BlockSkeleton, ReadError } from './shared'
 
@@ -17,9 +17,7 @@ export function RunSection() {
   const run = (runs.data ?? []).find((r) => r.id === runId) ?? null
 
   const empty = (
-    <EmptyState icon={<UsageIcon size={18} />} title="No run selected" className="py-6">
-      Open a mission to see the Claude sessions and tokens NEXUS observed for it.
-    </EmptyState>
+    <p className="m-0 text-small text-text-muted">No mission selected. Open one to see the Claude sessions and tokens NEXUS observed for it.</p>
   )
 
   let body

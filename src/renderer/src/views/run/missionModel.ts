@@ -10,6 +10,7 @@ import type {
   UsageOverview,
 } from '@shared/v3'
 import type { RunPolicyInfo, SpeculativeDetail } from '@shared/v3-read'
+import { contextWords, shortTitle, strategyWord } from '../../lib/wording'
 import { DASH, formatCount, formatDuration, formatTokens } from '../../lib/format'
 import { clockText, exactResetAt, untilText } from '../../lib/usageModel'
 
@@ -18,25 +19,12 @@ import { clockText, exactResetAt, untilText } from '../../lib/usageModel'
  * No DOM, no store: everything is derived from the data the backend returned.
  */
 
-const TITLE_MAX = 96
-
-/** First non-empty line of the prompt, shortened for a page title. */
-export function missionTitle(prompt: string): string {
-  const line =
-    prompt
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) ?? 'Untitled mission'
-  return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1).trimEnd()}…` : line
-}
+/** Short title: first sentence, at most 60 characters. */
+export const missionTitle = (prompt: string): string => shortTitle(prompt)
 
 /** True when the prompt has more to show than the title does. */
 export function promptHasMore(prompt: string): boolean {
-  const lines = prompt
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-  return lines.length > 1 || (lines[0]?.length ?? 0) > TITLE_MAX
+  return prompt.trim() !== shortTitle(prompt)
 }
 
 export interface StrategyChip {
@@ -49,8 +37,8 @@ export interface StrategyChip {
 export function strategyChip(info: RunStrategyInfo | null | undefined): StrategyChip {
   if (!info) return { label: null, hint: null }
   return {
-    label: info.resolved,
-    hint: info.requested !== info.resolved ? `requested ${info.requested}` : null,
+    label: strategyWord(info.resolved),
+    hint: info.requested !== info.resolved ? `requested ${strategyWord(info.requested)}` : null,
   }
 }
 
@@ -90,7 +78,7 @@ const countText = (n: number, passes: number) => (n === 0 ? DASH : `n=${n}, ${pa
 /** Arena trials and real missions are shown separately, never pooled. */
 export function evidenceRows(summary: readonly EvidenceSummaryRow[], chosen: string): EvidenceRowView[] {
   return summary.map((r) => ({
-    strategy: r.strategy,
+    strategy: strategyWord(r.strategy),
     chosen: r.strategy === chosen,
     arena: countText(r.arenaN, r.arenaSuccesses),
     missions: countText(r.missionN, r.missionSuccesses),
@@ -137,15 +125,14 @@ export function policyView(info: RunPolicyInfo | null | undefined): PolicyView {
     }
     return {
       kind: 'user',
-      headline: `Strategy ${strategy.resolved} was chosen by you. The adaptive policy was not consulted.`,
+      headline: `Strategy ${strategyWord(strategy.resolved)} was chosen by you. The adaptive policy was not consulted.`,
       ...empty,
     }
   }
   const key = info?.profile?.contextKey ?? decision.contextKey
-  const [category, complexity, risk] = key.split('|')
   return {
     kind: 'decision',
-    headline: `Policy chose ${decision.strategy}`,
+    headline: `Policy chose ${strategyWord(decision.strategy)}`,
     layer: LAYER_LABEL[decision.layer],
     layerNote: LAYER_EXPLANATION[decision.layer],
     reason: decision.reason,
@@ -153,7 +140,7 @@ export function policyView(info: RunPolicyInfo | null | undefined): PolicyView {
     exploration: decision.exploration,
     evidence: evidenceRows(decision.evidenceSummary, decision.strategy),
     resourceNotes: decision.resourceNotes,
-    profile: category && complexity && risk ? `${category} · ${complexity} complexity · ${risk} risk` : null,
+    profile: contextWords(key),
   }
 }
 

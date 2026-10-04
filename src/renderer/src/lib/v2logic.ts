@@ -191,7 +191,7 @@ export function deriveHealth(
   if (approvals > 0) reasons.push(plural(approvals, 'pending approval'))
   if (run.state === 'paused') reasons.push(`paused${run.pauseReason ? ` (${run.pauseReason})` : ''}`)
   if (run.state === 'failed' || failed > 0) return { level: 'at_risk', label: 'At risk', tone: 'danger', reasons }
-  if (reasons.length > 0) return { level: 'attention', label: 'Needs attention', tone: 'waiting', reasons }
+  if (reasons.length > 0) return { level: 'attention', label: run.state === 'awaiting_approval' || approvals > 0 ? 'Waiting for you' : 'Needs attention', tone: 'waiting', reasons }
   return { level: 'ok', label: 'On track', tone: 'success', reasons }
 }
 

@@ -20,6 +20,16 @@ const columns: Column<StrategyComparisonRow>[] = [
     render: (r) => <span className="font-medium">{strategyName(r.strategy)}</span>,
   },
   {
+    key: 'trials',
+    header: 'Trials',
+    render: (r) => (
+      <span className="whitespace-nowrap">
+        {r.n} from {r.cases} case{r.cases === 1 ? '' : 's'}
+        {r.excludedInfrastructure > 0 ? <span className="block text-caption text-text-muted">{r.excludedInfrastructure} excluded (harness)</span> : null}
+      </span>
+    ),
+  },
+  {
     key: 'pass',
     header: 'Passed',
     numeric: true,

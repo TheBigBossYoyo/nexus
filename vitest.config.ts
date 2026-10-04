@@ -16,6 +16,9 @@ export default defineConfig({
           name: 'unit',
           environment: 'node',
           include: ['tests/unit/**/*.test.ts'],
+          // Unit tests run next to the scenario tests' git processes; the limit bounds a hang, it is not a
+          // performance assertion.
+          testTimeout: 30_000,
           sequence: { groupOrder: 0 },
         },
       },

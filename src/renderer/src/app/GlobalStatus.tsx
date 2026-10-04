@@ -3,6 +3,7 @@ import { ACTIVE_AGENT_STATES } from '@shared/domain'
 import { useActiveOvernight, usePendingApprovals } from '../lib/queries'
 import { runStatus } from '../lib/status'
 import { cn } from '../lib/cn'
+import { overnightWord } from '../lib/wording'
 import { useUiStore } from '../store/ui'
 import { BranchIcon, CheckIcon, CommandIcon, Kbd, StatusDot, Tooltip } from '../components/ui'
 import { useCurrentProject, useSelectedRun } from './useCurrent'
@@ -86,11 +87,12 @@ function RunStatus() {
   )
 }
 
-function OvernightStatus() {
+function OvernightStatus({ showOff }: { showOff: boolean }) {
   const active = useActiveOvernight().data ?? []
   const openOvernight = useUiStore((s) => s.setView)
   const first = active[0]
   if (!first) {
+    if (!showOff) return null
     return (
       <span className={WIDE_ITEM} data-testid="overnight-off">
         <Label>Overnight</Label>
@@ -98,7 +100,7 @@ function OvernightStatus() {
       </span>
     )
   }
-  const state = first.state.replace(/_/g, ' ').toLowerCase()
+  const state = overnightWord(first.state)
   return (
     <button
       type="button"
@@ -109,7 +111,7 @@ function OvernightStatus() {
     >
       <Label>Overnight</Label>
       <StatusDot tone="warning" />
-      <span className="capitalize">{state}</span>
+      <span>{state}</span>
     </button>
   )
 }
@@ -188,15 +190,19 @@ function PaletteButton() {
   )
 }
 
-/** Concise global status for the right of every header. Text first; popovers and tooltips carry the detail. */
+/** Concise global status for the right of every header. Only what is relevant to the page is shown. */
 export function GlobalStatus() {
+  const view = useUiStore((s) => s.view)
+  const showGit = view === 'projects' || view === 'run' || view === 'agents'
+  const showRun = view === 'agents'
+  const showOvernightOff = view === 'home' || view === 'overnight' || view === 'projects'
   return (
     <>
       <ClaudeStatus />
-      <AgentsStatus />
-      <RunStatus />
-      <OvernightStatus />
-      <GitStatus />
+      {showRun ? <AgentsStatus /> : null}
+      {showRun ? <RunStatus /> : null}
+      <OvernightStatus showOff={showOvernightOff} />
+      {showGit ? <GitStatus /> : null}
       <ApprovalsStatus />
       <PaletteButton />
     </>

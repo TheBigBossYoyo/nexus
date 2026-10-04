@@ -32,8 +32,8 @@ describe('missionTitle', () => {
 describe('strategyChip', () => {
   it('shows the requested strategy only when it differs', () => {
     const base = { speculativeCandidates: 2, policyDecisionId: null, policySnapshotId: null, taskProfileId: null, arenaTrialId: null }
-    expect(strategyChip({ ...base, requested: 'ADAPTIVE', resolved: 'BUILD' })).toEqual({ label: 'BUILD', hint: 'requested ADAPTIVE' })
-    expect(strategyChip({ ...base, requested: 'SWARM', resolved: 'SWARM' })).toEqual({ label: 'SWARM', hint: null })
+    expect(strategyChip({ ...base, requested: 'ADAPTIVE', resolved: 'BUILD' })).toEqual({ label: 'Build', hint: 'requested Adaptive' })
+    expect(strategyChip({ ...base, requested: 'SWARM', resolved: 'SWARM' })).toEqual({ label: 'Swarm', hint: null })
     expect(strategyChip(null)).toEqual({ label: null, hint: null })
   })
 })
@@ -89,7 +89,7 @@ describe('policyView', () => {
     } as unknown as PolicyDecision
     const v = policyView({ strategy: null, profile: null, decision, outcome: null } as RunPolicyInfo)
     expect(v).toMatchObject({ kind: 'decision', layer: 'Evidence', version: 'Policy v4', reason: 'Higher pass rate' })
-    expect(v.profile).toBe('bugfix · small complexity · low risk')
+    expect(v.profile).toBe('Bug fix · small size · low risk')
   })
 })
 

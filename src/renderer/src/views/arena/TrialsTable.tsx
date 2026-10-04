@@ -38,7 +38,7 @@ export function TrialsTable({
       {
         key: 'state',
         header: 'State',
-        render: (r) => <TrialStateText state={r.trial.state} detail />,
+        render: (r) => <TrialStateText state={r.trial.state} blockKind={r.trial.blockKind} detail />,
       },
       {
         key: 'hidden',

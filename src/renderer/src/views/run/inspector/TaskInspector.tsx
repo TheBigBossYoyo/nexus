@@ -223,7 +223,7 @@ export function TaskInspector({ task }: { task: Task | null }) {
   }
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface" data-testid="task-inspector" data-task-id={task.id}>
-      <Tabs tabs={TAB_ITEMS} active={tab} onChange={setTab} label="Task inspector" className="overflow-x-auto overflow-y-hidden px-2 [&::-webkit-scrollbar]:h-1" />
+      <Tabs tabs={TAB_ITEMS} active={tab} onChange={setTab} label="Task inspector" className="gap-0 overflow-x-auto overflow-y-hidden px-2 [&::-webkit-scrollbar]:h-1 [&_[role=tab]]:px-2" />
       <div className="min-h-0 flex-1 overflow-auto" role="tabpanel">
         {tab === 'overview' ? <OverviewTab task={task} /> : null}
         {tab === 'context' ? <ContextTab task={task} /> : null}

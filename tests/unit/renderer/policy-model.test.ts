@@ -11,15 +11,15 @@ import {
 
 describe('formatContextKey', () => {
   it('spells out category, complexity and risk', () => {
-    expect(formatContextKey('bugfix|medium|low')).toBe('Bugfix · medium complexity · low risk')
-    expect(formatContextKey('security|high|high')).toBe('Security · high complexity · high risk')
+    expect(formatContextKey('bugfix|medium|low')).toBe('Bug fix · medium size · low risk')
+    expect(formatContextKey('security|high|high')).toBe('Security change · high size · high risk')
   })
   it('reads fallback keys as "any"', () => {
-    expect(formatContextKey('feature|*|*')).toBe('Feature · any complexity · any risk')
+    expect(formatContextKey('feature|*|*')).toBe('Feature · any size · any risk')
     expect(formatContextKey('*|*|*')).toBe('All tasks')
   })
   it('tolerates a short key', () => {
-    expect(formatContextKey('refactor')).toBe('Refactor · any complexity · any risk')
+    expect(formatContextKey('refactor')).toBe('Refactor · any size · any risk')
   })
 })
 
@@ -75,9 +75,9 @@ describe('diffLines', () => {
       config: [{ field: 'exploration', from: 'off', to: 'balanced' }],
     } as unknown as PolicyDiff
     expect(diffLines(d)).toEqual([
-      { kind: 'added', text: 'Bugfix · low complexity · low risk: Build' },
-      { kind: 'removed', text: 'Ui · low complexity · low risk: Build' },
-      { kind: 'changed', text: 'Feature · high complexity · high risk: Single → Swarm' },
+      { kind: 'added', text: 'Bug fix · low size · low risk: Build' },
+      { kind: 'removed', text: 'UI change · low size · low risk: Build' },
+      { kind: 'changed', text: 'Feature · high size · high risk: Single → Swarm' },
       { kind: 'config', text: 'exploration: off → balanced' },
     ])
   })

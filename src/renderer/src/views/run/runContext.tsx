@@ -103,10 +103,16 @@ export function useNow(active: boolean, intervalMs = 1000): number {
 
 /** The most recently created agent that worked on a task. */
 export function latestAgentOf(agents: readonly Agent[], taskId: string): Agent | null {
+  // The implementing agent represents the task; reviewers and verifiers only count when nothing implemented it.
   let best: Agent | null = null
+  let bestImpl = false
   for (const a of agents) {
     if (a.taskId !== taskId) continue
-    if (!best || a.createdAt >= best.createdAt) best = a
+    const impl = a.purpose === 'implement'
+    if (!best || (impl && !bestImpl) || (impl === bestImpl && a.createdAt >= best.createdAt)) {
+      best = a
+      bestImpl = impl
+    }
   }
   return best
 }

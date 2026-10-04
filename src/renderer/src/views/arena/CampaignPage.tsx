@@ -21,6 +21,7 @@ import {
   ChevronLeftIcon,
 } from '../../components/ui'
 import { BlockSkeleton, ReadError } from '../usage/shared'
+import { clockText } from '../../lib/usageModel'
 import { campaignDuration, CampaignStateBadge, ProgressCounts, ProgressStrip } from './CampaignList'
 import { Matrix } from './Matrix'
 import { ResultsPanel } from './ResultsPanel'
@@ -37,6 +38,11 @@ import {
 } from './arenaModel'
 
 type Tab = 'matrix' | 'results' | 'trials'
+
+function startedText(iso: string, now: number): string {
+  const clock = clockText(iso, now)
+  return /^d{1,2}:d{2}$/.test(clock) ? `Today ${clock}` : formatDateTime(iso)
+}
 
 export function CampaignPage({ campaignId, onBack }: { campaignId: string; onBack: () => void }) {
   const q = useArenaCampaign(campaignId)
@@ -98,7 +104,6 @@ export function CampaignPage({ campaignId, onBack }: { campaignId: string; onBac
         context="Arena"
         actions={
           <>
-            {back}
             <CampaignStateBadge c={c} />
             {canStart(c.state) ? (
               <Button
@@ -171,7 +176,7 @@ export function CampaignPage({ campaignId, onBack }: { campaignId: string; onBac
               label="Started"
               value={
                 <span className="text-body font-medium">
-                  {c.startedAt ? formatDateTime(c.startedAt) : 'Not started'}
+                  {c.startedAt ? startedText(c.startedAt, now) : 'Not started'}
                 </span>
               }
             />
