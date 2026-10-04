@@ -30,29 +30,35 @@ or a resumed task works on the chosen candidate like any other task.
 ```
 task worktree (from the integration branch)        base commit B
         │
-        ├── candidate a: worktree nexus/<run>/implement-cand-a   from B   session A
-        └── candidate b: worktree nexus/<run>/implement-cand-b   from B   session B
+        ├── candidate a: its own clone, checked out at B   session A
+        └── candidate b: its own clone, checked out at B   session B
                  │  each: implement → commit → project check commands
                  ▼
-            tournament (rankCandidates)
+            tournament (rankCandidates)            state: decided
                  │
-        winner fast-forwarded into the task worktree
+        winner fetched and fast-forwarded into the task worktree   state: adopted
                  │
         checks → review → verification → merge        (unchanged pipeline)
 ```
 
-1. Each candidate gets its own worktree and branch, created from the commit the task's worktree is at.
+1. Each candidate gets its own clone of the repository (`git clone --no-hardlinks --no-tags`, remote removed),
+   checked out at the commit the task's worktree is at. A clone has its own refs and objects, so no Git
+   command in one candidate can show another candidate's commits. Worktrees of one repository would share
+   every branch, which is why candidates are not worktrees. The clones live under the NEXUS worktrees
+   directory and never create a branch in your repository.
 2. One context pack is composed and given to every candidate. The prompts are identical except for the
    candidate's own worktree path and branch. No prompt mentions that other candidates exist.
-3. The sessions run concurrently. A session's path boundary is its own worktree, so the tool policy
-   refuses reads and writes in another candidate's directory. No message is routed between candidates.
+3. The sessions run concurrently. A session's path boundary is its own clone, so the tool policy refuses
+   reads and writes in another candidate's directory. No message is routed between candidates. An
+   instruction you send to the task while candidates run is delivered to every candidate.
 4. When a session ends, anything uncommitted is committed and the project's check commands run in that
    worktree. The diff against the base commit is stored.
 5. The tournament ranks the candidates and the decision is stored with every comparison it made.
-6. The winner's branch is fast-forwarded into the task's worktree. It is always a fast-forward because
-   the base is the same.
-7. All candidate worktrees are removed and their branches deleted. Before that, each candidate's
-   evidence, rank and diff (up to 200,000 characters) are in the database.
+6. The winner's commits are fetched from its clone and fast-forwarded into the task's worktree (hooks are
+   not run). It is always a fast-forward because the base is the same. The speculative run is then `adopted`.
+7. All candidate clones are removed. Before that, each candidate's evidence, rank and diff (up to 200,000
+   characters) are in the database. Memory a losing candidate proposed is rejected and decisions it
+   recorded are removed, so neither is promoted or shown to later agents as the task's own.
 8. The task continues with the normal checks, review, verification and merge.
 
 ## How the winner is chosen
@@ -71,8 +77,10 @@ task worktree (from the integration branch)        base commit B
 | 8 | Fewer files changed | tie-breaker |
 | 9 | Candidate label | tie-breaker |
 
-A value that was not measured never wins or loses a rule. No rule reads tokens, turns or duration, and
-no model is asked which candidate "looks better".
+Every rule maps a candidate to one number, so the ranking is a total order and does not depend on the
+order the candidates are given in. A yes/no value that was not measured ranks between yes and no; a count
+that was not measured ranks after every measured count. No rule reads tokens, turns or duration, and no
+model is asked which candidate "looks better".
 
 The stored confidence is `decisive` when a correctness rule separated the winner from the runner-up,
 `marginal` when only a tie-breaker did, and `none` when no candidate produced a result.
@@ -83,9 +91,11 @@ The stored confidence is `decisive` when a correctness rule separated the winner
 |---|---|
 | No candidate passes its checks | The best-ranked one is still adopted and goes through the normal repair loop. |
 | No candidate produces a result | The speculative run is `failed`, the task fails as retryable, and the retry is a normal single implementation. Speculation is not repeated for that task. |
-| Pause, usage limit or restart while candidates run | Finished candidates keep their evidence. Unfinished ones resume their SDK session when it is resumable, or continue in the same worktree with a fresh session. |
-| The task is cancelled | Candidate worktrees and branches are removed. |
-| The run is cleaned up | Leftover candidate worktrees are removed with the run's other worktrees. |
+| Pause, usage limit or restart while candidates run | The stage continues from its stored state. Finished candidates (with or without a result) keep their evidence and are not run again. Unfinished ones resume their SDK session when it is resumable, or continue in the same clone with a fresh session. The task is never checked or merged before the tournament has run. |
+| Restart after the tournament, before adoption | The stored winner is adopted; no candidate runs again. |
+| The winner cannot be adopted (its clone is gone, Git refuses) | The speculative run is `failed`, the task fails as retryable, and the retry is a normal single implementation. |
+| The task or the run is cancelled | Candidate clones are removed. |
+| The run is cleaned up | Leftover candidate clones are removed with the run's worktrees. |
 
 ## In the Arena
 
@@ -98,8 +108,8 @@ same way for every strategy.
 
 | Table | Content |
 |---|---|
-| `speculative_runs` | Task, base commit, candidate count, state, winner |
-| `candidate_results` | Label, session, branch, worktree, head commit, evidence, stored diff, rank, outcome, cleanup time |
+| `speculative_runs` | Task, base commit, candidate count, state (`running`, `decided`, `adopted`, `failed`, `cancelled`), winner |
+| `candidate_results` | Label, session, branch and directory of the clone, head commit, evidence, stored diff, rank, outcome, cleanup time |
 | `tournament_decisions` | Winner, ranking, each comparison with the rule and the two values, confidence, reason |
 
 Events: `speculative.started`, `speculative.candidate`, `speculative.decided`.
@@ -109,5 +119,7 @@ Events: `speculative.started`, `speculative.candidate`, `speculative.decided`.
 - Check commands are the only objective signal at tournament time for a normal run. With no check
   commands configured, the tournament can only use change size and label, and says so (`marginal`).
 - Candidates share the task's attempt counter and its lease; the speculative stage counts as attempt 1.
-- A candidate's worktree has no row in `worktrees`; it is tracked in `candidate_results`.
+- A candidate's clone has no row in `worktrees`; it is tracked in `candidate_results`.
+- A clone copies the repository's objects, so a very large repository makes each candidate slower to start and uses disk space until the tournament ends.
+- Isolation is between candidates. Each clone still contains the history of your repository as it was when the stage started, as any worktree does.
 - Speculation applies to a single-task run. A planned task graph has no speculative tasks in 0.3.
