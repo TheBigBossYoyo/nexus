@@ -21,6 +21,28 @@ import {
   TaskOutcomeRepository,
 } from './v2'
 import {
+  UsageEventRepository,
+  UsageWindowRepository,
+  QuotaPauseRepository,
+  QuotaResumeRepository,
+  ArenaCaseRepository,
+  ArenaCaseVersionRepository,
+  ArenaCampaignRepository,
+  ArenaTrialRepository,
+  ArenaMetricsRepository,
+  ArenaEvaluationRepository,
+  TaskProfileRepository,
+  MissionOutcomeRepository,
+  PolicySnapshotRepository,
+  PolicyDecisionRepository,
+  PolicyCandidateRepository,
+  PolicyPromotionRepository,
+  StrategyStatisticRepository,
+  SpeculativeRunRepository,
+  CandidateResultRepository,
+  TournamentDecisionRepository,
+} from './v3'
+import {
   ApprovalRepository,
   ArtifactRepository,
   CriterionRepository,
@@ -63,6 +85,26 @@ export interface Repositories {
   overnight: OvernightRepository
   powerAudit: PowerAuditRepository
   checkpoints: CheckpointRepository
+  usageEvents: UsageEventRepository
+  usageWindows: UsageWindowRepository
+  quotaPauses: QuotaPauseRepository
+  quotaResumes: QuotaResumeRepository
+  arenaCases: ArenaCaseRepository
+  arenaCaseVersions: ArenaCaseVersionRepository
+  arenaCampaigns: ArenaCampaignRepository
+  arenaTrials: ArenaTrialRepository
+  arenaMetrics: ArenaMetricsRepository
+  arenaEvaluations: ArenaEvaluationRepository
+  taskProfiles: TaskProfileRepository
+  missionOutcomes: MissionOutcomeRepository
+  policySnapshots: PolicySnapshotRepository
+  policyDecisions: PolicyDecisionRepository
+  policyCandidates: PolicyCandidateRepository
+  policyPromotions: PolicyPromotionRepository
+  strategyStatistics: StrategyStatisticRepository
+  speculativeRuns: SpeculativeRunRepository
+  candidateResults: CandidateResultRepository
+  tournamentDecisions: TournamentDecisionRepository
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -100,6 +142,26 @@ export function createRepositories(db: Database): Repositories {
     overnight: new OvernightRepository(db),
     powerAudit: new PowerAuditRepository(db),
     checkpoints: new CheckpointRepository(db),
+    usageEvents: new UsageEventRepository(db),
+    usageWindows: new UsageWindowRepository(db),
+    quotaPauses: new QuotaPauseRepository(db),
+    quotaResumes: new QuotaResumeRepository(db),
+    arenaCases: new ArenaCaseRepository(db),
+    arenaCaseVersions: new ArenaCaseVersionRepository(db),
+    arenaCampaigns: new ArenaCampaignRepository(db),
+    arenaTrials: new ArenaTrialRepository(db),
+    arenaMetrics: new ArenaMetricsRepository(db),
+    arenaEvaluations: new ArenaEvaluationRepository(db),
+    taskProfiles: new TaskProfileRepository(db),
+    missionOutcomes: new MissionOutcomeRepository(db),
+    policySnapshots: new PolicySnapshotRepository(db),
+    policyDecisions: new PolicyDecisionRepository(db),
+    policyCandidates: new PolicyCandidateRepository(db),
+    policyPromotions: new PolicyPromotionRepository(db),
+    strategyStatistics: new StrategyStatisticRepository(db),
+    speculativeRuns: new SpeculativeRunRepository(db),
+    candidateResults: new CandidateResultRepository(db),
+    tournamentDecisions: new TournamentDecisionRepository(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }
@@ -140,5 +202,30 @@ export type {
   FactListOptions,
   FactSearchOptions,
 } from './v2'
+export type {
+  UsageEventRepository,
+  UsageWindowRepository,
+  QuotaPauseRepository,
+  QuotaResumeRepository,
+  ArenaCaseRepository,
+  ArenaCaseVersionRepository,
+  ArenaCampaignRepository,
+  ArenaTrialRepository,
+  ArenaMetricsRepository,
+  ArenaEvaluationRepository,
+  TaskProfileRepository,
+  MissionOutcomeRepository,
+  PolicySnapshotRepository,
+  PolicyDecisionRepository,
+  PolicyCandidateRepository,
+  PolicyPromotionRepository,
+  StrategyStatisticRepository,
+  SpeculativeRunRepository,
+  CandidateResultRepository,
+  TournamentDecisionRepository,
+  UsageFilter,
+  Page,
+  TrialStateCount,
+} from './v3'
 export type { MessageRecipient } from './agents'
 export { toFtsQuery } from './memory'

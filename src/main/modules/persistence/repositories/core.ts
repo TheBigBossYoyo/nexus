@@ -35,8 +35,21 @@ export class ProjectRepository extends Table<Project> {
     return this.one('WHERE root_path = ?', [rootPath])
   }
 
+  /** The user's projects. The hidden projects of Arena trials are not listed. */
   list(): Project[] {
-    return this.query('ORDER BY last_opened_at DESC, rowid DESC')
+    return this.query(
+      'WHERE id NOT IN (SELECT project_id FROM arena_trials WHERE project_id IS NOT NULL) ORDER BY last_opened_at DESC, rowid DESC',
+    )
+  }
+
+  isArena(projectId: string): boolean {
+    return prepare(this.db, 'SELECT 1 FROM arena_trials WHERE project_id = ? LIMIT 1').get(projectId) !== undefined
+  }
+
+  listArena(): Project[] {
+    return this.query(
+      'WHERE id IN (SELECT project_id FROM arena_trials WHERE project_id IS NOT NULL) ORDER BY created_at, rowid',
+    )
   }
 }
 

@@ -21,6 +21,7 @@ import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
 import { aggregatePerformance } from '@main/modules/routing'
 import { ProjectService, QueryService } from './services'
+import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -43,6 +44,8 @@ export interface IpcContext {
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
   push: (message: PushMessage) => void
+  /** v0.3 channels (usage, arena, policy, speculative, home, activity). Absent: they answer `runtime_unavailable`. */
+  v3?: V3Handlers
 }
 
 type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
@@ -302,6 +305,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'overnight.report': ({ runId }) => overnight().report(runId),
     'overnight.audit': ({ runId }) => repos.powerAudit.listByRun(runId),
     'overnight.checkpoints': ({ runId }) => repos.checkpoints.listByRun(runId).slice(-50),
+
+    ...(ctx.v3 ?? unavailableV3Handlers()),
   }
 }
 

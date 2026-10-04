@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { RunStrategyInfo } from './v3'
 
 // ───────────────────────────── enums ─────────────────────────────
 
@@ -294,6 +295,8 @@ export interface RunConfig {
   planningMode?: 'single' | 'consensus'
   /** v0.2. Absent on runs created by v0.1; treat as 'auto'. */
   reviewMode?: 'standard' | 'dual' | 'auto'
+  /** v0.3. Absent on runs created before 0.3 and on runs started without a strategy. */
+  strategy?: RunStrategyInfo
 }
 
 export interface Run {
