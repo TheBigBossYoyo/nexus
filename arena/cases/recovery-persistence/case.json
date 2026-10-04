@@ -1,0 +1,47 @@
+{
+  "id": "recovery-persistence",
+  "version": 1,
+  "name": "Crash recovery of a journaled store",
+  "description": "An embedded key/value store with a journal and snapshots that loses data or refuses to start after a crash; the agent must make recovery correct without changing the public API or on-disk format.",
+  "category": "infrastructure",
+  "complexity": "large",
+  "risk": "high",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "Our embedded store `kvlog` (journal.log + snapshot.json + LOCK, see the README) has had several production incidents after the host process was killed or the machine lost power: it refused to start, came up with wrong counters, or lost data that had been acknowledged. Make it survive crashes. Guarantees we need: (1) a write that returned is never lost, and a write that threw is not visible, neither in memory nor after reopening; (2) a torn or damaged final journal record (the process died while appending) is discarded and removed from the file so that later appends and reopens work, while a damaged record that is followed by intact records, or a damaged snapshot, is genuine corruption and must raise StoreError with code 'CORRUPT' rather than silently dropping data; (3) writing a snapshot can be interrupted at any point without losing or corrupting data, and a crash between writing the snapshot and emptying the journal must not apply any operation twice (counters from `incr` must stay exact); (4) a LOCK file left behind by a process that no longer exists must not block reopening, while a lock held by a live process, including another open handle in this process, must still raise StoreError with code 'LOCKED'. Keep the exported API, option names (including the `fs` seam, which must be used for all file access) and the on-disk formats unchanged so existing data directories keep loading. Do not add dependencies.",
+  "visibleAcceptance": [
+    "A torn last journal record is dropped and truncated; reopening and appending afterwards works",
+    "A snapshot interrupted mid-write never destroys the previous snapshot or any acknowledged write",
+    "Replaying the journal after a crash between snapshot and journal reset applies no operation twice",
+    "A stale LOCK from a dead process does not block opening; a live lock still does",
+    "Failed writes leave neither memory nor disk changed; real corruption still raises StoreError CORRUPT; the existing tests pass and no new dependencies are added"
+  ],
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
+  "setup": [],
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/**/*.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 40,
+    "maxAgentSessions": 50,
+    "maxAgentsPerTrial": 4,
+    "maxTurnsPerAgent": 80
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
+}

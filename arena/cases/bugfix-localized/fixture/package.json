@@ -1,0 +1,10 @@
+{
+  "name": "pager-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Small pagination helpers for list views",
+  "scripts": {
+    "test": "node --test"
+  }
+}

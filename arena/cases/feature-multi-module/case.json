@@ -1,0 +1,47 @@
+{
+  "id": "feature-multi-module",
+  "version": 1,
+  "name": "Task priorities and due dates across a todo service",
+  "description": "Add priorities and due dates to a todo library: model, versioned storage with backwards compatibility, service filtering and sorting, text rendering and command flags.",
+  "category": "feature",
+  "complexity": "large",
+  "risk": "medium",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "Add task priorities and due dates to todo-service. They have to work end to end: model, saved data, service API, text output and commands. Use exactly these names and rules.\n\nModel (src/model.js): a task becomes `{ id, title, done, priority, dueDate }`. `createTask` accepts optional `priority` ('low' | 'normal' | 'high', default 'normal') and `dueDate` (a string 'YYYY-MM-DD' that is a real calendar date, or null; default null). Any other priority (including null) or an invalid date (for example '2025-02-30', '2025-1-5' or a non-string) throws RangeError. `completeTask` must keep the new fields.\n\nStorage (src/storage.js): newly written data uses `version: 2` and includes priority and dueDate for every task. Data files already written by the current code (`version: 1`, tasks without the new fields) must still load, with priority 'normal' and dueDate null. Any other version still throws RangeError, and invalid stored values are rejected.\n\nService (src/service.js): `add(title, { priority, dueDate } = {})`; new methods `setPriority(id, priority)` and `setDueDate(id, dueDate)` (null clears it), both return the updated task and are persisted; an unknown id throws RangeError and invalid input throws RangeError without changing or saving anything. `list` additionally accepts `priority` (exact match filter), `dueBefore` ('YYYY-MM-DD'; keeps tasks whose dueDate is strictly earlier, tasks without a due date never match) and `sortBy`: 'created' (default, current order), 'priority' (high, then normal, then low) or 'due' (earliest first, tasks without a due date last). Ties always keep creation order. Invalid priority, dueBefore or sortBy values throw RangeError. Sorting must not change the order of the service's stored tasks.\n\nRendering (src/render.js): `renderTasks(tasks, { today } = {})`. Each line keeps the current layout `[ ] t1  Title`, with these additions after the two spaces/before the end: a `[high] ` or `[low] ` tag directly before the title (nothing for 'normal'), then ` (due YYYY-MM-DD)` after the title when there is a due date, then ` OVERDUE` only if `today` ('YYYY-MM-DD') was supplied, the task is not done and its dueDate is strictly before today. Tasks without the new fields render exactly as before.\n\nCommands (src/cli.js): `add <title> [--priority p] [--due date]` and `list [--open] [--priority p] [--before date] [--sort created|priority|due] [--today date]`, passing the values through to the service and renderer. Invalid values must surface as RangeError.\n\nUpdate the README and add tests next to the existing ones.",
+  "visibleAcceptance": [
+    "Tasks carry priority (low/normal/high) and dueDate (YYYY-MM-DD or null) through the model, storage, service, renderer and commands",
+    "Data saved by the previous version still loads, and new data round-trips with the new fields",
+    "list supports priority filtering, dueBefore filtering and created/priority/due sorting with stable ties",
+    "renderTasks shows the priority tag, due date and OVERDUE marker exactly as specified",
+    "Invalid priorities, dates and options throw RangeError without modifying stored data; existing tests keep passing and new tests cover the feature"
+  ],
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
+  "setup": [],
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/**/*.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 40,
+    "maxAgentSessions": 60,
+    "maxAgentsPerTrial": 4,
+    "maxTurnsPerAgent": 80
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
+}

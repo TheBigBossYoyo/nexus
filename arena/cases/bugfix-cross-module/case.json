@@ -1,0 +1,23 @@
+{
+  "id": "bugfix-cross-module",
+  "version": 1,
+  "name": "Order totals change when an order is reprocessed",
+  "description": "An order pipeline gives wrong totals and stock levels when an order is priced or reserved more than once; the symptom shows in pricing and inventory but the cause is in a shared helper.",
+  "category": "bugfix",
+  "complexity": "medium",
+  "risk": "medium",
+  "languages": ["JavaScript"],
+  "frameworks": ["node:test"],
+  "taskPrompt": "Support is seeing two problems in order-desk. First, the same order object gives a different (larger) subtotal when it is priced a second time, for example when a customer reopens the checkout page. Second, retrying a stock reservation for an order that contains repeated SKUs reserves more units than the order contains, and invoices for those orders show inflated quantities. Orders with no repeated SKUs behave fine. Find the root cause and fix it where it actually lives, not just where it shows up, so every consumer behaves correctly. Callers must be able to pass in orders they never expect to be modified. Add regression tests alongside the existing ones.",
+  "visibleAcceptance": [
+    "Pricing the same order repeatedly always yields identical totals",
+    "Reserving stock and invoicing use the merged quantities of an order and never change the caller's order object",
+    "Orders with repeated or differently-cased SKUs are handled consistently by pricing, inventory and the pipeline",
+    "Existing tests keep passing and regression tests are added"
+  ],
+  "checks": { "build": null, "test": "node --test", "lint": null, "typecheck": null },
+  "setup": [],
+  "hiddenEvaluation": { "command": "node --test hidden-tests/**/*.test.mjs", "timeoutSeconds": 120 },
+  "budgets": { "maxWallClockMinutes": 25, "maxAgentSessions": 30, "maxAgentsPerTrial": 4, "maxTurnsPerAgent": 60 },
+  "allowedStrategies": ["SINGLE", "BUILD", "SWARM", "CONSENSUS", "SPECULATIVE"]
+}

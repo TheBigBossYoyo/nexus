@@ -1,0 +1,10 @@
+{
+  "name": "todo-panel-state",
+  "version": "2.1.0",
+  "description": "Framework-free state layer for a filterable, selectable to-do panel",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  }
+}
