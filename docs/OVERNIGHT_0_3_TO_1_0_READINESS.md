@@ -156,3 +156,45 @@ Written while the 0.3 stress runs; only light test runs alongside it.
   with the error instead of being swallowed. Found by the stress: under the `stop` usage policy a user could not
   resume a program while Claude was still limited; a resume during a limit now waits for the reset.
 - In progress: Programs UI (agent), independent code audit of 0.4 (agent).
+
+### 00:00 to 00:33 Phase B: 0.4 audit, UI, E2E and real acceptance
+
+- Programs UI delivered (list, new-program dialog with presets and work window, program page with state
+  notices, plan approval with a diff, roadmap with verification evidence, tabs for missions, plan history,
+  decisions, backlog, memory, expertise; background-engineering card; Home section).
+- Independent code audit of 0.4 (read-only): no CRITICAL, 1 HIGH, 7 MEDIUM, 11 LOW.
+  - HIGH: the program branch could lose accepted work. A retry started from its previous attempt's result; if
+    a revision had another milestone accepted in between, accepting the retry moved the branch to a commit
+    that lacked that milestone. Fixed: the branch only fast-forwards (compare-and-swap, refused while checked
+    out), and a retry starts from the accepted work when its previous attempt does not contain the branch tip.
+  - MEDIUM, all fixed: a judgment had to cover the milestone's criteria; a mission that finished around a
+    crash was thrown away; `update-ref` was unconditional; quoted data could be closed with `</tag >`, and
+    recorded context reached mission prompts unquoted; a revision could reuse a cancelled key or drop all
+    remaining work while the program reported "completed"; a run created just before a crash was unknown to
+    the program; a milestone could be accepted with an unreadable result commit.
+  - LOW fixed: pause during a closed window, pause of a blocked program, a plan decision undoing a user pause,
+    the shown work window ignoring `respectWorkWindows`, list total, project history order, two missing
+    indexes, leftover settings keys. Not fixed: a user-cancelled mission run counts as a failed mission; the
+    retry counter of an unreadable answer is in memory only.
+  - Docs corrected where they claimed more than the code did.
+  - Regression tests added for every HIGH and MEDIUM finding (8 cases); the stress gained the invariant "the
+    program branch contains every accepted result" (1500 seeds pass).
+- Found by the E2E after a restart: the gate `no_blocking_findings` rejected a completed mission because an
+  earlier review of a since-completed task had requested changes. Fixed: a review is open only while its task
+  is not finished.
+- E2E (`tests/e2e/v4.spec.ts`, built app, scripted runtime): 3 of 3 pass. A program from the dialog to
+  completion; plan approval, a user-requested reassessment and a restart mid-mission; background engineering.
+- Real acceptance (`node scripts/program-acceptance.mjs`, real Claude Agent SDK sessions, Claude subscription): **15 of
+  15 gates, first attempt**, evidence `docs/acceptance/program-2026-10-04T23-31-29-309Z.json`.
+  - Goal: two functions in a small library, in two steps. Plan v1: 2 milestones. The user asked for a third
+    (README); the reassessment produced plan v2 (added `document-readme`, changed the criteria of `round-trip`).
+  - 3 missions (SINGLE), each started from the result of the one before; 3 milestones verified with 6 gates
+    and 5, 5 and 3 judged criteria; 10 runs, 9 observed sessions.
+  - NEXUS was quit in the middle of the second mission and started again; the program continued with the same
+    run.
+  - Backlog: 6 proposals with evidence (3 from milestone verification, 3 from a real read-only background
+    job), all still `proposed`. Memory: 2 validated entries (interfaces).
+  - The repository's own tests pass on the program branch (8 of 8, run outside NEXUS); the user's checkout is
+    untouched.
+- Usage after the run: five-hour window about a third used, seven-day 60 percent (runtime figures).
+- In progress: independent UI review of the Programs area; the 0.3 stress is still running.
