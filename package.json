@@ -22,6 +22,9 @@
     "smoke:usage": "vitest run -c vitest.usage-smoke.config.ts",
     "accept:proposal": "node scripts/dynamic-proposal-acceptance.mjs",
     "accept:rotation": "node scripts/session-rotation-acceptance.mjs",
+    "accept:arena": "node scripts/arena-acceptance.mjs",
+    "accept:speculative": "node scripts/strategy-acceptance.mjs speculative",
+    "accept:adaptive": "node scripts/strategy-acceptance.mjs adaptive",
     "stress": "vitest run -c vitest.stress.config.ts",
     "package": "electron-vite build && electron-builder --win nsis"
   },

@@ -89,6 +89,18 @@ export async function driveRun(call, runId, { timeoutMs, onPlan, onTick } = {}) 
     }
     await onTick?.(detail)
     if (['completed', 'failed', 'cancelled'].includes(run.state)) break
+    // 0.3: a usage-limit pause is not an end. NEXUS waits for the reset and resumes by itself; the script
+    // only watches (and records that a real limit was met, which is evidence of its own).
+    if (run.state === 'paused' && run.pauseReason === 'quota') {
+      const usage = await call('usage.overview').catch(() => null)
+      const waitLine = `quota wait | status ${usage?.status ?? '?'} | next check ${usage?.autoResume?.nextCheckAt?.value ?? 'unknown'}`
+      if (waitLine !== lastLine) {
+        log(waitLine)
+        lastLine = waitLine
+      }
+      await new Promise((r) => setTimeout(r, 15_000))
+      continue
+    }
     if (run.state === 'paused') {
       const events = await call('events.list', { runId, limit: 5000 })
       log('paused:', JSON.stringify(events.filter((e) => e.type === 'run.paused').at(-1)?.payload))
