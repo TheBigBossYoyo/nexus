@@ -198,3 +198,33 @@ Written while the 0.3 stress runs; only light test runs alongside it.
     untouched.
 - Usage after the run: five-hour window about a third used, seven-day 60 percent (runtime figures).
 - In progress: independent UI review of the Programs area; the 0.3 stress is still running.
+
+### 00:35 to 00:52 Phase B: Programs UI review; Phase C prepared
+
+- Independent UI review of the Programs area (read-only, 17 screenshots and source): no HIGH; 5 MEDIUM (a
+  colour token that does not exist on the approval card, a Resume button competing with Accept while a plan
+  awaits approval, the same message three times, a diff that only repeats "Added" for a first plan, a
+  full-width status select in the backlog); 7 LOW. All 5 MEDIUM and 6 LOW fixed; checked on fresh screenshots.
+- Seen on those screenshots and fixed: a program's own planning and verification sessions were listed among
+  the user's missions. `runs.list` now leaves them out unless asked, and the Home feed excludes them in SQL.
+- E2E for Programs after the fixes: 3 of 3 pass.
+- State at 00:52: `nexus-0.4` at `ecae730`; the 0.3 stress (started 23:39 on `e4253e5`) is still running, one
+  worker left (the orchestrator stress).
+- Work on 0.5 (Workspaces) is being written outside the tree while 0.3 and 0.4 are validated, in
+  `%TEMP%\claude\C--Users-user-Documents-Nexus\6b6462d8-ada3-40b3-ad87-466ce2dd7776\scratchpad\wip05`:
+  `src/shared/workspace.ts` (domain, dependency order, contract surface comparison, cross-repository plan
+  validation, release planning), `src/main/modules/workspace/{contracts,discovery,engine}.ts`, migration 007
+  and its repositories. It is brought into `nexus-0.5` once 0.4 is released.
+
+### Order of the remaining release steps (kept here so it survives a long session)
+
+1. When the 0.3 stress ends: record its result; switch to `nexus-0.3`; correct the duplicate-version test in
+   `database.test.ts` (ok = latest + 1, broken = latest + 2); run `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+   `pnpm test:e2e`, `pnpm build`, `pnpm package`, `node scripts/packaged-validation.mjs`; update the 0.3
+   release report, TEST_STATUS and BUILD_PROGRESS; commit; `git checkout main`; `git merge --no-ff nexus-0.3`;
+   `git tag -a v0.3.0`.
+2. Back on `nexus-0.4`: `git merge main`; bump the version to 0.4.0; full validation (typecheck, lint, test,
+   stress at 1000 seeds, E2E, build, package, packaged validation); write `V0_4_RELEASE_REPORT.md`; merge to
+   `main` and tag `v0.4.0` only on PASS.
+3. `nexus-0.5` from `main`: bring in the Workspaces work, tests, UI, real acceptance, audit.
+4. Reserve the last 45 minutes for the final report, preservation and the supervisor's `finish-now`.
