@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { MissionPlan } from '@shared/domain'
 import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fake-runtime'
@@ -109,8 +109,12 @@ export function createDemoScript(): FakeScript {
       }
       await ctx.sleep(300)
       const target = join(spec.cwd, `${key}.txt`)
-      await ctx.useTool('Write', { file_path: target, content: `${key}${suffix}` }, async () => {
-        await writeFile(target, `${key}${suffix}\n`)
+      // A later mission of a program starts from the earlier one's result: the file is there already, so the
+      // work of this mission is one more line rather than nothing.
+      const existing = await readFile(target, 'utf8').catch(() => null)
+      const content = existing !== null && existing === `${key}${suffix}\n` ? `${existing}${key} revised\n` : existing !== null && existing.startsWith(`${key}${suffix}\n`) ? `${existing}${key} revised\n` : `${key}${suffix}\n`
+      await ctx.useTool('Write', { file_path: target, content: content.trimEnd() }, async () => {
+        await writeFile(target, content)
         return 'File written'
       })
       if (key === 'api' && ctx.nexusTools) {
@@ -203,7 +207,80 @@ export function createDemoScript(): FakeScript {
     await ctx.completeTurn({ text: 'Approved.', structuredOutput: { summary: 'No significant issues.', findings: [] } })
   }
 
+  /**
+   * Program-level reasoning (0.4): the read-only sessions that plan milestones, judge a milestone and reassess
+   * the plan answer with JSON in a fenced block, as the real ones are asked to. The first milestone judged is
+   * rejected once, so the demo shows a rejection, a retry, a backlog proposal and a memory entry.
+   */
+  let judged = 0
+  const fence = (value: unknown): string => `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``
+  const demoMilestone = (key: string, title: string, objective: string, dependsOn: string[] = []): Record<string, unknown> => ({
+    key,
+    title,
+    objective,
+    acceptanceCriteria: [`${title}: the module files exist and describe their module`],
+    workstream: 'Modules',
+    expertise: key === 'hardening' ? 'reliability' : 'backend',
+    dependsOn,
+    complexity: 'small',
+    risk: 'low',
+  })
+  const researcher: FakeScript = async (spec, ctx) => {
+    await ctx.sleep(200)
+    const p = spec.prompt
+    if (p.includes('NEXUS PROGRAM PLANNER')) {
+      await ctx.completeTurn({
+        text: `The goal splits into two milestones.\n\n${fence({
+          goal: 'Build the modules, then harden their integration.',
+          successCriteria: ['The modules exist and are integrated'],
+          milestones: [demoMilestone('foundation', 'Module foundation', 'Create the API and UI modules and integrate them.'), demoMilestone('hardening', 'Integration hardening', 'Revisit the modules and tighten their integration.', ['foundation'])],
+          risks: ['The modules drift apart'],
+          constraints: [],
+        })}`,
+      })
+      return
+    }
+    if (p.includes('NEXUS MILESTONE VERIFIER')) {
+      const first = judged++ === 0
+      await ctx.completeTurn({
+        text: fence({
+          verdict: first ? 'rejected' : 'accepted',
+          criteria: [{ criterion: 'The module files exist and describe their module', met: !first, evidence: first ? 'ui.txt describes the module in one line only.' : 'api.txt, ui.txt and integration.txt are in the diff.' }],
+          gaps: first ? ['The UI module description is too thin to integrate against'] : [],
+          backlog: first ? [{ title: 'No test covers the integration file', description: 'integration.txt is written by hand and nothing checks it.', category: 'test_gap', severity: 'medium', evidence: 'The diff adds integration.txt and no test.', complexity: 'small', dependencies: [], recommendedMilestone: null }] : [],
+          memory: first ? [{ kind: 'interface', title: 'Module files are the integration contract', content: 'The integration task reads api.txt and ui.txt; their first line is the module name.', evidence: 'integration.txt is produced from api.txt and ui.txt in the diff.', tags: ['modules', 'integration'] }] : [],
+        }),
+      })
+      return
+    }
+    if (p.includes('NEXUS PROGRAM REPLANNER')) {
+      const asked = /<user_request>\n([\s\S]*?)\n<\/user_request>/.exec(p)?.[1] ?? null
+      if (!asked) {
+        await ctx.completeTurn({ text: fence({ action: 'keep', reason: 'What happened does not change the remaining plan.', milestones: [], defer: [], strategyNote: null }) })
+        return
+      }
+      // Keep what remains as it is and add the milestone the user asked for.
+      const block = /<remaining_milestones>\n([\s\S]*?)\n<\/remaining_milestones>/.exec(p)?.[1] ?? ''
+      const remaining = [...block.matchAll(/^- ([a-z0-9-]+) \[[A-Z_]+\] ([^:]+): (.*?)(?: \(depends on ([^)]*)\))?$/gm)].map((m) => demoMilestone(m[1] ?? '', (m[2] ?? '').trim(), (m[3] ?? '').trim(), m[4] ? m[4].split(', ') : []))
+      await ctx.completeTurn({
+        text: fence({ action: 'revise', reason: `The user asked: ${asked.slice(0, 200)}`, milestones: [...remaining, demoMilestone('requested', 'Requested follow-up', asked.slice(0, 300))], defer: [], strategyNote: null }),
+      })
+      return
+    }
+    if (p.includes('NEXUS BACKGROUND ANALYSIS')) {
+      await ctx.completeTurn({
+        text: fence({
+          summary: 'Read the repository entry point and its manifest.',
+          proposals: [{ title: 'The entry point has no test', description: 'src/index.js exports a value nothing tests.', category: 'test_gap', severity: 'low', evidence: 'src/index.js:1 and no test directory', complexity: 'small', dependencies: [], recommendedMilestone: null }],
+        }),
+      })
+      return
+    }
+    await ctx.completeTurn({ text: 'Answer: this is the scripted runtime.' })
+  }
+
   return scriptsByRole({
+    researcher,
     // Planner sessions: the three consensus planners and the synthesizer all return the same plan.
     planner: async (spec, ctx) => {
       const marker = /\[demo:(stall|quota|fail|quota-reset|quota-unknown)\]/.exec(spec.prompt)?.[1]

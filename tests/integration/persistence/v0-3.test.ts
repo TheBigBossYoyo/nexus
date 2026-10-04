@@ -175,7 +175,7 @@ describe('migration 004 (v0.3)', () => {
 
     const db = openDatabase(path)
     open.push(db)
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 5 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 6 })
     const repos = createRepositories(db)
     expect(repos.runs.require(seeded.runId)).toMatchObject({ state: 'completed', prompt: `A schema-${version} mission` })
     expect(repos.tasks.listByRun(seeded.runId).map((t) => t.key)).toEqual(['api'])
@@ -194,7 +194,7 @@ describe('migration 004 (v0.3)', () => {
     open.pop()
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 5 })
+    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 6 })
 
     // The database as the older release left it was kept next to the upgraded one, complete and readable.
     const backup = `${path}.v${version}.bak`
@@ -211,7 +211,7 @@ describe('migration 004 (v0.3)', () => {
     db.close()
     const again = openDatabase(path)
     open.push(again)
-    for (const v of [0, 1, 2, 3, 4, 5]) expect(existsSync(`${path}.v${v}.bak`)).toBe(false)
+    for (const v of [0, 1, 2, 3, 4, 5, 6]) expect(existsSync(`${path}.v${v}.bak`)).toBe(false)
   })
 
   it('does not alter any table or index of the earlier schemas and adds exactly the 0.3 tables', () => {
@@ -231,7 +231,7 @@ describe('migration 004 (v0.3)', () => {
     const path = tempDb()
     const seeded = createOldDatabase(path, 3)
     const raw = new BetterSqlite3(path)
-    expect(() => runMigrations(raw, [...MIGRATIONS, { version: 6, name: 'broken', sql: 'SELECT * FROM no_such_table_anywhere;' }])).toThrow(NexusError)
+    expect(() => runMigrations(raw, [...MIGRATIONS, { version: 7, name: 'broken', sql: 'SELECT * FROM no_such_table_anywhere;' }])).toThrow(NexusError)
     expect(raw.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 3 })
     expect(raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'usage_events'").get()).toEqual({ n: 0 })
     expect(createRepositories(raw).runs.require(seeded.runId).prompt).toBe('A schema-3 mission')
