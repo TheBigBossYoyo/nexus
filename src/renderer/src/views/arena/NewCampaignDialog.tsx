@@ -33,7 +33,7 @@ import {
   ShutdownGroup,
 } from '../projects/OvernightPanel'
 import {
-  authorizationSentence,
+  authorizationStatus,
   defaultOvernightForm,
   type OvernightForm,
 } from '../projects/overnight'
@@ -223,19 +223,18 @@ export function NewCampaignDialog({
               data-testid="arena-trial-summary"
               role="status"
             >
-              {check.error && (name || picked.size > 0) ? (
-                <span className="text-small text-text-muted">{check.error}</span>
-              ) : (
-                <>
-                  <span className="font-medium">
-                    <span className="tnum">{trials}</span> trial{trials === 1 ? '' : 's'}
-                  </span>
-                  <span className="tnum text-small text-text-muted">
-                    {picked.size} case{picked.size === 1 ? '' : 's'} × {strategies.size} strateg
-                    {strategies.size === 1 ? 'y' : 'ies'} × {reps} rep{reps === 1 ? '' : 's'}
-                  </span>
-                </>
-              )}
+              <span className="font-medium">
+                <span className="tnum">{trials}</span> trial{trials === 1 ? '' : 's'}
+              </span>
+              <span className="tnum text-small text-text-muted">
+                {picked.size} case{picked.size === 1 ? '' : 's'} × {strategies.size} strateg
+                {strategies.size === 1 ? 'y' : 'ies'} × {reps} rep{reps === 1 ? '' : 's'}
+              </span>
+              {check.error ? (
+                <span className="text-small text-warning" data-testid="arena-validation-hint">
+                  {check.error}
+                </span>
+              ) : null}
             </div>
             <Button onClick={onClose}>Cancel</Button>
             {overnightOn ? (
@@ -511,13 +510,14 @@ export function NewCampaignDialog({
                   form={overnight}
                   onChange={patchOvernight}
                   testId="arena-overnight-authorize"
+                  noun="campaign"
                 />
                 <p
                   className="m-0 text-small text-text-secondary"
                   role="status"
                   data-testid="arena-overnight-readiness"
                 >
-                  {authorizationSentence(overnight.endAction)}{' '}
+                  {authorizationStatus(overnight.endAction, overnight.authorized)}{' '}
                   {arenaOvernightReadiness(overnightValidation, check.error, busy)}
                 </p>
                 {overnightError ? (

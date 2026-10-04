@@ -53,11 +53,11 @@ export const CONDITION_TESTID: Record<keyof EndConditions, string> = {
 export const CONDITION_KEYS = Object.keys(CONDITION_LABEL) as (keyof EndConditions)[]
 
 export const NORMAL_SHUTDOWN_NOTE =
-  'Normal shutdown: applications with unsaved data may prevent the shutdown.'
+  'Normal shutdown at the end of the run: an application with unsaved data may prevent it. This setting does not apply to the failsafe.'
 export const FORCED_SHUTDOWN_NOTE =
   'Forced shutdown: Windows closes applications without waiting. Unsaved work in other applications may be lost.'
 export const FAILSAFE_TIMER_NOTE =
-  'The failsafe is a Windows timer; Windows always closes applications without waiting when a timed shutdown fires.'
+  'If the failsafe fires, Windows closes applications without waiting, whatever is chosen above: unsaved work in other applications may be lost.'
 export const TOOL_APPROVALS_NOTE =
   'Tool approvals (for example sensitive shell commands) are always denied while the run is unattended.'
 
@@ -238,6 +238,23 @@ const VERB: Record<Exclude<EndAction, 'NONE'>, { present: string; authorized: st
 export function authorizationSentence(endAction: EndAction): string {
   if (endAction === 'NONE') return 'This run takes no power action; the PC is left running.'
   return `This run is authorized to ${VERB[endAction].authorized} automatically.`
+}
+
+/**
+ * What ticking the authorization allows, in the words of the chosen end action. Shown under the checkbox so
+ * the fixed authorization sentence is never the only description of what is being agreed to.
+ */
+export function authorizationScope(form: Pick<OvernightForm, 'endAction' | 'finalDelaySeconds'>, noun: 'run' | 'campaign' = 'run'): string {
+  if (form.endAction === 'NONE') return `With the end action "None", NEXUS takes no power action; the ${noun} runs unattended and the PC is left running.`
+  const what = { SHUTDOWN: 'shut down this PC', SLEEP: 'put this PC to sleep', HIBERNATE: 'hibernate this PC' }[form.endAction]
+  return `This allows NEXUS to ${what} ${form.finalDelaySeconds} s after the ${noun} ends, in the cases ticked above. You can cancel it while NEXUS counts down.`
+}
+
+/** What the form says before and after the box is ticked: it never claims an authorization that was not given. */
+export function authorizationStatus(endAction: EndAction, authorized: boolean): string {
+  if (authorized) return authorizationSentence(endAction)
+  if (endAction === 'NONE') return 'Not authorized yet. This run takes no power action.'
+  return `Not authorized yet: NEXUS will not ${VERB[endAction].authorized} unless you tick the box.`
 }
 
 function outcomeLine(label: string, form: OvernightForm, on: boolean): string {

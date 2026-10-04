@@ -4,7 +4,7 @@ import { Button, ConfirmDialog } from '../../components/ui'
 import { useCancelOvernightMission, useCancelPower } from '../../lib/queries'
 import { ChangeEndActionDialog, ExtendDialog, ReportDialog } from '../run/OvernightBanner'
 import { bannerEnablement } from '../run/overnightModel'
-import { cancelCopy, workloadNoun } from './workloadModel'
+import { actionHint, cancelCopy, workloadNoun } from './workloadModel'
 
 /**
  * The overnight controls for one record, worded for its workload. Works with the record's `runId` on
@@ -19,51 +19,61 @@ export function OvernightActions({ status, prefix }: { status: OvernightStatus; 
   const copy = cancelCopy(noun)
   const close = () => setDialog(null)
   const campaign = noun === 'campaign'
+  const hint = actionHint(noun, can, status.hasReport)
   return (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={!can.canCancelPower}
-          loading={cancelPower.isPending}
-          onClick={() => cancelPower.mutate({ runId: status.runId })}
-          data-testid={`${prefix}-cancel-shutdown`}
-        >
-          Cancel shutdown
-        </Button>
-        <Button
-          size="sm"
-          disabled={!can.canChangeEndAction}
-          onClick={() => setDialog('end')}
-          data-testid={`${prefix}-change-end-action`}
-        >
-          Change end action
-        </Button>
-        <Button
-          size="sm"
-          disabled={!can.canExtend}
-          onClick={() => setDialog('extend')}
-          data-testid={`${prefix}-extend`}
-        >
-          {campaign ? 'Extend' : 'Extend mission'}
-        </Button>
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={!can.canCancelMission}
-          loading={cancelWorkload.isPending}
-          onClick={() => setDialog('cancel')}
-          data-testid={`${prefix}-cancel`}
-        >
-          {copy.confirmLabel}
-        </Button>
+        {can.canCancelPower ? (
+          <Button
+            size="sm"
+            variant="danger"
+            loading={cancelPower.isPending}
+            onClick={() => cancelPower.mutate({ runId: status.runId })}
+            data-testid={`${prefix}-cancel-shutdown`}
+          >
+            Cancel shutdown
+          </Button>
+        ) : null}
+        {can.canChangeEndAction ? (
+          <Button
+            size="sm"
+            onClick={() => setDialog('end')}
+            data-testid={`${prefix}-change-end-action`}
+          >
+            Change end action
+          </Button>
+        ) : null}
+        {can.canExtend ? (
+          <Button
+            size="sm"
+            onClick={() => setDialog('extend')}
+            data-testid={`${prefix}-extend`}
+          >
+            {campaign ? 'Extend' : 'Extend mission'}
+          </Button>
+        ) : null}
+        {can.canCancelMission ? (
+          <Button
+            size="sm"
+            variant="danger"
+            loading={cancelWorkload.isPending}
+            onClick={() => setDialog('cancel')}
+            data-testid={`${prefix}-cancel`}
+          >
+            {copy.confirmLabel}
+          </Button>
+        ) : null}
         {status.hasReport ? (
           <Button size="sm" onClick={() => setDialog('report')} data-testid={`${prefix}-report`}>
             {campaign ? 'View report' : 'Final report'}
           </Button>
         ) : null}
       </div>
+      {hint ? (
+        <p className="m-0 mt-2 text-small text-text-muted" data-testid={`${prefix}-action-hint`}>
+          {hint}
+        </p>
+      ) : null}
 
       {dialog === 'end' ? <ChangeEndActionDialog status={status} open onClose={close} /> : null}
       {dialog === 'extend' ? (

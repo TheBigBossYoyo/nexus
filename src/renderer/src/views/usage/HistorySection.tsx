@@ -14,6 +14,7 @@ import { DailyChart } from './DailyChart'
 import {
   BREAKDOWN_TABS,
   HISTORY_RANGES,
+  breakdownDetail,
   breakdownLabel,
   dailySeries,
   sortBreakdown,
@@ -28,9 +29,18 @@ function columns(by: BreakdownTab): Column<UsageBreakdownRow>[] {
     {
       key: 'label',
       header: first,
-      render: (r) => (
-        <span className="block max-w-[28rem] truncate font-medium">{breakdownLabel(by, r)}</span>
-      ),
+      render: (r) => {
+        const label = breakdownLabel(by, r)
+        const detail = breakdownDetail(by, r)
+        return (
+          <span className="block w-full max-w-[28rem] min-w-0" title={detail ? `${label} (${detail})` : label}>
+            <span className="block truncate font-medium">{label}</span>
+            {detail ? (
+              <span className="block truncate font-mono text-small text-text-muted">{detail}</span>
+            ) : null}
+          </span>
+        )
+      },
     },
     { key: 'sessions', header: 'Sessions', numeric: true, render: (r) => formatCount(r.sessions) },
     { key: 'turns', header: 'Turns', numeric: true, render: (r) => formatCount(r.turns) },

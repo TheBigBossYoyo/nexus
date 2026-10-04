@@ -56,7 +56,7 @@ Incidents:
 
 Not done:
 
-- Overnight Arena with a power action (not implemented).
+- Overnight Arena: implemented on 2026-10-04 (workload abstraction, `overnight.startArena`, UI); see OVERNIGHT_MODE.md.
 - A real usage limit inside a NEXUS mission (did not occur; not provoked).
 - Running the installer.
 - Merge into `main` and tag `v0.3.0` (left to the user).

@@ -55,6 +55,7 @@ export function AgentDetail({ agent }: { agent: Agent }) {
           variant="danger"
           icon={<StopIcon size={12} />}
           disabled={!STOPPABLE.has(agent.state)}
+          title={STOPPABLE.has(agent.state) ? undefined : 'This agent is not running.'}
           onClick={() => setConfirmStop(true)}
           data-testid="agent-stop"
         >

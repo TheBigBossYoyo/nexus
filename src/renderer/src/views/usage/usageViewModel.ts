@@ -286,6 +286,12 @@ export function breakdownLabel(by: BreakdownTab, row: UsageBreakdownRow): string
   return row.label || row.key || 'Unknown'
 }
 
+/** A short id shown under a mission label so identical labels can be told apart; null for other tabs. */
+export function breakdownDetail(by: BreakdownTab, row: UsageBreakdownRow): string | null {
+  if (by !== 'run' || !row.key) return null
+  return row.key.length > 8 ? row.key.slice(0, 8) : row.key
+}
+
 // ───────────────────────────── limit events ─────────────────────────────
 
 export interface LimitRow {

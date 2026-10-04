@@ -56,7 +56,7 @@ export function arenaOvernightReadiness(
   if (!validation.policyValid) return Object.values(validation.errors)[0] ?? 'Check the policy.'
   if (!validation.canStart)
     return validation.errors.authorization ?? 'Tick the authorization to start.'
-  return 'Ready. NEXUS will also ask Windows for a confirmation.'
+  return 'Ready. A confirmation dialog appears before anything starts.'
 }
 
 export function buildArenaOvernightInput(

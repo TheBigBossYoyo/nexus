@@ -80,3 +80,78 @@ export function endActionSummary(policy: OvernightStatus['policy']): string {
 /** A finished record: nothing left to cancel or extend. */
 export const overnightFinished = (state: OvernightStatus['state']): boolean =>
   state === 'DONE' || state === 'FINALIZATION_FAILED' || state === 'POWER_ACTION_FAILED'
+
+/** Cased, spaced terminal reason: "USER_CANCELLED" -> "user cancelled". */
+export const terminalReasonText = (reason: string): string =>
+  reason.replace(/_/g, ' ').toLowerCase()
+
+/** "campaign ended: success". Names the workload, never "run" for an Arena campaign. */
+export const endedText = (
+  status: Pick<OvernightStatus, 'workloadType' | 'terminalReason'>,
+): string | null =>
+  status.terminalReason
+    ? `${workloadNoun(status)} ended: ${terminalReasonText(status.terminalReason)}`
+    : null
+
+/** True once the workload has a terminal outcome, so its deadline can no longer matter. */
+export const workloadEnded = (status: Pick<OvernightStatus, 'terminalReason' | 'state'>): boolean =>
+  status.terminalReason !== null || overnightFinished(status.state)
+
+/** Deadline row label; "(not reached)" once the workload ended for a reason other than the time limit. */
+export function deadlineRowLabel(
+  status: Pick<OvernightStatus, 'workloadType' | 'terminalReason' | 'state'>,
+): string {
+  const base = deadlineLabel(workloadNoun(status))
+  return workloadEnded(status) && status.terminalReason !== 'TIME_LIMIT'
+    ? `${base} (not reached)`
+    : base
+}
+
+/**
+ * The end-of-workload power action row, or null when none was scheduled. Distinct from the failsafe timer:
+ * this is the final action itself.
+ */
+export function finalActionRow(
+  status: Pick<OvernightStatus, 'workloadType' | 'powerAction'>,
+  countdown: string | null,
+): { label: string; value: string } | null {
+  const p = status.powerAction
+  if (!p) return null
+  const action = p.action === 'SHUTDOWN' ? 'shutdown' : p.action === 'SLEEP' ? 'sleep' : 'hibernation'
+  const label = `End-of-${workloadNoun(status)} ${action}`
+  if (p.cancelledAt !== null) return { label, value: 'cancelled' }
+  if (p.executedAt !== null) return { label, value: 'executed' }
+  const when = countdown ? countdown.replace(/^.*? in /, 'in ') : 'pending'
+  return { label, value: `scheduled, ${when}` }
+}
+
+/** The failsafe timer value. Says when a final action replaced the timer instead of a bare "cancelled". */
+export function failsafeRowValue(
+  status: Pick<OvernightStatus, 'failsafe' | 'policy' | 'powerAction'>,
+  now: number,
+): string {
+  const f = status.failsafe
+  if (!f) return status.policy.failsafeEnabled ? 'not armed' : 'none'
+  if (f.cancelledAt !== null) {
+    const replaced = status.powerAction !== null && status.powerAction.cancelledAt === null
+    return replaced ? 'replaced by the final shutdown' : 'cancelled'
+  }
+  if (f.lostAt !== null) return 'lost (Windows restarted)'
+  if (!f.result.ok) return 'not armed'
+  return `armed for ${formatWallClock(f.deadline, now)}`
+}
+
+/** Which overnight actions still apply, and a one-line hint when some are hidden. */
+export function actionHint(
+  noun: WorkloadNoun,
+  can: { canCancelPower: boolean; canChangeEndAction: boolean; canExtend: boolean; canCancelMission: boolean },
+  hasReport: boolean,
+): string | null {
+  const hidden = !can.canChangeEndAction || !can.canExtend || !can.canCancelMission
+  if (!hidden) return null
+  const left = [can.canCancelPower ? 'Cancel shutdown' : null, hasReport ? 'View report' : null].filter(
+    (x): x is string => x !== null,
+  )
+  const tail = left.length === 0 ? 'no actions remain' : `only ${left.join(' and ')} ${left.length === 1 ? 'applies' : 'apply'}`
+  return `The ${noun} is no longer running; ${tail}.`
+}

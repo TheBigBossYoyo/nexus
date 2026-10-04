@@ -13,7 +13,12 @@ import {
 } from '../../components/ui'
 import { OvernightActions } from '../overnight/OvernightActions'
 import { overnightPageModel } from '../overnight/overnightPageModel'
-import { endActionSummary, overnightFinished } from '../overnight/workloadModel'
+import {
+  deadlineRowLabel,
+  endActionSummary,
+  finalActionRow,
+  overnightFinished,
+} from '../overnight/workloadModel'
 import { activeTrialCount, trialProgressText, usageResetText } from './arenaOvernight'
 import type { CampaignProgress } from './arenaModel'
 
@@ -56,6 +61,7 @@ export function CampaignOvernightPanel({
   const m = overnightPageModel(status, now)
   const b = m.banner
   const finished = overnightFinished(status.state)
+  const finalRow = finalActionRow(status, b.countdown)
   const reset = usageResetText(usage.overview, now)
   const quotaShown = m.quota.filter((l) => l.key !== 'deadline' && l.key !== 'failsafe')
 
@@ -68,12 +74,14 @@ export function CampaignOvernightPanel({
         </span>
       }
       actions={
-        <span className="flex items-center gap-2" role="status">
-          <StatusBadge
-            status={{ tone: b.tone, label: b.state.replace(/_/g, ' ') }}
-            pulse={m.working}
-            data-testid="arena-overnight-state"
-          />
+        <span className="flex items-center gap-2">
+          <span role="status">
+            <StatusBadge
+              status={{ tone: b.tone, label: b.state.replace(/_/g, ' ') }}
+              pulse={m.working}
+              data-testid="arena-overnight-state"
+            />
+          </span>
           {b.countdown ? (
             <span
               className="tnum font-medium text-warning"
@@ -152,12 +160,9 @@ export function CampaignOvernightPanel({
               ),
             },
             ...(reset ? [{ label: 'Usage resets', value: reset, mono: true }] : []),
-            { label: 'Hard deadline', value: b.deadline, mono: true },
-            {
-              label: 'Failsafe shutdown',
-              value: b.failsafe === 'off' ? 'none' : b.failsafe,
-              mono: true,
-            },
+            { label: deadlineRowLabel(status), value: b.deadline, mono: true },
+            ...(finalRow ? [{ label: finalRow.label, value: finalRow.value, mono: true }] : []),
+            { label: 'Failsafe timer', value: b.failsafe, mono: true },
             { label: 'End action', value: endActionSummary(status.policy) },
           ]}
         />

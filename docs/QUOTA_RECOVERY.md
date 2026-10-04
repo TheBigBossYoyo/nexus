@@ -291,7 +291,7 @@ resumes it like any other run. The campaign's own pause is derived (`ArenaServic
 becomes `paused` with reason `quota` while the usage gate is closed or a trial's run is paused for
 `quota`, queued trials are not started, and the campaign goes back to `running` when the gate is open and
 no trial is quota-paused. The campaign's wall-clock budget counts active time only; a quota wait does not
-count. See [ARENA.md](ARENA.md). Overnight Arena under the supervisor is not implemented in 0.3.
+count. See [ARENA.md](ARENA.md). An overnight campaign keeps this behaviour; the supervisor only decides whether the wait fits before the deadline (OVERNIGHT_MODE.md, "Workloads").
 
 ## Speculative candidates
 

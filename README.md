@@ -361,7 +361,7 @@ earlier single-mission acceptance script.
 - The ADAPTIVE decision is fixed when the run is created. An explicit strategy choice is used as given and records no decision.
 - Arena needs Node.js 20 or newer on `PATH` (NEXUS ships none); without it a campaign cannot start. Every built-in case is a
   small JavaScript project, so results say nothing about other languages or large repositories. Creating a campaign from a
-  user repository is not offered. Overnight Arena with a power action is not implemented. Unattended trials deny every tool
+  user repository is not offered. A campaign can run under the overnight supervisor (Arena, New campaign, Run overnight); a real campaign with a real power action has not been run. Unattended trials deny every tool
   approval request. The `performance-optimization` evaluator decides by timing and runs on one machine.
   Pausing a campaign does not pause runs already running. Budgets are checked after each trial (the wall-clock budget on a timer),
   so the running trial can exceed them. Regression detection compares only the two newest (NEXUS version, model) groups.

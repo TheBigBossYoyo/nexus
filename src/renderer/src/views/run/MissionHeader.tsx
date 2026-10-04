@@ -336,7 +336,7 @@ export function MissionHeader() {
                 Stop
               </Button>
             ) : null}
-            <Button size="sm" icon={<PlusIcon size={12} />} onClick={() => setAddOpen(true)} disabled={finished} data-testid="add-task">
+            <Button size="sm" icon={<PlusIcon size={12} />} onClick={() => setAddOpen(true)} disabled={finished} title={finished ? 'The mission has finished; tasks can no longer be added.' : undefined} data-testid="add-task">
               Add task
             </Button>
             {finished ? (

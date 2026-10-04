@@ -1,4 +1,4 @@
-import { useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { Button, IconButton } from './Button'
 import { XIcon } from './icons'
 import { useModal } from './useModal'
@@ -21,8 +21,13 @@ export function Dialog({
   testId?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   useModal(ref, open, onClose, 'input, textarea, select, button[data-autofocus]')
+  // Always open scrolled to the top, whatever the autofocus target did.
+  useEffect(() => {
+    if (open) bodyRef.current?.scrollTo({ top: 0 })
+  }, [open])
 
   if (!open) return null
   return (
@@ -46,7 +51,9 @@ export function Dialog({
             <XIcon />
           </IconButton>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+        <div ref={bodyRef} className="min-h-0 flex-1 overflow-auto p-4">
+          {children}
+        </div>
         {footer ? <footer className="flex shrink-0 justify-end gap-2 border-t px-4 py-3">{footer}</footer> : null}
       </div>
     </div>

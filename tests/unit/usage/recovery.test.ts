@@ -8,7 +8,9 @@ import { QuotaRecoveryController, UsageIntelligenceService, type AvailabilityPro
 import { makeProject, makeRun } from '../../integration/persistence/fixtures'
 
 const MIN = 60_000
-const T0 = Date.UTC(2026, 9, 4, 22, 0, 0)
+// Durable events are stamped with the real clock; the controller's clock must not be behind it. A fixed date
+// would start failing the moment the wall clock passed it.
+const T0 = Math.ceil(Date.now() / MIN) * MIN + 24 * 60 * MIN
 
 function world(usageSettings: Partial<typeof DEFAULT_SETTINGS.usage> = {}) {
   const db = openDatabase(':memory:')

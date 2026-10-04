@@ -13,10 +13,15 @@ import {
   Skeleton,
   StatusBadge,
 } from '../../components/ui'
-import { END_ACTION_LABEL } from '../projects/overnight'
 import { OvernightActions } from './OvernightActions'
 import { overnightPageModel } from './overnightPageModel'
-import { deadlineLabel, isArenaWorkload, workloadKind, workloadNoun } from './workloadModel'
+import {
+  deadlineRowLabel,
+  endActionSummary,
+  finalActionRow,
+  isArenaWorkload,
+  workloadKind,
+} from './workloadModel'
 
 function OvernightRunCard({ status, label }: { status: OvernightStatus; label: string }) {
   const openRun = useUiStore((s) => s.openRun)
@@ -26,15 +31,18 @@ function OvernightRunCard({ status, label }: { status: OvernightStatus; label: s
   const m = overnightPageModel(status, now)
   const arena = isArenaWorkload(status)
   const b = m.banner
+  const finalRow = finalActionRow(status, b.countdown)
   return (
     <Card data-testid={`overnight-card-${status.runId}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2" role="status">
-            <StatusBadge
-              status={{ tone: b.tone, label: b.state.replace(/_/g, ' ') }}
-              data-testid="overnight-page-state"
-            />
+          <div className="flex items-center gap-2">
+            <span role="status">
+              <StatusBadge
+                status={{ tone: b.tone, label: b.state.replace(/_/g, ' ') }}
+                data-testid="overnight-page-state"
+              />
+            </span>
             {b.countdown ? (
               <span
                 className="tnum font-medium text-warning"
@@ -91,9 +99,10 @@ function OvernightRunCard({ status, label }: { status: OvernightStatus; label: s
         <KeyValue
           labelWidth="10rem"
           rows={[
-            { label: deadlineLabel(workloadNoun(status)), value: b.deadline, mono: true },
-            { label: 'Failsafe shutdown', value: b.failsafe, mono: true },
-            { label: 'End action', value: END_ACTION_LABEL[status.policy.endAction] },
+            { label: deadlineRowLabel(status), value: b.deadline, mono: true },
+            ...(finalRow ? [{ label: finalRow.label, value: finalRow.value, mono: true }] : []),
+            { label: 'Failsafe timer', value: b.failsafe, mono: true },
+            { label: 'End action', value: endActionSummary(status.policy) },
           ]}
         />
       </div>

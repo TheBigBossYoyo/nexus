@@ -40,12 +40,12 @@ export function PageHeader({
       <header
         data-testid="top-bar"
         className={cn(
-          '@container/header flex min-h-12 items-center gap-4 border-b bg-surface px-5 py-1.5',
+          '@container/header flex min-h-12 flex-wrap items-center gap-x-4 gap-y-1 border-b bg-surface px-5 py-1.5',
           className,
         )}
         {...rest}
       >
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <div className="flex min-w-48 flex-1 items-baseline gap-2">
           {context ? (
             <>
               <span className="shrink-0 text-body text-text-muted">{context}</span>
@@ -54,7 +54,10 @@ export function PageHeader({
               </span>
             </>
           ) : null}
-          <h1 className="m-0 min-w-0 truncate text-title font-semibold text-text-primary">
+          <h1
+            className="m-0 min-w-0 truncate text-title font-semibold text-text-primary"
+            title={typeof title === 'string' ? title : undefined}
+          >
             {title}
           </h1>
         </div>

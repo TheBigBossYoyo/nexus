@@ -4,7 +4,9 @@ import type { Harness } from './harness'
 
 /** A manual clock shared by the usage service, the controller, the probe and the fake account. */
 export class ManualClock {
-  constructor(public t = Date.UTC(2026, 9, 4, 22, 0, 0)) {}
+  // Starts a day ahead of the wall clock, on the hour. Durable events are stamped with the real clock, and the
+  // controller compares its own times with theirs; a fixed date fails once the wall clock passes it.
+  constructor(public t = Math.ceil(Date.now() / 3_600_000) * 3_600_000 + 24 * 3_600_000) {}
   now = (): number => this.t
   advance(ms: number): number {
     this.t += ms

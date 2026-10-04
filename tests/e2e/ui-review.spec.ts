@@ -60,6 +60,43 @@ test.describe('UI review capture', () => {
       const caseId = cases.find((c) => c.case.id === 'bugfix-localized')?.case.id ?? cases[0]!.case.id
       const campaign = await invoke(page, 'arena.createCampaign', { name: 'Review campaign', caseIds: [caseId], strategies: ['SINGLE', 'BUILD'], repetitions: 1, modelPreset: 'balanced', budgetPreset: 'eco', start: true })
       await expect.poll(async () => (await invoke(page, 'arena.campaign', { campaignId: campaign.id })).campaign.state, { timeout: 300_000, intervals: [1000] }).toBe('completed')
+      // The "Run overnight" form of the dialog, before any overnight workload exists (it is disabled while one is live).
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme)
+        await page.getByTestId('nav-arena').click()
+        await page.getByTestId('arena-new-campaign').click()
+        const dialog = page.getByTestId('arena-campaign-dialog')
+        await dialog.getByTestId('arena-campaign-name').fill('Overnight form')
+        await dialog.getByTestId(`arena-case-${caseId}`).click()
+        await dialog.getByTestId('arena-run-overnight').check()
+        await expect(dialog.getByTestId('arena-overnight-form')).toBeVisible()
+        await shot(page, `${theme}-wide-arena-dialog-overnight-form-top`)
+        await dialog.getByTestId('arena-overnight-authorize').scrollIntoViewIfNeeded()
+        await dialog.getByTestId('arena-overnight-authorize').check()
+        await shot(page, `${theme}-wide-arena-dialog-overnight-form-authorized`)
+        await page.keyboard.press('Escape')
+        // Mission Control with the finished mission, a task open in the inspector, and the Agents page.
+        await page.getByTestId('nav-run').click()
+        await page.getByTestId('runs-table').locator('[data-testid^="run-row-"]').first().click()
+        await expect(page.getByTestId('run-view')).toBeVisible()
+        await shot(page, `${theme}-wide-mission-control`)
+        const node = page.locator('.nexus-flow .react-flow__node').first()
+        if (await node.count()) {
+          await node.click()
+          await shot(page, `${theme}-wide-mission-control-inspector`)
+        }
+        await resize(app, 1024, 700)
+        await shot(page, `${theme}-narrow-mission-control`)
+        await page.getByTestId('nav-agents').click()
+        await shot(page, `${theme}-narrow-agents-with-mission`)
+        await resize(app, 1440, 900)
+        await shot(page, `${theme}-wide-agents-with-mission`)
+        const agent = page.getByTestId('agents-panel').locator('button, a').first()
+        if (await agent.count()) {
+          await agent.click()
+          await shot(page, `${theme}-wide-agents-detail`)
+        }
+      }
       const { campaignId } = await invoke(page, 'overnight.startArena', {
         campaign: { name: 'Overnight review campaign', caseIds: [caseId], strategies: ['SINGLE'], repetitions: 1, modelPreset: 'balanced', budgetPreset: 'eco' },
         policy: { ...DEFAULT_OVERNIGHT_POLICY, forceCloseApplications: true, finalDelaySeconds: 3600 },

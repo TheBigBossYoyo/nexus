@@ -28,27 +28,27 @@ interface Row {
 }
 
 const COLUMNS: readonly Column<Row>[] = [
-  { key: 'state', header: 'State', width: '9.5rem', render: (r) => <StatusBadge status={runStatus(r.run.state)} /> },
+  { key: 'state', header: 'State', width: '8.5rem', render: (r) => <StatusBadge status={runStatus(r.run.state)} /> },
   {
     key: 'mission',
     header: 'Mission',
     render: (r) => (
-      <span className="block max-w-[64ch] truncate font-medium" title={r.run.prompt}>
+      <span className="block min-w-24 max-w-[30ch] truncate font-medium xl:max-w-[64ch]" title={r.run.prompt}>
         {missionTitle(r.run.prompt)}
       </span>
     ),
   },
-  { key: 'mode', header: 'Mode', width: '5.5rem', render: (r) => <span className="text-text-secondary">{r.run.mode}</span> },
+  { key: 'mode', header: 'Mode', width: '4.5rem', render: (r) => <span className="text-text-secondary">{r.run.mode}</span> },
   {
     key: 'strategy',
     header: 'Strategy',
-    width: '7.5rem',
+    width: '6.5rem',
     render: (r) => (r.strategy ? <span className="font-mono text-code">{r.strategy}</span> : <span className="text-text-muted">—</span>),
   },
   {
     key: 'progress',
     header: 'Progress',
-    width: '9rem',
+    width: '8rem',
     render: (r) =>
       r.total === null || r.done === null ? (
         <span className="text-text-muted">—</span>
@@ -61,8 +61,8 @@ const COLUMNS: readonly Column<Row>[] = [
         </span>
       ),
   },
-  { key: 'created', header: 'Started', width: '7rem', render: (r) => <TimeAgo iso={r.run.createdAt} /> },
-  { key: 'duration', header: 'Elapsed', width: '6.5rem', numeric: true, render: (r) => formatSpan(r.run.startedAt, r.run.finishedAt) },
+  { key: 'created', header: 'Started', width: '5.5rem', render: (r) => <TimeAgo iso={r.run.createdAt} /> },
+  { key: 'duration', header: 'Elapsed', width: '5rem', numeric: true, render: (r) => formatSpan(r.run.startedAt, r.run.finishedAt) },
 ]
 
 /** Shown when no mission is selected: the current project's missions, newest first. */
@@ -117,7 +117,7 @@ export function RunsList() {
             .
           </EmptyState>
         ) : (
-          <div className="overflow-hidden rounded-lg border bg-surface" data-testid="runs-table">
+          <div className="overflow-x-auto rounded-lg border bg-surface" data-testid="runs-table">
             <p className="m-0 border-b px-3 py-2 text-small text-text-muted">
               No mission selected. Pick one to open Mission Control{project ? ` for ${project.name}` : ''}.
             </p>

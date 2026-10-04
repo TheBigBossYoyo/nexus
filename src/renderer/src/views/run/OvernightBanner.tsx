@@ -27,6 +27,7 @@ import { END_ACTION_LABEL } from '../projects/overnight'
 import { overnightWord } from '../../lib/wording'
 import type { WorkloadNoun } from '../overnight/workloadModel'
 import { bannerModel } from './overnightModel'
+import { deadlineRowLabel } from '../overnight/workloadModel'
 import { useNow } from './runContext'
 
 const END_OPTIONS: SelectOption<EndAction>[] = END_ACTIONS.map((a) => ({
@@ -234,10 +235,10 @@ export function OvernightBanner({ runId }: { runId: string }) {
         </span>
         {m.detail ? <span className="text-text-secondary">{m.detail}</span> : null}
         <span className="font-mono text-small text-text-secondary">
-          Failsafe shutdown: <span data-testid="overnight-failsafe">{m.failsafe}</span>
+          Failsafe timer: <span data-testid="overnight-failsafe">{m.failsafe}</span>
         </span>
         <span className="font-mono text-small text-text-secondary">
-          Mission deadline: <span data-testid="overnight-deadline">{m.deadline}</span>
+          {deadlineRowLabel(status)}: <span data-testid="overnight-deadline">{m.deadline}</span>
         </span>
         <span className="font-mono text-small text-text-secondary">
           End action: <span data-testid="overnight-end-action-label">{m.endAction}</span>

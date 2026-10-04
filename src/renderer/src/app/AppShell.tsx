@@ -46,10 +46,20 @@ export function AppShell() {
   )
   return (
     <div className="flex h-full bg-background" data-testid="app-shell">
+      <a
+        href="#main-content"
+        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-md focus-visible:bg-surface focus-visible:px-3 focus-visible:py-2 focus-visible:text-text-primary focus-visible:shadow-lg"
+        onClick={(e) => {
+          e.preventDefault()
+          document.getElementById('main-content')?.focus()
+        }}
+      >
+        Skip to main content
+      </a>
       <ErrorBoundary label="Navigation failed">
         <Sidebar />
       </ErrorBoundary>
-      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <main id="main-content" tabIndex={-1} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <ShellSlotsContext.Provider value={slots}>
           <ViewRouter />
         </ShellSlotsContext.Provider>

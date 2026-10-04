@@ -18,6 +18,7 @@ import {
   FORCED_SHUTDOWN_NOTE,
   NORMAL_SHUTDOWN_NOTE,
   TOOL_APPROVALS_NOTE,
+  authorizationScope,
   defaultFailsafeMinutes,
   effectiveFailsafeMinutes,
   joinMinutes,
@@ -286,14 +287,20 @@ export function AuthorizeCheck({
   form,
   onChange,
   testId = 'overnight-authorize',
-}: Pick<PolicyFieldsProps, 'form' | 'onChange'> & { testId?: string }) {
+  noun = 'run',
+}: Pick<PolicyFieldsProps, 'form' | 'onChange'> & { testId?: string; noun?: 'run' | 'campaign' }) {
   return (
-    <Check
-      checked={form.authorized}
-      onChange={(authorized) => onChange({ authorized })}
-      label={OVERNIGHT_CONFIRMATION_TEXT}
-      testId={testId}
-    />
+    <div className="flex flex-col gap-1">
+      <Check
+        checked={form.authorized}
+        onChange={(authorized) => onChange({ authorized })}
+        label={OVERNIGHT_CONFIRMATION_TEXT}
+        testId={testId}
+      />
+      <p className="m-0 pl-6 text-small text-text-secondary" data-testid={`${testId}-scope`}>
+        {authorizationScope(form, noun)}
+      </p>
+    </div>
   )
 }
 

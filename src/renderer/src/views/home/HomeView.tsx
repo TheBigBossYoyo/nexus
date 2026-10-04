@@ -197,8 +197,13 @@ function RecentMissions({ data }: { data: HomeData }) {
                   testId={`home-recent-${m.run.id}`}
                   label={`Open mission ${m.run.prompt}`}
                 >
-                  <span className="min-w-0 flex-1 truncate">{m.run.prompt}</span>
-                  <span className="hidden shrink-0 text-small text-text-muted sm:inline">
+                  <span className="min-w-0 flex-1 truncate" title={m.run.prompt}>
+                    {m.run.prompt}
+                  </span>
+                  <span
+                    className="hidden max-w-32 min-w-0 shrink truncate text-small text-text-muted sm:inline"
+                    title={m.projectName}
+                  >
                     {m.projectName}
                   </span>
                   <span className="flex w-28 shrink-0 justify-end">
