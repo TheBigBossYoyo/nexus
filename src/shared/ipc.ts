@@ -293,6 +293,8 @@ export const ipcInputs = {
       maxIterations: z.number().int().min(1).max(50).optional(),
       planningMode: z.enum(['single', 'consensus']).optional(),
       reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
+      /** v0.3. Absent: BUILD, which configures the run exactly as before 0.3 and lets its outcome be recorded. */
+      strategy: StrategySchema.optional(),
     })
     .strict(),
   'overnight.get': z.object({ runId: Id }).strict(),

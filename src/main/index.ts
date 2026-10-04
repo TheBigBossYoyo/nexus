@@ -23,7 +23,7 @@ import { Orchestrator } from './modules/orchestrator'
 import { OvernightSupervisor } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
-import { attachOutcomeRecording, PolicyService } from './modules/policy'
+import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from './modules/policy'
 import { FakePowerController, WindowsPowerController, type PowerController } from './modules/power'
 import { QuotaRecoveryController, RuntimeAvailabilityProbe, UsageIntelligenceService } from './modules/usage'
 import { OvernightTray } from './tray'
@@ -407,7 +407,8 @@ async function bootstrap(): Promise<void> {
     projects: new ProjectService(repos, git, logger),
     usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
     policy: { activeSnapshotId: () => policy.active().id },
-    push,
+    // A finished campaign refreshes the evidence and may leave a policy candidate; it never promotes one.
+    push: learnOnCampaignEnd(repos, policy, push, logger),
     nexusVersion: app.getVersion(),
     environment: async () => ({
       platform: `${process.platform} ${process.arch}`,

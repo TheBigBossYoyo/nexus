@@ -28,6 +28,7 @@ import {
   type WatchdogDiagnostic,
 } from '@shared/overnight'
 import { errorMessage, NexusError } from '@shared/result'
+import type { Strategy } from '@shared/v3'
 import type { EventBus } from '@main/modules/events'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
@@ -45,6 +46,7 @@ export interface OvernightOrchestrator {
     prompt: string
     overrides?: Partial<RunConfig>
     prepare?: (run: Run) => Promise<void>
+    strategy?: Strategy
   }): Promise<Run>
   pauseRun(runId: string, reason?: 'user' | 'quota' | 'recovery', detail?: string, cause?: PauseCause): Promise<Run>
   resumeRun(runId: string): Promise<Run>
@@ -101,6 +103,8 @@ export interface OvernightStartInput {
   maxIterations?: number
   planningMode?: 'single' | 'consensus'
   reviewMode?: 'standard' | 'dual' | 'auto'
+  /** v0.3. Absent: BUILD. */
+  strategy?: Strategy
 }
 
 export interface OvernightAmendment {
@@ -265,6 +269,8 @@ export class OvernightSupervisor {
       mode: 'mission',
       preset: input.preset,
       prompt: input.prompt,
+      // A strategy makes the mission's outcome usable as evidence. BUILD sets what the preset already set.
+      strategy: input.strategy ?? 'BUILD',
       overrides: {
         // Nobody is there to approve a plan; starting the run is the approval.
         requirePlanApproval: false,

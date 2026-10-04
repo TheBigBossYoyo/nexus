@@ -6,6 +6,7 @@ import type { ConcreteStrategy } from '@shared/v3'
 import { completeWith, scriptsByRole, type FakeScript, type FakeSessionContext } from '@main/modules/agent-runtime/fake-runtime'
 import { ArenaService, compareTrials } from '@main/modules/arena'
 import { ProjectService } from '@main/modules/ipc/services'
+import { learnOnCampaignEnd } from '@main/modules/policy'
 import { environment, writeDemoCase } from '../integration/arena/harness'
 import { approvedReview, createHarness, passedVerification, plan, plannedTask, writeFiles, type Harness } from './harness'
 
@@ -35,6 +36,7 @@ function arenaFor(h: Harness, casesDir: string): ArenaService {
     nexusVersion: '0.3.0-test',
     environment,
     ...(h.policy ? { policy: { activeSnapshotId: () => h.policy!.active().id } } : {}),
+    ...(h.policy ? { push: learnOnCampaignEnd(h.repos, h.policy, () => undefined) } : {}),
   })
 }
 
@@ -139,6 +141,11 @@ describe('v0.3 Arena on the real orchestrator', () => {
       }
     }
     expect(prompts.filter((p) => p.strategy === 'SINGLE')).toHaveLength(1)
+
+    // The finished campaign already refreshed the evidence by itself, and changed no policy.
+    expect(h.repos.strategyStatistics.list().length).toBeGreaterThan(0)
+    expect(h.repos.policyCandidates.listRecent()).toEqual([])
+    expect(h.policy!.active().version).toBe(1)
 
     // Evidence reaches the policy as controlled Arena trials; one trial each proposes nothing.
     const learned = h.policy!.learn()
