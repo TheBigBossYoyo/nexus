@@ -320,3 +320,10 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Task graph nodes are focusable wrappers; the library hides their outline, so restore the shared focus ring. */
+.nexus-flow .react-flow__node:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}

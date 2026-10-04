@@ -2,7 +2,14 @@ import { useMemo, useState } from 'react'
 import { ARENA_BUDGET_PRESETS, type ArenaBudgetPreset, type ConcreteStrategy } from '@shared/v3'
 import type { ArenaCaseSummary } from '@shared/v3-read'
 import type { Preset } from '@shared/domain'
-import { useArenaCases, useCreateCampaign, useImportCase, useTrustCase } from '../../lib/queries-v3'
+import { useActiveOvernight } from '../../lib/queries'
+import {
+  useArenaCases,
+  useCreateCampaign,
+  useImportCase,
+  useStartArenaOvernight,
+  useTrustCase,
+} from '../../lib/queries-v3'
 import {
   Badge,
   Button,
@@ -10,11 +17,26 @@ import {
   Dialog,
   Field,
   Input,
+  Notice,
   NumberField,
   SegmentedControl,
   Select,
 } from '../../components/ui'
 import { BlockSkeleton, ReadError } from '../usage/shared'
+import {
+  AuthorizeCheck,
+  Check,
+  DurationFields,
+  EndOfRunGroup,
+  FailsafeGroup,
+  QuotaPolicyField,
+  ShutdownGroup,
+} from '../projects/OvernightPanel'
+import {
+  authorizationSentence,
+  defaultOvernightForm,
+  type OvernightForm,
+} from '../projects/overnight'
 import {
   ARENA_STRATEGIES,
   STRATEGY_HINT,
@@ -23,6 +45,12 @@ import {
   strategyName,
   trialCount,
 } from './arenaModel'
+import {
+  arenaOvernightReadiness,
+  buildArenaOvernightInput,
+  overnightBusy,
+  validateArenaOvernight,
+} from './arenaOvernight'
 
 const MODEL_PRESETS: { value: Preset; label: string }[] = [
   { value: 'eco', label: 'Economy: faster, cheaper models' },
@@ -91,6 +119,11 @@ export function NewCampaignDialog({
   const cases = useArenaCases()
   const create = useCreateCampaign()
   const importCase = useImportCase()
+  const startOvernight = useStartArenaOvernight()
+  const active = useActiveOvernight()
+  const [overnightOn, setOvernightOn] = useState(false)
+  const [overnight, setOvernight] = useState<OvernightForm>(defaultOvernightForm)
+  const [overnightError, setOvernightError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [strategies, setStrategies] = useState<Set<ConcreteStrategy>>(new Set(['SINGLE', 'BUILD']))
@@ -118,6 +151,38 @@ export function NewCampaignDialog({
     if (n.has(v)) n.delete(v)
     else n.add(v)
     return n
+  }
+
+  const busy = overnightBusy(active.data)
+  const overnightValidation = validateArenaOvernight(overnight)
+  const patchOvernight = (patch: Partial<OvernightForm>) => {
+    setOvernightError(null)
+    setOvernight((f) => ({ ...f, ...patch }))
+  }
+  const overnightReady = check.ok && overnightValidation.canStart && !busy
+  const submitOvernight = () => {
+    setOvernightError(null)
+    startOvernight.mutate(
+      buildArenaOvernightInput(overnight, {
+        name,
+        caseIds: [...picked],
+        strategies: ARENA_STRATEGIES.filter((s) => strategies.has(s)),
+        repetitions: reps,
+        modelPreset: model,
+        budgetPreset: budget,
+      }),
+      {
+        onSuccess: (out) => {
+          setName('')
+          setPicked(new Set())
+          setOvernightOn(false)
+          setOvernight(defaultOvernightForm())
+          onClose()
+          onCreated(out.campaignId)
+        },
+        onError: (e) => setOvernightError(e.message),
+      },
+    )
   }
 
   const submit = (start: boolean) =>
@@ -173,23 +238,37 @@ export function NewCampaignDialog({
               )}
             </div>
             <Button onClick={onClose}>Cancel</Button>
-            <Button
-              disabled={!check.ok}
-              loading={create.isPending}
-              onClick={() => submit(false)}
-              data-testid="arena-create"
-            >
-              Create
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!check.ok}
-              loading={create.isPending}
-              onClick={() => submit(true)}
-              data-testid="arena-create-start"
-            >
-              Create and start
-            </Button>
+            {overnightOn ? (
+              <Button
+                variant="primary"
+                disabled={!overnightReady}
+                loading={startOvernight.isPending}
+                onClick={submitOvernight}
+                data-testid="arena-overnight-start"
+              >
+                Start overnight campaign
+              </Button>
+            ) : (
+              <>
+                <Button
+                  disabled={!check.ok}
+                  loading={create.isPending}
+                  onClick={() => submit(false)}
+                  data-testid="arena-create"
+                >
+                  Create
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={!check.ok}
+                  loading={create.isPending}
+                  onClick={() => submit(true)}
+                  data-testid="arena-create-start"
+                >
+                  Create and start
+                </Button>
+              </>
+            )}
           </>
         )
       }
@@ -376,6 +455,83 @@ export function NewCampaignDialog({
               {check.warning}
             </p>
           ) : null}
+
+          <section
+            className="flex flex-col gap-3 rounded-lg border bg-surface-muted p-3"
+            aria-label="Run overnight"
+            data-testid="arena-overnight-section"
+          >
+            <Check
+              checked={overnightOn}
+              disabled={!!busy && !overnightOn}
+              onChange={(v) => {
+                setOvernightOn(v)
+                setOvernightError(null)
+              }}
+              label={<span className="font-medium">Run overnight</span>}
+              hint="Run the whole campaign unattended under a time limit, with an end-of-campaign power action you authorize in advance."
+              testId="arena-run-overnight"
+            />
+            {busy ? (
+              <Notice tone="warning" data-testid="arena-overnight-busy">
+                {busy}
+              </Notice>
+            ) : null}
+            {overnightOn ? (
+              <div className="flex flex-col gap-3" data-testid="arena-overnight-form">
+                <Notice tone="warning" title="Overnight Arena">
+                  Tool approvals are denied while the campaign is unattended, and each trial runs
+                  real Claude sessions. Nothing happens to Windows unless you tick the authorization
+                  below.
+                </Notice>
+                <div className="grid grid-cols-2 gap-3">
+                  <DurationFields
+                    form={overnight}
+                    onChange={patchOvernight}
+                    errors={overnightValidation.errors}
+                  />
+                </div>
+                <EndOfRunGroup
+                  form={overnight}
+                  onChange={patchOvernight}
+                  errors={overnightValidation.errors}
+                />
+                <FailsafeGroup
+                  form={overnight}
+                  onChange={patchOvernight}
+                  errors={overnightValidation.errors}
+                />
+                <ShutdownGroup
+                  form={overnight}
+                  onChange={patchOvernight}
+                  errors={overnightValidation.errors}
+                />
+                <QuotaPolicyField form={overnight} onChange={patchOvernight} />
+                <AuthorizeCheck
+                  form={overnight}
+                  onChange={patchOvernight}
+                  testId="arena-overnight-authorize"
+                />
+                <p
+                  className="m-0 text-small text-text-secondary"
+                  role="status"
+                  data-testid="arena-overnight-readiness"
+                >
+                  {authorizationSentence(overnight.endAction)}{' '}
+                  {arenaOvernightReadiness(overnightValidation, check.error, busy)}
+                </p>
+                {overnightError ? (
+                  <Notice
+                    tone="danger"
+                    title="The campaign was not started"
+                    data-testid="arena-overnight-error"
+                  >
+                    {overnightError}
+                  </Notice>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
         </div>
       )}
     </Dialog>

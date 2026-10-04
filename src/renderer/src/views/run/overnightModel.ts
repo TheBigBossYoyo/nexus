@@ -1,6 +1,7 @@
 import type { OvernightState, OvernightStatus } from '@shared/overnight'
 import type { Tone } from '../../lib/status'
 import { END_ACTION_BANNER, formatWallClock } from '../projects/overnight'
+import { quotaDetail } from '../overnight/workloadModel'
 
 /** Mirrors the failsafe check in the supervisor: a timer that is actually armed in Windows. */
 export function failsafeArmed(status: Pick<OvernightStatus, 'failsafe'>): boolean {
@@ -116,10 +117,7 @@ export function bannerModel(status: OvernightStatus, now: number = Date.now()): 
   let detail: string | null = null
   switch (status.state) {
     case 'QUOTA_PAUSED': {
-      const resume = status.quota?.resumeAt ?? status.quota?.resetsAt ?? null
-      detail = resume
-        ? `waiting for the usage limit, resumes ${formatWallClock(resume, now)}`
-        : 'waiting for the usage limit'
+      detail = quotaDetail(status, now)
       break
     }
     case 'FINALIZING':

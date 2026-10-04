@@ -1,8 +1,14 @@
-import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import type { IpcOutputs } from '@shared/ipc'
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
+import type { IpcInput, IpcOutputs } from '@shared/ipc'
 import type { UsageGrouping } from '@shared/v3'
 import { api, BRIDGE_UNAVAILABLE, IpcError } from './bridge'
-import { qk, useRead, useWrite } from './queries'
+import { applyOvernight, qk, useRead, useWrite } from './queries'
 
 /** Hooks for the 0.3 Intelligence pages (Usage, Arena, Policy). All lists are paged in the main process. */
 
@@ -102,6 +108,22 @@ const refreshArena = (qc: QueryClient) => {
   void qc.invalidateQueries({ queryKey: qk.homeRoot() })
 }
 export const useCreateCampaign = () => useWrite('arena.createCampaign', refreshArena)
+/** An Arena campaign under the overnight supervisor. Errors show inside the dialog, so the global toast is suppressed. */
+export function useStartArenaOvernight() {
+  const qc = useQueryClient()
+  return useMutation<
+    IpcOutputs['overnight.startArena'],
+    IpcError,
+    IpcInput<'overnight.startArena'>
+  >({
+    mutationFn: (input) => api.invoke('overnight.startArena', input),
+    meta: { silent: true },
+    onSuccess: (out) => {
+      applyOvernight(qc, out.overnight)
+      refreshArena(qc)
+    },
+  })
+}
 export const useStartCampaign = () => useWrite('arena.start', refreshArena)
 export const usePauseCampaign = () => useWrite('arena.pause', refreshArena)
 export const useResumeCampaign = () => useWrite('arena.resume', refreshArena)

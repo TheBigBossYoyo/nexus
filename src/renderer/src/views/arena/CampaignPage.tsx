@@ -22,7 +22,8 @@ import {
 } from '../../components/ui'
 import { BlockSkeleton, ReadError } from '../usage/shared'
 import { clockText } from '../../lib/usageModel'
-import { campaignDuration, CampaignStateBadge, ProgressCounts, ProgressStrip } from './CampaignList'
+import { campaignDuration, CampaignStateBadge, ProgressCounts, ProgressStrip, StrategyCounts } from './CampaignList'
+import { CampaignOvernightPanel } from './CampaignOvernightPanel'
 import { Matrix } from './Matrix'
 import { ResultsPanel } from './ResultsPanel'
 import { TrialsTable } from './TrialsTable'
@@ -35,6 +36,7 @@ import {
   canResume,
   canStart,
   strategyName,
+  strategyProgress,
 } from './arenaModel'
 
 type Tab = 'matrix' | 'results' | 'trials'
@@ -162,6 +164,8 @@ export function CampaignPage({ campaignId, onBack }: { campaignId: string; onBac
           ) : null}
           {c.error ? <ErrorNote error={c.error} /> : null}
 
+          <CampaignOvernightPanel campaignId={campaignId} progress={progress} counts={d.counts} />
+
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border bg-surface px-4 py-3 sm:grid-cols-3 xl:grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)]">
             <Stat
               label="Strategies"
@@ -193,6 +197,7 @@ export function CampaignPage({ campaignId, onBack }: { campaignId: string; onBac
               </div>
               <ProgressStrip p={progress} className="mt-1.5" />
               <ProgressCounts p={progress} />
+              <StrategyCounts rows={strategyProgress(d.matrix, c.strategies)} />
             </div>
           </div>
 

@@ -44,10 +44,21 @@ export function Badge({
 }
 
 /** Dot + label for a state, e.g. <StatusBadge status={runStatus(run.state)} />. */
-export function StatusBadge({ status, className }: { status: StatusInfo; className?: string }) {
+export function StatusBadge({
+  status,
+  className,
+  pulse = false,
+  ...rest
+}: {
+  status: StatusInfo
+  className?: string
+  pulse?: boolean
+  'data-testid'?: string
+  title?: string
+}) {
   return (
-    <Badge tone={status.tone} className={className}>
-      <StatusDot tone={status.tone} />
+    <Badge tone={status.tone} className={className} {...rest}>
+      <StatusDot tone={status.tone} pulse={pulse} />
       {status.label}
     </Badge>
   )

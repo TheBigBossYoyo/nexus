@@ -14,7 +14,7 @@ function Page({ children, count }: { children: ReactNode; count?: number }) {
         context="Workspace"
         {...(count !== undefined ? { actions: <span className="text-small text-text-muted">{count} in this mission</span> } : {})}
       />
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="@container min-h-0 flex-1">{children}</div>
     </div>
   )
 }
@@ -71,11 +71,11 @@ export function AgentsView() {
 
   return (
     <Page count={agents.length}>
-      <div className="flex h-full min-h-0" data-testid="agents-view">
-        <div className="w-[340px] shrink-0 border-r bg-surface">
+      <div className="flex h-full min-h-0 flex-col @3xl:flex-row" data-testid="agents-view">
+        <div className="h-[38%] min-h-32 shrink-0 border-b bg-surface @3xl:h-auto @3xl:min-h-0 @3xl:w-[340px] @3xl:border-b-0 @3xl:border-r">
           <AgentsPanel agents={agents} selectedId={selected?.id ?? null} onSelect={selectAgent} />
         </div>
-        <div className="min-w-0 flex-1 bg-surface">{selected ? <AgentDetail key={selected.id} agent={selected} /> : null}</div>
+        <div className="min-h-0 min-w-0 flex-1 bg-surface">{selected ? <AgentDetail key={selected.id} agent={selected} /> : null}</div>
       </div>
     </Page>
   )

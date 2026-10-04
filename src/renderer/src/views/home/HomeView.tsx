@@ -8,6 +8,7 @@ import {
   useRuns,
 } from '../../lib/queries'
 import { overnightWord } from '../../lib/wording'
+import { isArenaWorkload } from '../overnight/workloadModel'
 import { runStatus } from '../../lib/status'
 import { formatSpan, formatTokens, formatCount } from '../../lib/format'
 import { exactResetAt } from '../../lib/usageModel'
@@ -28,6 +29,7 @@ import {
   ProgressBar,
   SourceLabel,
   Skeleton,
+  StatusBadge,
   StatusDot,
   TimeAgo,
 } from '../../components/ui'
@@ -130,11 +132,10 @@ function ActiveMissions({ data }: { data: HomeData }) {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <StatusDot tone={st.tone} />
                       <span className="min-w-0 flex-1 truncate font-medium">{m.run.prompt}</span>
-                      <span className="shrink-0 text-small text-text-secondary">{st.label}</span>
+                      <StatusBadge status={st} className="shrink-0" />
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-3.5 text-small text-text-muted">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-small text-text-muted">
                       <span>{m.projectName}</span>
                       <span aria-hidden="true">·</span>
                       <span className="capitalize">
@@ -196,13 +197,12 @@ function RecentMissions({ data }: { data: HomeData }) {
                   testId={`home-recent-${m.run.id}`}
                   label={`Open mission ${m.run.prompt}`}
                 >
-                  <StatusDot tone={st.tone} />
                   <span className="min-w-0 flex-1 truncate">{m.run.prompt}</span>
                   <span className="hidden shrink-0 text-small text-text-muted sm:inline">
                     {m.projectName}
                   </span>
-                  <span className="w-24 shrink-0 text-right text-small text-text-secondary">
-                    {st.label}
+                  <span className="flex w-28 shrink-0 justify-end">
+                    <StatusBadge status={st} />
                   </span>
                   <TimeAgo
                     iso={m.run.createdAt}
@@ -291,11 +291,12 @@ function OvernightCard({ overnight }: { overnight: readonly OvernightStatus[] })
             </span>
           </div>
           <div className="text-small text-text-secondary">
-            Mission deadline <span className="tnum">{clockText(first.deadlineAt, Date.now())}</span>
+            {isArenaWorkload(first) ? 'Arena campaign' : 'Mission'} deadline{' '}
+            <span className="tnum">{clockText(first.deadlineAt, Date.now())}</span>
           </div>
         </div>
       ) : (
-        <p className="m-0 text-text-secondary">Off. No unattended mission is running.</p>
+        <p className="m-0 text-text-secondary">Off. No unattended mission or campaign is running.</p>
       )}
     </Card>
   )

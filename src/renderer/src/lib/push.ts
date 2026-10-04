@@ -173,7 +173,12 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
         case 'overnight':
           // The push carries the whole record: render from it immediately, then refresh what hangs off it.
           qc.setQueryData(qk.overnight(message.status.runId), message.status)
-          schedule([qk.overnightActive(), qk.overnightReport(message.status.runId), qk.run(message.status.runId), qk.runsList()])
+          // A campaign's runId is the campaign id: it has no run to refresh, but the campaign page does.
+          schedule(
+            message.status.workloadType === 'arena_campaign'
+              ? [qk.overnightActive(), qk.overnightReport(message.status.runId), qk.arenaCampaign(message.status.runId), qk.homeRoot()]
+              : [qk.overnightActive(), qk.overnightReport(message.status.runId), qk.run(message.status.runId), qk.runsList()],
+          )
           break
         case 'usage':
           // The push carries the whole overview: render from it immediately, then refresh what hangs off it.

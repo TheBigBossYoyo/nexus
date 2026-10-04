@@ -1,51 +1,40 @@
-import { useState } from 'react'
 import type { OvernightStatus } from '@shared/overnight'
-import {
-  useActiveOvernight,
-  useCancelOvernightMission,
-  useCancelPower,
-  useRuns,
-} from '../../lib/queries'
+import { useActiveOvernight, useRuns } from '../../lib/queries'
+import { useArenaCampaign } from '../../lib/queries-v3'
 import { useNow } from '../../lib/useNow'
-import { TONE_CLASSES } from '../../lib/status'
 import { useUiStore } from '../../store/ui'
 import {
   Button,
   Card,
-  ConfirmDialog,
   ErrorNote,
   KeyValue,
   MoonIcon,
   PageHeader,
   Skeleton,
-  StatusDot,
+  StatusBadge,
 } from '../../components/ui'
-import { ChangeEndActionDialog, ExtendDialog, ReportDialog } from '../run/OvernightBanner'
 import { END_ACTION_LABEL } from '../projects/overnight'
+import { OvernightActions } from './OvernightActions'
 import { overnightPageModel } from './overnightPageModel'
+import { deadlineLabel, isArenaWorkload, workloadKind, workloadNoun } from './workloadModel'
 
 function OvernightRunCard({ status, label }: { status: OvernightStatus; label: string }) {
   const openRun = useUiStore((s) => s.openRun)
-  const cancelPower = useCancelPower()
-  const cancelMission = useCancelOvernightMission()
-  const [dialog, setDialog] = useState<'end' | 'extend' | 'report' | 'cancel' | null>(null)
+  const openCampaign = useUiStore((s) => s.openCampaign)
   const live = status.state === 'POWER_ACTION_SCHEDULED' || status.state === 'QUOTA_PAUSED'
   const now = useNow(live, 1000)
   const m = overnightPageModel(status, now)
-  const close = () => setDialog(null)
+  const arena = isArenaWorkload(status)
   const b = m.banner
   return (
     <Card data-testid={`overnight-card-${status.runId}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2" role="status">
-            <StatusDot tone={b.tone} />
-            <span
-              className={`font-semibold ${TONE_CLASSES[b.tone].text}`}
+            <StatusBadge
+              status={{ tone: b.tone, label: b.state.replace(/_/g, ' ') }}
               data-testid="overnight-page-state"
-            >
-              {b.state.replace(/_/g, ' ')}
-            </span>
+            />
             {b.countdown ? (
               <span
                 className="tnum font-medium text-warning"
@@ -58,16 +47,26 @@ function OvernightRunCard({ status, label }: { status: OvernightStatus; label: s
           </div>
           <p className="m-0 mt-1 text-text-secondary">{m.summary}</p>
           <p className="m-0 mt-1 truncate text-small text-text-muted" title={label}>
-            Mission: {label}
+            {workloadKind(status)}: {label}
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => openRun(status.runId, status.projectId)}
-          data-testid="overnight-open-mission"
-        >
-          Open mission
-        </Button>
+        {arena ? (
+          <Button
+            size="sm"
+            onClick={() => openCampaign(status.runId)}
+            data-testid="overnight-open-campaign"
+          >
+            Open campaign
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            onClick={() => openRun(status.runId, status.projectId)}
+            data-testid="overnight-open-mission"
+          >
+            Open mission
+          </Button>
+        )}
       </div>
 
       {m.quota.length > 0 ? (
@@ -92,70 +91,30 @@ function OvernightRunCard({ status, label }: { status: OvernightStatus; label: s
         <KeyValue
           labelWidth="10rem"
           rows={[
-            { label: 'Mission deadline', value: b.deadline, mono: true },
+            { label: deadlineLabel(workloadNoun(status)), value: b.deadline, mono: true },
             { label: 'Failsafe shutdown', value: b.failsafe, mono: true },
             { label: 'End action', value: END_ACTION_LABEL[status.policy.endAction] },
           ]}
         />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-1.5">
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={!b.canCancelPower}
-          loading={cancelPower.isPending}
-          onClick={() => cancelPower.mutate({ runId: status.runId })}
-        >
-          Cancel shutdown
-        </Button>
-        <Button size="sm" disabled={!b.canChangeEndAction} onClick={() => setDialog('end')}>
-          Change end action
-        </Button>
-        <Button size="sm" disabled={!b.canExtend} onClick={() => setDialog('extend')}>
-          Extend mission
-        </Button>
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={!b.canCancelMission}
-          loading={cancelMission.isPending}
-          onClick={() => setDialog('cancel')}
-        >
-          Cancel mission
-        </Button>
-        {b.hasReport ? (
-          <Button size="sm" onClick={() => setDialog('report')} data-testid="overnight-page-report">
-            Final report
-          </Button>
-        ) : null}
+      <div className="mt-4">
+        <OvernightActions status={status} prefix="overnight-page" />
       </div>
-
-      {dialog === 'end' ? <ChangeEndActionDialog status={status} open onClose={close} /> : null}
-      {dialog === 'extend' ? <ExtendDialog runId={status.runId} open onClose={close} /> : null}
-      {dialog === 'report' ? <ReportDialog runId={status.runId} open onClose={close} /> : null}
-      <ConfirmDialog
-        open={dialog === 'cancel'}
-        onClose={close}
-        onConfirm={() => {
-          cancelMission.mutate({ runId: status.runId })
-          close()
-        }}
-        title="Cancel this mission?"
-        confirmLabel="Cancel mission"
-        danger
-      >
-        Agents are stopped and the run ends. The end action runs only if cancellation is one of the
-        conditions you selected.
-      </ConfirmDialog>
     </Card>
   )
+}
+
+/** The campaign name for a campaign record. Never touches the run channels. */
+function CampaignCard({ status }: { status: OvernightStatus }) {
+  const campaign = useArenaCampaign(status.runId)
+  return <OvernightRunCard status={status} label={campaign.data?.campaign.name ?? status.runId} />
 }
 
 const EXPLAINER = [
   {
     lead: 'Unattended',
-    text: 'Runs one mission without you, with a hard deadline and automatic waiting for Claude usage limits.',
+    text: 'Runs one mission or Arena campaign without you, with a hard deadline and automatic waiting for Claude usage limits.',
   },
   {
     lead: 'Safe by default',
@@ -172,7 +131,9 @@ function Explainer() {
     <Card>
       <div className="flex flex-col items-center gap-1 pt-4 text-center">
         <MoonIcon size={20} className="mb-1 text-text-muted" />
-        <h2 className="m-0 text-heading font-semibold">No overnight mission is running</h2>
+        <h2 className="m-0 text-heading font-semibold">
+          No overnight mission or campaign is running
+        </h2>
         <p className="m-0 text-text-secondary">
           Overnight Mode is how NEXUS works while you are away.
         </p>
@@ -219,9 +180,13 @@ export function OvernightView() {
           ) : active.data.length === 0 ? (
             <Explainer />
           ) : (
-            active.data.map((s) => (
-              <OvernightRunCard key={s.runId} status={s} label={labels.get(s.runId) ?? s.runId} />
-            ))
+            active.data.map((s) =>
+              isArenaWorkload(s) ? (
+                <CampaignCard key={s.runId} status={s} />
+              ) : (
+                <OvernightRunCard key={s.runId} status={s} label={labels.get(s.runId) ?? s.runId} />
+              ),
+            )
           )}
         </div>
       </div>

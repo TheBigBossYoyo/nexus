@@ -146,6 +146,8 @@ export function MissionComposer({ project }: { project: Project }) {
   }
   const problem = validateMission(draft)
   const dirty = project.profile?.dirty === true
+  const noChecks =
+    project.profile !== null && Object.values(project.profile.commands).every((c) => c === null || c === '')
 
   const submit = async () => {
     setSubmitted(true)
@@ -198,6 +200,12 @@ export function MissionComposer({ project }: { project: Project }) {
             />
           )}
         </Field>
+        {noChecks && mode !== 'ask' ? (
+          <p className="m-0 -mt-2 text-small text-text-muted" data-testid="no-check-commands">
+            No check commands configured for this project (build, test, lint, typecheck). Missions run without
+            automatic checks; set them up in the project's scripts and reprofile.
+          </p>
+        ) : null}
 
         <div className={cn('grid gap-3', showStrategy ? 'grid-cols-3' : 'grid-cols-2')}>
           <Field label="Mode" hint={overnightMode ? OVERNIGHT_MODE_INFO : MODE_INFO[mode]}>

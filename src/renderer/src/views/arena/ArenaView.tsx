@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useArenaCampaigns, useArenaResults, useImportCase } from '../../lib/queries-v3'
 import { useNow } from '../../lib/useNow'
+import { useUiStore } from '../../store/ui'
 import { ArenaIcon, Button, Card, EmptyState, PageHeader, PlusIcon } from '../../components/ui'
 import { BlockSkeleton, LoadMore, ReadError } from '../usage/shared'
 import { CampaignTable } from './CampaignList'
@@ -38,6 +39,14 @@ export function ArenaView() {
   const campaigns = useArenaCampaigns()
   const importCase = useImportCase()
   const now = useNow(true, 30_000)
+  // Another page (Overnight, Home) can ask for a campaign page; consume the request once.
+  const requested = useUiStore((s) => s.arenaCampaignId)
+  const openCampaign = useUiStore((s) => s.openCampaign)
+  useEffect(() => {
+    if (!requested) return
+    setCampaignId(requested)
+    openCampaign(null)
+  }, [requested, openCampaign])
   const rows = useMemo(
     () => campaigns.data?.pages.flatMap((p) => p.campaigns) ?? [],
     [campaigns.data],

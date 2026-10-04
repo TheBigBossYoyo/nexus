@@ -348,6 +348,15 @@ infrastructure block, excluded from the statistics.
 | `arena.start` | Only for a `draft`, and only when the Node preflight passes |
 | `arena.cleanup` | `cleanupCampaign`: for a finished campaign (`completed`, `cancelled`, `failed`) with no trial still finishing, removes each trial's run worktrees through the host and then its trial directory under `<data>/arena/`. Database rows are kept. Nothing calls it automatically |
 
+### Overnight Arena
+
+A campaign can run under the overnight supervisor (`overnight.startArena`): explicit authorization, a hard
+wall-clock deadline, the failsafe armed before the first trial, a final report and an end action of `NONE`,
+`SHUTDOWN`, `SLEEP` or `HIBERNATE`. The Arena keeps doing what it does for any campaign (queue, quota pause,
+restart recovery, evaluation, policy candidates); the supervisor owns the deadline and the power lifecycle.
+`ArenaService.suspend` stops a campaign without ending it and `idleCampaign` waits until none of its trials
+is being worked on. See [OVERNIGHT_MODE.md](OVERNIGHT_MODE.md), "Workloads".
+
 ### Quota pause
 
 The Arena derives a quota pause; it does not run a second recovery. The campaign becomes `paused` with
@@ -500,9 +509,8 @@ Also written for Arena runs: `task_profiles.arena_trial_id`, `mission_outcomes.i
   `ArenaService` has no method to create such a case or campaign. Only built-in and imported case
   directories can be run.
 - Arena cases need Node.js 20 or newer on `PATH`; NEXUS does not ship Node. Without it a campaign cannot start.
-- Overnight Arena with a power action is not implemented in 0.3. `ArenaCampaign.overnight` is stored
-  and the IPC schema does not set it; nothing in `overnight/` reads it. A campaign is a normal campaign
-  that stops on its own budgets.
+- An overnight campaign that is finalized (deadline, usage limit that cannot be waited on, lapse after a
+  restart) has its trials in flight cancelled. Their partial work is not evaluated.
 - Pausing a campaign does not pause running runs; they finish and are evaluated.
 - Budgets are checked after each trial (`maxAgentSessions`) or on a 5 s timer (`maxWallClockMinutes`);
   `maxTrials` only at creation. The session budget can be exceeded by the trial that is running.
@@ -516,7 +524,8 @@ Also written for Arena runs: `task_profiles.arena_trial_id`, `mission_outcomes.i
 - Scores are relative to the passing trials of the same case in the same campaign and are recomputed when
   another trial of that case finishes. They are not comparable across campaigns. Compare pass rates and
   raw metrics.
-- Campaign state `failed` exists and is never set.
+- Campaign state `failed` exists and is never set. An overnight campaign in which no trial produced a
+  result is finalized with the terminal reason `FAILED`; the campaign row itself is `completed`.
 - Evaluators are checked for presence in the trial repository at provisioning. A result commit that contains an
   evaluator's top-level path fails the trial as tampering; the evaluator is never copied over agent files.
 - Every built-in case is a small JavaScript project. Results say nothing about other languages, large

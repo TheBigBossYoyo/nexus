@@ -118,6 +118,16 @@ function GraphInner({
       edges={edges}
       nodeTypes={nodeTypes}
       onNodeClick={(_, node) => onSelect(node.id)}
+      onKeyDown={(e) => {
+        // A focused node opens its inspector with Enter or Space, like a click.
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        const node = (e.target as HTMLElement).closest<HTMLElement>('.react-flow__node')
+        const id = node?.dataset.id
+        if (node && id && e.target === node) {
+          e.preventDefault()
+          onSelect(id)
+        }
+      }}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable

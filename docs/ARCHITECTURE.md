@@ -58,7 +58,7 @@ src/
       strategy/      v0.3: strategies.ts (five strategies as engine configuration), tournament.ts (pure ranking)
       policy/        v0.3: profiler.ts, stats.ts, engine.ts, learning.ts (pure); service.ts, snapshots.ts, simulator.ts
       arena/         v0.3: case-format.ts, fixtures.ts, evaluator.ts, scoring.ts, metrics.ts, campaign.ts (ArenaService)
-      overnight/     v0.2.1: supervisor, report, tray model
+      overnight/     v0.2.1: supervisor, report, tray model; v0.3: AutonomousWorkload, MissionWorkload, ArenaCampaignWorkload
   preload/           narrow typed bridge (CJS, sandboxed)
   renderer/          React UI
 tests/

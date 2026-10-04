@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useUsageOverview, useUsageRefresh, useUsageResumeNow } from '../../lib/queries'
 import { useNow } from '../../lib/useNow'
-import { Badge, Button, PageHeader, RefreshIcon, StatusDot } from '../../components/ui'
+import { Button, PageHeader, RefreshIcon, StatusBadge } from '../../components/ui'
 import { usageHeader } from './usageViewModel'
 import { StatusSection } from './StatusSection'
 import { RunSection } from './RunSection'
@@ -27,10 +27,7 @@ export function UsageView() {
         actions={
           <>
             {o ? (
-              <Badge tone={h.tone} data-testid="usage-header-status">
-                <StatusDot tone={h.tone} />
-                {h.statusLabel}
-              </Badge>
+              <StatusBadge status={{ tone: h.tone, label: h.statusLabel }} data-testid="usage-header-status" />
             ) : null}
             {h.waiting ? (
               <Button

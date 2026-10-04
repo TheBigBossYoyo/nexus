@@ -91,7 +91,8 @@ export function Toggle({
         <span
           aria-hidden="true"
           className={cn(
-            'absolute top-px size-3.5 rounded-full bg-white transition-[left]',
+            'absolute top-px size-3.5 rounded-full transition-[left]',
+            checked ? 'bg-accent-fg' : 'bg-surface',
             checked ? 'left-[15px]' : 'left-px border border-border-strong',
           )}
         />

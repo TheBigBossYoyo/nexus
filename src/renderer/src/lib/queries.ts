@@ -304,9 +304,11 @@ export const useUsageResumeNow = () => useWrite('usage.resumeNow', applyUsage)
 export const useUsageEndWait = () => useWrite('usage.endWait', applyUsage)
 
 // Overnight Mode. Every write returns the new status, which replaces the cached record directly.
-const applyOvernight = (qc: QueryClient, status: IpcOutputs['overnight.get']) => {
+export const applyOvernight = (qc: QueryClient, status: IpcOutputs['overnight.get']) => {
   if (status) qc.setQueryData(qk.overnight(status.runId), status)
   void qc.invalidateQueries({ queryKey: qk.overnightActive() })
+  // Cancelling a campaign changes the campaign, not a run.
+  if (status?.workloadType === 'arena_campaign') void qc.invalidateQueries({ queryKey: qk.arenaRoot() })
   refreshRuns(qc)
 }
 export const useCancelPower = () => useWrite('overnight.cancelPower', applyOvernight)

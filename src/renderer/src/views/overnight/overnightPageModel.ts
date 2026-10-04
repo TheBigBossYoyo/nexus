@@ -1,17 +1,33 @@
 import type { OvernightStatus } from '@shared/overnight'
 import { bannerModel, failsafeArmed, type BannerModel } from '../run/overnightModel'
 import { formatWallClock } from '../projects/overnight'
+import {
+  hasQuotaTime,
+  isArenaWorkload,
+  QUOTA_NO_RESET_TEXT,
+  runningSummary,
+  workloadNoun,
+} from './workloadModel'
 
 export interface QuotaLine {
-  key: 'paused' | 'reset' | 'resume' | 'deadline' | 'failsafe'
+  key: 'paused' | 'reset' | 'resume' | 'noreset' | 'deadline' | 'failsafe'
   text: string
 }
 
 /** The quota-wait explanation. Only values that exist are listed; nothing is inferred. */
 export function quotaLines(status: OvernightStatus, now: number): QuotaLine[] {
   if (status.state !== 'QUOTA_PAUSED') return []
-  const lines: QuotaLine[] = [{ key: 'paused', text: 'Mission paused for Claude usage limit' }]
+  const noun = workloadNoun(status)
+  const lines: QuotaLine[] = [
+    {
+      key: 'paused',
+      text: `${noun === 'campaign' ? 'Campaign' : 'Mission'} paused for Claude usage limit`,
+    },
+  ]
   const q = status.quota
+  // A campaign may wait without a reported reset time; say so instead of showing a made-up one.
+  if (isArenaWorkload(status) && !hasQuotaTime(status))
+    lines.push({ key: 'noreset', text: QUOTA_NO_RESET_TEXT })
   if (q?.resetsAt)
     lines.push({ key: 'reset', text: `Expected reset ${formatWallClock(q.resetsAt, now)}` })
   if (q?.resumeAt)
@@ -49,7 +65,7 @@ export function overnightPageModel(status: OvernightStatus, now: number): Overni
     status.state === 'QUOTA_PAUSED'
       ? 'Waiting for Claude to be available again. No work has been lost.'
       : status.state === 'RUNNING'
-        ? 'The mission is running unattended. Tool approvals are denied while nobody is there.'
+        ? runningSummary(workloadNoun(status))
         : (banner.detail ?? 'See the state below.')
   return { banner, quota: quotaLines(status, now), working, summary }
 }

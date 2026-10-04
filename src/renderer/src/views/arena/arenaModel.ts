@@ -432,3 +432,31 @@ export function metricGroups(m: ArenaTrialMetrics | null): MetricGroup[] {
 }
 
 export const isTerminalTrial = (s: TrialState): boolean => TERMINAL_TRIAL_STATES.includes(s)
+
+export interface StrategyProgress {
+  strategy: string
+  passed: number
+  finished: number
+  total: number
+}
+
+/** Passed and finished trials per strategy, from the matrix the page already loaded. Order follows `strategies`. */
+export function strategyProgress(
+  matrix: readonly ArenaCell[],
+  strategies: readonly string[],
+): StrategyProgress[] {
+  return strategies.map((strategy) => {
+    let passed = 0
+    let finished = 0
+    let total = 0
+    for (const cell of matrix) {
+      if (cell.strategy !== strategy) continue
+      for (const t of cell.trials) {
+        total += 1
+        if (t.state === 'passed') passed += 1
+        if (TERMINAL_TRIAL_STATES.includes(t.state)) finished += 1
+      }
+    }
+    return { strategy, passed, finished, total }
+  })
+}

@@ -2,8 +2,6 @@ import { API_KEY_WARNING, type AuthStatus } from '@shared/auth'
 import { useAuthStatus, useRefreshAuth, useSettings, useUpdateSettings } from '../../lib/queries'
 import { summarizeAuth } from '../../lib/authSummary'
 import { DASH, formatDateTime } from '../../lib/format'
-import { TONE_CLASSES } from '../../lib/status'
-import { cn } from '../../lib/cn'
 import {
   Button,
   CodeBlock,
@@ -15,7 +13,7 @@ import {
   PageHeader,
   Panel,
   RefreshIcon,
-  StatusDot,
+  StatusBadge,
   Toggle,
 } from '../../components/ui'
 
@@ -68,10 +66,7 @@ export function AuthView() {
           <>
             <Panel title="Status" data-testid="auth-status">
               <div className="mb-3 flex items-center gap-2">
-                <StatusDot tone={summary.tone} className="size-2.5" />
-                <span className={cn('text-heading font-semibold', TONE_CLASSES[summary.tone].text)} data-testid="auth-state-label">
-                  {summary.label}
-                </span>
+                <StatusBadge status={summary} data-testid="auth-state-label" />
               </div>
               {status.error ? <ErrorNote error={status.error} className="mb-3" /> : null}
               <KeyValue rows={statusRows(status)} />

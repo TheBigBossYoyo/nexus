@@ -3,7 +3,7 @@ import type { Agent } from '@shared/domain'
 import { useStopAgent } from '../../lib/queries'
 import { agentStatus } from '../../lib/status'
 import { formatCount } from '../../lib/format'
-import { Button, ConfirmDialog, StatusText, StopIcon, Tabs, type TabItem } from '../../components/ui'
+import { Button, ConfirmDialog, StatusBadge, StopIcon, Tabs, type TabItem } from '../../components/ui'
 import { agentActivityLine, claudeModelLabel } from './agentLogic'
 import { FilesTab } from './FilesTab'
 import { MessagesTab } from './MessagesTab'
@@ -38,11 +38,11 @@ export function AgentDetail({ agent }: { agent: Agent }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="agent-detail">
-      <header className="flex shrink-0 items-start gap-3 px-5 pb-2 pt-3">
-        <div className="min-w-0 flex-1">
+      <header className="flex shrink-0 flex-wrap items-start gap-3 px-5 pb-2 pt-3">
+        <div className="min-w-48 flex-1">
           <div className="flex items-center gap-3">
             <h2 className="m-0 truncate text-heading font-semibold text-text-primary">{agent.label}</h2>
-            <StatusText status={agentStatus(agent.state)} className="text-small" />
+            <StatusBadge status={agentStatus(agent.state)} className="shrink-0" />
           </div>
           <div className="text-small text-text-muted">
             <span className="capitalize">{agent.role}</span> · {claudeModelLabel(agent.model)}

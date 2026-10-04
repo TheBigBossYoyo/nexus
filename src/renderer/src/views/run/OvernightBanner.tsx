@@ -11,11 +11,10 @@ import {
   Markdown,
   NumberField,
   Select,
-  StatusDot,
+  StatusBadge,
   type SelectOption,
 } from '../../components/ui'
 import { useRunControls } from '../../app/useRunControls'
-import { TONE_CLASSES } from '../../lib/status'
 import {
   useCancelOvernightMission,
   useCancelPower,
@@ -26,6 +25,7 @@ import {
 } from '../../lib/queries'
 import { END_ACTION_LABEL } from '../projects/overnight'
 import { overnightWord } from '../../lib/wording'
+import type { WorkloadNoun } from '../overnight/workloadModel'
 import { bannerModel } from './overnightModel'
 import { useNow } from './runContext'
 
@@ -103,10 +103,12 @@ export function ExtendDialog({
   runId,
   open,
   onClose,
+  noun = 'mission',
 }: {
   runId: string
   open: boolean
   onClose: () => void
+  noun?: WorkloadNoun
 }) {
   const extend = useExtendMission()
   const [minutes, setMinutes] = useState(60)
@@ -115,7 +117,7 @@ export function ExtendDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Extend mission"
+      title={`Extend ${noun}`}
       testId="overnight-extend-dialog"
       footer={
         <>
@@ -134,7 +136,7 @@ export function ExtendDialog({
     >
       <Field
         label="Extra minutes"
-        hint="Moves the mission deadline and the failsafe by the same amount."
+        hint={`Moves the ${noun} deadline and the failsafe by the same amount.`}
         error={valid ? undefined : 'Enter 1 to 1440 minutes.'}
       >
         {(id) => (
@@ -156,10 +158,12 @@ export function ReportDialog({
   runId,
   open,
   onClose,
+  noun = 'mission',
 }: {
   runId: string
   open: boolean
   onClose: () => void
+  noun?: WorkloadNoun
 }) {
   const report = useOvernightReport(runId, open)
   return (
@@ -182,7 +186,9 @@ export function ReportDialog({
               {report.data.path}
             </div>
           ) : (
-            <div className="text-text-muted">Not saved into the project.</div>
+            <div className="text-text-muted">
+              {noun === 'campaign' ? 'Not saved to a file.' : 'Not saved into the project.'}
+            </div>
           )}
           {report.data.text ? (
             <Markdown>{report.data.text}</Markdown>
@@ -221,8 +227,7 @@ export function OvernightBanner({ runId }: { runId: string }) {
           OVERNIGHT MODE
         </Badge>
         <span className="inline-flex items-center gap-1.5">
-          <StatusDot tone={m.tone} pulse={m.live} />
-          <span className={`font-semibold ${TONE_CLASSES[m.tone].text}`}>{overnightWord(m.state)}</span>
+          <StatusBadge status={{ tone: m.tone, label: overnightWord(m.state) }} pulse={m.live} />
           <span className="sr-only" aria-hidden="true" data-testid="overnight-state" data-state={m.state}>
             {m.state}
           </span>

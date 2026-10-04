@@ -1,13 +1,14 @@
 import { useMemo } from 'react'
 import type { ArenaCampaignSummary } from '@shared/v3-read'
 import { formatDuration, formatRelative } from '../../lib/format'
-import { Badge, DataTable, StatusDot, TimeAgo, type Column } from '../../components/ui'
+import { DataTable, StatusBadge, TimeAgo, type Column } from '../../components/ui'
 import { TableFrame } from '../usage/shared'
 import {
   campaignProgress,
   campaignStateInfo,
   strategyName,
   type CampaignProgress,
+  type StrategyProgress,
 } from './arenaModel'
 
 /** Stacked bar of trial counts. The denominator is the known trial total, so a bar is honest here. */
@@ -25,6 +26,26 @@ export function ProgressStrip({ p, className = '' }: { p: CampaignProgress; clas
       {seg(p.other, 'bg-text-muted')}
       {seg(p.running, 'bg-info')}
     </span>
+  )
+}
+
+/** Passed and finished trials for each strategy, next to the campaign strip. */
+export function StrategyCounts({ rows }: { rows: readonly StrategyProgress[] }) {
+  if (rows.length === 0) return null
+  return (
+    <ul
+      className="tnum m-0 mt-0.5 flex list-none flex-wrap gap-x-3 gap-y-0.5 p-0 text-small text-text-secondary"
+      aria-label="Trials per strategy"
+      data-testid="arena-strategy-counts"
+    >
+      {rows.map((r) => (
+        <li key={r.strategy} title={`${r.passed} passed, ${r.finished} of ${r.total} finished`}>
+          <span className="text-text-muted">{strategyName(r.strategy)}</span>{' '}
+          <span className="font-medium text-text-primary">{r.passed}</span> passed ·{' '}
+          <span className="font-medium text-text-primary">{r.finished}</span>/{r.total} finished
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -54,10 +75,7 @@ export function ProgressCounts({ p }: { p: CampaignProgress }) {
 export function CampaignStateBadge({ c }: { c: ArenaCampaignSummary['campaign'] }) {
   const info = campaignStateInfo(c.state, c.pauseReason)
   return (
-    <Badge tone={info.tone}>
-      <StatusDot tone={info.tone} />
-      {info.label}
-    </Badge>
+    <StatusBadge status={info} />
   )
 }
 

@@ -3,7 +3,7 @@ import { agentStatus } from '../../lib/status'
 import { cn } from '../../lib/cn'
 import { formatCount, formatTokens } from '../../lib/format'
 import { useNow } from '../../lib/useNow'
-import { StatusDot } from '../../components/ui'
+import { StatusBadge } from '../../components/ui'
 import { agentActivityLine, agentElapsed, claudeModelLabel, groupAgentsByState, isActiveAgent, observedTokens } from './agentLogic'
 
 function AgentRow({ agent, selected, now, onSelect }: { agent: Agent; selected: boolean; now: number; onSelect: () => void }) {
@@ -22,14 +22,13 @@ function AgentRow({ agent, selected, now, onSelect }: { agent: Agent; selected: 
         )}
       >
         <span className="flex items-center gap-2">
-          <StatusDot tone={status.tone} />
-          <span className="truncate font-medium text-text-primary">{agent.label}</span>
-          <span className="ml-auto shrink-0 text-small text-text-muted">{status.label}</span>
+          <span className="min-w-0 flex-1 truncate font-medium text-text-primary">{agent.label}</span>
+          <StatusBadge status={status} className="shrink-0" />
         </span>
-        <span className="truncate pl-3.5 text-small text-text-secondary" title={agentActivityLine(agent)}>
+        <span className="truncate text-small text-text-secondary" title={agentActivityLine(agent)}>
           {agentActivityLine(agent)}
         </span>
-        <span className="tnum flex items-center gap-3 pl-3.5 text-caption text-text-muted">
+        <span className="tnum flex flex-wrap items-center gap-x-3 gap-y-0.5 text-caption text-text-muted">
           <span>{claudeModelLabel(agent.model)}</span>
           <span>{agentElapsed(agent, now)}</span>
           <span>

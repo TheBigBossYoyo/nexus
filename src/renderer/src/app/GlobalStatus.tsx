@@ -4,6 +4,7 @@ import { useActiveOvernight, usePendingApprovals } from '../lib/queries'
 import { runStatus } from '../lib/status'
 import { cn } from '../lib/cn'
 import { overnightWord } from '../lib/wording'
+import { isArenaWorkload } from '../views/overnight/workloadModel'
 import { useUiStore } from '../store/ui'
 import { BranchIcon, CheckIcon, CommandIcon, Kbd, StatusDot, Tooltip } from '../components/ui'
 import { useCurrentProject, useSelectedRun } from './useCurrent'
@@ -106,7 +107,7 @@ function OvernightStatus({ showOff }: { showOff: boolean }) {
       type="button"
       data-testid="overnight-indicator"
       onClick={() => openOvernight('overnight')}
-      title={`Overnight run active${active.length > 1 ? ` (${active.length})` : ''}. Open the Overnight page.`}
+      title={`Overnight ${isArenaWorkload(first) ? 'campaign' : 'run'} active${active.length > 1 ? ` (${active.length})` : ''}. Open the Overnight page.`}
       className={ITEM_BUTTON}
     >
       <Label>Overnight</Label>

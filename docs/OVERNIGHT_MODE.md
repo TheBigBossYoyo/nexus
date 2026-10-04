@@ -1,4 +1,4 @@
-# Overnight Mode (0.2.1)
+# Overnight Mode (0.2.1, workloads since 0.3)
 
 An overnight run is a MISSION run that works without anyone present and ends with a power action the
 user approved for that run: shut down, sleep, hibernate, or nothing.
@@ -188,6 +188,78 @@ What Windows holds is never inferred from clocks alone: whenever the record cann
 
 A person starts NEXUS, so a launch never powers the machine off for a run that lapsed.
 
+## Workloads: missions and Arena campaigns (0.3)
+
+The supervisor supervises a workload. There is one supervisor and one implementation of arming, the
+deadline, finalization, the power decision, the countdown, the user actions and restart recovery; a workload
+only knows how to run, stop and describe its own work.
+
+`AutonomousWorkload` (`src/main/modules/overnight/workload.ts`):
+
+| Member | Meaning |
+|---|---|
+| `id`, `type`, `state` | The workload id (run id or campaign id), `mission` or `arena_campaign`, and its phase: `working`, `paused`, `quota_wait`, `completed`, `failed`, `cancelled`, `missing` |
+| `start()` | Begin the work. Called once, after the failsafe is armed |
+| `pause(detail)` | Stop working and stay resumable. Resolves when nothing of the workload is running |
+| `resume()`, `cancel()` | Continue; end for good |
+| `checkpoint(reason)` | Write a durable checkpoint |
+| `isTerminal()` | The work ended by itself |
+| `summarize(input)` | The end-of-workload report, from persisted state only |
+| `getDeadlineState(now)` | Phase, the terminal reason when it ended by itself, and the reset time of a usage limit |
+| `getFinalizationState()` | After the stop: preserve unfinished work and capture what there is to report |
+
+A workload never holds the power controller and takes no part in the power decision. The overnight record
+stores `workloadType`; its `runId` is the workload id. One overnight workload at a time, of either type:
+Windows has one shutdown timer.
+
+| | `MissionWorkload` | `ArenaCampaignWorkload` |
+|---|---|---|
+| Work | One run of the orchestrator | One Arena campaign (many trial runs) |
+| Stop at finalization | The run is paused | No new trial starts, trials in flight are cancelled, queued trials stay queued; the campaign is `paused` (user) and can be resumed by hand |
+| Ends by itself as | `SUCCESS`, `FAILED`, `USER_CANCELLED` from the run state | `SUCCESS` when the campaign completed with at least one evaluated trial; `FAILED` when no trial produced a result; `BLOCKED` when a campaign budget ran out; `USER_CANCELLED` when cancelled |
+| Usage limit | The supervisor waits, probes and resumes the run (see above) | The Arena pauses and resumes the campaign through the usage gate; the supervisor only decides whether waiting fits before the deadline |
+| Checkpoint | A row in `run_checkpoints` | Campaign and trial states are written on every change; a marker records where the campaign stood |
+| Report | `overnight-<start>.md`, also in the project | `overnight-arena-<start>.md` in the NEXUS data directory |
+| Watchdog, run budgets, unattended approvals | Supervisor | Not used: a trial has its own time budget and its own approval rule (ARENA.md) |
+
+### Overnight Arena
+
+Arena, New campaign, Run overnight. The dialog shows the same policy and the same authorization sentence as
+an overnight mission, and the main process asks for the native confirmation. Order of events:
+
+1. Node.js preflight. A campaign that cannot run arms nothing.
+2. The campaign is created as a draft with `overnight: true`.
+3. The overnight record, the authorization and the failsafe. If Windows refuses the failsafe the campaign is
+   cancelled and nothing starts.
+4. The campaign starts.
+
+Usage limit during a campaign:
+
+| Situation | What happens |
+|---|---|
+| Reset reported, before the deadline | `QUOTA_PAUSED`. The campaign continues by itself when the limit clears; the record returns to `RUNNING` |
+| Reset reported, after the deadline | No wait. Finalized as `QUOTA_EXHAUSTED`; the policy for that reason applies |
+| Reset not reported | `QUOTA_PAUSED` until the limit clears or the deadline, whichever comes first. The deadline finalizes as `TIME_LIMIT` |
+| Policy `END_RUN`, or more than six waits | Finalized as `QUOTA_EXHAUSTED` |
+
+A usage limit never moves the deadline or the failsafe.
+
+The power events of a campaign are in the power audit under the campaign id. A campaign is not a run, so
+the supervisor writes no run events for it; the window follows it through the `overnight` push.
+
+A finished campaign refreshes the policy evidence and may leave a policy candidate, as any campaign does.
+The report lists the candidates proposed since the campaign started. Nothing is promoted without a person.
+
+After a restart of NEXUS the Arena re-attaches the campaign's trials and the supervisor restores the record
+(same deadline, same failsafe, same quota wait). After a restart of Windows or an absence of more than ten
+minutes the power authorization lapses, the campaign is stopped and nothing powers the machine off.
+
+Tests: `tests/integration/arena/overnight-arena.test.ts` (success, failure policy, budget blocker, reset
+before and after the deadline, unknown reset, timeout with trials in flight, restart during a quota pause,
+restart while active, restart of Windows, double finalization, agent content and a tampered row),
+`tests/stress/overnight-workload-stress.test.ts` (1000 seeded histories), and migration 005 in
+`tests/integration/persistence/overnight.test.ts`.
+
 ## Verifying on your machine
 
 - `pnpm smoke:power`: schedules a real shutdown one hour away with the real controller and aborts it at
@@ -211,6 +283,10 @@ A person starts NEXUS, so a launch never powers the machine off for a run that l
 Real sleep and hibernate were not executed (they would suspend the development machine), and no real
 shutdown was allowed to complete. Their command lines are pinned by tests; the shutdown timer was exercised
 for real by the smoke test only.
+
+Overnight Arena was exercised with the Arena integration rig (real ArenaService, Git and evaluator, a
+stand-in for the orchestrator), the fake power controller and a manual clock. A real campaign under the
+supervisor with a real power action has not been run.
 
 The 0.3 quota wait (probe before resume, probing on an unknown reset until the deadline) was exercised with
 the scripted runtime and a manual clock only (`tests/scenarios/usage-overnight.test.ts`). A real usage
