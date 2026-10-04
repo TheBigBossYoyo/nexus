@@ -7,6 +7,7 @@ import { newId } from '@shared/ids'
 import {
   decidePowerAction,
   decideQuota,
+  MAX_QUOTA_WAITS,
   EndActionSchema,
   EndConditionsSchema,
   normalizeEpochMs,
@@ -15,6 +16,7 @@ import {
   toStatus,
   type EndAction,
   type EndConditions,
+  type QuotaDecision,
   type OvernightPolicy,
   type OvernightRun,
   type OvernightState,
@@ -30,6 +32,8 @@ import type { EventBus } from '@main/modules/events'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
 import { isEffectivelyForced, type PowerController } from '@main/modules/power'
+import { planQuotaWait } from '@main/modules/usage/machine'
+import type { AvailabilityProbe } from '@main/modules/usage/probe'
 import { buildCheckpoint, buildOvernightReport, powerAddendum, type GitStateCapture } from './report'
 
 /** The orchestrator surface the supervisor drives. It never reaches into scheduling internals. */
@@ -67,6 +71,12 @@ export interface OvernightDeps {
   bootTime?: () => number
   /** Milliseconds between supervisor passes; 0 disables the timer (tests call tick()). */
   tickIntervalMs?: number
+  /**
+   * v0.3. With a probe, a usage-limit wait follows the shared plan (`planQuotaWait`): it probes before
+   * resuming, and an unknown reset probes on the backoff schedule while the next probe is before the
+   * deadline. Without one the supervisor behaves as in 0.2.1.
+   */
+  probe?: AvailabilityProbe
   /** Longest wait for agent sessions to stop during finalization. */
   stopTimeoutMs?: number
   /** Longest time finalization spends on Git (checkpoint commits and state capture). */
@@ -408,7 +418,10 @@ export class OvernightSupervisor {
       case 'run.resumed':
         void this.serial(runId, async () => {
           const record = this.deps.repos.overnight.getByRun(runId)
-          if (record?.state === 'QUOTA_PAUSED') this.setState(record, 'RUNNING', 'the run was resumed')
+          if (record?.state === 'QUOTA_PAUSED') {
+            this.closeQuotaRow(runId, 'cancelled', 'The run was resumed by the user')
+            this.setState(record, 'RUNNING', 'the run was resumed')
+          }
         })
         break
       case 'approval.requested':
@@ -626,27 +639,170 @@ export class OvernightSupervisor {
       .find((e) => e.seq > since && e.payload.status === 'rejected' && normalizeEpochMs(e.payload.resetsAt) !== null)
     const resetsAt = limited ? normalizeEpochMs(limited.payload.resetsAt) : null
     const waits = record.quota?.waits ?? 0
-    const decision = decideQuota({ policy: record.policy.quotaPolicy, now, deadline: Date.parse(record.deadlineAt), resetsAt, waits })
+    const deadline = Date.parse(record.deadlineAt)
+    let decision: QuotaDecision
+    if (this.deps.probe && record.policy.quotaPolicy === 'WAIT_AND_RETRY' && waits < MAX_QUOTA_WAITS) {
+      const settings = repos.settings.get().usage
+      if (!settings.overnightWaitForReset) {
+        decision = { action: 'end', why: 'Waiting for the usage limit to reset is switched off in the settings.' }
+      } else {
+        const plan = planQuotaWait({ now, resetAt: resetsAt, probes: 0, settings, deadline, pausedAt: now })
+        decision = plan.action === 'wait' ? { action: 'wait', resumeAt: plan.checkAt } : { action: 'end', why: plan.why }
+      }
+    } else {
+      decision = decideQuota({ policy: record.policy.quotaPolicy, now, deadline, resetsAt, waits })
+    }
     if (decision.action === 'end') {
       this.update(record.id, { quota: { pausedAt: iso(now), resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: null, waits } })
       bus.emit({ runId, type: 'overnight.quota', payload: { action: 'exhausted', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: null } })
       return this.doFinalize(runId, 'QUOTA_EXHAUSTED', decision.why)
     }
     const next = this.update(record.id, { quota: { pausedAt: iso(now), resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt), waits: waits + 1 } })
+    if (this.deps.probe) this.openQuotaRow(runId, now, resetsAt, decision.resumeAt)
     this.setState(next, 'QUOTA_PAUSED', `Claude usage limit; resuming at ${iso(decision.resumeAt)}`)
     bus.emit({ runId, type: 'overnight.quota', payload: { action: 'waiting', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt) } })
   }
 
+  /** The same quota_pauses row the controller writes for ordinary runs, so history is uniform (scope 'overnight'). */
+  private openQuotaRow(runId: string, now: number, resetsAt: number | null, checkAt: number): void {
+    const { repos } = this.deps
+    try {
+      if (repos.quotaPauses.liveForRun(runId)) return
+      this.checkpoint(runId, 'quota')
+      repos.quotaPauses.insert({
+        id: newId(),
+        runId,
+        scope: 'overnight',
+        state: 'waiting',
+        pausedAt: iso(now),
+        limitType: null,
+        resetAt: resetsAt !== null ? iso(resetsAt) : null,
+        resetConfidence: resetsAt !== null ? 'EXACT' : 'UNKNOWN',
+        nextCheckAt: iso(checkAt),
+        probes: 0,
+        checkpointId: repos.checkpoints.latest(runId)?.id ?? null,
+        resumeState: null,
+        endedAt: null,
+        endReason: null,
+        createdAt: iso(now),
+        updatedAt: iso(now),
+      })
+    } catch (e) {
+      this.log(`quota row ${runId}: ${errorMessage(e)}`)
+    }
+  }
+
+  private closeQuotaRow(runId: string, state: 'resumed' | 'ended' | 'cancelled', reason: string | null): void {
+    const { repos } = this.deps
+    try {
+      const row = repos.quotaPauses.liveForRun(runId)
+      if (row?.scope === 'overnight') repos.quotaPauses.close(row.id, state, iso(this.now()), reason)
+    } catch (e) {
+      this.log(`quota row ${runId}: ${errorMessage(e)}`)
+    }
+  }
+
+  /** Record the successful resume of an overnight wait and close its row. */
+  private recordQuotaResumed(runId: string): void {
+    const { repos } = this.deps
+    try {
+      const row = repos.quotaPauses.liveForRun(runId)
+      if (!row || row.scope !== 'overnight') return
+      const at = this.now()
+      if (!repos.quotaPauses.close(row.id, 'resumed', iso(at), null)) return
+      repos.quotaResumes.insert({
+        id: newId(),
+        pauseId: row.id,
+        runId,
+        attemptedAt: iso(at),
+        kind: 'resume',
+        result: 'resumed',
+        method: 'none',
+        detail: null,
+        waitedMs: Math.max(0, at - Date.parse(row.pausedAt)),
+        createdAt: iso(at),
+      })
+    } catch (e) {
+      this.log(`quota row ${runId}: ${errorMessage(e)}`)
+    }
+  }
+
+  /**
+   * Probe before resuming. True: Claude is available, resume. False: still limited (re-planned) or the
+   * wait ended (the run was finalized as QUOTA_EXHAUSTED).
+   */
+  private async probeBeforeResume(record: OvernightRun, probe: AvailabilityProbe): Promise<boolean> {
+    const { repos, bus } = this.deps
+    const runId = record.runId
+    const now = this.now()
+    const quota = record.quota
+    if (!quota) return true
+    const resetMs = quota.resetsAt ? Date.parse(quota.resetsAt) : null
+    let row = repos.quotaPauses.liveForRun(runId)
+    if (!row || row.scope !== 'overnight') {
+      this.openQuotaRow(runId, Date.parse(quota.pausedAt), resetMs, now)
+      row = repos.quotaPauses.liveForRun(runId)
+    }
+    if (!row) return true
+    repos.quotaPauses.update(row.id, { state: 'probing', updatedAt: iso(now) })
+    let result: Awaited<ReturnType<AvailabilityProbe['probe']>>
+    try {
+      result = await probe.probe({ limitType: row.limitType })
+    } catch (e) {
+      result = { available: false, method: 'none', resetAt: null, detail: errorMessage(e), outcome: 'runtime' }
+    }
+    const at = this.now()
+    repos.quotaResumes.insert({
+      id: newId(),
+      pauseId: row.id,
+      runId,
+      attemptedAt: iso(at),
+      kind: 'probe',
+      result: result.available ? 'available' : result.outcome === 'limited' ? 'still_limited' : 'failed',
+      method: result.method,
+      detail: result.detail,
+      waitedMs: Math.max(0, at - Date.parse(quota.pausedAt)),
+      createdAt: iso(at),
+    })
+    bus.emit({ runId, type: 'usage.probe', payload: { pauseId: row.id, method: result.method, result: result.available ? 'available' : result.outcome } })
+    if (result.available) return true
+
+    const probes = row.probes + 1
+    const newReset = result.resetAt ? Date.parse(result.resetAt) : Number.NaN
+    const knownReset = Number.isFinite(newReset) ? newReset : resetMs
+    const plan = planQuotaWait({ now: at, resetAt: knownReset, probes, settings: repos.settings.get().usage, deadline: Date.parse(record.deadlineAt), pausedAt: Date.parse(quota.pausedAt) })
+    if (plan.action === 'end') {
+      this.update(record.id, { quota: { ...quota, resumeAt: null } })
+      repos.quotaPauses.close(row.id, 'ended', iso(at), plan.why)
+      bus.emit({ runId, type: 'overnight.quota', payload: { action: 'exhausted', resetsAt: quota.resetsAt, resumeAt: null } })
+      await this.doFinalize(runId, 'QUOTA_EXHAUSTED', plan.why)
+      return false
+    }
+    repos.quotaPauses.update(row.id, {
+      state: 'waiting',
+      probes,
+      resetAt: knownReset !== null ? iso(knownReset) : null,
+      resetConfidence: knownReset !== null ? 'EXACT' : 'UNKNOWN',
+      nextCheckAt: iso(plan.checkAt),
+      updatedAt: iso(at),
+    })
+    this.update(record.id, { quota: { ...quota, resetsAt: knownReset !== null ? iso(knownReset) : null, resumeAt: iso(plan.checkAt) } })
+    return false
+  }
+
   private async resumeFromQuota(record: OvernightRun): Promise<void> {
     const { repos, bus, orchestrator } = this.deps
+    if (this.deps.probe && !(await this.probeBeforeResume(record, this.deps.probe))) return
     const run = repos.runs.get(record.runId)
     if (run?.state === 'paused' && run.pauseReason === 'quota') {
       try {
         await orchestrator.resumeRun(record.runId)
       } catch (e) {
+        this.closeQuotaRow(record.runId, 'ended', 'The run could not be resumed')
         return this.doFinalize(record.runId, 'BLOCKED', `The run could not be resumed after the usage limit: ${errorMessage(e)}`)
       }
     }
+    this.recordQuotaResumed(record.runId)
     const current = repos.overnight.require(record.id)
     if (current.state === 'QUOTA_PAUSED') this.setState(current, 'RUNNING', 'usage limit reset')
     bus.emit({ runId: record.runId, type: 'overnight.quota', payload: { action: 'resumed', resetsAt: record.quota?.resetsAt ?? null, resumeAt: record.quota?.resumeAt ?? null } })
@@ -664,6 +820,8 @@ export class OvernightSupervisor {
     let record = repos.overnight.getByRun(runId)
     if (!record) return
     if (record.state !== 'RUNNING' && record.state !== 'QUOTA_PAUSED' && record.state !== 'ARMING' && record.state !== 'FINALIZING') return
+    // A quota wait still open when the run ends is closed with the run.
+    this.closeQuotaRow(runId, 'ended', `The run ended: ${reason}`)
     // The first terminal reason wins, also across a restart in the middle of finalization.
     const terminalReason = record.terminalReason ?? reason
     const terminalDetail = record.terminalDetail ?? detail ?? null

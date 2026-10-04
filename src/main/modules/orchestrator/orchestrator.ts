@@ -14,6 +14,7 @@ import {
   type Message,
   type MissionPlan,
   type Preset,
+  type Project,
   type Run,
   type RunConfig,
   type RunMode,
@@ -27,6 +28,7 @@ import type { RecoverableRun } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage, NexusError } from '@shared/result'
 import { buildRunConfig } from '@shared/settings'
+import type { ConcreteStrategy, PolicyDecision, RunStrategyInfo, Strategy, TaskProfile } from '@shared/v3'
 import {
   buildMissionVerifierPrompt,
   buildPlannerPrompt,
@@ -41,6 +43,7 @@ import {
   selectRunnable,
 } from '@main/modules/scheduler'
 import { canPauseRun, deriveRunPhase, resumeTarget } from '@main/modules/state'
+import { configureStrategy, planOverrides, type StrategyPlan } from '@main/modules/strategy/strategies'
 import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
@@ -68,6 +71,23 @@ export interface CreateRunInput {
    * Mode arms its failsafe here, so autonomous work never begins without it.
    */
   prepare?: (run: Run) => Promise<void>
+  /** v0.3. Absent: the run behaves as before 0.3 (the mode alone decides how it is planned). */
+  strategy?: Strategy
+  /** Candidate count for SPECULATIVE (clamped to the hard maximum). */
+  speculativeCandidates?: number
+  /** Acceptance criteria of the single task when the strategy has no planner. */
+  acceptanceCriteria?: string[]
+  /** Set by the Arena: the trial this run belongs to. */
+  arenaTrialId?: string
+}
+
+/** The usage service's view for the scheduler (usage/service.ts implements it). */
+export interface DispatchGate {
+  canDispatch(): boolean
+  /** The parallel-session limit to apply now (a ramp after a resume lowers it). */
+  limit(normal: number): number
+  /** Called when the gate may have reopened or the limit changed. Returns an unsubscribe function. */
+  onChange?(listener: () => void): () => void
 }
 
 export interface AddTaskInput {
@@ -105,6 +125,9 @@ export class Orchestrator implements PipelineHost {
   private readonly announced = new Set<string>()
   /** Set once shutdown starts: no scheduling pass may launch new work while sessions are being stopped. */
   private closing = false
+  /** v0.3: the usage service's gate. Closed while Claude is limited: no new session starts. */
+  private gate: DispatchGate | null = null
+  private unsubscribeGate: (() => void) | null = null
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.core = new Core(deps)
@@ -183,7 +206,43 @@ export class Orchestrator implements PipelineHost {
       }
     }
 
-    if (input.mode === 'ask') {
+    const strategy = readOnly || !input.strategy ? null : this.applyStrategy(run, project, input)
+    if (strategy?.plan.planning === 'none') {
+      // SINGLE and SPECULATIVE: no planner session. The mission is one worker task; the task's own checks,
+      // review and verification judge it, so there is no separate mission-level criterion to verify again.
+      const criteria = input.acceptanceCriteria?.length
+        ? input.acceptanceCriteria
+        : [`The change does what the mission asks: ${input.prompt.replace(/\s+/g, ' ').slice(0, 300)}`]
+      const profile = strategy.profile?.features
+      this.materialize(repos.runs.require(run.id), {
+        summary: input.prompt.slice(0, 200),
+        assumptions: [],
+        acceptanceCriteria: [],
+        risks: [],
+        tasks: [
+          {
+            id: 'implement',
+            title: input.prompt.replace(/\s+/g, ' ').slice(0, 120),
+            description: input.prompt,
+            role: 'worker',
+            dependencies: [],
+            parallelizable: false,
+            suggestedFiles: [],
+            acceptanceCriteria: criteria,
+            complexity: profile?.complexity.value ?? 'medium',
+            risk: profile?.risk.value ?? 'medium',
+            requiresApproval: false,
+          },
+        ],
+      })
+      if (strategy.plan.singleWorkerTier === 'strongest') {
+        const task = repos.tasks.listByRun(run.id)[0]
+        if (task) repos.tasks.update(task.id, { modelTierOverride: 'strongest' })
+      }
+      this.background(run.id, async () => {
+        if (await this.refreshFacts(run.id)) await this.startExecution(run.id)
+      })
+    } else if (input.mode === 'ask') {
       this.materialize(run, {
         summary: input.prompt.slice(0, 200),
         assumptions: [],
@@ -217,6 +276,79 @@ export class Orchestrator implements PipelineHost {
   }
 
   /**
+   * v0.3: resolve the run's strategy (through the policy service when there is one), store it in the run
+   * configuration together with what the strategy configures, and record why. Explicit overrides of the
+   * caller win over the strategy's own settings. The decision is fixed for the whole run.
+   */
+  private applyStrategy(run: Run, project: Project, input: CreateRunInput): { plan: StrategyPlan; profile: TaskProfile | null } {
+    const { repos, bus } = this.deps
+    const requested = input.strategy as Strategy
+    const settings = repos.settings.get()
+    let plan: StrategyPlan
+    let info: RunStrategyInfo
+    let profile: TaskProfile | null = null
+    let decision: PolicyDecision | null = null
+    if (this.deps.strategies) {
+      const resolved = this.deps.strategies.decideForRun({
+        project,
+        prompt: input.prompt,
+        runId: run.id,
+        preset: input.preset,
+        requested,
+        ...(input.speculativeCandidates !== undefined ? { candidates: input.speculativeCandidates } : {}),
+        arenaTrialId: input.arenaTrialId ?? null,
+      })
+      ;({ plan, info, profile, decision } = resolved)
+    } else {
+      // No policy service in this process: a concrete strategy is configured directly; ADAPTIVE has
+      // nothing to learn from and uses the default.
+      const concrete: ConcreteStrategy = requested === 'ADAPTIVE' ? 'BUILD' : requested
+      plan = configureStrategy(concrete, {
+        preset: input.preset,
+        settings,
+        ...(input.speculativeCandidates !== undefined ? { candidates: input.speculativeCandidates } : {}),
+      })
+      info = {
+        requested,
+        resolved: concrete,
+        speculativeCandidates: plan.speculativeCandidates,
+        policyDecisionId: null,
+        policySnapshotId: null,
+        taskProfileId: null,
+        arenaTrialId: input.arenaTrialId ?? null,
+      }
+    }
+    const checks = project.profile?.commands ?? { build: null, test: null, lint: null, typecheck: null }
+    const config = {
+      ...buildRunConfig(settings, input.preset, checks, project.respectProjectClaudeConfig, { ...planOverrides(plan), ...input.overrides }),
+      strategy: info,
+    }
+    bus.transaction(() => {
+      // SWARM is planned with the swarm guidance; every other strategy keeps the mode the caller chose.
+      repos.runs.update(run.id, { config, ...(plan.strategy === 'SWARM' ? { mode: 'swarm' as const } : {}) })
+      if (decision) {
+        bus.emit({
+          runId: run.id,
+          type: 'policy.decided',
+          payload: {
+            decisionId: decision.id,
+            strategy: decision.strategy,
+            layer: decision.layer,
+            exploration: decision.exploration,
+            policyVersion: decision.policyVersion,
+          },
+        })
+      }
+      bus.emit({
+        runId: run.id,
+        type: 'strategy.selected',
+        payload: { requested, resolved: info.resolved, reason: decision?.reason ?? plan.summary },
+      })
+    })
+    return { plan, profile }
+  }
+
+  /**
    * Refresh the project's repository facts before the run plans or executes. A failure is logged and
    * never blocks the run. Resolves false when the run left 'planning' meanwhile (cancelled, paused).
    */
@@ -236,6 +368,11 @@ export class Orchestrator implements PipelineHost {
     const project = this.core.project(run)
     if (!project.profile) throw new NexusError('invalid_state', 'Project has not been profiled')
     if (this.closing) return
+    if (this.dispatchClosed()) {
+      // No planning session while Claude is limited: wait as a quota pause, resumed by the usage controller.
+      this.core.pauseRun(runId, 'quota', 'Waiting for Claude usage to be available before planning')
+      return
+    }
     const control = this.runControl(runId)
     let previousErrors: string[] | undefined
 
@@ -463,6 +600,28 @@ export class Orchestrator implements PipelineHost {
 
   // ───────────────────────────── scheduling ─────────────────────────────
 
+  /**
+   * v0.3: install (or remove) the dispatch gate. While `canDispatch()` is false no new task pipeline or
+   * planning session starts and nothing is failed or paused for intervention because of it; in-flight
+   * checks and merges finish. When the gate reopens (via `onChange`) every active run is ticked.
+   */
+  setDispatchGate(gate: DispatchGate | null): void {
+    this.unsubscribeGate?.()
+    this.unsubscribeGate = null
+    this.gate = gate
+    if (!gate?.onChange) return
+    this.unsubscribeGate = gate.onChange(() => {
+      if (this.closing || !gate.canDispatch()) return
+      for (const run of this.deps.repos.runs.listActive()) {
+        if (ACTIVE_RUN_STATES.includes(run.state)) this.requestTick(run.id)
+      }
+    })
+  }
+
+  private dispatchClosed(): boolean {
+    return this.gate !== null && !this.gate.canDispatch()
+  }
+
   /** Schedule a scheduler pass for the run. Passes for one run never overlap. */
   requestTick(runId: string): void {
     if (this.closing) return
@@ -509,7 +668,8 @@ export class Orchestrator implements PipelineHost {
       })
     }
 
-    this.restartOrphans(run)
+    const gateClosed = this.dispatchClosed()
+    if (!gateClosed) this.restartOrphans(run)
 
     let tasks = repos.tasks.listByRun(runId)
     const dependencies = repos.dependencies.listByRun(runId)
@@ -526,9 +686,9 @@ export class Orchestrator implements PipelineHost {
       tasks,
       dependencies,
       activeTaskIds,
-      maxParallelAgents: run.config.maxParallelAgents,
+      maxParallelAgents: this.gate ? this.gate.limit(run.config.maxParallelAgents) : run.config.maxParallelAgents,
       now: nowIso(),
-      paused: false,
+      paused: gateClosed,
     })
     for (const deferred of decision.deferred) this.announceDeferral(runId, deferred.taskId, deferred.reason)
     for (const taskId of decision.start) {
@@ -541,6 +701,8 @@ export class Orchestrator implements PipelineHost {
 
     this.updatePhase(runId)
 
+    // Gate closed: nothing may start, finalize (the mission verifier is a session) or be declared stuck.
+    if (gateClosed) return
     const stillActive = [...this.active.values()].some((p) => p.runId === runId)
     if (stillActive || this.runWork.has(runId)) return
     tasks = repos.tasks.listByRun(runId)
@@ -1311,6 +1473,8 @@ export class Orchestrator implements PipelineHost {
         this.core.log(`cleanup skipped ${worktree.path}: ${errorMessage(e)}`)
       }
     }
+    // Speculative candidates have no worktree rows of their own.
+    await this.pipeline.speculation.cleanupRun(run)
     this.integrations.delete(runId)
   }
 

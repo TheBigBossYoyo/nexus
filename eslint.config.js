@@ -3,7 +3,11 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
-  { ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**', 'test-results/**', 'playwright-report/**'] },
+  { ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**', 'test-results/**', 'playwright-report/**',
+    // Arena fixtures, hidden evaluators and reference solutions are standalone sample projects, not NEXUS source.
+    'arena/cases/**',
+    'tests/fixtures/**',
+  ] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -121,7 +121,20 @@ export type AgentEvent =
   | { type: 'tool.started'; toolUseId: string; toolName: string; input: Record<string, unknown> }
   | { type: 'tool.completed'; toolUseId: string; isError: boolean; outputPreview: string }
   | { type: 'tool.denied'; toolUseId: string; toolName: string; reason: string }
-  | { type: 'rate_limit'; status: 'allowed' | 'allowed_warning' | 'rejected'; resetsAt: number | null; limitType: string | null }
+  | {
+      type: 'rate_limit'
+      status: 'allowed' | 'allowed_warning' | 'rejected'
+      /** Epoch seconds, as the SDK reports it. */
+      resetsAt: number | null
+      limitType: string | null
+      /** Verbatim runtime figure; the SDK does not document its unit. */
+      utilization?: number | null
+      overageStatus?: 'allowed' | 'allowed_warning' | 'rejected' | null
+      isUsingOverage?: boolean | null
+      surpassedThreshold?: number | null
+    }
+  /** A transient throttle (overloaded / server error). Never a quota condition. */
+  | { type: 'throttle'; kind: 'overloaded' | 'server_error' }
   | { type: 'status'; status: string }
   | { type: 'turn.completed'; result: TurnResult }
   /** The session process ended. No further events follow. */
@@ -151,6 +164,16 @@ export interface RuntimeCapabilities {
   sdkVersion: string
 }
 
+/** The fixed prompt of the availability probe's minimal session (usage/probe.ts). */
+export const USAGE_PROBE_PROMPT = 'Reply with the single word OK.'
+
+/** The runtime's no-prompt plan-usage report (experimental SDK method), already validated. */
+export interface RuntimeUsageReport {
+  rateLimitsAvailable: boolean
+  subscriptionType: string | null
+  windows: { limitType: string; utilizationPercent: number | null; resetsAt: string | null }[]
+}
+
 export interface AgentRuntime {
   startSession(spec: SessionSpec): AgentSessionHandle
   /** Same as startSession with `resumeSessionId` set; kept explicit for call-site clarity. */
@@ -161,6 +184,11 @@ export interface AgentRuntime {
   getCapabilities(): Promise<RuntimeCapabilities>
   /** Auth status as reported by the runtime. Never reads credential stores. */
   getAccountInfo(options: { subscriptionMode: boolean }): Promise<AuthStatus>
+  /**
+   * Plan windows without sending a prompt. Null when unsupported, unavailable or failed; never throws.
+   * Experimental in the SDK, so callers must treat null as UNKNOWN.
+   */
+  getUsageReport?(options: { subscriptionMode: boolean }): Promise<RuntimeUsageReport | null>
   /** Stop every live session (application shutdown). */
   shutdown(): Promise<void>
 }

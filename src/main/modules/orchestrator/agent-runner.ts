@@ -617,10 +617,26 @@ export class AgentRunner {
             bus.emit({
               ...ids,
               type: 'agent.rate_limited',
-              payload: { status: event.status, resetsAt: event.resetsAt, limitType: event.limitType },
+              payload: {
+                status: event.status,
+                resetsAt: event.resetsAt,
+                limitType: event.limitType,
+                utilization: event.utilization ?? null,
+                overageStatus: event.overageStatus ?? null,
+                isUsingOverage: event.isUsingOverage ?? null,
+                surpassedThreshold: event.surpassedThreshold ?? null,
+              },
             })
             break
           }
+          case 'throttle':
+            // Transient (overloaded / server error): recorded for the usage service, never a quota outcome.
+            bus.emit({
+              ...ids,
+              type: 'agent.rate_limited',
+              payload: { status: 'throttled', resetsAt: null, limitType: event.kind },
+            })
+            break
           case 'status':
             repos.agents.update(agentId, { activity: event.status })
             break
@@ -778,7 +794,25 @@ export class AgentRunner {
         taskId: input.task?.id ?? null,
         agentId,
         type: 'agent.usage',
-        payload: { inputTokens: metrics.inputTokens ?? 0, outputTokens: metrics.outputTokens ?? 0, costUsd: metrics.costUsd ?? 0 },
+        payload: {
+          inputTokens: metrics.inputTokens ?? 0,
+          outputTokens: metrics.outputTokens ?? 0,
+          costUsd: metrics.costUsd ?? 0,
+          turn: {
+            sdkSessionId: sessionKey === agentId ? null : sessionKey,
+            role: input.role,
+            turns: result.numTurns,
+            durationMs: result.durationMs,
+            models: deltas.map((u) => ({
+              model: u.model,
+              inputTokens: u.inputTokens,
+              outputTokens: u.outputTokens,
+              cacheReadTokens: u.cacheReadTokens,
+              cacheCreationTokens: u.cacheCreationTokens,
+              costUsd: u.costUsd,
+            })),
+          },
+        },
       })
     })
   }

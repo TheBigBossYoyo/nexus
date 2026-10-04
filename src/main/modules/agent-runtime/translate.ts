@@ -148,6 +148,8 @@ export function translateSdkMessage(msg: SDKMessage, state: TranslatorState): Ag
         if (QUOTA_ERRORS.includes(msg.error)) {
           state.quotaSignal = true
           events.push({ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null })
+        } else if (msg.error === 'overloaded' || msg.error === 'server_error') {
+          events.push({ type: 'throttle', kind: msg.error })
         }
       }
       for (const block of msg.message.content) {
@@ -202,6 +204,10 @@ export function translateSdkMessage(msg: SDKMessage, state: TranslatorState): Ag
           status: info.status,
           resetsAt: info.resetsAt ?? null,
           limitType: info.rateLimitType ?? null,
+          utilization: info.utilization ?? null,
+          overageStatus: info.overageStatus ?? null,
+          isUsingOverage: info.isUsingOverage ?? null,
+          surpassedThreshold: info.surpassedThreshold ?? null,
         },
       ]
     }

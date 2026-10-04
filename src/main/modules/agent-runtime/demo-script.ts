@@ -9,7 +9,10 @@ import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fak
  *
  * A marker in the mission text selects how the mission goes, so UI tests can reach every way an
  * overnight run ends: `[demo:stall]` (workers never finish), `[demo:quota]` (a worker hits a usage
- * limit that reports no reset time), `[demo:fail]` (the planner never returns a valid plan).
+ * limit that reports no reset time), `[demo:fail]` (the planner never returns a valid plan),
+ * `[demo:quota-reset]` (the first worker hits a limit with an exact reset a few seconds ahead, then the
+ * account is available again: automatic resume) and `[demo:quota-unknown]` (a limit with no reset time; the
+ * first availability probe still finds it limited, the second finds it available).
  */
 export function createDemoScript(): FakeScript {
   const plan: MissionPlan = {
@@ -62,7 +65,7 @@ export function createDemoScript(): FakeScript {
 
   let uiReviews = 0
   let docsProposed = false
-  let behaviour: 'normal' | 'stall' | 'quota' | 'fail' = 'normal'
+  let behaviour: 'normal' | 'stall' | 'quota' | 'fail' | 'quota-reset' | 'quota-unknown' = 'normal'
   let quotaHit = false
 
   const writer =
@@ -74,6 +77,19 @@ export function createDemoScript(): FakeScript {
       if (behaviour === 'stall') {
         // Until the session is stopped (a pause, the mission deadline, or the app closing).
         await ctx.sleep(60 * 60_000)
+        return
+      }
+      if ((behaviour === 'quota-reset' || behaviour === 'quota-unknown') && !quotaHit) {
+        quotaHit = true
+        if (behaviour === 'quota-reset') {
+          const seconds = Number(process.env['NEXUS_USAGE_DEMO_RESET_S'] ?? 6)
+          ctx.usage.limit(ctx.usage.now() + seconds * 1000)
+        } else {
+          ctx.usage.limit(null)
+          ctx.usage.probeFailures = 1
+        }
+        await ctx.rateLimit({ status: 'rejected', resetsAt: ctx.usage.resetAtSeconds(), limitType: 'five_hour' })
+        await ctx.completeTurn({ text: 'Usage limit reached.', outcome: 'quota' })
         return
       }
       if (behaviour === 'quota' && !quotaHit) {
@@ -181,8 +197,10 @@ export function createDemoScript(): FakeScript {
   return scriptsByRole({
     // Planner sessions: the three consensus planners and the synthesizer all return the same plan.
     planner: async (spec, ctx) => {
-      const marker = /\[demo:(stall|quota|fail)\]/.exec(spec.prompt)?.[1]
-      if (marker === 'stall' || marker === 'quota' || marker === 'fail') behaviour = marker
+      const marker = /\[demo:(stall|quota|fail|quota-reset|quota-unknown)\]/.exec(spec.prompt)?.[1]
+      if (marker === 'stall' || marker === 'quota' || marker === 'fail' || marker === 'quota-reset' || marker === 'quota-unknown') {
+        behaviour = marker
+      }
       await ctx.emitText('Inspecting the repository and drafting a plan.')
       await ctx.sleep(200)
       if (behaviour === 'fail') {

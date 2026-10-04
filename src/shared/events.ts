@@ -58,7 +58,26 @@ export interface EventPayloads {
   'agent.failed': { error: string }
   'agent.stopped': { reason: string }
   'agent.rotated': { fromSessionId: string | null; turns: number }
-  'agent.usage': { inputTokens: number; outputTokens: number; costUsd: number }
+  'agent.usage': {
+    inputTokens: number
+    outputTokens: number
+    costUsd: number
+    /** v0.3: this turn's own (delta) figures per model, for the usage service. Absent on older events. */
+    turn?: {
+      sdkSessionId: string | null
+      role: string
+      turns: number
+      durationMs: number
+      models: {
+        model: string
+        inputTokens: number
+        outputTokens: number
+        cacheReadTokens: number
+        cacheCreationTokens: number
+        costUsd: number
+      }[]
+    }
+  }
   'agent.rate_limited': {
     status: string
     resetsAt: number | null
