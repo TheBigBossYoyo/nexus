@@ -18,7 +18,28 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [SPECULATIVE_EXECUTION](docs/SPECULATIVE_EXECUTION.md), [V0_3_DESIGN](docs/V0_3_DESIGN.md),
 [ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md),
 [ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md), [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md),
-[QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md).
+[QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [PROGRAMS](docs/PROGRAMS.md),
+[LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md).
+
+## What's new in 0.4
+
+0.4 goes from "execute a mission" to "pursue an engineering goal across many missions and milestones".
+
+| Feature | What it does | Where to read more |
+|---|---|---|
+| Programs | A program has a goal, a plan of at most 12 milestones, and a deterministic engine that plans, generates a mission per milestone, verifies the milestone, records backlog and memory, reassesses the plan and goes on. The accepted work accumulates on a program branch that is never checked out in your working tree. | [PROGRAMS](docs/PROGRAMS.md) |
+| Milestone verification | A mission that reports success has not completed its milestone. Deterministic gates run first (mission completed, checks passed, no review requesting changes); then a verifier session judges each acceptance criterion on the evidence. A milestone is never accepted without a judgment. | [PROGRAMS](docs/PROGRAMS.md) |
+| Replanning | After a milestone, a rejection or a failed mission the plan is reassessed. A revision can add, split, reorder, change, defer or drop remaining milestones; it is stored with a diff. You can ask for a reassessment yourself. | [PROGRAMS](docs/PROGRAMS.md) |
+| Backlog and memory | Verifiers, failed missions and background jobs propose backlog items; proposals never become work by themselves. Validated long-horizon facts are kept as program memory, and a mission receives only the entries relevant to its milestone. | [PROGRAMS](docs/PROGRAMS.md) |
+| Long-horizon operation | A usage limit is a wait: the program continues by itself at the reset. Work windows (for example 22:00 to 07:00) bound when a program works. A program can be an overnight workload with an end-of-window power action. | [LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md) |
+| Background engineering | Optional, off by default: read-only analysis jobs (dependency audit, test gaps, dead code and more) whose only output is backlog proposals. | [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md) |
+
+Statements that hold for 0.4:
+
+- The application state machine owns the truth. Claude proposes plans and judgments; every proposal is validated before it is stored or acted on.
+- A program runs one mission at a time.
+- The milestone verifier judges from the diff and the recorded evidence; it does not execute the result.
+- A program's result stays on its branch. NEXUS does not merge it into your branch.
 
 ## What's new in 0.3
 

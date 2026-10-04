@@ -108,3 +108,51 @@ The end-of-session shutdown does not depend on the coding assistant.
 - `pnpm typecheck`: pass. `pnpm lint`: pass. `pnpm build`: pass.
 - `pnpm test:e2e`: 17 passed, 1 skipped (the review capture, which runs only on request), 4.3 min.
 - `pnpm test` and `pnpm stress` (1000 seeds): started 23:28 as one job.
+
+### 23:28 to 23:40 Phase A: final suites on the 0.3 tree
+
+- `pnpm test`: 126 files, 2398 tests passed, 469 s.
+- While reviewing the restart path of a campaign: after a restart, `QuotaRecoveryController.recover()` closed
+  the usage gate for every waiting overnight record. For a mission the supervisor probes and reopens it; for a
+  campaign nothing would, if the wait of its trial run had been ended by the user. Fixed (the gate is restored
+  for a waiting overnight mission only) with a regression test. Commit `e4253e5`.
+- `pnpm stress` with `NEXUS_STRESS_RUNS=1000` started 23:39 on `e4253e5` (six files: orchestrator, policy,
+  usage, Arena, overnight, overnight workload).
+- A test defect found while preparing 0.4: in `database.test.ts` the "rolls the whole migration back" case had
+  two migrations with the same version after the schema bump, so it passed for the wrong reason (a duplicate
+  key, not the broken SQL). To be corrected on `nexus-0.3` before the merge.
+
+### 23:40 Phase B started: NEXUS 0.4 (branch `nexus-0.4`, from `e4253e5`)
+
+Written while the 0.3 stress runs; only light test runs alongside it.
+
+- Domain (`src/shared/program.ts`): Program, ProgramGoal, Milestone, Workstream, BacklogItem, ProgramDecision,
+  ProgramCheckpoint, ProgramOutcome, ProgramPolicy (presets Conservative, Balanced, Autonomous),
+  ProgramSchedule (work windows), ProgramMemoryEntry, ProgramPlanRevision, ExpertiseProfile, BackgroundJob;
+  transition tables for programs and milestones; plan, revision, judgment and findings schemas; plan
+  structure validation (unique keys, known dependencies, no cycle); plan diff; `windowStatus`.
+- Migration 006 (additive, 11 tables) and repositories.
+- `ProgramEngine`: plan, mission per milestone, deterministic gates, verifier judgment, backlog, validated
+  memory, selective memory per mission, reassessment and revisions with diffs, budgets, usage waits, work
+  windows, restart recovery, user actions, decision trail, checkpoints. Missions and reasoning sessions are
+  ordinary runs; `createRun` gained `baseRef` so a mission starts from the program branch.
+- `BackgroundEngineering` (off by default, read-only runs, proposals only).
+- `ProgramWorkload`: a program as an overnight workload for one work window (`overnight.startProgram`).
+- IPC: 19 channels (`program.*`, `backlog.*`, `background.*`, `expertise.list`, `overnight.startProgram`).
+- The scripted demo runtime answers the program reasoning sessions, so the built app can run a program in E2E.
+- Tests so far, all passing:
+  - `tests/unit/program/program-model.test.ts` (24)
+  - `tests/integration/program/engine.test.ts` (16): multi-milestone completion, gate rejection, verifier
+    rejection with backlog and memory, failed mission to backlog and a stored revision, plan approval, usage
+    wait and resume, closed gate, stop policy, endless wait, restart mid-mission and mid-verification, work
+    windows, selective memory, refused memory, unreadable plans, budgets, user actions, strategy per mission.
+  - `tests/integration/program/background-overnight.test.ts` (7): background jobs, a program under the
+    overnight supervisor, migration 006.
+  - `tests/scenarios/v4-program.test.ts` (1): a whole program on the real orchestrator with the scripted
+    runtime (three real missions, one rejection, one revision, memory, backlog, user checkout untouched).
+  - `tests/stress/program-stress.test.ts`: 3000 seeded histories pass.
+- Found by these tests and fixed: a milestone that used all its missions could not be blocked (missing
+  transition `READY -> BLOCKED`), which left the program looking busy; an engine error now blocks the program
+  with the error instead of being swallowed. Found by the stress: under the `stop` usage policy a user could not
+  resume a program while Claude was still limited; a resume during a limit now waits for the reset.
+- In progress: Programs UI (agent), independent code audit of 0.4 (agent).

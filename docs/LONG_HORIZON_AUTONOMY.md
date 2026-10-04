@@ -13,6 +13,7 @@ A program can span several Claude usage windows. A usage limit is a wait, never 
 | Claude is available again | Quota recovery resumes the run (QUOTA_RECOVERY.md). The program returns to its state by itself and records `quota_resumed` |
 | The wait lasts longer than `quotaWaitMaxMinutes` | `BLOCKED`, with the reason. The user resumes it |
 | `usageBehavior: stop` | The program is `PAUSED` (`usage_policy`) and waits for the user. A run that quota recovery resumes meanwhile is paused again |
+| The user resumes while Claude is still limited | The program becomes `WAITING_FOR_QUOTA` and continues at the reset, also under `stop`: the policy decides what happens when a limit is first met, the user decided to go on |
 
 Waiting does not count as active time, does not consume a mission attempt and does not change the plan.
 
@@ -73,6 +74,7 @@ is verified again, a milestone `ACTIVE` without a run is made `READY`.
 | A milestone could not be verified | `BLOCKED` | Resume verifies again |
 | A milestone used all its missions and no reassessment remains | `BLOCKED` | Resume gives it another round |
 | A budget ran out (missions, active time) | `BLOCKED` | Resume; the budget is the policy's |
+| An internal error of the engine | `BLOCKED`, with the error | Resume |
 | The current run needs a person | `BLOCKED` | Deal with the run, then resume |
 
 ## Decision trail and checkpoints
@@ -95,8 +97,11 @@ block, a usage wait, a recovery and the end. The newest 100 are kept.
   closed gate, the stop policy, an endless wait, restart in the middle of a mission and of a verification,
   work windows, selective memory, refused memory, unreadable plans, budgets, user actions, strategy per mission.
 - `tests/scenarios/v4-program.test.ts`: a program on the real orchestrator with the scripted runtime.
+- `tests/integration/program/background-overnight.test.ts`: background engineering, a program under the
+  overnight supervisor (window end, blocker, usage limit, authorization), migration 006.
 - `tests/stress/program-stress.test.ts`: seeded histories with random answers, outcomes, limits, user actions
-  and restarts, checking the invariants after every step.
+  and restarts, checking the invariants after every step (300 seeds in `pnpm test`; `NEXUS_PROGRAM_STRESS_RUNS`
+  selects more).
 
 ## Not verified
 

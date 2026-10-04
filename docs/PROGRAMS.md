@@ -116,6 +116,11 @@ used all its missions. The reassessment may keep the plan, or return every remai
 from now on: added, split, reordered, changed, deferred or dropped. Completed milestones are fixed and their
 keys cannot be reused.
 
+The user can ask for a reassessment at any time (`program.replan`, "Reassess plan" on the program page) with a
+note saying what should change. It happens at the next point where no run is in flight, before the next
+mission. The note is given to the reassessment session as the user's request about the plan; the resulting
+revision carries the trigger `user` and goes through the same validation and approval as any other.
+
 Every revision is stored with a diff (`added`, `removed`, `deferred`, `changed` with the changed fields,
 `reordered`, and the order before and after). A reassessment that cannot be read never blocks the program: the
 accepted plan stands. Reassessments are counted against `maxReplans`.
@@ -178,6 +183,9 @@ normal Agent SDK sessions.
 A budget that runs out blocks the program with the reason. Resuming a blocked program gives its blocked
 milestones another round of attempts.
 
+An error inside the engine blocks the program with the error as the reason. A program is never left looking
+busy while nothing drives it.
+
 ## Restart
 
 Runs that were active are paused by the orchestrator at startup. A program on the Conservative preset, or one
@@ -188,7 +196,7 @@ again.
 ## IPC
 
 `program.list`, `program.get`, `program.presets`, `program.create`, `program.start`, `program.pause`,
-`program.resume`, `program.cancel`, `program.decidePlan`, `backlog.list`, `backlog.setStatus`,
+`program.resume`, `program.cancel`, `program.decidePlan`, `program.replan`, `backlog.list`, `backlog.setStatus`,
 `expertise.list`, and the background channels (BACKGROUND_ENGINEERING.md). Changes are announced with
 `{ kind: 'program', programId }`.
 

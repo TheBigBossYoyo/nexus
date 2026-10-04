@@ -188,7 +188,7 @@ What Windows holds is never inferred from clocks alone: whenever the record cann
 
 A person starts NEXUS, so a launch never powers the machine off for a run that lapsed.
 
-## Workloads: missions and Arena campaigns (0.3)
+## Workloads: missions, Arena campaigns (0.3) and programs (0.4)
 
 The supervisor supervises a workload. There is one supervisor and one implementation of arming, the
 deadline, finalization, the power decision, the countdown, the user actions and restart recovery; a workload
@@ -209,8 +209,13 @@ only knows how to run, stop and describe its own work.
 | `getFinalizationState()` | After the stop: preserve unfinished work and capture what there is to report |
 
 A workload never holds the power controller and takes no part in the power decision. The overnight record
-stores `workloadType`; its `runId` is the workload id. One overnight workload at a time, of either type:
+stores `workloadType`; its `runId` is the workload id. One overnight workload at a time, of any type:
 Windows has one shutdown timer.
+
+Since 0.4 a program is the third workload type (`ProgramWorkload`, `overnight.startProgram`): one autonomous
+work window of a long-running program. The deadline is the end of the window; at the end the program is
+paused in a safe state, checkpointed and reported before the power action. A program that completes, fails,
+is blocked or waits for a plan approval ends the window early. See LONG_HORIZON_AUTONOMY.md.
 
 | | `MissionWorkload` | `ArenaCampaignWorkload` |
 |---|---|---|

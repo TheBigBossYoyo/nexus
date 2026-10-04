@@ -112,7 +112,7 @@ export function createDemoScript(): FakeScript {
       // A later mission of a program starts from the earlier one's result: the file is there already, so the
       // work of this mission is one more line rather than nothing.
       const existing = await readFile(target, 'utf8').catch(() => null)
-      const content = existing !== null && existing === `${key}${suffix}\n` ? `${existing}${key} revised\n` : existing !== null && existing.startsWith(`${key}${suffix}\n`) ? `${existing}${key} revised\n` : `${key}${suffix}\n`
+      const content = existing !== null && existing.startsWith(`${key}${suffix}\n`) ? `${existing}${key} revised\n` : `${key}${suffix}\n`
       await ctx.useTool('Write', { file_path: target, content: content.trimEnd() }, async () => {
         await writeFile(target, content)
         return 'File written'
