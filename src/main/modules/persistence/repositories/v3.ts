@@ -168,10 +168,11 @@ export class UsageEventRepository extends Table<UsageEvent> {
     const column = GROUP_COLUMN[by]
     const where = usageWhere(filter)
     const tail = where.sql ? `${where.sql} AND ${column} IS NOT NULL` : `WHERE ${column} IS NOT NULL`
-    const order = by === 'day' ? `${column} DESC` : 'input_tokens + output_tokens DESC, sessions DESC'
+    // Ordered in an outer query: inside the grouped one, `input_tokens` would name the raw column, not the sum.
+    const order = by === 'day' ? 'group_key DESC' : 'input_tokens + output_tokens DESC, sessions DESC, group_key'
     const rows = prepare(
       this.db,
-      `SELECT ${column} AS group_key, ${TOTALS_SQL} FROM usage_events ${tail} GROUP BY ${column} ORDER BY ${order} LIMIT ?`,
+      `SELECT * FROM (SELECT ${column} AS group_key, ${TOTALS_SQL} FROM usage_events ${tail} GROUP BY ${column}) ORDER BY ${order} LIMIT ?`,
     ).all(...where.params, Math.min(Math.max(1, limit), 400)) as Row[]
     return rows.map((r) => ({ key: String(r['group_key']), label: String(r['group_key']), ...totalsOf(r) }))
   }

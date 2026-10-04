@@ -75,6 +75,7 @@ describe('migration 003 (overnight) on a 0.2.0 database', () => {
       { version: 1, name: 'initial' },
       { version: 2, name: 'v0-2' },
       { version: 3, name: 'overnight' },
+      { version: 4, name: 'v0-3' },
     ])
     const repos = createRepositories(db)
     expect(repos.runs.require(run.id)).toMatchObject({ prompt: 'A 0.2.0 mission', state: 'completed' })
@@ -94,14 +95,16 @@ describe('migration 003 (overnight) on a 0.2.0 database', () => {
     // Reopening changes nothing.
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 3 })
+    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 4 })
     expect(createRepositories(again).overnight.getByRun(run.id)?.state).toBe('RUNNING')
   })
 
   it('does not alter any table of the earlier schemas', () => {
     const before = new BetterSqlite3(':memory:')
     runMigrations(before, MIGRATIONS.filter((m) => m.version <= 2))
-    const after = openDatabase(':memory:')
+    // Schema 3 exactly: later migrations have their own tests.
+    const after = new BetterSqlite3(':memory:')
+    runMigrations(after, MIGRATIONS.filter((m) => m.version <= 3))
     open.push(before, after)
     const ddl = (db: Database): Map<string, string> =>
       new Map((db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'").all() as { name: string; sql: string }[]).map((r) => [r.name, r.sql]))

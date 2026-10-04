@@ -562,6 +562,7 @@ describe('v0.1 to v0.2 migration', () => {
       { version: 1, name: 'initial' },
       { version: 2, name: 'v0-2' },
       { version: 3, name: 'overnight' },
+      { version: 4, name: 'v0-3' },
     ])
     const repos = createRepositories(db)
     expect(repos.projects.require(seeded.project.id)).toEqual(seeded.project)
@@ -585,7 +586,7 @@ describe('v0.1 to v0.2 migration', () => {
     // Reopening is a no-op.
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()).toHaveLength(3)
+    expect(again.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()).toHaveLength(4)
     expect(count(again, 'graph_revisions')).toBe(1)
     expect(createRepositories(again).runs.require(seeded.run.id).prompt).toBe('Legacy v0.1 mission')
   })
@@ -635,14 +636,14 @@ describe('v0.1 to v0.2 migration', () => {
     // The real migration still applies afterwards.
     const db = openDatabase(path)
     open.push(db)
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 3 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 4 })
   })
 
   it('rolls back the real v0.2 migration when a later migration fails, leaving the DB at v0.1', () => {
     const path = tempDb()
     createV1Database(path)
     const raw = new BetterSqlite3(path)
-    expect(() => runMigrations(raw, [...MIGRATIONS, { version: 3, name: 'broken', sql: 'SELECT * FROM no_such_table_anywhere;' }])).toThrow(
+    expect(() => runMigrations(raw, [...MIGRATIONS, { version: 5, name: 'broken', sql: 'SELECT * FROM no_such_table_anywhere;' }])).toThrow(
       NexusError,
     )
     expect(raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'graph_revisions'").get()).toEqual({ n: 0 })

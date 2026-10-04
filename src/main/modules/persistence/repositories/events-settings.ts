@@ -119,6 +119,20 @@ export class EventRepository {
     return row.n
   }
 
+  /**
+   * The newest events across every run, newest first, for the Activity feed. Streaming bookkeeping
+   * (usage counters, state echoes) is left out; `beforeSeq` pages backwards.
+   */
+  listRecent(limit = 200, beforeSeq?: number): RunEvent[] {
+    const rows = prepare(
+      this.db,
+      `SELECT ${EVENT_COLUMNS} FROM run_events
+       WHERE seq < ? AND type NOT IN ('agent.usage', 'agent.state_changed', 'task.state_changed', 'run.state_changed', 'context.composed')
+       ORDER BY seq DESC LIMIT ?`,
+    ).all(beforeSeq ?? Number.MAX_SAFE_INTEGER, Math.min(Math.max(1, limit), 500)) as Row[]
+    return rows.map((r) => decode(eventCodec, r))
+  }
+
   /** Events with seq > afterSeq in ascending order. */
   listByRun(runId: string, afterSeq = 0, limit = 1000): RunEvent[] {
     const rows = prepare(

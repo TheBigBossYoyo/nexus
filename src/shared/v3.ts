@@ -624,7 +624,7 @@ export interface ShadowEvaluation {
 export interface PolicyPromotion {
   id: string
   /** promote | rollback | pin | unpin */
-  action: 'promote' | 'rollback' | 'pin' | 'unpin' | 'config'
+  action: 'promote' | 'reject' | 'rollback' | 'pin' | 'unpin' | 'config'
   candidateId: string | null
   fromSnapshotId: string | null
   toSnapshotId: string

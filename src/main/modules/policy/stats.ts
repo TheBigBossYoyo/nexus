@@ -115,8 +115,8 @@ function gamma(shape: number, rand: () => number): number {
   const d = shape - 1 / 3
   const c = 1 / Math.sqrt(9 * d)
   for (;;) {
-    let x = 0
-    let v = 0
+    let x: number
+    let v: number
     do {
       x = gaussian(rand)
       v = 1 + c * x
