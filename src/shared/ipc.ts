@@ -298,6 +298,29 @@ export const ipcInputs = {
       strategy: StrategySchema.optional(),
     })
     .strict(),
+  /**
+   * v0.3: an Arena campaign under the overnight supervisor. The same campaign fields as `arena.createCampaign`
+   * and the same power policy and authorization as `overnight.start`; nothing else is accepted.
+   */
+  'overnight.startArena': z
+    .object({
+      campaign: z
+        .object({
+          name: z.string().min(1).max(120),
+          caseIds: z.array(Id).min(1).max(50),
+          strategies: z.array(ConcreteStrategySchema).min(1).max(5),
+          repetitions: z.number().int().min(1).max(20),
+          modelPreset: PresetSchema,
+          budgetPreset: ArenaBudgetPresetSchema,
+          maxConcurrentTrials: z.number().int().min(1).max(4).optional(),
+          maxWallClockMinutes: z.number().int().min(1).max(1440).optional(),
+        })
+        .strict(),
+      policy: OvernightPolicySchema,
+      confirmed: z.literal(true),
+      confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT),
+    })
+    .strict(),
   'overnight.get': z.object({ runId: Id }).strict(),
   'overnight.active': Empty,
   'overnight.cancelPower': z.object({ runId: Id }).strict(),
@@ -459,6 +482,7 @@ export interface IpcOutputs {
   'intelligence.refresh': { facts: number; stale: number }
   'context.packs': ContextPack[]
   'overnight.start': { run: Run; overnight: OvernightStatus }
+  'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]

@@ -169,6 +169,7 @@ function status(patch: Partial<OvernightStatus> = {}): OvernightStatus {
   return {
     id: 'r1',
     runId: 'r1',
+    workloadType: 'mission',
     projectId: 'p1',
     state: 'RUNNING',
     policy: DEFAULT_OVERNIGHT_POLICY,

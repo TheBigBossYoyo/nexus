@@ -516,6 +516,28 @@ export class ArenaService {
     return next
   }
 
+  /**
+   * Stops a campaign without ending it: no new trial starts and the trials in flight are cancelled (their
+   * runs are stopped; they are not evidence). Queued trials stay queued, so the campaign can be resumed.
+   * Used when an overnight campaign is finalized.
+   */
+  suspend(campaignId: string, detail: string): ArenaCampaign {
+    const c = this.repos.arenaCampaigns.require(campaignId)
+    if (c.state !== 'running' && c.state !== 'paused') return c
+    const next = c.state === 'paused' && c.pauseReason === 'user' ? c : this.setCampaign(campaignId, { state: 'paused', pauseReason: 'user' })
+    for (const job of this.jobsOf(campaignId)) this.requestStop(job, 'cancel', detail)
+    return next
+  }
+
+  /** Resolves when no trial of the campaign is being worked on. */
+  async idleCampaign(campaignId: string): Promise<void> {
+    for (;;) {
+      const jobs = this.jobsOf(campaignId)
+      if (jobs.length === 0) return
+      await Promise.allSettled(jobs.map((j) => j.promise))
+    }
+  }
+
   private jobsOf(campaignId: string): Job[] {
     return [...this.jobs.values()].filter((j) => j.campaignId === campaignId)
   }

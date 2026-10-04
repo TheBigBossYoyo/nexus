@@ -23,6 +23,7 @@ function record(overrides: Partial<OvernightRun> = {}, policy: Partial<Overnight
   return {
     id: 'run-1',
     runId: 'run-1',
+    workloadType: 'mission',
     projectId: 'p1',
     state: 'RUNNING',
     policy: p,

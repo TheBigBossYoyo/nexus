@@ -20,7 +20,7 @@ import { createIpcHandlers, dispatchIpc } from './modules/ipc/handlers'
 import { ProjectService } from './modules/ipc/services'
 import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { Orchestrator } from './modules/orchestrator'
-import { OvernightSupervisor } from './modules/overnight'
+import { ArenaCampaignWorkload, OvernightSupervisor } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from './modules/policy'
@@ -257,6 +257,9 @@ async function bootstrap(): Promise<void> {
   // Windows must not put the PC to sleep in the middle of an unattended mission.
   let awakeBlocker: number | null = null
   let keepAwake: () => void = () => undefined
+  let recoverOvernight: () => void = () => undefined
+  /** Pause and resume of the live overnight workload from the tray, when it is an Arena campaign. */
+  let campaignControl: { pause(id: string): unknown; resume(id: string): unknown } | null = null
   const overnight = power
     ? new OvernightSupervisor({
         repos,
@@ -299,18 +302,26 @@ async function bootstrap(): Promise<void> {
       () => {
         const status = current()
         const run = status ? repos.runs.get(status.runId) : null
+        const campaign = status?.workloadType === 'arena_campaign' ? repos.arenaCampaigns.get(status.runId) : null
         return {
           overnight: status,
-          projectName: (run && repos.projects.get(run.projectId)?.name) || 'project',
-          runState: run?.state ?? null,
-          activeAgents: status ? repos.agents.listActive(status.runId).length : 0,
+          projectName: campaign ? campaign.name : (run && repos.projects.get(run.projectId)?.name) || 'project',
+          runState: campaign ? campaign.state : (run?.state ?? null),
+          activeAgents: campaign ? orchestrator.activeAgentCount() : status ? repos.agents.listActive(status.runId).length : 0,
           time: (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }
       },
       (action, runId) => {
         const report = (e: unknown): void => console.error(`[nexus] tray ${action}: ${errorMessage(e)}`)
         if (action === 'open') showWindow()
-        else if (action === 'pause') void orchestrator.pauseRun(runId).catch(report)
+        else if (repos.overnight.getByRun(runId)?.workloadType === 'arena_campaign' && (action === 'pause' || action === 'resume')) {
+          try {
+            if (action === 'pause') campaignControl?.pause(runId)
+            else campaignControl?.resume(runId)
+          } catch (e) {
+            report(e)
+          }
+        } else if (action === 'pause') void orchestrator.pauseRun(runId).catch(report)
         else if (action === 'resume') void orchestrator.resumeRun(runId).catch(report)
         else if (action === 'cancelPower') void supervisor.cancelPower(runId).catch(report)
         else void supervisor.cancelMission(runId).catch(report)
@@ -391,11 +402,13 @@ async function bootstrap(): Promise<void> {
       return true
     }
     // An overnight run that was active when NEXUS stopped resumes without anyone clicking; the Windows
-    // failsafe scheduled before the restart stays as it is.
-    void supervisor
-      .recover()
-      .then(() => overnightTray.refresh())
-      .catch((e: unknown) => console.error(`[nexus] overnight recovery: ${errorMessage(e)}`))
+    // failsafe scheduled before the restart stays as it is. Called once the Arena exists, because the
+    // workload that was live may be a campaign.
+    recoverOvernight = () =>
+      void supervisor
+        .recover()
+        .then(() => overnightTray.refresh())
+        .catch((e: unknown) => console.error(`[nexus] overnight recovery: ${errorMessage(e)}`))
   }
 
   const sdkVersion = readSdkVersion()
@@ -431,9 +444,17 @@ async function bootstrap(): Promise<void> {
   } catch (e) {
     console.error(`[nexus] arena cases: ${errorMessage(e)}`)
   }
+  campaignControl = arena
+  // An Arena campaign can be an overnight workload: the supervisor owns its deadline, failsafe and end action.
+  overnight?.registerWorkload(
+    'arena_campaign',
+    (id) => new ArenaCampaignWorkload(id, { repos, host: arena, quotaResetsAt: () => usage.machineState().resetAt, now: () => Date.now(), log: logger }),
+    arena,
+  )
   void Promise.resolve()
     .then(() => arena.recover())
     .catch((e: unknown) => console.error(`[nexus] arena recovery: ${errorMessage(e)}`))
+    .finally(() => recoverOvernight())
   const appInfo = async (): Promise<AppInfo> => ({
     version: app.getVersion(),
     dataDir,

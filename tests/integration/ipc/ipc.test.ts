@@ -24,6 +24,12 @@ const APP_INFO: AppInfo = {
 /** One minimal valid input per channel. Typed so that adding a channel without an entry fails to compile. */
 const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'overnight.start': { projectId: 'p1', preset: 'balanced', prompt: 'do it', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT },
+  'overnight.startArena': {
+    campaign: { name: 'c', caseIds: ['case-1'], strategies: ['SINGLE'], repetitions: 1, modelPreset: 'balanced', budgetPreset: 'eco' },
+    policy: DEFAULT_OVERNIGHT_POLICY,
+    confirmed: true,
+    confirmation: OVERNIGHT_CONFIRMATION_TEXT,
+  },
   'overnight.get': { runId: 'r1' },
   'overnight.active': {},
   'overnight.cancelPower': { runId: 'r1' },
