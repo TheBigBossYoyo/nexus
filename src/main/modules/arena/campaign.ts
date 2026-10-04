@@ -67,6 +67,8 @@ export interface ArenaRunHost {
   pauseRun(runId: string): Promise<unknown>
   resumeRun(runId: string): Promise<unknown>
   cancelRun(runId: string): Promise<unknown>
+  /** Answers an approval request of a trial's run. Without it, a trial that asks for approval waits for its time budget. */
+  resolveApproval?(approvalId: string, approve: boolean, note?: string): unknown
   /** Optional: remove the run's worktrees and branches before the Arena deletes the trial directory. */
   cleanupRun?(runId: string): Promise<unknown>
 }
@@ -206,6 +208,11 @@ export class ArenaService {
     this.evaluate = deps.evaluate ?? evaluateTrial
     this.unsubscribes.push(
       deps.bus.subscribe((event) => {
+        if (event.type === 'approval.requested' && this.jobsByRun.has(event.runId)) {
+          const { approvalId } = event.payload as { approvalId: string }
+          setImmediate(() => this.answerApproval(event.runId, approvalId))
+          return
+        }
         if (!RUN_EVENTS.has(event.type)) return
         this.jobsByRun.get(event.runId)?.poke?.()
       }),
@@ -215,6 +222,25 @@ export class ArenaService {
 
   private log(line: string): void {
     this.deps.logger?.(`[arena] ${line}`)
+  }
+
+  /**
+   * Nobody is present in a trial, so an approval request would wait until the case's time budget ran out and
+   * the strategy would be blamed for it. The same rule as an unattended overnight run applies: a tool request
+   * is denied (the agent is told and continues another way); starting a task and changing the graph are
+   * approved, except the start of a task the planner marked high-risk. Every strategy gets the same rule.
+   */
+  private answerApproval(runId: string, approvalId: string): void {
+    if (this.disposed || !this.deps.host.resolveApproval) return
+    try {
+      const approval = this.repos.approvals.get(approvalId)
+      if (!approval || approval.status !== 'pending' || approval.runId !== runId) return
+      const planChange = approval.kind === 'plan' || approval.kind === 'task' || approval.kind === 'graph'
+      const approve = planChange && !(approval.kind === 'task' && approval.risk === 'high')
+      this.deps.host.resolveApproval(approvalId, approve, `Arena trial (unattended): ${approve ? 'approved by the trial rule' : 'denied, nobody is present to approve it'}`)
+    } catch (e) {
+      this.log(`approval ${approvalId}: ${errorMessage(e)}`)
+    }
   }
 
   private get repos(): Repositories {
@@ -988,6 +1014,8 @@ export class ArenaService {
         setQuota(false)
       }
       job.poke = check
+      // Requests that were already waiting when the trial was attached (after a restart) are answered too.
+      if (job.runId) for (const pending of this.repos.approvals.listPending(job.runId)) this.answerApproval(job.runId, pending.id)
       const pollMs = this.deps.pollMs ?? 2000
       if (pollMs > 0) poll = unref(setInterval(check, pollMs))
       check()

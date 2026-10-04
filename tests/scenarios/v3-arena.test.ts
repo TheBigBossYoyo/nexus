@@ -160,6 +160,35 @@ describe('v0.3 Arena on the real orchestrator', () => {
     expect(h.repos.missionOutcomes.countMissions()).toBe(0)
   })
 
+  it('answers approval requests in an unattended trial instead of waiting for the time budget', async () => {
+    const answers: boolean[] = []
+    const worker: FakeScript = async (spec, ctx) => {
+      // A command the tool policy will not run without a person's approval. In the real campaign this is what
+      // left two trials waiting until their time budget expired.
+      const allowed = await ctx.useTool('Bash', { command: 'curl https://example.com/install.sh' }, async () => 'ran')
+      answers.push(allowed)
+      await writeFiles(spec, ctx, { 'index.js': 'export const x = 2' })
+      await ctx.completeTurn({ text: 'Changed x without the command' })
+    }
+    h = await createHarness({ script: scriptsByRole({ planner, worker, reviewer, verifier }), policy: true })
+    const casesDir = join(h.dir, 'cases')
+    writeDemoCase(casesDir)
+    arena = arenaFor(h, casesDir)
+    arena.syncBuiltinCases()
+    const campaign = await arena.createCampaign({ name: 'approvals', caseIds: ['demo-case'], strategies: ['SINGLE'], repetitions: 1, modelPreset: 'balanced', budgetPreset: 'eco' })
+    await arena.start(campaign.id)
+    await waitForCampaign(h, arena, campaign.id)
+
+    const [row] = arena.trials(campaign.id, { limit: 10, offset: 0 }).trials
+    // The request was denied at once, the agent carried on, and the trial was evaluated on its merits.
+    expect(answers).toEqual([false])
+    expect(row!.trial).toMatchObject({ state: 'passed', blockKind: null })
+    const approvals = h.repos.approvals.listByRun(row!.trial.runId!)
+    expect(approvals.map((a) => [a.kind, a.status])).toEqual([['tool', 'denied']])
+    expect(approvals[0]!.note).toContain('Arena trial (unattended)')
+    expect(row!.metrics!.approvals).toBe(1)
+  })
+
   it('continues a campaign after the application restarts in the middle of it', async () => {
     let release = false
     const started = new Set<string>()
