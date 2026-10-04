@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { basename, isAbsolute, resolve } from 'node:path'
 import type { Project, Run, Task } from '@shared/domain'
 import type { DiffFile, DiffResult, RunSummary } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
@@ -21,6 +21,20 @@ function toDiff(scope: 'task' | 'run', base: string | null, head: string | null,
   return { scope, base, head, files, patch: diff.patch, truncated: diff.truncated }
 }
 
+/**
+ * The only paths projects.open accepts: absolute local paths (a drive letter on Windows, a root on
+ * POSIX). UNC and network shares (\\host\share, //host/share), device and extended-length paths
+ * (\\?\, \\.\) and relative paths are refused before the filesystem is touched.
+ */
+export function assertLocalAbsolutePath(path: string): void {
+  const invalid = (why: string): never => {
+    throw new NexusError('invalid_input', 'Cannot open this folder: ' + why)
+  }
+  if (path.trim() === '' || path.includes('\0')) invalid('the path is empty or malformed.')
+  if (/^[\\/]{2}/.test(path)) invalid('network (UNC) and device paths are not supported; use a local folder.')
+  if (process.platform === 'win32' ? !/^[A-Za-z]:[\\/]/.test(path) : !isAbsolute(path)) invalid('the path must be absolute.')
+}
+
 /** Opening and profiling projects. Discovery is read-only. */
 export class ProjectService {
   private readonly profilerGit: ProfilerGit
@@ -40,6 +54,7 @@ export class ProjectService {
   }
 
   async open(path: string): Promise<Project> {
+    assertLocalAbsolutePath(path)
     const absolute = resolve(path)
     if (!existsSync(absolute)) throw new NexusError('not_found', `Folder does not exist: ${absolute}`)
     const isRepo = await this.git.isRepository(absolute)

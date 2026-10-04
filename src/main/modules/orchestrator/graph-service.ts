@@ -26,8 +26,11 @@ import type { Core } from './core'
 import type { OrchestratorDeps } from './deps'
 import { kindFor } from './task-kind'
 
-/** At most this many proposals per agent; the rest are rejected. */
+/** At most this many proposals per proposing task (agent for agents without one); the rest are rejected. */
 export const MAX_PROPOSALS_PER_AGENT = 5
+/** Run-wide bounds: past either, a proposal that adds tasks needs the user's approval instead of applying. */
+export const MAX_APPLIED_PROPOSALS_PER_RUN = 20
+export const MAX_PROPOSED_TASKS_PER_RUN = 25
 
 const PRE_EXECUTION: readonly RunState[] = ['planning', 'awaiting_approval']
 const PROPOSING: readonly RunState[] = ['executing', 'testing', 'reviewing', 'verifying', 'repairing']
@@ -79,7 +82,7 @@ const issueText = (issues: readonly { path: PropertyKey[]; message: string }[]):
 /** Apply validated proposals transactionally and keep the revision history of the run's graph. */
 export class GraphService {
   private host: GraphHost | null = null
-  /** Submissions per agent, malformed ones included (those leave no row to count). */
+  /** Submissions per proposing task (or agent), malformed ones included (those leave no row to count). */
   private readonly submissions = new Map<string, number>()
 
   constructor(
@@ -108,12 +111,14 @@ export class GraphService {
     const errors: string[] = parsed.success ? [] : issueText(parsed.error.issues)
 
     if (!PROPOSING.includes(current.state)) errors.push(`The run is ${current.state}; the graph can only change while it is executing.`)
-    if (who.agentId !== null) {
-      const rows = repos.graphProposals.listByRun(run.id).filter((p) => p.proposedByAgentId === who.agentId).length
-      const used = Math.max(rows, this.submissions.get(who.agentId) ?? 0)
-      this.submissions.set(who.agentId, used + 1)
+    // Keyed on the task so retries, resumes and repairs (each a new agent) do not reset the allowance.
+    const limitKey = who.taskId ?? who.agentId
+    if (limitKey !== null) {
+      const rows = repos.graphProposals.listByRun(run.id).filter((p) => (p.taskId ?? p.proposedByAgentId) === limitKey).length
+      const used = Math.max(rows, this.submissions.get(limitKey) ?? 0)
+      this.submissions.set(limitKey, used + 1)
       if (used >= MAX_PROPOSALS_PER_AGENT) {
-        errors.push(`Rate limit: an agent may submit at most ${MAX_PROPOSALS_PER_AGENT} graph proposals and you have used them all. Finish your task with the plan as it is.`)
+        errors.push(`Rate limit: a task may submit at most ${MAX_PROPOSALS_PER_AGENT} graph proposals and you have used them all. Finish your task with the plan as it is.`)
       }
     }
 
@@ -152,7 +157,9 @@ export class GraphService {
     const validation = this.validate(current, proposal)
     if (!validation.ok) return this.reject(proposal, validation.errors)
 
-    if (validation.requiresApproval) {
+    const runWide = validation.requiresApproval ? null : this.runWideApprovalReason(run.id, validation)
+    if (validation.requiresApproval || runWide) {
+      const approvalReason = validation.approvalReason ?? runWide
       const approval = bus.transaction(() => {
         repos.graphProposals.update(proposal.id, { status: 'awaiting_approval' })
         const created = this.approvals.create({
@@ -162,7 +169,7 @@ export class GraphService {
           kind: 'graph',
           action: validation.summary,
           reason: proposal.reason,
-          command: this.renderOperations(validation, repos.tasks.listByRun(run.id)),
+          command: this.renderOperations({ ...validation, approvalReason }, repos.tasks.listByRun(run.id)),
           requestedBy: proposal.proposedBy,
           risk: 'medium',
         })
@@ -172,21 +179,40 @@ export class GraphService {
       return {
         proposal: repos.graphProposals.require(proposal.id),
         outcome: 'awaiting_approval',
-        message: `Awaiting user approval (${validation.approvalReason ?? 'this change needs approval'}; approval request ${approval.id}). The graph is unchanged until the user approves. Continue with your own task as it stands; do not wait for the answer.`,
+        message: `Awaiting user approval (${approvalReason ?? 'this change needs approval'}; approval request ${approval.id}). The graph is unchanged until the user approves. Continue with your own task as it stands; do not wait for the answer.`,
       }
     }
     return this.applyProposal(current, proposal, validation, who.taskId !== null)
+  }
+
+  /** Past the run-wide limits, a proposal that adds tasks is no longer applied on the agents' own authority. */
+  private runWideApprovalReason(runId: string, validation: Extract<ProposalValidation, { ok: true }>): string | null {
+    const added = validation.operations.filter((o) => o.op === 'add_task').length
+    if (added === 0) return null
+    const applied = this.deps.repos.graphProposals.listByRun(runId).filter((p) => p.status === 'applied')
+    if (applied.length >= MAX_APPLIED_PROPOSALS_PER_RUN) {
+      return `this run already applied ${applied.length} proposals (limit ${MAX_APPLIED_PROPOSALS_PER_RUN} without approval)`
+    }
+    const tasks = applied.reduce((n, p) => n + p.changes.tasks.length, 0)
+    if (tasks + added > MAX_PROPOSED_TASKS_PER_RUN) {
+      return `proposals in this run already added ${tasks} tasks; ${added} more would pass the limit of ${MAX_PROPOSED_TASKS_PER_RUN} without approval`
+    }
+    return null
   }
 
   /** Resolution of a 'graph' approval: re-validate against the graph as it is now, then apply or reject. */
   onApprovalResolved(approval: ApprovalRequest): void {
     const { repos } = this.deps
     const proposalId = repos.settings.getValue<string>(approvalKey(approval.id))
+    if (proposalId) repos.settings.deleteValue(approvalKey(approval.id))
     const proposal = proposalId ? repos.graphProposals.get(proposalId) : null
     if (!proposal || proposal.status !== 'awaiting_approval') return
-    repos.settings.deleteValue(approvalKey(approval.id))
     if (approval.status !== 'approved') {
-      this.reject(proposal, [`Denied by the user${approval.note ? `: ${approval.note}` : '.'}`])
+      this.reject(proposal, [
+        approval.status === 'expired'
+          ? 'The approval request expired before the user decided.'
+          : `Denied by the user${approval.note ? `: ${approval.note}` : '.'}`,
+      ])
       return
     }
     const run = repos.runs.require(proposal.runId)
@@ -204,9 +230,14 @@ export class GraphService {
 
   /** The run ended (or its approvals expired): proposals still waiting for a decision can never apply. */
   expireAwaiting(runId: string, why: string): void {
-    for (const proposal of this.deps.repos.graphProposals.listByStatus(runId, 'awaiting_approval')) {
-      this.reject(proposal, [why])
+    const { repos } = this.deps
+    const waiting = repos.graphProposals.listByStatus(runId, 'awaiting_approval')
+    for (const approval of repos.approvals.listPending(runId)) {
+      if (approval.kind !== 'graph') continue
+      const proposalId = repos.settings.getValue<string>(approvalKey(approval.id))
+      if (proposalId && waiting.some((p) => p.id === proposalId)) repos.settings.deleteValue(approvalKey(approval.id))
     }
+    for (const proposal of waiting) this.reject(proposal, [why])
   }
 
   private validate(run: Run, proposal: GraphProposal): ProposalValidation {
@@ -216,8 +247,8 @@ export class GraphService {
       dependencies: repos.dependencies.listByRun(run.id),
       proposal: { type: proposal.type, changes: proposal.changes, taskId: proposal.taskId },
     })
-    if (!validation.ok || run.mode === 'build') return validation
-    // AUDIT and ASK runs are read-only: no proposal may introduce a task that writes.
+    if (!validation.ok || (run.mode !== 'audit' && run.mode !== 'ask')) return validation
+    // Only AUDIT and ASK runs are read-only: no proposal may introduce a task that writes.
     const errors = validation.operations.flatMap((op) =>
       op.op === 'add_task' && WRITING_ROLES.includes(op.task.role)
         ? [`Task '${op.task.key}': ${run.mode.toUpperCase()} runs are read-only; role ${op.task.role} is not allowed.`]

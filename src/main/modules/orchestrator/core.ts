@@ -87,6 +87,8 @@ export class Core {
         state: to,
         ...(finished ? { finishedAt: nowIso(), leaseOwner: null, leaseExpiresAt: null } : {}),
       })
+      // A finished task never resumes: its yield marker must not outlive it.
+      if (finished) this.graph.clearYield(taskId)
       bus.emit({
         runId: task.runId,
         taskId,

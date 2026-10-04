@@ -360,6 +360,10 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     expect(await call('tasks.cancel', { taskId: h.repos.tasks.listByRun(waiting.id)[0]?.id ?? '' })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
     expect(await call('runs.recover', { runId: 'missing', action: 'resume' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
     expect(await call('projects.open', { path: `${h.dir}\\does-not-exist` })).toMatchObject({ ok: false, error: { code: 'not_found' } })
+    // Only absolute local paths are opened: UNC, device and relative paths are refused before any filesystem access.
+    for (const bad of ['\\\\host\\share\\repo', '//host/share/repo', '\\\\?\\C:\\repo', '\\\\.\\pipe\\x', 'relative/dir', '..\\other', '\\rooted-no-drive']) {
+      expect(await call('projects.open', { path: bad }), bad).toMatchObject({ ok: false, error: { code: 'invalid_input' } })
+    }
 
     // Replan, pause and cancel through the channels.
     h.runtime.script = scenarioScript({ plan: plan([plannedTask('later')]) })

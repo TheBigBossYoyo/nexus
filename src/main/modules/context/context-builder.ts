@@ -114,7 +114,7 @@ export function buildContextPack(input: ContextPackInput): {
 
   const facts = input.facts?.length
     ? boundedList(
-        input.facts.map((f) => `- [${f.kind}] ${f.subject}: ${f.statement}`),
+        input.facts.map((f) => `- [${f.kind}${f.source === 'agent' || f.source === 'verifier' || f.source === 'user' ? `, source: ${f.source}, ${f.confidence} confidence` : ''}] ${f.subject}: ${f.statement}`),
         SECTION_LIMITS.facts,
         'repository facts',
       )

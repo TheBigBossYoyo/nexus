@@ -62,7 +62,7 @@ test.describe('mission happy path', () => {
       // Durable data is the source of truth for the counts.
       const runId = (await invoke(page, 'runs.list', {}))[0]?.id
       expect(runId).toBeTruthy()
-      if (!runId) return
+      if (!runId) throw new Error('The mission run was not created')
       const summary = await invoke(page, 'runs.summary', { runId })
       const detailData = await invoke(page, 'runs.get', { runId })
       const keys = detailData.tasks.map((t) => t.key).sort()

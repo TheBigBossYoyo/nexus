@@ -60,6 +60,20 @@ export class EventRepository {
     return row?.created_at ?? null
   }
 
+  /** Number of events of one type in a run that belong to any of the tasks, counted in SQL. */
+  countByTypeForTasks(runId: string, type: EventType, taskIds: readonly string[]): number {
+    let total = 0
+    for (let i = 0; i < taskIds.length; i += 500) {
+      const chunk = taskIds.slice(i, i + 500)
+      const row = prepare(
+        this.db,
+        `SELECT COUNT(*) AS n FROM run_events WHERE run_id = ? AND type = ? AND task_id IN (${chunk.map(() => '?').join(',')})`,
+      ).get(runId, type, ...chunk) as { n: number }
+      total += row.n
+    }
+    return total
+  }
+
   /** Events with seq > afterSeq in ascending order. */
   listByRun(runId: string, afterSeq = 0, limit = 1000): RunEvent[] {
     const rows = prepare(

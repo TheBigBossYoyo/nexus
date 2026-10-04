@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { FakeScript } from '@main/modules/agent-runtime/fake-runtime'
 import { fingerprintFiles } from '@main/modules/intelligence'
-import { refreshProjectFacts } from '@main/modules/orchestrator'
 import { newId, nowIso } from '@shared/ids'
 import type { RepositoryFact } from '@shared/v2'
 import { createHarness, fileWorker, git, ipc, keyOf, plan, plannedTask, scenarioScript, sessionsOf, type Harness } from './harness'
@@ -53,12 +52,11 @@ describe('scenario: Context Engine V2', () => {
     // A supporting file changes in the repository.
     await writeFile(join(h.repoDir, 'src/api/server.ts'), 'export const server = 2 // changed and longer\n')
     await git(h.repoDir, 'commit', '-am', 'change server')
-    const refreshed = await refreshProjectFacts({ repos: h.repos, git: h.git }, h.project)
-    expect(refreshed?.stale).toBeGreaterThanOrEqual(1)
-    expect(h.repos.facts.listByProject(h.project.id, { includeStale: true }).find((f) => f.id === seeded.id)?.stale).toBe(true)
-
+    // No manual refresh: the second run's own start-of-run refresh must find the change.
     const second = await h.startRun()
     expect((await h.waitForState(second.id, 'completed')).state).toBe('completed')
+    expect(h.eventsOfType(second.id, 'intelligence.refreshed')[0]?.payload.stale).toBeGreaterThanOrEqual(1)
+    expect(h.repos.facts.listByProject(h.project.id, { includeStale: true }).find((f) => f.id === seeded.id)?.stale).toBe(true)
     const task2 = h.task(second.id, 'endpoint')
     const pack2 = h.repos.contextPacks.listByTask(task2.id)[0]
     expect(pack2?.entries.find((e) => e.sourceId === seeded.id)).toMatchObject({ included: false })

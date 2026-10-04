@@ -17,6 +17,7 @@ type ResolvedListener = (approval: ApprovalRequest) => void
 export class ApprovalService {
   private readonly waiters = new Map<string, (approved: boolean) => void>()
   private readonly listeners = new Set<ResolvedListener>()
+  private readonly expiredListeners = new Set<ResolvedListener>()
 
   constructor(private readonly deps: Pick<OrchestratorDeps, 'repos' | 'bus'>) {}
 
@@ -71,14 +72,15 @@ export class ApprovalService {
   }
 
   /** Expire pending requests (run cancelled, agent stopped, or app restarted). Waiters get a denial. */
-  expire(filter: { runId?: string; agentId?: string } = {}): number {
+  expire(filter: { runId?: string; agentId?: string; kind?: ApprovalRequest['kind'] } = {}): number {
     const { repos, bus } = this.deps
     const pending = repos.approvals
       .listPending(filter.runId)
       .filter((a) => filter.agentId === undefined || a.agentId === filter.agentId)
+      .filter((a) => filter.kind === undefined || a.kind === filter.kind)
     for (const approval of pending) {
-      bus.transaction(() => {
-        repos.approvals.update(approval.id, { status: 'expired', resolvedAt: nowIso() })
+      const expired = bus.transaction(() => {
+        const row = repos.approvals.update(approval.id, { status: 'expired', resolvedAt: nowIso() })
         bus.emit({
           runId: approval.runId,
           taskId: approval.taskId,
@@ -86,10 +88,18 @@ export class ApprovalService {
           type: 'approval.resolved',
           payload: { approvalId: approval.id, status: 'expired' },
         })
+        return row
       })
       this.settle(approval.id, false)
+      for (const listener of this.expiredListeners) listener(expired)
     }
     return pending.length
+  }
+
+  /** Called for every request that expires (not for ones the user answered), so owners can clean up. */
+  onExpired(listener: ResolvedListener): () => void {
+    this.expiredListeners.add(listener)
+    return () => this.expiredListeners.delete(listener)
   }
 
   onResolved(listener: ResolvedListener): () => void {

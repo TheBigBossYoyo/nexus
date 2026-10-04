@@ -16,7 +16,7 @@ import type {
 import { z } from 'zod'
 import { API_KEY_WARNING } from '@shared/auth'
 import type { AuthStatus, ModelOption } from '@shared/auth'
-import { AgentRoleSchema, ComplexitySchema, MessageTypeSchema, RiskSchema, SeveritySchema } from '@shared/domain'
+import { AgentMessageTypeSchema, AgentRoleSchema, ComplexitySchema, MAX_AGENT_SUBJECT_CHARS, RiskSchema, SeveritySchema } from '@shared/domain'
 import { nowIso } from '@shared/ids'
 import { NexusError, errorMessage } from '@shared/result'
 import { ProposalTypeSchema } from '@shared/v2'
@@ -358,8 +358,8 @@ export function createNexusMcpServer(handlers: NexusToolHandlers): McpServerConf
         'send_message',
         'Send a message to another task or role in this run (question, handoff, finding, warning).',
         {
-          type: MessageTypeSchema,
-          subject: z.string(),
+          type: AgentMessageTypeSchema,
+          subject: z.string().max(MAX_AGENT_SUBJECT_CHARS),
           body: z.string(),
           toTask: z.string().nullish(),
           toRole: AgentRoleSchema.nullish(),

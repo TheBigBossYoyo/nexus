@@ -1,5 +1,7 @@
 import {
+  AgentMessageTypeSchema,
   emptyMetrics,
+  MAX_AGENT_SUBJECT_CHARS,
   HandoffSchema,
   type Agent,
   type AgentMetrics,
@@ -339,11 +341,15 @@ export class AgentRunner {
 
     const nexusTools: NexusToolHandlers = {
       sendMessage: async (m) => {
+        // Authoritative: only NEXUS writes user instructions and review findings. An agent that
+        // claims them gets an ordinary information message.
+        const legal = AgentMessageTypeSchema.safeParse(m.type).success
+        const type = legal ? m.type : 'information'
         const { recipients } = this.messages.send({
           runId: run.id,
-          type: m.type,
+          type,
           severity: m.severity,
-          subject: m.subject,
+          subject: m.subject.replace(/\s+/g, ' ').trim().slice(0, MAX_AGENT_SUBJECT_CHARS),
           body: m.body,
           fromAgentId: agent.id,
           fromTaskId: task?.id ?? null,
@@ -351,9 +357,11 @@ export class AgentRunner {
           toTask: m.toTask,
           toRole: m.toRole,
         })
-        return recipients.length > 0
-          ? `Message routed to: ${recipients.map((t) => t.key).join(', ')}`
-          : 'Message recorded. No open task matched the recipient; the user can see it.'
+        const outcome =
+          recipients.length > 0
+            ? `Message routed to: ${recipients.map((t) => t.key).join(', ')}`
+            : 'Message recorded. No open task matched the recipient; the user can see it.'
+        return legal ? outcome : `${outcome} Type '${m.type}' is reserved for NEXUS and the user; it was sent as 'information'.`
       },
       reportBlocker: async (b) => {
         onBlocker(b)
@@ -774,7 +782,8 @@ export class AgentRunner {
   private finishAgent(agentId: string, to: 'stopped' | 'failed', error: string | null, reason: string): void {
     const { repos, bus } = this.deps
     const agent = repos.agents.require(agentId)
-    this.approvals.expire({ runId: agent.runId, agentId })
+    // Only tool approvals belong to a session; a graph approval outlives its proposer's turn.
+    this.approvals.expire({ runId: agent.runId, agentId, kind: 'tool' })
     bus.transaction(() => {
       // 'stopped' is only reachable through 'stopping' in the agent state machine.
       if (to === 'stopped' && canTransition('agent', agent.state, 'stopping')) {

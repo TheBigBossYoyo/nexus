@@ -27,6 +27,8 @@ describe('scenario: the fake-runtime demo script', () => {
     expect(h.repos.planningCritiques.listByRun(run.id)).toHaveLength(1)
     expect(h.eventsOfType(run.id, 'planning.synthesized')).toHaveLength(1)
     expect(h.eventsOfType(run.id, 'review.arbitrated').length).toBeGreaterThanOrEqual(1)
+    // The demo arbiter must really accept the finding it is shown (not just fail safe).
+    expect(h.eventsOfType(run.id, 'review.arbitrated').some((e) => e.payload.accepted >= 1)).toBe(true)
     expect(h.task(run.id, 'ui').repairCycles).toBe(1)
   })
 })

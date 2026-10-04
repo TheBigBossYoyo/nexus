@@ -30,9 +30,7 @@ export function recordTaskOutcome(deps: OrchestratorDeps, run: Run, taskId: stri
     const reviews = repos.reviews.listByTask(task.id)
     const arbitratedAttempts = new Set(reviews.filter((r) => arbiterIds.has(r.id)).map((r) => r.attempt))
     const decisive = reviews.filter((r) => arbiterIds.has(r.id) || !arbitratedAttempts.has(r.attempt))
-    const interventions = repos.events
-      .listByRun(run.id, 0, 1_000_000)
-      .filter((e) => e.type === 'user.intervention' && e.taskId !== null && family.has(e.taskId)).length
+    const interventions = repos.events.countByTypeForTasks(run.id, 'user.intervention', [...family])
     repos.taskOutcomes.upsertForTask(
       buildTaskOutcome({
         projectId: run.projectId,

@@ -224,7 +224,8 @@ describe('scenario: dynamic graph adaptation', () => {
     expect(h.task(run.id, 'a').attempt).toBe(1)
   })
 
-  it('keeps revisions, proposals, added tasks and dependencies across an application restart, and resumes to completion', async () => {
+  // A clean shutdown and a crash (a snapshot taken while the old instance was still running) must both recover.
+  it.each([{ crash: false }, { crash: true }])('keeps revisions, proposals, added tasks and dependencies across an application restart (crash: $crash), and resumes to completion', async ({ crash }) => {
     let proposed = false
     let stalled = false
     const worker: FakeScript = async (spec, ctx) => {
@@ -247,7 +248,7 @@ describe('scenario: dynamic graph adaptation', () => {
     const run = await h.startRun()
     await h.waitFor(() => stalled && h.task(run.id, 'main').state === 'queued', 'extra mid-session while main is yielded')
 
-    restarted = await h.restart(scenarioScript({ plan: planned, worker: fileWorker }))
+    restarted = await h.restart(scenarioScript({ plan: planned, worker: fileWorker }), { crash })
     const versions = restarted.repos.graphRevisions.listByRun(run.id)
     expect(versions.map((r) => r.version)).toEqual([1, 2])
     expect(restarted.repos.graphProposals.listByRun(run.id)).toMatchObject([{ status: 'applied', revisionId: versions[1]?.id }])

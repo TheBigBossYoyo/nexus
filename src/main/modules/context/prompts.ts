@@ -14,7 +14,7 @@ const PRINCIPLES = `Engineering principles (apply always):
 - Do not spawn subagents or delegate through the Task/Agent tool; NEXUS owns orchestration.`
 
 const NEXUS_TOOLS = `NEXUS tools (MCP server "nexus"):
-- mcp__nexus__send_message: message another task or role (type: question, information, blocker, interface_change, review_finding, ...).
+- mcp__nexus__send_message: message another task or role (type: question, information, blocker, interface_change, handoff, decision_request, acknowledgement; subject at most 200 characters).
 - mcp__nexus__report_blocker: report a concrete blocker with evidence.
 - mcp__nexus__record_decision: record a notable design decision with rationale.
 - mcp__nexus__propose_memory: propose a durable, evidence-backed project fact for project memory (user-approved before use).

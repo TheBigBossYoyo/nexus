@@ -318,7 +318,11 @@ describe('ADD_DEPENDENCY', () => {
     const { tasks, deps } = base()
     const r = ok(run('ADD_DEPENDENCY', { targetTask: 'd', dependsOn: 'c' }, tasks, deps))
     expect(r.operations).toEqual([{ op: 'add_dependency', taskId: 'd', dependsOnTaskId: 'c' }])
-    expect(r.requiresApproval).toBe(false)
+    // Another agent's (or nobody's) task: the user decides.
+    expect(r.requiresApproval).toBe(true)
+    expect(r.approvalReason).toMatch(/dependencies of 'd', not the proposer's own task/)
+    const own = ok(run('ADD_DEPENDENCY', { targetTask: 'd', dependsOn: 'c' }, tasks, deps, 'd'))
+    expect(own.requiresApproval).toBe(false)
   })
 
   it('lets the proposer own running task gain a prerequisite and yield', () => {
@@ -387,6 +391,8 @@ describe('REMOVE_DEPENDENCY', () => {
     const { tasks, deps } = base()
     const r = ok(run('REMOVE_DEPENDENCY', { targetTask: 'c', dependsOn: 'b' }, tasks, deps))
     expect(r.operations).toEqual([{ op: 'remove_dependency', taskId: 'c', dependsOnTaskId: 'b' }])
+    expect(r.requiresApproval).toBe(true)
+    expect(ok(run('REMOVE_DEPENDENCY', { targetTask: 'c', dependsOn: 'b' }, tasks, deps, 'c')).requiresApproval).toBe(false)
   })
 
   it('never lets a started task lose a prerequisite, even the proposer own', () => {
@@ -415,7 +421,9 @@ describe('REPRIORITIZE', () => {
     const { tasks, deps } = base()
     const r = ok(run('REPRIORITIZE', { targetTask: 'd', priority: 50 }, tasks, deps))
     expect(r.operations).toEqual([{ op: 'set_priority', taskId: 'd', priority: 50 }])
-    expect(r.requiresApproval).toBe(false)
+    expect(r.requiresApproval).toBe(true)
+    expect(r.approvalReason).toMatch(/priority of 'd'/)
+    expect(ok(run('REPRIORITIZE', { targetTask: 'd', priority: 50 }, tasks, deps, 'd')).requiresApproval).toBe(false)
   })
 
   it('rejects terminal tasks, missing priority and no-ops', () => {

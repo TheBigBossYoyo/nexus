@@ -127,7 +127,7 @@ export function createDemoScript(): FakeScript {
     }
     if (purpose === 'arbitrate') {
       // Accept every finding (the prompt lists them as "[index] ...").
-      const indexes = [...spec.prompt.matchAll(/^[(d+)] /gm)].map((m) => Number(m[1]))
+      const indexes = [...spec.prompt.matchAll(/^\[(\d+)\] \(reported by /gm)].map((m) => Number(m[1]))
       await ctx.completeTurn({
         text: 'Arbitration done.',
         structuredOutput: { summary: 'Findings checked against the code.', decisions: indexes.map((findingIndex) => ({ findingIndex, accepted: true, reason: 'Confirmed in ui.txt.' })) },

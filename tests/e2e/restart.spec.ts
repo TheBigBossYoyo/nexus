@@ -85,6 +85,10 @@ test.describe('restart and recovery', () => {
       expect(summary.tasksCompleted).toBe(summary.tasksTotal)
       const finalDetail = await invoke(second.page, 'runs.get', { runId })
       expect(finalDetail.tasks.map((t) => t.key)).toEqual(expect.arrayContaining(['api', 'ui', 'integration']))
+      // The task the api worker added through a graph proposal and both plan revisions survived the interruption.
+      expect(finalDetail.tasks.map((t) => t.key)).toContain('docs')
+      expect(finalDetail.tasks.find((t) => t.key === 'docs')?.state).toBe('completed')
+      expect((await invoke(second.page, 'graph.revisions', { runId })).map((r) => r.version)).toEqual([1, 2])
     } finally {
       await closeApp(second.app)
     }

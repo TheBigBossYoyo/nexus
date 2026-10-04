@@ -82,6 +82,17 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
         throw new NexusError('invalid_state', 'Cancel the active runs of this project before removing it')
       }
       // Removes NEXUS records only; the repository on disk is not touched.
+      // Per-run and per-session bookkeeping lives in settings keys that no foreign key cascades to.
+      for (const run of repos.runs.listByProject(projectId)) {
+        repos.settings.deleteValue(`run-active:${run.id}`)
+        for (const task of repos.tasks.listByRun(run.id)) repos.settings.deleteValue(`graph-yield:${task.id}`)
+        for (const approval of repos.approvals.listByRun(run.id)) repos.settings.deleteValue(`graph-approval:${approval.id}`)
+        for (const agent of repos.agents.listByRun(run.id)) {
+          for (const session of repos.sessions.listByAgent(agent.id)) {
+            if (session.sdkSessionId) repos.settings.deleteValue(`usage-cumulative:${session.sdkSessionId}`)
+          }
+        }
+      }
       repos.projects.delete(projectId)
       return null
     },

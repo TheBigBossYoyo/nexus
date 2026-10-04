@@ -103,6 +103,20 @@ export const MESSAGE_TYPES = [
 export const MessageTypeSchema = z.enum(MESSAGE_TYPES)
 export type MessageType = z.infer<typeof MessageTypeSchema>
 
+/** Types an agent may send. 'user_instruction' and 'review_finding' are written by NEXUS only. */
+export const AGENT_MESSAGE_TYPES = [
+  'question',
+  'information',
+  'blocker',
+  'interface_change',
+  'handoff',
+  'decision_request',
+  'acknowledgement',
+] as const satisfies readonly MessageType[]
+export const AgentMessageTypeSchema = z.enum(AGENT_MESSAGE_TYPES)
+/** Longest message subject an agent can set. */
+export const MAX_AGENT_SUBJECT_CHARS = 200
+
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'nit'] as const
 export const SeveritySchema = z.enum(SEVERITIES)
 export type Severity = z.infer<typeof SeveritySchema>

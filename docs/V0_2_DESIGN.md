@@ -73,8 +73,23 @@ Validation rules (deterministic, in `task-graph/proposals.ts`):
   original's criteria (traceability);
 - repair children are managed by the pipeline and cannot be targeted.
 
-Approval policy: `REPLAN`, cancelling another agent's task, and proposals adding more than three
-tasks need user approval (`ApprovalRequest` kind `graph`); the rest apply immediately.
+Approval policy: `REPLAN`, cancelling another agent's task, proposals adding more than three tasks, and
+any dependency (`ADD_DEPENDENCY`, `REMOVE_DEPENDENCY`) or priority (`REPRIORITIZE`) change whose target
+is not the proposer's own task need user approval (`ApprovalRequest` kind `graph`); the rest apply
+immediately. A graph approval belongs to the run, not to the proposing session: it stays answerable after
+the proposer's turn ends and is only closed (proposal rejected with a reason, settings key deleted) when
+the run ends, is cancelled or the request expires.
+
+Limits (`task-graph` / `orchestrator/graph-service.ts`):
+
+- at most 5 proposals per proposing task (the task id, so retries, resumes and repair sessions share one
+  allowance; an agent without a task is keyed by its agent id; user and system proposals have none);
+- run-wide: at most 20 applied proposals and 25 tasks added by proposals (counted from the tasks the
+  applied proposals list). Past either, a proposal that adds tasks no longer applies automatically and
+  needs user approval; approving it applies it regardless;
+- at most 8 new tasks per proposal;
+- only ASK and AUDIT runs are read-only: a proposal may not add a writing task there; every other mode
+  (build, swarm, repair, mission, loop) may.
 
 State: proposal `proposed` → `applied` | `rejected` | `awaiting_approval` → `applied` | `rejected`.
 Each application writes a `graph_revisions` row (version n+1, full snapshot of tasks and
@@ -143,7 +158,10 @@ Only accepted findings can request changes. All three records are persisted.
 
 Proposals are data validated in code; an agent cannot widen its own tools, paths, or approvals
 through them. New tasks inherit the role policy of their role. The proposal tool is rate-limited per
-session. Repository analysis reads file names, sizes and bounded import lines only, never secrets
+task (see Dynamic DAG for the exact numbers). Agent-written messages can only use the agent message
+types (a claimed `user_instruction` or `review_finding` is stored as `information`), subjects are capped
+at 200 characters, and the orchestration evidence given to verifiers is rendered as one sanitized,
+bounded line per record. Repository analysis reads file names, sizes and bounded import lines only, never secrets
 files, and never follows links out of the root.
 
 ## UI

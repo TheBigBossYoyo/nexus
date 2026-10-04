@@ -42,8 +42,12 @@ One request channel (`nexus:invoke`) and one push channel (`nexus:push`), define
 4. Errors are returned as typed results (`{ ok: false, error: { code, message } }`); handlers do not throw
    into the renderer.
 
-The renderer never receives paths to open, commands to run or Git arguments. The folder picker runs in
-main. Project removal deletes NEXUS records only.
+The renderer never sends commands to run or Git arguments. `projects.open` takes an optional folder path (the
+folder picker runs in main and is used when it is omitted). The path is checked before the filesystem is touched:
+it must be an absolute local path (a drive letter such as `C:\` or `C:/` on Windows, a root on POSIX). UNC and
+network paths (`\\host\share`, `//host/share`), device and extended-length paths (`\\?\`, `\\.\`), empty or
+NUL-containing paths and relative paths are refused with `invalid_input`. A folder that passes is only read
+(profiled and analysed), never written. Project removal deletes NEXUS records only.
 
 ## Role tool policies
 

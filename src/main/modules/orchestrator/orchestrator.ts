@@ -105,6 +105,9 @@ export class Orchestrator implements PipelineHost {
     this.pipeline = new TaskPipeline(this.core, this)
     this.core.messages.setLiveDelivery((taskId, message) => this.deliverLive(taskId, message))
     this.core.approvals.onResolved((approval) => this.onApprovalResolved(approval))
+    this.core.approvals.onExpired((approval) => {
+      if (approval.kind === 'graph') this.core.graph.onApprovalResolved(approval)
+    })
     this.core.graph.bind({
       setTaskState: (...args) => this.core.setTaskState(...args),
       tryTaskState: (...args) => this.core.tryTaskState(...args),
@@ -568,6 +571,12 @@ export class Orchestrator implements PipelineHost {
     for (const task of tasks) {
       if (this.active.has(task.id) || task.parentTaskId) continue
       let stage: Stage | null = null
+      if ((task.state === 'assigned' || task.state === 'running') && this.core.graph.unmetPrerequisites(task).length > 0) {
+        // It yielded to a prerequisite before its turn ended: wait in the queue, then resume (not relaunch).
+        this.core.graph.markYielded(task.id)
+        this.core.tryTaskState(task.id, 'queued', { leaseOwner: null, leaseExpiresAt: null }, 'yielded: waiting for its prerequisites; resumes once they are merged')
+        continue
+      }
       switch (task.state) {
         case 'assigned':
         case 'running':
@@ -715,10 +724,15 @@ export class Orchestrator implements PipelineHost {
     if (integration && run.baseCommit && existsSync(integration.path)) {
       const control = this.runControl(runId)
       const cycle = tasks.filter((t) => t.key.startsWith('mission-fix-')).length + 1
-      const checks = await this.core.runChecks(run, null, integration.path, cycle)
-      // Checks can leave files behind; only merges are committed in the integration worktree, so restore
-      // it before a mission-fix task merges into it.
-      await this.core.cleanWorktree(integration.path)
+      // Under the merge lock: a task merging into the integration worktree must not race the checks
+      // (or the cleaning that follows them).
+      const checks = await this.withMergeLock(runId, async () => {
+        const result = await this.core.runChecks(run, null, integration.path, cycle)
+        // Checks can leave files behind; only merges are committed in the integration worktree, so restore
+        // it before a mission-fix task merges into it.
+        await this.core.cleanWorktree(integration.path)
+        return result
+      })
       if (control.stopReason || repos.runs.require(runId).state !== 'verifying') return
       const diff = await git.diff(integration.path, run.baseCommit, 'HEAD')
       const stat = diff.files.map((f) => `${f.status} ${f.path} (+${f.additions} -${f.deletions})`).join('\n')
@@ -798,6 +812,11 @@ export class Orchestrator implements PipelineHost {
           this.core.pauseRun(runId, 'user', `Intervention required: mission verification still failing after ${cycle - 1} repair iteration(s)`)
           return
         }
+        // Work added meanwhile (by the user or a proposal) must be verified before more repair is planned.
+        if (this.hasOpenTasks(runId)) {
+          this.requestTick(runId)
+          return
+        }
         bus.transaction(() => {
           const task = this.insertTask(run, {
             key: `mission-fix-${cycle}`,
@@ -821,7 +840,12 @@ export class Orchestrator implements PipelineHost {
       }
     }
 
-    const completed = tasks.filter((t) => t.state === 'completed').length
+    // A task added while the mission was being verified is not covered by that verification.
+    if (this.hasOpenTasks(runId)) {
+      this.requestTick(runId)
+      return
+    }
+    const completed = countedTasks(repos.tasks.listByRun(runId)).filter((t) => t.state === 'completed').length
     this.closeProposals(runId, 'The run completed before this proposal was decided.')
     bus.transaction(() => {
       this.core.setRunState(runId, 'completed')
@@ -829,10 +853,15 @@ export class Orchestrator implements PipelineHost {
     })
   }
 
+  /** True when finalization has to start over: a task is open, or failed after the checks began. */
+  private hasOpenTasks(runId: string): boolean {
+    return countedTasks(this.deps.repos.tasks.listByRun(runId)).some((t) => !TERMINAL_TASK_STATES.includes(t.state) || t.state === 'failed')
+  }
+
   /** Pending graph approvals die with the run: nothing could ever apply them. */
   private closeProposals(runId: string, why: string): void {
-    this.core.approvals.expire({ runId })
     this.core.graph.expireAwaiting(runId, why)
+    this.core.approvals.expire({ runId })
   }
 
   private failRun(runId: string, error: string): void {
@@ -871,8 +900,18 @@ export class Orchestrator implements PipelineHost {
       bus.emit({ runId, type: 'run.resumed', payload: {} })
     })
     this.runControls.delete(runId)
-    if (target === 'planning') this.background(runId, () => this.plan(runId))
-    else if (target === 'awaiting_approval') {
+    if (target === 'planning') {
+      if (repos.tasks.listByRun(runId).length === 0) this.background(runId, () => this.plan(runId))
+      else if (run.config.requirePlanApproval && run.mode !== 'ask') {
+        // The plan is already materialized (ASK always is): planning again would duplicate its tasks.
+        this.core.setRunState(runId, 'awaiting_approval')
+        this.requestPlanApproval(repos.runs.require(runId))
+      } else {
+        this.background(runId, async () => {
+          if (await this.refreshFacts(runId)) await this.startExecution(runId)
+        })
+      }
+    } else if (target === 'awaiting_approval') {
       if (!repos.approvals.listPending(runId).some((a) => a.kind === 'plan')) this.requestPlanApproval(repos.runs.require(runId))
     } else this.requestTick(runId)
     return repos.runs.require(runId)
@@ -998,7 +1037,7 @@ export class Orchestrator implements PipelineHost {
         title: input.title,
         description: input.description,
         role: input.role,
-        kind: WRITING_ROLES.includes(input.role) ? 'implement' : 'research',
+        kind: kindFor(run.mode, { role: input.role, dependencies: input.dependsOn }),
         suggestedFiles: input.suggestedFiles,
         acceptanceCriteria: input.acceptanceCriteria,
         complexity: input.complexity,

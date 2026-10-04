@@ -134,6 +134,10 @@ interface Observation {
   /** Tasks whose injected crash actually fired (a pause can stop the session before it does). */
   crashed: Set<string>
   rejected: Set<string>
+  /** Tasks whose injected verification failure actually fired. */
+  verifyFailed: Set<string>
+  /** Tasks whose worker really sent its message (the tool answered). */
+  messaged: Set<string>
   /** Proposals the workers submitted, with what the tool answered (coverage and oracle). */
   proposed: { kind: ProposalKind; by: string; reply: string }[]
 }
@@ -303,6 +307,7 @@ function buildScript(s: Scenario, obs: Observation, harness: () => Harness): Fak
       await writeFiles(spec, ctx, { [`${key}.txt`]: `${key} attempt ${n}` })
       if (s.messengers.has(key) && ctx.nexusTools) {
         await ctx.nexusTools.sendMessage({ type: 'interface_change', subject: `${key} changed`, body: 'details', toTask: null, toRole: null, severity: null })
+        obs.messaged.add(key)
       }
       await ctx.sleep(delay(`worker-end:${key}:${n}`))
       await ctx.completeTurn({ text: `Created ${key}.txt` })
@@ -331,6 +336,7 @@ function buildScript(s: Scenario, obs: Observation, harness: () => Harness): Fak
     const n = nth(`verify:${key}`)
     await ctx.sleep(delay(`verify:${key}:${n}`))
     const fail = s.verifyFailOnce.has(key) && n === 0
+    if (fail && !ctx.signal.aborted) obs.verifyFailed.add(key)
     await ctx.completeTurn({ text: 'verify', structuredOutput: fail ? failedVerification() : passedVerification })
   }
   /** Second reviewer of a dual review: repeats the first reviewer's finding (a duplicate to merge) or approves. */
@@ -365,6 +371,9 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
 
   const cancelled = s.cancelTask ? planned.find((t) => t.key === s.cancelTask) : undefined
   const cancelTookEffect = cancelled?.state === 'cancelled'
+  // What a cancellation can legitimately take down: the task and everything that transitively waited for it.
+  const affected = new Set<string>(cancelTookEffect && cancelled ? [cancelled.id, ...transitiveDependants(h.repos.dependencies.listByRun(run.id), cancelled.id)] : [])
+  const unaffected = (t: { id: string }): boolean => !affected.has(t.id)
 
   // v0.2 graph history. Every applied proposal has exactly one revision, versions are 1..n without gaps, and
   // a task other than the user's injected cancellation can only be cancelled by an applied proposal.
@@ -405,7 +414,11 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
   if (!cancelTookEffect) {
     if (run.state !== 'completed') problems.push(`run ended ${run.state} (expected completed)`)
     for (const t of live) if (t.state !== 'completed') problems.push(`task ${t.key} ended ${t.state}`)
-  } else if (run.state !== 'completed' && run.state !== 'paused' && run.state !== 'cancelled') {
+  } else {
+    // Only the cancelled task and its dependants may be missing: everything else must have finished.
+    for (const t of live.filter(unaffected)) if (t.state !== 'completed') problems.push(`task ${t.key} (not affected by the cancellation) ended ${t.state}`)
+  }
+  if (cancelTookEffect && run.state !== 'completed' && run.state !== 'paused' && run.state !== 'cancelled') {
     problems.push(`run ended ${run.state} after a task cancellation`)
   }
   if (run.state === 'completed') {
@@ -450,15 +463,36 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
   }
 
   // Injected faults must have produced their recovery path.
-  if (!cancelTookEffect) {
+  {
     for (const key of obs.rejected) {
       const t = planned.find((x) => x.key === key)
+      if (t && !unaffected(t)) continue
       if (t && !h.repos.reviews.listByTask(t.id).some((r) => r.verdict === 'changes_requested')) problems.push(`rejected review of ${key} was not recorded`)
       if (t && !tasks.some((c) => c.parentTaskId === t.id)) problems.push(`no repair task was created for ${key}`)
     }
     for (const key of obs.crashed) {
       const t = planned.find((x) => x.key === key)
+      if (t && !unaffected(t)) continue
       if (t && t.attempt < 2) problems.push(`crashed task ${key} was not retried (attempt ${t.attempt})`)
+    }
+    // A verification failure that fired leaves a repair child or a second verifier row.
+    for (const key of obs.verifyFailed) {
+      const t = planned.find((x) => x.key === key)
+      if (!t || !unaffected(t) || t.state !== 'completed') continue
+      const verifierRows = h.repos.verifications.listByTask(t.id).filter((v) => v.kind === 'verifier').length
+      if (!tasks.some((c) => c.parentTaskId === t.id) && verifierRows < 2) problems.push(`injected verification failure of ${key} left no repair child and no second verification`)
+    }
+    // Dual review with a real rejection must have been arbitrated.
+    if (s.dualReview) {
+      for (const key of obs.rejected) {
+        const t = planned.find((x) => x.key === key)
+        if (!t || !unaffected(t) || t.state !== 'completed') continue
+        if (!events.some((e) => e.type === 'review.arbitrated' && e.taskId === t.id)) problems.push(`dual review rejected ${key} without a review.arbitrated event`)
+      }
+    }
+    // Messages the workers sent through the tool were persisted.
+    for (const key of obs.messaged) {
+      if (!h.repos.messages.listByRun(run.id).some((m) => m.subject === `${key} changed`)) problems.push(`message of ${key} was not persisted`)
     }
   }
 
@@ -509,7 +543,7 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
 
 async function runSeed(seed: number): Promise<string[]> {
   const s = buildScenario(seed)
-  const obs: Observation = { violations: [], maxActiveWriters: 0, crashed: new Set(), rejected: new Set(), proposed: [] }
+  const obs: Observation = { violations: [], maxActiveWriters: 0, crashed: new Set(), rejected: new Set(), verifyFailed: new Set(), messaged: new Set(), proposed: [] }
   const holder: { h?: Harness } = {}
   const h = await createHarness({ script: buildScript(s, obs, () => holder.h as Harness) })
   holder.h = h
@@ -602,6 +636,15 @@ async function runSeed(seed: number): Promise<string[]> {
       )
     }
     coverage.push(...obs.proposed.map((p) => `${p.kind}:${p.reply.split(' ')[0]}`))
+    if (obs.crashed.size > 0) faults.add('crash')
+    if (obs.rejected.size > 0) faults.add('rejected_review')
+    if (obs.verifyFailed.size > 0) faults.add('verify_fail')
+    if (obs.messaged.size > 0) faults.add('message')
+    if (s.pauseAfterStarts > 0) faults.add('pause')
+    if (s.cancelTask) faults.add('cancel')
+    if (s.consensus) faults.add('consensus')
+    if (s.badCandidate && s.consensus) faults.add('bad_candidate')
+    if (s.dualReview) faults.add('dual_review')
     return problems
   } finally {
     await h.dispose()
@@ -610,6 +653,7 @@ async function runSeed(seed: number): Promise<string[]> {
 
 /** What the campaign actually exercised: proposal kinds and the answer each got. */
 const coverage: string[] = []
+const faults = new Set<string>()
 
 describe('orchestrator stress campaign', () => {
   it(`holds its invariants over ${RUNS} seeded runs starting at seed ${START}`, async () => {
@@ -633,5 +677,13 @@ describe('orchestrator stress campaign', () => {
     console.warn(`[stress] proposals: ${[...tally].sort().map(([k, v]) => `${k}=${v}`).join(' ')}`)
     console.warn(`[stress] finished ${done}/${RUNS}; failing seeds: ${failures.map((f) => f.seed).join(', ') || 'none'}`)
     expect(failures).toEqual([])
+    // A campaign this long must have exercised every injected behaviour at least once.
+    if (RUNS >= 200) {
+      const kinds = new Set(coverage.map((c) => c.split(':')[0]))
+      for (const kind of PROPOSAL_KINDS) expect(kinds.has(kind), `proposal kind ${kind} was never exercised`).toBe(true)
+      for (const fault of ['crash', 'rejected_review', 'verify_fail', 'message', 'pause', 'cancel', 'consensus', 'bad_candidate', 'dual_review']) {
+        expect(faults.has(fault), `fault class ${fault} was never exercised`).toBe(true)
+      }
+    }
   }, 6 * 60 * 60 * 1000)
 })

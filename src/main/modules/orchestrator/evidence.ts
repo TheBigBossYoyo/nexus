@@ -18,18 +18,53 @@ export function gatherEvidence(repos: Repositories, runId: string, task: Task | 
   const mine = (taskId: string | null, agentId: string | null): boolean =>
     taskIds === null ? true : (taskId !== null && taskIds.has(taskId)) || (agentId !== null && agentIds.has(agentId))
   return {
-    messages: repos.messages
-      .listByRun(runId)
-      // Messages from the user and the orchestrator's own review findings are not an agent's coordination.
-      .filter((m) => m.type !== 'review_finding' && m.type !== 'user_instruction' && mine(m.fromTaskId, m.fromAgentId))
-      .map((m) => ({ type: m.type, to: m.toLabel, subject: m.subject, at: m.createdAt })),
+    ...messageEvidence(repos, runId, taskIds, mine),
     decisions: repos.decisions
       .listByRun(runId)
       .filter((d) => mine(d.taskId, d.agentId))
-      .map((d) => ({ title: d.title, decision: d.decision, at: d.createdAt })),
+      .map((d) => ({ id: d.id, title: d.title, at: d.createdAt })),
     proposals: repos.graphProposals
       .listByRun(runId)
       .filter((p) => mine(p.taskId, p.proposedByAgentId))
-      .map((p) => ({ type: p.type, status: p.status, reason: p.reason, at: p.createdAt })),
+      .map((p) => ({
+        id: p.id,
+        type: p.type,
+        status: p.status,
+        title: p.changes.tasks.length > 0 ? p.changes.tasks.map((t) => t.title).join('; ') : (p.changes.targetTask ?? '(none)'),
+        at: p.createdAt,
+      })),
   }
+}
+
+/** Longest list of message records the mission verifier gets. */
+const MISSION_MESSAGE_CAP = 60
+
+function messageEvidence(
+  repos: Repositories,
+  runId: string,
+  taskIds: ReadonlySet<string> | null,
+  mine: (taskId: string | null, agentId: string | null) => boolean,
+): Pick<OrchestrationEvidence, 'messages' | 'omittedMessages'> {
+  // Messages from the user and the orchestrator's own review findings are not an agent's coordination.
+  const agentMessages = repos.messages.listByRun(runId).filter((m) => m.type !== 'review_finding' && m.type !== 'user_instruction')
+  const record = (m: (typeof agentMessages)[number], direction: 'sent' | 'received'): OrchestrationEvidence['messages'][number] => ({
+    id: m.id,
+    direction,
+    type: m.type,
+    from: m.fromLabel,
+    to: m.toLabel,
+    subject: m.subject,
+    at: m.createdAt,
+  })
+  if (taskIds === null) {
+    // Whole run: most recent first, bounded, with the count of what was left out.
+    const all = agentMessages.map((m) => record(m, 'sent')).sort((a, b) => b.at.localeCompare(a.at))
+    return { messages: all.slice(0, MISSION_MESSAGE_CAP), omittedMessages: Math.max(0, all.length - MISSION_MESSAGE_CAP) }
+  }
+  const sent = agentMessages.filter((m) => mine(m.fromTaskId, m.fromAgentId)).map((m) => record(m, 'sent'))
+  const received = agentMessages
+    .filter((m) => !mine(m.fromTaskId, m.fromAgentId))
+    .filter((m) => (m.toTaskId !== null && taskIds.has(m.toTaskId)) || repos.messages.listRecipients(m.id).some((r) => taskIds.has(r.taskId)))
+    .map((m) => record(m, 'received'))
+  return { messages: [...sent, ...received] }
 }

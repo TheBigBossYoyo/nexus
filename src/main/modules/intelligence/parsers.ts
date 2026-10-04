@@ -163,6 +163,28 @@ export function parsePyprojectDependencies(text: string): DepSpec[] {
   return out
 }
 
+/**
+ * Lines inside every "open ( ... )" block, found in one forward pass: a block ends at the first line that
+ * starts with ")" and an unterminated one runs to the end. Linear however hostile the input.
+ */
+export function blockLines(text: string, open: RegExp): string[] {
+  const out: string[] = []
+  let inside = false
+  for (const raw of text.split(/\r?\n/)) {
+    if (!inside) {
+      const m = open.exec(raw)
+      if (!m) continue
+      inside = true
+      const rest = raw.slice(m.index + m[0].length)
+      if (rest.trim() !== '') out.push(rest)
+      continue
+    }
+    if (raw.trimStart().startsWith(')')) inside = false
+    else out.push(raw)
+  }
+  return out
+}
+
 export function parseGoMod(text: string): { module: string | null; deps: DepSpec[] } {
   const module = /^module\s+(\S+)/m.exec(text)?.[1] ?? null
   const deps: DepSpec[] = []
@@ -171,9 +193,7 @@ export function parseGoMod(text: string): { module: string | null; deps: DepSpec
     const m = /^\s*(\S+)\s+(v\S+)/.exec(line)
     if (m) deps.push({ name: m[1] ?? '', spec: m[2] ?? '' })
   }
-  for (const block of text.matchAll(/^require\s*\(([\s\S]*?)^\)/gm)) {
-    for (const l of (block[1] ?? '').split(/\r?\n/)) take(l)
-  }
+  for (const l of blockLines(text, /^require\s*\(/)) take(l)
   for (const m of text.matchAll(/^require\s+([^(\s].*)$/gm)) take(m[1] ?? '')
   return { module, deps }
 }
@@ -211,8 +231,9 @@ export function extractImports(family: 'js' | 'py' | 'go' | 'rs', text: string):
     }
   } else if (family === 'go') {
     for (const m of text.matchAll(/^[ \t]*import\s+(?:[\w.]+\s+)?"([^"]+)"/gm)) if (m[1]) out.add(m[1])
-    for (const block of text.matchAll(/^[ \t]*import\s*\(([\s\S]*?)\)/gm)) {
-      for (const m of (block[1] ?? '').matchAll(/^[ \t]*(?:[\w.]+\s+)?"([^"]+)"/gm)) if (m[1]) out.add(m[1])
+    for (const line of blockLines(text, /^[ \t]*import\s*\(/)) {
+      const m = /^[ \t]*(?:[\w.]+\s+)?"([^"]+)"/.exec(line)
+      if (m?.[1]) out.add(m[1])
     }
   } else {
     for (const m of text.matchAll(/^[ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;/gm)) out.add(`mod:${m[1] ?? ''}`)

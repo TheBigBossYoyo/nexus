@@ -610,6 +610,18 @@ export function validateProposal(input: ProposalValidationInput): ProposalValida
   } else if (foreign.length > 0) {
     reasons.push(`cancels ${foreign.length} task${foreign.length === 1 ? '' : 's'}`)
   }
+  // Rewiring or reprioritising a task that is not the proposer's own is a decision for the user.
+  if (proposal.type === 'ADD_DEPENDENCY' || proposal.type === 'REMOVE_DEPENDENCY' || proposal.type === 'REPRIORITIZE') {
+    const others = built.ops.filter(
+      (op) =>
+        (op.op === 'add_dependency' || op.op === 'remove_dependency' || op.op === 'set_priority') &&
+        op.taskId !== proposal.taskId,
+    )
+    if (others.length > 0) {
+      const keys = [...new Set(others.map((op) => ('taskId' in op ? (byId.get(op.taskId)?.key ?? op.taskId) : '')))]
+      reasons.push(`changes the ${proposal.type === 'REPRIORITIZE' ? 'priority' : 'dependencies'} of ${keys.map((k) => `'${k}'`).join(', ')}, not the proposer's own task`)
+    }
+  }
   const added = built.ops.filter((op) => op.op === 'add_task').length
   if (added > APPROVAL_NEW_TASK_THRESHOLD) {
     reasons.push(`adds ${added} tasks (more than ${APPROVAL_NEW_TASK_THRESHOLD})`)

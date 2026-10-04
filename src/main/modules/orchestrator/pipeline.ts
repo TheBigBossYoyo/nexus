@@ -31,6 +31,7 @@ import {
   verifierOutputJsonSchema,
 } from '@main/modules/context/context-builder'
 import { packForPrompt, withBlock, type ComposedContext, type PromptBlock } from '@main/modules/context/context-engine'
+import { oneLine } from '@main/modules/context/render'
 import type { DiffResult } from '@main/modules/git'
 import { applyArbitration, dedupeFindings } from '@main/modules/review'
 import { nextAttemptPlan, type FailureKind } from '@main/modules/scheduler'
@@ -257,6 +258,8 @@ export class TaskPipeline {
       this.host.setStage(taskId, 'merge')
       const branch = worktree.branch
       const merged = await this.host.withMergeLock(runId, async () => {
+        // The task may have been cancelled or stopped while it waited for the lock: never merge it then.
+        if (control.stopReason || repos.tasks.require(taskId).state !== 'verification') return null
         // Mission checks and dependency setup run in the integration worktree and can leave files behind;
         // git refuses to merge into a dirty tree. The worktree is NEXUS-owned: only merges are committed there.
         await this.core.cleanWorktree(integration.path)
@@ -265,6 +268,7 @@ export class TaskPipeline {
           author: this.core.author(),
         })
       })
+      if (merged === null) return
       if (!merged.ok) {
         bus.emit({
           runId,
@@ -930,11 +934,16 @@ export class TaskPipeline {
    */
   private async yieldIfWaiting(run: Run, task: Task, worktree: Worktree | null): Promise<boolean> {
     const waitingOn = this.core.graph.unmetPrerequisites(task)
-    if (waitingOn.length === 0) return false
+    // A marker with nothing left to wait for (the prerequisite finished before the turn did) still yields:
+    // the restart goes through the resume path, which merges the integration branch into the worktree.
+    if (waitingOn.length === 0 && !this.core.graph.yieldMarker(task.id)) return false
     if (worktree) await this.commitLeftovers(run, task, worktree)
     const keys = waitingOn.map((t) => t.key).join(', ')
     this.core.graph.markYielded(task.id)
-    const reason = `yielded: waiting for ${keys} (graph change); resumes once it is merged`
+    const reason =
+      waitingOn.length > 0
+        ? `yielded: waiting for ${keys} (graph change); resumes once it is merged`
+        : 'yielded: the prerequisite already merged; resumes on the updated integration branch'
     return this.core.tryTaskState(task.id, 'queued', { leaseOwner: null, leaseExpiresAt: null }, reason) !== null
   }
 
@@ -999,8 +1008,8 @@ export class TaskPipeline {
           id: newId(),
           projectId: project.id,
           kind: 'decision',
-          subject: d.title,
-          statement: `${d.decision} Rationale: ${d.rationale}`,
+          subject: oneLine(d.title, 120),
+          statement: `Agent-recorded decision (not independently verified): ${oneLine(`${d.decision} Rationale: ${d.rationale}`, 600)}`,
           source: 'agent',
           confidence: 'medium',
           files,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { PLANNER_LENSES } from '@main/modules/planning'
-import { specPurpose } from '@main/modules/agent-runtime/fake-runtime'
+import { specPurpose, type FakeScript } from '@main/modules/agent-runtime/fake-runtime'
 import { createHarness, ipc, lensLabelOf, plan, plannedTask, scenarioScript, type Harness } from './harness'
 
 const [A, B, C] = PLANNER_LENSES.map((l) => l.label) as [string, string, string]
@@ -20,8 +20,19 @@ describe('scenario: consensus planning', () => {
   afterEach(async () => h?.dispose())
 
   it('runs three independent planners, persists candidates (one invalid), critiques, synthesizes and executes the result', async () => {
+    // The three candidate planners wait for each other: a sequential batch would never meet.
+    let arrived = 0
+    const met: boolean[] = []
+    const overlapping = (inner: FakeScript): FakeScript => async (spec, ctx) => {
+      if (lensLabelOf(spec.prompt) !== null && specPurpose(spec) !== 'synthesize') {
+        arrived++
+        for (let i = 0; i < 400 && arrived < 3 && !ctx.signal.aborted; i++) await ctx.sleep(10)
+        met.push(arrived >= 3)
+      }
+      return inner(spec, ctx)
+    }
     h = await createHarness({
-      script: scenarioScript({
+      script: overlapping(scenarioScript({
         plan: planA,
         candidate: (label) => (label === A ? planA : label === B ? planB : planC),
         synthesis: finalPlan,
@@ -34,10 +45,11 @@ describe('scenario: consensus planning', () => {
               preferredCandidate: A,
             },
           }),
-      }),
+      })),
     })
     const run = await h.startRun({ overrides: { planningMode: 'consensus' } })
     expect((await h.waitForState(run.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+    expect(met).toEqual([true, true, true])
 
     // Three candidates, in one concurrent batch: two valid, one invalid with its errors.
     const candidates = h.repos.planningCandidates.listByRun(run.id)

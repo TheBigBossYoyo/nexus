@@ -78,3 +78,39 @@ to the user immediately, with the command to run by hand. It is not worked aroun
   2090 s, log `test-results/stress-v01.log`, no failure dumps). No unexplained pause occurred. The
   original once-in-35 `paused` symptom was therefore not reproduced after task worktree creation was
   serialized with merges; the cause is still inferred (git lock contention), not proven.
+- v0.2 integration wave 1 (dynamic graph, IPC, intelligence wiring) and wave 2 (consensus planning, model
+  routing, outcomes, Context Engine V2, dual review + arbiter, orchestration evidence for verifiers) landed.
+  `pnpm typecheck`, `pnpm lint` clean; `pnpm test` 65 files / 1243 tests pass; `pnpm test:e2e` 4/4 pass
+  with new v0.2 assertions (plan v2 from a proposal, plan inspector, routing decisions, context packs,
+  performance and intelligence views). 150-seed stress runs by both integration agents: 0 failures.
+- Started the 1,000-seed stress campaign on the v0.2 orchestrator and the real v0.2 acceptance mission
+  (consensus planning, dual review) against the dev build.
+- Independent read-only audit (four reviewers covering architecture + persistence, concurrency/scheduler,
+  security + Windows/Electron, test quality). No CRITICAL findings. HIGH: (1) approval-gated graph proposals
+  expire when the proposer's session ends (found by two reviewers independently); (2) agents can send
+  `user_instruction` / `review_finding` messages and so forge user text in another task's context; (3) the
+  new "Orchestration evidence" section inserts unsanitized agent text and calls it authoritative; (4) writing
+  proposals are rejected in every mode except BUILD; (5) no run-wide bound on proposal-created tasks.
+  MEDIUM: cross-agent dependency/priority edits without approval, cancelled task still merged, yielded task
+  relaunched with unmet prerequisites after pause/restart, stale yield marker, finalization racing a task
+  added mid-verification, ASK run re-planned after a pause during facts refresh, event-log scan per outcome,
+  inconsistent task kind for user-added tasks, agent decisions becoming unmarked persistent facts, quadratic
+  import regexes, renderer-supplied paths in `projects.open`, plus five test-quality gaps (demo arbiter regex
+  never matches; stress faults injected but not checked). One fix agent is working through all of them.
+- **Real v0.2 acceptance mission (dev build, consensus planning + dual review): run ended `paused`
+  (intervention); 4 of 5 planned tasks completed and merged, `report` failed after 3 repair cycles.**
+  Evidence: `docs/acceptance/v02-acceptance-2026-10-03T23-32-39-266Z.json`. 42 SDK sessions, about 16 min.
+  Exercised with real sessions: consensus planning (3 independent planners, all valid; critic with 9
+  findings; synthesizer; 5-task plan); 3 concurrent workers; dependencies (`table` after `config`, `report`
+  after `duration`, `csv`, `table`); dual review (reviewer + security reviewer concurrently) with a finding
+  arbiter (table: 1 accepted, 1 rejected; report: 3 accepted); 4 `changes_requested` reviews leading to real
+  repairs (e.g. a prototype-pollution finding in `buildReport`); routing decisions persisted for every
+  session with reasons; context packs persisted with repository facts and routed messages; 5 task outcomes
+  recorded (first-pass rate 3/5 for the fast-tier worker model); controlled restart and recovery; 12
+  persisted messages; user checkout untouched. `npm test` exit 0 on merged work.
+  Not exercised: a dynamic graph proposal (the consensus plan already contained the `config` prerequisite,
+  so no agent needed to propose it); only graph revision v1 exists.
+  **Defect found (second-order):** the new orchestration evidence listed only messages sent BY a task. The
+  `report` verifier was asked whether the upstream tasks had messaged `report`, saw no such record, and
+  failed the criterion twice although three `handoff` messages to `report` were persisted. Sent to the fix
+  agent as H6: evidence must include messages received by the task.

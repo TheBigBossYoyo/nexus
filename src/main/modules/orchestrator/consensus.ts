@@ -53,6 +53,10 @@ export class ConsensusPlanner {
     const { repos, bus } = this.core.deps
     const { run, control } = input
 
+    // A new round (replan, or a rerun after a halt) replaces the previous round's records.
+    for (const old of repos.planningCandidates.listByRun(run.id)) repos.planningCandidates.delete(old.id)
+    for (const old of repos.planningCritiques.listByRun(run.id)) repos.planningCritiques.delete(old.id)
+
     const candidates = await this.runCandidates(input)
     if (candidates === 'halt') return { status: 'halt' }
     const valid = candidates.filter((c) => c.valid && c.plan !== null)

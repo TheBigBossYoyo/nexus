@@ -504,7 +504,8 @@ export async function analyzeRepository(input: AnalyzeInput): Promise<AnalyzedFa
     batch.forEach((f, idx) => {
       const text = texts[idx]
       const family = familyOf(f.path)
-      if (text === null || text === undefined || family === null) return
+      // The deadline is checked per file: one hostile file must not hold a whole batch past it.
+      if (text === null || text === undefined || family === null || Date.now() >= deadline) return
       const targets = new Set<string>()
       for (const spec of extractImports(family, text)) {
         const t = resolveImport(f.path, spec)
