@@ -1,6 +1,6 @@
 // Validates a packaged or installed NEXUS build without using Claude:
 //
-//   node scripts/packaged-validation.mjs <path-to-NEXUS.exe> <dir-with-v0.1-nexus.db> <dir-with-v0.2.0-nexus.db>
+//   node scripts/packaged-validation.mjs <path-to-NEXUS.exe> <dir-with-an-older-nexus.db> [<dir> ...]
 //
 // For each database directory it works on a COPY: launches the build on it, checks the schema upgrade,
 // that the old run is still readable, Claude auth status, opening a project and the Overnight Mode UI.
@@ -20,6 +20,8 @@ if (!exe || !existsSync(exe) || sources.length === 0) {
   process.exit(2)
 }
 const root = resolve(import.meta.dirname, '..')
+const VERSION = require(join(root, 'package.json')).version
+const LATEST_SCHEMA = [1, 2, 3, 4]
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 function schemaOf(dbPath) {
@@ -67,7 +69,7 @@ for (const source of sources) {
     }
     const info = await call('app.info')
     entry.app = { version: info.version, isPackaged: info.isPackaged, sdkVersion: info.sdkVersion, gitVersion: info.gitVersion, dataDir: info.dataDir }
-    entry.checks['launches as packaged 0.2.1'] = info.isPackaged === true && info.version === '0.2.1'
+    entry.checks[`launches as packaged ${VERSION}`] = info.isPackaged === true && info.version === VERSION
 
     const runs = await call('runs.list', {})
     const old = runs[0] ? await call('runs.get', { runId: runs[0].id }) : null
@@ -83,6 +85,38 @@ for (const source of sources) {
     const project = await call('projects.open', { path: repo })
     entry.checks['a project opens'] = project.profile?.isGitRepo === true
 
+    // 0.3: the redesigned pages render in the packaged renderer, and the 0.3 services answer.
+    await page.waitForSelector('[data-testid="home-view"]', { timeout: 20_000 })
+    const shot = (name) => page.screenshot({ path: join(root, 'test-results', 'screenshots', `packaged-${evidence.databases.length}-${name}.png`) }).catch(() => undefined)
+    mkdirSync(join(root, 'test-results', 'screenshots'), { recursive: true })
+    await shot('home')
+    const pages = {}
+    for (const view of ['run', 'arena', 'policy', 'usage', 'overnight', 'settings', 'home']) {
+      await page.click(`[data-testid="nav-${view}"]`)
+      pages[view] = await page.waitForSelector(`[data-testid="view-${view}"]`, { timeout: 15_000 }).then(() => true, () => false)
+      await page.waitForTimeout(400)
+      await shot(view)
+    }
+    entry.pages = pages
+    entry.checks['Home, Missions, Arena, Policy, Usage, Overnight and Settings render'] = Object.values(pages).every(Boolean)
+    if (old) {
+      await page.click('[data-testid="nav-run"]')
+      await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
+      entry.checks['the old run opens in Mission Control'] = await page.waitForSelector('[data-testid="run-view"]', { timeout: 15_000 }).then(() => true, () => false)
+      await page.waitForTimeout(600)
+      await shot('old-run')
+    }
+    const cases = await call('arena.cases')
+    const arenaStatus = await call('arena.status')
+    entry.arena = { builtinCases: cases.length, node: arenaStatus }
+    entry.checks['the 12 built-in Arena cases are found next to the packaged app'] = cases.length === 12 && cases.every((c) => c.case.origin === 'builtin' && c.version.trusted)
+    const policy = await call('policy.overview')
+    entry.checks['the default policy is active (version 1, no preference)'] = policy.active.version === 1 && policy.active.preferences.length === 0
+    const usage = await call('usage.refresh')
+    entry.usage = { status: usage.status, accountMode: usage.accountMode, windows: usage.windows.map((w) => ({ limitType: w.limitType, utilizationPercent: w.utilizationPercent, confidence: w.confidence })), usageReportSupported: usage.usageReportSupported }
+    entry.checks['usage overview answers with provenance on every figure'] = typeof usage.status === 'string' && ['EXACT', 'UNKNOWN'].includes(usage.subscriptionUtilizationPercent.confidence)
+    entry.checks['an old run has no strategy and no outcome'] = old !== null && old.run.config.strategy === undefined && (await call('policy.run', { runId: old.run.id })).outcome === null
+
     // The Overnight Mode UI in the packaged renderer.
     await page.click('[data-testid="nav-projects"]')
     await page.click(`text=${project.name}`).catch(() => undefined)
@@ -93,8 +127,7 @@ for (const source of sources) {
     const authorized = await page.isChecked('[data-testid="overnight-authorize"]')
     const force = await page.isChecked('[data-testid="overnight-force-close"]')
     entry.checks['Overnight panel renders; start is disabled until authorized; force close is off'] = startDisabled && !authorized && !force
-    mkdirSync(join(root, 'test-results', 'screenshots'), { recursive: true })
-    await page.screenshot({ path: join(root, 'test-results', 'screenshots', `packaged-overnight-${evidence.databases.length}.png`) }).catch(() => undefined)
+    await shot('overnight-composer')
     // A packaged build must refuse the test-only switches.
     entry.checks['no fake power log is written by a packaged build'] = !existsSync(join(dataDir, 'fake-power.log'))
   } catch (e) {
@@ -104,7 +137,9 @@ for (const source of sources) {
     await app.close().catch(() => undefined)
   }
   entry.after = schemaOf(join(dataDir, 'nexus.db'))
-  entry.checks['schema upgraded to version 3'] = JSON.stringify(entry.after.versions) === '[1,2,3]'
+  entry.checks['schema upgraded to version 4'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
+  const oldVersion = Math.max(...entry.before.versions)
+  entry.checks['the database as the older release left it was kept as a .bak copy'] = oldVersion >= LATEST_SCHEMA.at(-1) || existsSync(join(dataDir, `nexus.db.v${oldVersion}.bak`))
   entry.checks['no row was lost in the upgrade'] = entry.after.runs === entry.before.runs && entry.after.tasks === entry.before.tasks && entry.after.agents === entry.before.agents && entry.after.events >= entry.before.events
   for (const [name, pass] of Object.entries(entry.checks)) {
     log(pass ? 'PASS' : 'FAIL', name)
