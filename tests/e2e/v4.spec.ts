@@ -131,7 +131,9 @@ test.describe('NEXUS 0.4 programs', () => {
       const program = await invoke(page, 'program.create', { projectId, name: 'Approved program', goal: 'Build the modules and harden them.', preset: 'balanced', start: true })
       const waiting = await waitForProgram(page, program.id, (d) => d.program.state === 'PAUSED' && d.program.pauseReason === 'approval')
       expect(waiting.roadmap).toHaveLength(0)
-      expect(await invoke(page, 'runs.list', {})).toHaveLength(1) // the planner session only
+      // The planner session is the program's own: it is not in the user's list of missions.
+      expect(await invoke(page, 'runs.list', {})).toHaveLength(0)
+      expect((await invoke(page, 'runs.list', { includeInternal: true })).map((r) => r.mode)).toEqual(['ask'])
       await page.getByTestId('nav-programs').click()
       await page.getByTestId(`program-row-${program.id}`).click()
       await expect(page.getByTestId('program-plan-approval')).toBeVisible()
@@ -195,7 +197,8 @@ test.describe('NEXUS 0.4 programs', () => {
       const backlog = await invoke(page, 'backlog.list', { projectId })
       expect(backlog.map((b) => [b.title, b.status, b.provenance.source, b.programId])).toEqual([['The entry point has no test', 'proposed', 'background_job', null]])
       // Read-only: the only run is an `ask` run and the repository is as it was.
-      expect((await invoke(page, 'runs.list', {})).map((r) => r.mode)).toEqual(['ask'])
+      expect((await invoke(page, 'runs.list', { includeInternal: true })).map((r) => r.mode)).toEqual(['ask'])
+      expect(await invoke(page, 'runs.list', {})).toEqual([])
       expect(git(repo, 'status', '--porcelain')).toBe('')
       await expect(page.getByTestId('background-jobs')).toContainText(/completed/i)
       await screenshot(page, 'v4-background')

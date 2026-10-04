@@ -9,6 +9,22 @@ import { StrategySchema } from './v3'
  * against these schemas before anything is stored.
  */
 
+/**
+ * The first line of the prompt of each kind of program reasoning session. The marker records the session's
+ * purpose with its run, and lets lists of missions leave these internal read-only runs out.
+ */
+export const REASONING_MARKERS = {
+  plan: 'NEXUS PROGRAM PLANNER',
+  replan: 'NEXUS PROGRAM REPLANNER',
+  verify: 'NEXUS MILESTONE VERIFIER',
+  background: 'NEXUS BACKGROUND ANALYSIS',
+} as const
+
+/** True for a read-only run NEXUS started for itself (planning, verifying, reassessing, background analysis). */
+export function isReasoningRun(run: { mode: string; prompt: string }): boolean {
+  return run.mode === 'ask' && Object.values(REASONING_MARKERS).some((marker) => run.prompt.startsWith(marker))
+}
+
 // ───────────────────────────── states ─────────────────────────────
 
 export const PROGRAM_STATES = ['DRAFT', 'PLANNING', 'ACTIVE', 'PAUSED', 'WAITING_FOR_QUOTA', 'BLOCKED', 'REPLANNING', 'COMPLETED', 'CANCELLED', 'FAILED'] as const

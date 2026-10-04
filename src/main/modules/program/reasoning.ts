@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import {
+  REASONING_MARKERS,
   MilestoneJudgmentSchema,
   ProgramPlanSchema,
   ReplanSchema,
@@ -24,12 +25,7 @@ import {
  * is a read-only run whose prompt starts with a marker line, so the session's purpose is recorded with it.
  */
 
-export const REASONING_MARKERS = {
-  plan: 'NEXUS PROGRAM PLANNER',
-  replan: 'NEXUS PROGRAM REPLANNER',
-  verify: 'NEXUS MILESTONE VERIFIER',
-  background: 'NEXUS BACKGROUND ANALYSIS',
-} as const
+export { REASONING_MARKERS }
 
 /**
  * Text that came from a repository, an agent or a user is quoted as data. Every `<` in it is escaped, so

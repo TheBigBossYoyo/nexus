@@ -151,7 +151,7 @@ try {
   detail = await call('program.get', { programId: program.id })
   const jobs = await call('background.jobs', { projectId: project.id })
   const projectBacklog = await call('backlog.list', { projectId: project.id })
-  const runs = await call('runs.list', { projectId: project.id })
+  const runs = await call('runs.list', { projectId: project.id, includeInternal: true })
   const usage = await call('usage.overview').catch(() => null)
   const p = detail.program
   const completed = detail.roadmap.filter((m) => m.state === 'COMPLETED')

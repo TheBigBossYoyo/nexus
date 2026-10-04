@@ -1,3 +1,4 @@
+import { REASONING_MARKERS } from '@shared/program'
 import {
   TERMINAL_RUN_STATES,
   type Project,
@@ -91,12 +92,16 @@ export class RunRepository extends Table<Run> {
     return this.query('ORDER BY created_at DESC, rowid DESC LIMIT ?', [Math.min(Math.max(1, limit), 500)])
   }
 
-  /** The newest runs of the user's own projects (runs of Arena trials are left out in SQL, before the limit). */
+  /**
+   * The newest runs of the user's own projects. Runs of Arena trials and the read-only sessions NEXUS runs for
+   * itself (program planning, verification, reassessment, background analysis) are left out in SQL, before the limit.
+   */
   listRecentUser(limit = 50): Run[] {
     return this.query(
       `WHERE id NOT IN (SELECT run_id FROM arena_trials WHERE run_id IS NOT NULL)
+         AND NOT (mode = 'ask' AND prompt LIKE 'NEXUS %' AND (${Object.values(REASONING_MARKERS).map(() => 'prompt LIKE ?').join(' OR ')}))
        ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-      [Math.min(Math.max(1, limit), 500)],
+      [...Object.values(REASONING_MARKERS).map((marker) => `${marker}%`), Math.min(Math.max(1, limit), 500)],
     )
   }
 

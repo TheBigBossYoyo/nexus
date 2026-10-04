@@ -21,6 +21,7 @@ import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
 import { aggregatePerformance } from '@main/modules/routing'
 import { ProjectService, QueryService } from './services'
+import { isReasoningRun } from '@shared/program'
 import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 import { unavailableV4Handlers, type V4Handlers } from './v4-handlers'
 
@@ -132,8 +133,11 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       return null
     },
 
-    'runs.list': ({ projectId }) =>
-      projectId ? repos.runs.listByProject(projectId) : repos.projects.list().flatMap((p) => repos.runs.listByProject(p.id)),
+    'runs.list': ({ projectId, includeInternal }) => {
+      const runs = projectId ? repos.runs.listByProject(projectId) : repos.projects.list().flatMap((p) => repos.runs.listByProject(p.id))
+      // A program's planning, verification and reassessment sessions are its own; they are not missions of the user.
+      return includeInternal ? runs : runs.filter((r) => !isReasoningRun(r))
+    },
     'runs.get': ({ runId }) => ({
       run: repos.runs.require(runId),
       tasks: repos.tasks.listByRun(runId),

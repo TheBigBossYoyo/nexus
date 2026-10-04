@@ -192,7 +192,8 @@ export const ipcInputs = {
     .strict(),
   'projects.remove': z.object({ projectId: Id }).strict(),
 
-  'runs.list': z.object({ projectId: Id.optional() }).strict(),
+  /** Missions as the user sees them. `includeInternal` adds the read-only sessions NEXUS ran for itself (0.4). */
+  'runs.list': z.object({ projectId: Id.optional(), includeInternal: z.boolean().optional() }).strict(),
   'runs.get': z.object({ runId: Id }).strict(),
   'runs.create': z
     .object({
