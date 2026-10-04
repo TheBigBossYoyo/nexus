@@ -296,7 +296,9 @@ function arenaHeadline(arena: ArenaService, campaignId: string, counts: Record<s
   if (finished === 0) return null
   const rows = arena.campaignDetail(campaignId).comparison.filter((r) => r.n > 0)
   if (rows.length === 0) return null
-  const best = [...rows].sort((a, b) => (b.passRate ?? 0) - (a.passRate ?? 0) || b.n - a.n)[0]!
   const n = rows.reduce((sum, r) => sum + r.n, 0)
-  return `${best.strategy} passed ${best.passed} of ${best.n} (n=${n} trials, ${best.label.toLowerCase()} evidence)`
+  // Counts for every strategy, in a fixed order. No strategy is named "best": that needs evidence the
+  // Arena page shows with its intervals, not a one-line summary.
+  const counts = [...rows].sort((a, b) => a.strategy.localeCompare(b.strategy)).map((r) => `${r.strategy} ${r.passed}/${r.n}`)
+  return `${counts.join(' · ')} passed (n=${n} trials)`
 }

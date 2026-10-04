@@ -61,9 +61,16 @@ export function intervalsOverlap(a: Interval | null, b: Interval | null): boolea
   return a.low <= b.high && b.low <= a.high
 }
 
-/** Highest pass rate first, then more observations; unmeasured rates last. A cheaper strategy never outranks a more correct one. */
+/**
+ * Ordered by the lower bound of the pass-rate interval, so one lucky trial (1 of 1) does not sit above a
+ * well-measured strategy (18 of 20); then by pass rate, then by observations. Unmeasured rows last. Cost is
+ * never part of the order: a cheaper strategy never outranks a more correct one.
+ */
 export function sortComparison(rows: readonly StrategyComparisonRow[]): StrategyComparisonRow[] {
   return [...rows].sort((a, b) => {
+    const al = a.passInterval?.low ?? -1
+    const bl = b.passInterval?.low ?? -1
+    if (al !== bl) return bl - al
     const ar = a.passRate ?? -1
     const br = b.passRate ?? -1
     if (ar !== br) return br - ar

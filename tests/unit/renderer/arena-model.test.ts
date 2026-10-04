@@ -45,6 +45,11 @@ const row = (
 })
 
 describe('sortComparison', () => {
+  it('does not put one lucky trial above a well-measured strategy', () => {
+    const lucky = row('SWARM', 1, 1, { passInterval: { low: 0.21, high: 1 } })
+    const measured = row('BUILD', 18, 20, { passInterval: { low: 0.7, high: 0.97 } })
+    expect(sortComparison([lucky, measured]).map((r) => r.strategy)).toEqual(['BUILD', 'SWARM'])
+  })
   it('ranks by correctness, never by cost', () => {
     const cheapButWorse = row('SINGLE', 3, 9, {
       meanObservedTokens: 1_000,
