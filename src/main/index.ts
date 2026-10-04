@@ -1,12 +1,14 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, safeStorage, shell } from 'electron'
 import type { PushMessage } from '@shared/events'
 import { IPC_INVOKE_CHANNEL, IPC_PUSH_CHANNEL, type AppInfo } from '@shared/ipc'
 import { errorMessage } from '@shared/result'
+import { ArenaService } from './modules/arena'
 import { ClaudeSdkRuntime } from './modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from './modules/agent-runtime/demo-script'
 import { FakeAgentRuntime } from './modules/agent-runtime/fake-runtime'
@@ -15,11 +17,15 @@ import type { AgentRuntime } from './modules/agent-runtime/types'
 import { EventBus } from './modules/events'
 import { GitService, WorktreeManager } from './modules/git'
 import { createIpcHandlers, dispatchIpc } from './modules/ipc/handlers'
+import { ProjectService } from './modules/ipc/services'
+import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { Orchestrator } from './modules/orchestrator'
 import { OvernightSupervisor } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
+import { attachOutcomeRecording, PolicyService } from './modules/policy'
 import { FakePowerController, WindowsPowerController, type PowerController } from './modules/power'
+import { QuotaRecoveryController, RuntimeAvailabilityProbe, UsageIntelligenceService } from './modules/usage'
 import { OvernightTray } from './tray'
 
 const require = createRequire(import.meta.url)
@@ -54,7 +60,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     ...(offscreen ? { x: -32000, y: -32000, skipTaskbar: true, focusable: false } : {}),
-    backgroundColor: '#0b0d10',
+    backgroundColor: '#f6f7f9',
     title: 'NEXUS',
     autoHideMenuBar: true,
     webPreferences: {
@@ -173,6 +179,23 @@ async function bootstrap(): Promise<void> {
         logger: settings.advanced.debugSdk ? (line) => console.error(`[claude] ${line}`) : undefined,
       })
 
+  const logger = (line: string): void => console.error(`[nexus] ${line}`)
+
+  // Usage intelligence observes what the runtime reports (limits, resets, per-session usage) and is the
+  // gate every new Claude session passes. It reads nothing but the Agent SDK's own events and calls.
+  const usage = new UsageIntelligenceService({ repos, bus, runtime, push, logger })
+  const probe = new RuntimeAvailabilityProbe({ runtime, settings: () => repos.settings.get() })
+  // The policy engine decides the strategy of ADAPTIVE runs from stored evidence and records every
+  // mission's outcome. It never changes the active policy by itself.
+  const policy = new PolicyService({
+    repos,
+    nexusVersion: app.getVersion(),
+    usage: { status: () => usage.status(), recentLimitWithin: (ms) => usage.recentLimitWithin(ms) },
+    push,
+  })
+  policy.ensureDefault()
+  attachOutcomeRecording(bus, policy)
+
   const orchestrator = new Orchestrator({
     repos,
     bus,
@@ -180,10 +203,38 @@ async function bootstrap(): Promise<void> {
     git,
     worktrees: new WorktreeManager(git, worktreesDir),
     push,
-    logger: (line) => console.error(`[nexus] ${line}`),
+    logger,
+    strategies: policy,
   })
+  orchestrator.setDispatchGate(usage)
   // Runs that were active when the app last stopped are paused and offered for recovery in the UI.
   orchestrator.recoverOnStartup()
+
+  // Quota recovery: a run paused for a usage limit is checkpointed, waited on and resumed without anyone
+  // clicking. Timing overrides exist for automated tests only and cannot be set in a packaged build.
+  const testNumber = (name: string): number | undefined => {
+    const value = !app.isPackaged ? Number(process.env[name] ?? '') : NaN
+    return Number.isFinite(value) && value > 0 ? value : undefined
+  }
+  const usageTick = testNumber('NEXUS_USAGE_TICK_MS')
+  const resumeDelay = testNumber('NEXUS_USAGE_RESUME_DELAY_S')
+  const probeSeconds = testNumber('NEXUS_USAGE_PROBE_S')
+  const recovery = new QuotaRecoveryController({
+    repos,
+    bus,
+    usage,
+    probe,
+    orchestrator,
+    push,
+    isOvernightRun: (runId) => repos.overnight.getByRun(runId) !== null,
+    ...(usageTick !== undefined && usageTick >= 100 ? { tickIntervalMs: usageTick } : {}),
+    overrides: {
+      ...(resumeDelay !== undefined ? { resumeDelaySeconds: resumeDelay } : {}),
+      ...(probeSeconds !== undefined ? { probeSeconds } : {}),
+    },
+    logger,
+  })
+  recovery.recover()
 
   // Overnight Mode. The power controller is created here and handed to the supervisor only: no IPC
   // handler, agent tool or MCP server ever holds it. Tests (and any run on the scripted runtime) get
@@ -215,6 +266,7 @@ async function bootstrap(): Promise<void> {
         flush: () => void db.pragma('wal_checkpoint(TRUNCATE)'),
         reportsDir: join(dataDir, 'reports'),
         sealer: createSealer(dataDir),
+        probe,
         ...(Number.isFinite(testTick) && testTick >= 100 ? { tickIntervalMs: testTick } : {}),
         logger: (line) => console.error(`[nexus] ${line}`),
       })
@@ -341,6 +393,40 @@ async function bootstrap(): Promise<void> {
   }
 
   const sdkVersion = readSdkVersion()
+
+  // Arena: controlled trials of the same task under different strategies. Each trial is an ordinary run
+  // on its own throwaway repository; the hidden evaluators stay in the cases directory, outside every
+  // path an agent may read. Built-in cases ship next to the app (extraResources) when packaged.
+  const arena = new ArenaService({
+    repos,
+    bus,
+    git,
+    dataDir,
+    casesDir: app.isPackaged ? join(process.resourcesPath, 'arena', 'cases') : join(app.getAppPath(), 'arena', 'cases'),
+    host: orchestrator,
+    projects: new ProjectService(repos, git, logger),
+    usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
+    policy: { activeSnapshotId: () => policy.active().id },
+    push,
+    nexusVersion: app.getVersion(),
+    environment: async () => ({
+      platform: `${process.platform} ${process.arch}`,
+      osRelease: release(),
+      nodeVersion: process.versions.node,
+      sdkVersion,
+      gitVersion: await git.version().catch(() => null),
+      modelTiers: { ...repos.settings.get().models.tiers },
+    }),
+    logger,
+  })
+  try {
+    arena.syncBuiltinCases()
+  } catch (e) {
+    console.error(`[nexus] arena cases: ${errorMessage(e)}`)
+  }
+  void Promise.resolve()
+    .then(() => arena.recover())
+    .catch((e: unknown) => console.error(`[nexus] arena recovery: ${errorMessage(e)}`))
   const appInfo = async (): Promise<AppInfo> => ({
     version: app.getVersion(),
     dataDir,
@@ -375,6 +461,21 @@ async function bootstrap(): Promise<void> {
     openDataDir: async () => {
       await shell.openPath(dataDir)
     },
+    v3: createV3Handlers({
+      repos,
+      usage,
+      recovery,
+      arena,
+      policy,
+      ...(overnight ? { overnight } : {}),
+      pickDirectory: async () => {
+        const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        const options = { title: 'Import Arena case', properties: ['openDirectory' as const] }
+        const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+        return result.canceled ? null : (result.filePaths[0] ?? null)
+      },
+      activeAgentCount: () => orchestrator.activeAgentCount(),
+    }),
   })
 
   ipcMain.handle(IPC_INVOKE_CHANNEL, (event, channel: unknown, input: unknown) => {
@@ -415,6 +516,9 @@ async function bootstrap(): Promise<void> {
     void settled
       .then(() => {
         overnight?.dispose()
+        arena.dispose()
+        recovery.dispose()
+        usage.dispose()
         return orchestrator.shutdown()
       })
       .catch((e: unknown) => console.error(`[nexus] shutdown: ${errorMessage(e)}`))

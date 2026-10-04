@@ -319,8 +319,14 @@ export class Orchestrator implements PipelineHost {
       }
     }
     const checks = project.profile?.commands ?? { build: null, test: null, lint: null, typecheck: null }
+    const overrides = { ...planOverrides(plan), ...input.overrides }
+    // In an Arena trial the caller's agent limit is a cap, not a setting: every strategy keeps its own
+    // parallelism below it, otherwise the cap would erase the difference between strategies.
+    if (input.arenaTrialId && input.overrides?.maxParallelAgents !== undefined) {
+      overrides.maxParallelAgents = Math.min(plan.maxParallelAgents, input.overrides.maxParallelAgents)
+    }
     const config = {
-      ...buildRunConfig(settings, input.preset, checks, project.respectProjectClaudeConfig, { ...planOverrides(plan), ...input.overrides }),
+      ...buildRunConfig(settings, input.preset, checks, project.respectProjectClaudeConfig, overrides),
       strategy: info,
     }
     bus.transaction(() => {

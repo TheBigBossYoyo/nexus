@@ -826,7 +826,7 @@ export class ArenaService {
     const limitMs = def.budgets.maxWallClockMinutes * this.minuteMs
     job.clock.start()
     const tick = (): void => {
-      if (job.stop) return
+      if (job.stop || this.disposed) return
       if (job.clock.elapsed() >= limitMs) {
         this.requestStop(job, 'timeout', `Trial exceeded the case wall-clock budget (${def.budgets.maxWallClockMinutes} min)`)
         return
@@ -857,6 +857,12 @@ export class ArenaService {
       }
       const check = (): void => {
         if (done) return
+        // The service was disposed (application quitting): the database may already be closed. The trial
+        // stays `running` in the database and is picked up by recover() on the next start.
+        if (this.disposed) {
+          if (poll) clearInterval(poll)
+          return
+        }
         if (job.stop) return finish({ kind: 'stopped', stop: job.stop.kind, detail: job.stop.detail })
         const run = this.repos.runs.get(job.runId ?? '')
         if (!run) return finish({ kind: 'missing' })
