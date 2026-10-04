@@ -41,6 +41,7 @@ describe('strategyChip', () => {
 const row = (over: Partial<EvidenceSummaryRow>): EvidenceSummaryRow => ({
   strategy: 'BUILD',
   arenaN: 0,
+  arenaCases: 0,
   arenaSuccesses: 0,
   missionN: 0,
   missionSuccesses: 0,

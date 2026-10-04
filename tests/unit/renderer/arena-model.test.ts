@@ -28,6 +28,8 @@ const row = (
 ): StrategyComparisonRow => ({
   strategy,
   n,
+  cases: 1,
+  excludedInfrastructure: 0,
   passed,
   passRate: n === 0 ? null : passed / n,
   passInterval:

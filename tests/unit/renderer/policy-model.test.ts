@@ -30,6 +30,7 @@ describe('policy text', () => {
   it('shows dashes for absent evidence and counts otherwise', () => {
     const base = {
       strategy: 'BUILD',
+      arenaCases: 0,
       effectiveN: 0,
       passRate: null,
       passInterval: null,
