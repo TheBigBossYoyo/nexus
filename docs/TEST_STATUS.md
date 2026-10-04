@@ -1,5 +1,44 @@
 # Test Status
 
+Factual status as of 2026-10-04 02:35 (+01:00), version 0.2.0. The section "v0.1 status (2026-10-03)" below
+is the earlier record, kept unchanged.
+
+## Automated (no Claude usage), final tree
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm lint` | pass |
+| `pnpm test:unit` | 38 files, 945 tests passed |
+| `pnpm test:integration` | 29 files, 322 tests passed (includes `tests/scenarios`) |
+| `pnpm test` | 67 files, 1267 tests passed |
+| `pnpm test:e2e` | 4 Playwright tests passed (run after the audit fixes; not re-run after the version bump, which changed only `package.json`) |
+| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 1000/1000 seeds passed on the final orchestrator code, 4488 s, no failure dumps |
+| `pnpm package` | produced `release/NEXUS-Setup-0.2.0.exe` (206,863,779 bytes) |
+
+Earlier the same night: 1000/1000 seeds on the v0.1 orchestrator (2090 s).
+
+## Manual, with the real Claude runtime (consumes usage)
+
+| Check | Result |
+|---|---|
+| Adversarial mission on the v0.1 packaged build | Ended paused. Exercised parallel workers, dependencies, messaging, restart recovery, 9 repairs. Exposed the verifier-evidence defect |
+| v0.2 acceptance mission 1 (before audit fixes) | Ended paused; 4/5 planned tasks merged. Exercised consensus planning, dual review with arbitration, review-rejection repairs, routing, context packs, outcomes, restart recovery |
+| v0.2 acceptance mission 2 (final code, dev build) | **Completed**: 11/11 tasks, 51 sessions; independent `node --test` on the integration worktree: 117 pass, 0 fail |
+| Packaged 0.2.0 launch (`release/win-unpacked/NEXUS.exe`) | Launched on a copy of a real v0.1 database: schema 1 → 2, old run readable, auth reported, project opened |
+
+Not exercised with the real runtime: dynamic graph proposals, session rotation, quota pause.
+Not performed: running the NSIS installer (see `docs/OVERNIGHT_BLOCKERS.md`).
+
+## Intermittent failures
+
+None observed during this run. The earlier once-in-35 `paused` symptom did not recur; its cause remains
+unproven (see `docs/OVERNIGHT_FINAL_REPORT.md`, "Flake Investigation").
+
+---
+
+# v0.1 status (2026-10-03)
+
 Factual status as of 2026-10-03, commit `4503709` plus the documentation commit that follows it.
 
 ## Automated (no Claude usage)

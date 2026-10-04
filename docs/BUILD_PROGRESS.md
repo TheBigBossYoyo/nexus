@@ -20,7 +20,23 @@ Factual log. Test and build status lives in TEST_STATUS.md.
 | 11 Hardening | Six-dimension review with adversarial verification; 19 confirmed findings fixed with regression tests |
 | 12 Acceptance | Real mission completed on the final installed build; evidence in `docs/acceptance/` |
 
-## Known failures and open items
+## v0.2 (2026-10-04)
+
+| Area | What exists |
+|---|---|
+| Dynamic graph | Validated proposals, approval policy, limits, yield/resume, persisted revisions |
+| Consensus planning | Three planners, critic, synthesizer, fallbacks |
+| Model routing | `routeModel` for every session, persisted decisions with reasons |
+| Performance | Task outcomes, aggregation with sample thresholds |
+| Repository intelligence | Facts with provenance and freshness, refresh on open and before planning |
+| Context Engine V2 | Persisted context packs with per-entry reasons |
+| Review V2 | Dual review, deduplication, finding arbiter |
+| UI | Plan inspector, revision diff, routing reasons, context tab, Performance and Intelligence views |
+| Validation | 1267 tests, 4 E2E, 1000-seed stress, audit with all findings fixed, a completed real mission, packaged 0.2.0 verified against a v0.1 database |
+
+Open items for v0.2 are in `docs/OVERNIGHT_BLOCKERS.md` and `docs/OVERNIGHT_FINAL_REPORT.md`.
+
+## Known failures and open items (v0.1 record)
 
 - One intermittent scenario failure has no established cause (TEST_STATUS.md, item 3).
 - `electron.exe` in `node_modules` was quarantined by antivirus and is not restored; E2E was last run

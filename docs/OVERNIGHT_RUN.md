@@ -35,14 +35,14 @@ to the user immediately, with the command to run by hand. It is not worked aroun
 
 | Phase | Status |
 |---|---|
-| v0.1 baseline validation | in progress |
-| Orchestrator stress campaign | pending |
-| Real adversarial mission (v0.1) | pending |
-| v0.2 design | pending |
-| v0.2 implementation | pending |
-| v0.2 validation | pending |
-| Independent review | pending |
-| Final packaging and report | pending |
+| v0.1 baseline validation | done |
+| Orchestrator stress campaign | done |
+| Real adversarial mission (v0.1) | done |
+| v0.2 design | done |
+| v0.2 implementation | done |
+| v0.2 validation | done |
+| Independent review | done |
+| Final packaging and report | done |
 
 ## Log
 
@@ -114,3 +114,13 @@ to the user immediately, with the command to run by hand. It is not worked aroun
   `report` verifier was asked whether the upstream tasks had messaged `report`, saw no such record, and
   failed the criterion twice although three `handoff` messages to `report` were persisted. Sent to the fix
   agent as H6: evidence must include messages received by the task.
+- Audit fixes landed (all high and medium findings, plus the real-mission finding H6): typecheck, lint
+  clean; 67 files / 1267 tests pass; E2E 4/4.
+- **Real v0.2 mission 2 on the fixed build: completed**, 11/11 tasks, 51 sessions; independent
+  `node --test` on the integration worktree 117/117. Evidence
+  `docs/acceptance/v02-acceptance-2026-10-04T00-36-19-550Z.json`. No dynamic proposal occurred.
+- Version set to 0.2.0; `pnpm package` produced `release/NEXUS-Setup-0.2.0.exe` (206,863,779 bytes,
+  SHA-256 f604bcf1fff4d6c0893c6cd747a3538960d2d3d0d11d9de072b3064f5bc4df5b). The unpacked packaged build
+  launched on a copy of a real v0.1 database and migrated it (schema versions 1, 2).
+- **Final stress campaign from zero on the fixed v0.2 code: 1000/1000 seeds passed** (4488 s).
+- 02:35 Final report written. Shutdown not performed (blocked by the permission system).
