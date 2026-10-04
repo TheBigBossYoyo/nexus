@@ -1,5 +1,22 @@
 import { z } from 'zod'
 import {
+  BACKLOG_STATUSES,
+  BackgroundJobKindSchema,
+  BackgroundSettingsSchema,
+  PROGRAM_PRESETS,
+  ProgramPolicySchema,
+  ProgramScheduleSchema,
+  type BackgroundJob,
+  type BackgroundSettings,
+  type BacklogItem,
+  type ExpertiseProfile,
+  type Program,
+  type ProgramDetail,
+  type ProgramPolicy,
+  type ProgramPreset,
+  type ProgramSummary,
+} from './program'
+import {
   AgentRoleSchema,
   ComplexitySchema,
   PresetSchema,
@@ -321,6 +338,11 @@ export const ipcInputs = {
       confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT),
     })
     .strict(),
+  /**
+   * v0.4: a program under the overnight supervisor for one autonomous work window. The policy's duration is
+   * the window; at its end the program is paused in a safe state before the end action.
+   */
+  'overnight.startProgram': z.object({ programId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
   'overnight.get': z.object({ runId: Id }).strict(),
   'overnight.active': Empty,
   'overnight.cancelPower': z.object({ runId: Id }).strict(),
@@ -415,6 +437,43 @@ export const ipcInputs = {
   'speculative.list': z.object({ runId: Id }).strict(),
   'home.summary': Empty,
   'activity.recent': z.object({ limit: z.number().int().min(1).max(500).optional(), beforeSeq: z.number().int().min(1).optional() }).strict(),
+
+  // v0.4: programs, backlog, background engineering, expertise
+  'program.list': z.object({ projectId: Id.optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'program.get': z.object({ programId: Id }).strict(),
+  'program.presets': Empty,
+  'program.create': z
+    .object({
+      projectId: Id,
+      name: z.string().trim().min(1).max(120),
+      goal: z.string().trim().min(1).max(8000),
+      successCriteria: z.array(z.string().trim().min(1).max(400)).max(10).optional(),
+      constraints: z.array(z.string().trim().min(1).max(400)).max(10).optional(),
+      preset: z.enum(PROGRAM_PRESETS),
+      /** A custom policy; when absent the preset is used as it is. */
+      policy: ProgramPolicySchema.optional(),
+      schedule: ProgramScheduleSchema.nullable().optional(),
+      start: z.boolean().optional(),
+    })
+    .strict(),
+  'program.start': z.object({ programId: Id }).strict(),
+  'program.pause': z.object({ programId: Id }).strict(),
+  'program.resume': z.object({ programId: Id }).strict(),
+  'program.cancel': z.object({ programId: Id }).strict(),
+  'program.decidePlan': z.object({ programId: Id, revisionId: Id, accept: z.boolean() }).strict(),
+  /** The user asks for a reassessment of the remaining plan. The note is data for the planner, never a command. */
+  'program.replan': z.object({ programId: Id, note: z.string().trim().min(1).max(2000) }).strict(),
+  'backlog.list': z
+    .object({ projectId: Id.optional(), programId: Id.optional(), statuses: z.array(z.enum(BACKLOG_STATUSES)).max(6).optional(), limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() })
+    .strict(),
+  /** A person changes the status of a backlog item. Nothing in the backlog becomes work by itself. */
+  'backlog.setStatus': z.object({ itemId: Id, status: z.enum(BACKLOG_STATUSES) }).strict(),
+  'background.settings': Empty,
+  'background.setSettings': z.object({ settings: BackgroundSettingsSchema }).strict(),
+  'background.jobs': z.object({ projectId: Id }).strict(),
+  'background.start': z.object({ projectId: Id, kind: BackgroundJobKindSchema }).strict(),
+  'background.cancel': z.object({ jobId: Id }).strict(),
+  'expertise.list': z.object({ projectId: Id }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -483,6 +542,25 @@ export interface IpcOutputs {
   'context.packs': ContextPack[]
   'overnight.start': { run: Run; overnight: OvernightStatus }
   'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
+  'overnight.startProgram': { programId: string; overnight: OvernightStatus }
+  'program.list': { programs: ProgramSummary[]; total: number }
+  'program.get': ProgramDetail
+  'program.presets': Record<ProgramPreset, ProgramPolicy>
+  'program.create': Program
+  'program.start': Program
+  'program.pause': Program
+  'program.resume': Program
+  'program.cancel': Program
+  'program.decidePlan': Program
+  'program.replan': Program
+  'backlog.list': BacklogItem[]
+  'backlog.setStatus': BacklogItem
+  'background.settings': BackgroundSettings
+  'background.setSettings': BackgroundSettings
+  'background.jobs': BackgroundJob[]
+  'background.start': BackgroundJob
+  'background.cancel': BackgroundJob
+  'expertise.list': ExpertiseProfile[]
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]

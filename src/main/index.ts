@@ -19,11 +19,13 @@ import { GitService, WorktreeManager } from './modules/git'
 import { createIpcHandlers, dispatchIpc } from './modules/ipc/handlers'
 import { ProjectService } from './modules/ipc/services'
 import { createV3Handlers } from './modules/ipc/v3-handlers'
+import { createV4Handlers } from './modules/ipc/v4-handlers'
 import { Orchestrator } from './modules/orchestrator'
-import { ArenaCampaignWorkload, OvernightSupervisor } from './modules/overnight'
+import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from './modules/policy'
+import { BackgroundEngineering, ProgramEngine } from './modules/program'
 import { FakePowerController, WindowsPowerController, type PowerController } from './modules/power'
 import { QuotaRecoveryController, RuntimeAvailabilityProbe, UsageIntelligenceService } from './modules/usage'
 import { OvernightTray } from './tray'
@@ -260,6 +262,7 @@ async function bootstrap(): Promise<void> {
   let recoverOvernight: () => void = () => undefined
   /** Pause and resume of the live overnight workload from the tray, when it is an Arena campaign. */
   let campaignControl: { pause(id: string): unknown; resume(id: string): unknown } | null = null
+  let programControl: { pause(id: string): Promise<unknown>; resume(id: string): Promise<unknown> } | null = null
   const overnight = power
     ? new OvernightSupervisor({
         repos,
@@ -303,18 +306,21 @@ async function bootstrap(): Promise<void> {
         const status = current()
         const run = status ? repos.runs.get(status.runId) : null
         const campaign = status?.workloadType === 'arena_campaign' ? repos.arenaCampaigns.get(status.runId) : null
+        const program = status?.workloadType === 'program' ? repos.programs.get(status.runId) : null
         return {
           overnight: status,
-          projectName: campaign ? campaign.name : (run && repos.projects.get(run.projectId)?.name) || 'project',
-          runState: campaign ? campaign.state : (run?.state ?? null),
-          activeAgents: campaign ? orchestrator.activeAgentCount() : status ? repos.agents.listActive(status.runId).length : 0,
+          projectName: program ? program.name : campaign ? campaign.name : (run && repos.projects.get(run.projectId)?.name) || 'project',
+          runState: program ? (program.state === 'PAUSED' || program.state === 'BLOCKED' ? 'paused' : program.state) : campaign ? campaign.state : (run?.state ?? null),
+          activeAgents: campaign || program ? orchestrator.activeAgentCount() : status ? repos.agents.listActive(status.runId).length : 0,
           time: (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }
       },
       (action, runId) => {
         const report = (e: unknown): void => console.error(`[nexus] tray ${action}: ${errorMessage(e)}`)
         if (action === 'open') showWindow()
-        else if (repos.overnight.getByRun(runId)?.workloadType === 'arena_campaign' && (action === 'pause' || action === 'resume')) {
+        else if (repos.overnight.getByRun(runId)?.workloadType === 'program' && (action === 'pause' || action === 'resume')) {
+          void (action === 'pause' ? programControl?.pause(runId) : programControl?.resume(runId))?.catch(report)
+        } else if (repos.overnight.getByRun(runId)?.workloadType === 'arena_campaign' && (action === 'pause' || action === 'resume')) {
           try {
             if (action === 'pause') campaignControl?.pause(runId)
             else campaignControl?.resume(runId)
@@ -451,9 +457,42 @@ async function bootstrap(): Promise<void> {
     (id) => new ArenaCampaignWorkload(id, { repos, host: arena, quotaResetsAt: () => usage.machineState().resetAt, now: () => Date.now(), log: logger }),
     arena,
   )
+  // Programs: long-horizon goals pursued across milestones. The engine owns the state; missions and the
+  // reasoning sessions (plan, verify, reassess) are ordinary runs of the orchestrator.
+  const programs = new ProgramEngine({
+    repos,
+    bus,
+    git,
+    host: orchestrator,
+    usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
+    evidence: () => {
+      const evidence = policy.overview().evidence
+      return `Recorded evidence: ${evidence.arenaTrials} Arena trial(s), ${evidence.missions} mission outcome(s). Active policy version ${policy.active().version}.`
+    },
+    push,
+    logger,
+  })
+  // Background engineering is off until the user turns it on, and only ever proposes.
+  const backgroundJobs = new BackgroundEngineering({
+    repos,
+    bus,
+    host: orchestrator,
+    addBacklog: (projectId, programId, proposals, provenance) => programs.addBacklog(projectId, programId, proposals, provenance),
+    repositoryFacts: (projectId) => programs.repositoryFacts(projectId),
+    push,
+    logger,
+  })
+  programControl = programs
+  // A program can be an overnight workload for one autonomous work window.
+  overnight?.registerWorkload('program', (id) => new ProgramWorkload(id, { host: programs, get: (programId) => repos.programs.get(programId), quotaResetsAt: () => usage.machineState().resetAt }))
   void Promise.resolve()
     .then(() => arena.recover())
     .catch((e: unknown) => console.error(`[nexus] arena recovery: ${errorMessage(e)}`))
+    .then(() => {
+      backgroundJobs.recover()
+      return programs.recover()
+    })
+    .catch((e: unknown) => console.error(`[nexus] program recovery: ${errorMessage(e)}`))
     .finally(() => recoverOvernight())
   const appInfo = async (): Promise<AppInfo> => ({
     version: app.getVersion(),
@@ -510,6 +549,7 @@ async function bootstrap(): Promise<void> {
         return response === 0
       },
     }),
+    v4: createV4Handlers({ repos, programs, background: backgroundJobs }),
   })
 
   ipcMain.handle(IPC_INVOKE_CHANNEL, (event, channel: unknown, input: unknown) => {
@@ -550,8 +590,10 @@ async function bootstrap(): Promise<void> {
     void settled
       .then(() => {
         overnight?.dispose()
-        // Nothing new may start: campaigns and quota recovery stop first. The usage service stays until the
-        // agent sessions have ended, so what they used is still recorded.
+        // Nothing new may start: programs, campaigns and quota recovery stop first. The usage service stays until
+        // the agent sessions have ended, so what they used is still recorded.
+        programs.dispose()
+        backgroundJobs.dispose()
         arena.dispose()
         recovery.dispose()
         // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.

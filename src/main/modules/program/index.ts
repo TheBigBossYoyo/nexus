@@ -1,0 +1,6 @@
+export { ProgramEngine, describeDiff } from './engine'
+export type { CreateProgramInput, ProgramEngineDeps, ProgramRunHost } from './engine'
+export { BackgroundEngineering } from './background'
+export type { BackgroundDeps } from './background'
+export { selectMemory, scoreMemory, validateMemory, MEMORY_PER_MISSION } from './memory'
+export { REASONING_MARKERS, buildBackgroundPrompt, buildMissionPrompt, buildPlanPrompt, buildReplanPrompt, buildVerifyPrompt, extractJson, parseFindings, parseJudgment, parsePlan, parseReplan } from './reasoning'

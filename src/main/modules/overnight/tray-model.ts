@@ -44,7 +44,7 @@ export function buildTrayModel(input: TrayInput): TrayModel {
   const paused = o.state === 'QUOTA_PAUSED' || input.runState === 'paused'
   const status: TrayStatus = pendingFinal ? 'SHUTDOWN SCHEDULED' : o.state === 'FINALIZING' || o.state === 'CANCELLING' ? 'FINALIZING' : paused ? 'PAUSED' : 'RUNNING'
 
-  const what = o.workloadType === 'arena_campaign' ? 'Arena campaign' : 'mission'
+  const what = o.workloadType === 'arena_campaign' ? 'Arena campaign' : o.workloadType === 'program' ? 'program' : 'mission'
   const lines = ['NEXUS']
   if (status === 'SHUTDOWN SCHEDULED' && o.powerAction) {
     lines.push(`Overnight ${what} finished`, `${ACTION_LABEL[o.powerAction.action] ?? o.powerAction.action} scheduled ${input.time(o.powerAction.executeAt)}`)
@@ -64,7 +64,7 @@ export function buildTrayModel(input: TrayInput): TrayModel {
       ? { action: 'resume', label: 'Resume', enabled: true }
       : { action: 'pause', label: 'Pause', enabled: o.state === 'RUNNING' && input.runState !== 'paused' },
     { action: 'cancelPower', label: 'Cancel shutdown', enabled: pendingFinal || (working && (failsafeArmed || o.policy.endAction !== 'NONE')) },
-    { action: 'cancelMission', label: o.workloadType === 'arena_campaign' ? 'Cancel campaign' : 'Cancel mission', enabled: working },
+    { action: 'cancelMission', label: o.workloadType === 'arena_campaign' ? 'Cancel campaign' : o.workloadType === 'program' ? 'Cancel program' : 'Cancel mission', enabled: working },
   ]
   return { visible: true, runId: o.runId, status, tooltip, lines, items }
 }

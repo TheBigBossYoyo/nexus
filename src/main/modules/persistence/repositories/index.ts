@@ -11,6 +11,19 @@ import { EventRepository, SettingsRepository } from './events-settings'
 import { MemoryRepository } from './memory'
 import { CheckpointRepository, OvernightRepository, PowerAuditRepository } from './overnight'
 import {
+  BackgroundJobRepository,
+  BacklogRepository,
+  ExpertiseRepository,
+  MilestoneRepository,
+  ProgramCheckpointRepository,
+  ProgramDecisionRepository,
+  ProgramMemoryRepository,
+  ProgramMissionRepository,
+  ProgramPlanRevisionRepository,
+  ProgramRepository,
+  WorkstreamRepository,
+} from './program'
+import {
   ContextPackRepository,
   FactRepository,
   GraphProposalRepository,
@@ -105,6 +118,18 @@ export interface Repositories {
   speculativeRuns: SpeculativeRunRepository
   candidateResults: CandidateResultRepository
   tournamentDecisions: TournamentDecisionRepository
+  // v0.4
+  programs: ProgramRepository
+  workstreams: WorkstreamRepository
+  milestones: MilestoneRepository
+  programMissions: ProgramMissionRepository
+  programDecisions: ProgramDecisionRepository
+  programCheckpoints: ProgramCheckpointRepository
+  planRevisions: ProgramPlanRevisionRepository
+  programMemory: ProgramMemoryRepository
+  backlog: BacklogRepository
+  expertise: ExpertiseRepository
+  backgroundJobs: BackgroundJobRepository
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -162,6 +187,17 @@ export function createRepositories(db: Database): Repositories {
     speculativeRuns: new SpeculativeRunRepository(db),
     candidateResults: new CandidateResultRepository(db),
     tournamentDecisions: new TournamentDecisionRepository(db),
+    programs: new ProgramRepository(db),
+    workstreams: new WorkstreamRepository(db),
+    milestones: new MilestoneRepository(db),
+    programMissions: new ProgramMissionRepository(db),
+    programDecisions: new ProgramDecisionRepository(db),
+    programCheckpoints: new ProgramCheckpointRepository(db),
+    planRevisions: new ProgramPlanRevisionRepository(db),
+    programMemory: new ProgramMemoryRepository(db),
+    backlog: new BacklogRepository(db),
+    expertise: new ExpertiseRepository(db),
+    backgroundJobs: new BackgroundJobRepository(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }
@@ -227,5 +263,18 @@ export type {
   Page,
   TrialStateCount,
 } from './v3'
+export type {
+  BackgroundJobRepository,
+  BacklogRepository,
+  ExpertiseRepository,
+  MilestoneRepository,
+  ProgramCheckpointRepository,
+  ProgramDecisionRepository,
+  ProgramMemoryRepository,
+  ProgramMissionRepository,
+  ProgramPlanRevisionRepository,
+  ProgramRepository,
+  WorkstreamRepository,
+} from './program'
 export type { MessageRecipient } from './agents'
 export { toFtsQuery } from './memory'

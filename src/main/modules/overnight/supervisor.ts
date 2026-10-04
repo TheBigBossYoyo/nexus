@@ -120,6 +120,14 @@ export interface OvernightArenaStartInput {
   confirmation: string
 }
 
+/** A program started under the supervisor for one autonomous work window. */
+export interface OvernightProgramStartInput {
+  programId: string
+  policy: OvernightPolicy
+  confirmed: boolean
+  confirmation: string
+}
+
 /** What the supervisor needs to create a campaign before it arms the failsafe. */
 export interface OvernightArenaHost {
   createCampaign(input: CreateCampaignInput): Promise<{ id: string }>
@@ -224,9 +232,9 @@ export class OvernightSupervisor {
   }
 
   /** Makes a workload type other than a mission available. Called once at startup, before `recover()`. */
-  registerWorkload(type: Exclude<WorkloadType, 'mission'>, factory: WorkloadFactory, host: OvernightArenaHost): void {
+  registerWorkload(type: Exclude<WorkloadType, 'mission'>, factory: WorkloadFactory, host?: OvernightArenaHost): void {
     this.factories.set(type, factory)
-    this.arenaHost = host
+    if (type === 'arena_campaign' && host) this.arenaHost = host
   }
 
   private workloadOf(record: Pick<OvernightRun, 'runId' | 'workloadType'>): AutonomousWorkload {
@@ -367,6 +375,40 @@ export class OvernightSupervisor {
         await this.finalize(campaign.id, 'FAILED', `The campaign could not be started: ${errorMessage(e)}`)
       }
       return { campaignId: campaign.id, overnight: toStatus(this.deps.repos.overnight.require(campaign.id)) }
+    } finally {
+      this.starting = false
+    }
+  }
+
+  /**
+   * Run a program as an overnight workload for one work window. The program exists already (a draft, or one
+   * that is paused); the authorization and the failsafe exist before it starts or continues.
+   */
+  async startProgram(input: OvernightProgramStartInput): Promise<{ programId: string; overnight: OvernightStatus }> {
+    if (input.confirmed !== true || input.confirmation !== OVERNIGHT_CONFIRMATION_TEXT) {
+      throw new NexusError('invalid_input', 'Overnight Mode needs the explicit power authorization for this program window.')
+    }
+    const policy = OvernightPolicySchema.parse(input.policy)
+    if (!this.factories.has('program')) throw new NexusError('runtime_unavailable', 'Programs are not available in this process')
+    if (this.live.size > 0 || this.starting) {
+      throw new NexusError('invalid_state', 'An overnight run is already active. Windows holds a single shutdown timer; finish or cancel that run first.')
+    }
+    const { repos } = this.deps
+    const program = repos.programs.require(input.programId)
+    const workload = this.workloadOf({ runId: program.id, workloadType: 'program' })
+    if (workload.isTerminal()) throw new NexusError('invalid_state', `The program is ${program.state}; it cannot run overnight`)
+    this.starting = true
+    try {
+      // One overnight record per workload id: an earlier window of the same program is history, kept in the report file.
+      const earlier = repos.overnight.getByRun(program.id)
+      if (earlier) repos.overnight.delete(earlier.id)
+      await this.arm({ id: program.id, projectId: program.projectId, type: 'program' }, policy)
+      try {
+        await workload.start()
+      } catch (e) {
+        await this.finalize(program.id, 'FAILED', `The program could not be started: ${errorMessage(e)}`)
+      }
+      return { programId: program.id, overnight: toStatus(repos.overnight.require(program.id)) }
     } finally {
       this.starting = false
     }
@@ -647,7 +689,7 @@ export class OvernightSupervisor {
         return this.doFinalize(id, 'QUOTA_EXHAUSTED', why)
       }
       if (record.policy.quotaPolicy === 'END_RUN') return end('The policy ends the run on a usage limit.')
-      if (entering && waits >= MAX_QUOTA_WAITS) return end(`The campaign already waited for a usage limit ${waits} times.`)
+      if (entering && waits >= MAX_QUOTA_WAITS) return end(`The ${record.workloadType === 'program' ? 'program' : 'campaign'} already waited for a usage limit ${waits} times.`)
       const resumeAt = resetsAt !== null ? Math.max(resetsAt, now) + QUOTA_RESUME_MARGIN_SECONDS * 1000 : null
       // An unknown reset is waited on until the deadline; a known one only when it falls before the deadline.
       if (resumeAt !== null && resumeAt >= deadline) return end('The usage limit resets after the overnight deadline.')
@@ -983,7 +1025,7 @@ export class OvernightSupervisor {
         text = workload.summarize({ record: repos.overnight.require(record.id), reason: terminalReason, detail: terminalDetail, finishedAt, finalization, powerPlan })
       } catch (e) {
         // A report must exist even if a section cannot be built.
-        text = `# NEXUS Overnight ${record.workloadType === 'mission' ? 'Run' : 'Arena Campaign'}\n\n- ${record.workloadType === 'mission' ? 'Run' : 'Campaign'} ID: ${runId}\n- Finished: ${finishedAt}\n- Outcome: ${terminalReason}\n\nThe full report could not be built: ${errorMessage(e)}\n\n## Power action\n\n${powerPlan}\n`
+        text = `# NEXUS Overnight ${record.workloadType === 'mission' ? 'Run' : record.workloadType === 'program' ? 'Program Window' : 'Arena Campaign'}\n\n- Workload ID: ${runId}\n- Finished: ${finishedAt}\n- Outcome: ${terminalReason}\n\nThe full report could not be built: ${errorMessage(e)}\n\n## Power action\n\n${powerPlan}\n`
       }
       record = this.update(record.id, { finalReport: text, reportSavedAt: iso(this.now()), finishedAt })
       const path = this.writeReportFiles(record, text)
@@ -999,7 +1041,7 @@ export class OvernightSupervisor {
   }
 
   private async stopWorkload(workload: AutonomousWorkload, reason: TerminalReason): Promise<void> {
-    const what = workload.type === 'mission' ? 'run' : 'campaign'
+    const what = workload.type === 'mission' ? 'run' : workload.type === 'program' ? 'program window' : 'campaign'
     const stop = workload.pause(`Overnight Mode ended the ${what} (${reason}).`).catch((e: unknown) => this.log(`stop ${workload.id}: ${errorMessage(e)}`))
     const timeout = this.deps.stopTimeoutMs ?? 120_000
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -1017,7 +1059,7 @@ export class OvernightSupervisor {
 
   /** Writes the report under the NEXUS data directory and, when the policy says so, into the project. */
   private writeReportFiles(record: OvernightRun, text: string): string | null {
-    const name = `overnight-${record.workloadType === 'mission' ? '' : 'arena-'}${record.startedAt.slice(0, 19).replace(/:/g, '')}.md`
+    const name = `overnight-${record.workloadType === 'mission' ? '' : record.workloadType === 'program' ? 'program-' : 'arena-'}${record.startedAt.slice(0, 19).replace(/:/g, '')}.md`
     let saved: string | null = null
     try {
       mkdirSync(this.deps.reportsDir, { recursive: true })
@@ -1457,7 +1499,7 @@ export class OvernightSupervisor {
         : null
     const mission = record.workloadType === 'mission'
     const missing = this.factories.has(record.workloadType) ? this.workloadOf(record).state === 'missing' : false
-    const what = mission ? 'run' : 'campaign'
+    const what = mission ? 'run' : record.workloadType === 'program' ? 'program' : 'campaign'
     this.emit({ runId, type: 'overnight.state_changed', payload: { from: record.state, to: record.state, detail: 'RECOVERING OVERNIGHT RUN' } })
 
     // Whether a timer still exists is never inferred from clocks: when the session lapsed, or the record
