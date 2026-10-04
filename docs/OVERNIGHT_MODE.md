@@ -89,7 +89,7 @@ Token or cost thresholds are not implemented (subscription sessions report no re
 | SUCCESS | run completed |
 | FAILED | run failed |
 | BLOCKED | NEXUS paused the run for intervention, authentication was lost, the watchdog or a budget fired |
-| QUOTA_EXHAUSTED | usage limit with no reset time, a reset after the deadline, END_RUN, or six waits |
+| QUOTA_EXHAUSTED | a usage limit whose reset or next probe falls at or after the deadline, END_RUN, `usage.overnightWaitForReset` off, `usage.maxQuotaWaitMinutes` exceeded, or six waits (in 0.2.1 also any limit with no reset time) |
 | TIME_LIMIT | the wall-clock deadline |
 | USER_CANCELLED | the run was cancelled |
 
@@ -124,8 +124,26 @@ was replaced, and CANCEL SHUTDOWN still works.
   **PAUSE MISSION**, **CANCEL MISSION**.
 - **Approvals**: tool approvals are denied (the agent continues another way); the plan is not held for
   approval; task-start and graph approvals follow `autoApprovePlanChanges`.
-- **Quota**: `QUOTA_PAUSED` is not a failure. When Claude reports when the limit resets and that is inside
-  the mission time, the run resumes 90 seconds after the reset.
+- **Quota** (0.3): `QUOTA_PAUSED` is not a failure. The supervisor owns an overnight run's wait (the
+  ordinary quota controller skips these runs) and uses the shared `planQuotaWait` and the availability
+  probe. The deadline and the failsafe are never moved by a wait. Details in QUOTA_RECOVERY.md; the rules:
+
+  | Situation | Behaviour |
+  |---|---|
+  | Reset known; reset plus `usage.resumeDelaySeconds` (default 60) is before the deadline | Wait, probe at that time, resume if Claude is available |
+  | Reset known; that time is at or after the deadline | Ends `QUOTA_EXHAUSTED` |
+  | Reset unknown | Probe at 5, 10, 20, 30, 30 ... minutes (`usage.unknownResetProbeMinutes`, `usage.unknownResetProbeMaxMinutes`) while the next probe is before the deadline; then `QUOTA_EXHAUSTED` |
+  | Probe finds the limit still on | Re-plan from the new reset time or the next backoff interval |
+  | `quotaPolicy` `END_RUN` | Ends `QUOTA_EXHAUSTED` |
+  | Setting `usage.overnightWaitForReset` off | Ends `QUOTA_EXHAUSTED` |
+  | Six waits already (`MAX_QUOTA_WAITS`) | Ends `QUOTA_EXHAUSTED` |
+  | `usage.maxQuotaWaitMinutes` (0 = none) exceeded | Ends `QUOTA_EXHAUSTED` |
+  | Deadline reached during the wait | `TIME_LIMIT`, wait row closed |
+
+  The probe asks the runtime's usage report first (no prompt) and falls back to one minimal session. Each
+  wait is a `quota_pauses` row of scope `overnight`, with `quota_resumes` rows for the probes and the
+  resume. Without a probe object (not the case in the application) the 0.2.1 rule applies: wait only for a
+  known reset, resume 90 seconds after it.
 - **Watchdog**: no orchestration event for `stallMinutes` → diagnostic snapshot → scheduler reconciliation →
   if still silent after `graceMinutes` → BLOCKED. Check commands that are still running extend the
   allowance by their timeout. Diagnostics are in the report.
@@ -189,3 +207,10 @@ A person starts NEXUS, so a launch never powers the machine off for a run that l
 Real sleep and hibernate were not executed (they would suspend the development machine), and no real
 shutdown was allowed to complete. Their command lines are pinned by tests; the shutdown timer was exercised
 for real by the smoke test only.
+
+The 0.3 quota wait (probe before resume, probing on an unknown reset until the deadline) was exercised with
+the scripted runtime and a manual clock only (`tests/scenarios/usage-overnight.test.ts`). A real usage
+limit during an overnight run has not been observed; see V0_3_RELEASE_REPORT.md. The usage report the probe
+prefers is an SDK method declared experimental; NEXUS treats it as optional and falls back to one minimal
+session. Quota reset behaviour depends on what the runtime reports, and NEXUS never fabricates remaining
+quota. See QUOTA_RECOVERY.md.

@@ -14,7 +14,33 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [TASK_LIFECYCLE](docs/TASK_LIFECYCLE.md), [AGENT_RUNTIME](docs/AGENT_RUNTIME.md),
 [GIT_WORKTREES](docs/GIT_WORKTREES.md), [SECURITY](docs/SECURITY.md), [RECOVERY](docs/RECOVERY.md),
 [AUTHENTICATION](docs/AUTHENTICATION.md), [TESTING](docs/TESTING.md),
-[V0_2_DESIGN](docs/V0_2_DESIGN.md), [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md).
+[V0_2_DESIGN](docs/V0_2_DESIGN.md), [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md),
+[SPECULATIVE_EXECUTION](docs/SPECULATIVE_EXECUTION.md), [V0_3_DESIGN](docs/V0_3_DESIGN.md),
+[ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md),
+[ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md), [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md),
+[QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md).
+
+## What's new in 0.3
+
+| Feature | What it does | Where to read more |
+|---|---|---|
+| Arena | Runs the same task under different strategies in controlled trials. Each trial has its own fresh Git repository and project; a hidden evaluator scores the finished trial after the agents are gone. Twelve built-in cases ship with NEXUS. Raw metrics are stored and a documented, versioned ranking (`score-v1`) puts correctness first. | [ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md) |
+| Adaptive policy | `ADAPTIVE` profiles the task and chooses a strategy from a versioned policy: a default table, an evidence override that exists only after you promote a candidate, and bounded exploration. Every decision stores its reason, its evidence and its seed. Candidates are proposed from stored evidence and never applied by themselves; promotion, rollback and pin are user actions. | [ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md) |
+| Strategies | `SINGLE`, `BUILD`, `SWARM`, `CONSENSUS`, `SPECULATIVE` and `ADAPTIVE` configure the one orchestration engine. `SINGLE` has no planner: one worker implements the mission. `SPECULATIVE` has two or three independent candidates implement the same task and picks one by objective checks. | [ORCHESTRATION](docs/ORCHESTRATION.md), [SPECULATIVE_EXECUTION](docs/SPECULATIVE_EXECUTION.md) |
+| Usage intelligence | Records what NEXUS's own sessions used and what the runtime reports about limits and plan windows, each value with its source and confidence. A percentage is shown only when the runtime supplied it. | [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md) |
+| Automatic quota resume | A usage limit pauses the mission, closes a dispatch gate, waits for the reset the runtime reported (or probes on a conservative schedule when it reported none), checks availability and resumes the run through the existing resume path. It survives a restart of NEXUS. | [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Light UI | A new shell: grouped navigation (Workspace, Intelligence, System), a page header with global status, a light theme by default with a dark override, and new Home, Arena, Policy and Usage pages. A quota banner appears on every page while a wait is active. | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+
+Statements that hold for every 0.3 feature:
+
+- NEXUS does not claim universal superiority of any strategy. Arena results describe the cases, models and versions that were run.
+- Usage totals may not be exposed by Claude. Observed usage is what NEXUS's own sessions reported; it is not necessarily the account's full subscription usage, because other Claude clients use the same account.
+- Quota reset behaviour depends on what the runtime reports. NEXUS never fabricates remaining quota; a percentage is shown only when the runtime supplied it.
+- The runtime usage report is an SDK method declared experimental and unstable. NEXUS treats it as optional and falls back to conservative probing.
+- Arena evidence is controlled; mission history is observational and weighted lower. Neither is pooled in displayed counts.
+- Policy changes only by explicit promotion. Learning never rewrites NEXUS source code.
+
+The design and its deviations from the implementation are in [V0_3_DESIGN](docs/V0_3_DESIGN.md).
 
 ## What's new in 0.2.1
 
@@ -23,7 +49,7 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 | Overnight Mode | An unattended MISSION run with a wall-clock deadline and an end-of-run power action (shut down, sleep, hibernate or none) that you authorize for that run, in the composer and in a native Windows dialog. NEXUS itself performs the action, from deterministic main-process code, after the agents are stopped and the final report is saved. A Windows shutdown timer is armed as a failsafe before any agent starts. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Power controller | `WindowsPowerController` runs `System32\shutdown.exe` (and Windows PowerShell for sleep) with argument arrays, no shell and fixed messages. Only the overnight supervisor holds it. Agents have no path to it, and power commands in an agent's shell are refused for every role. | [SECURITY](docs/SECURITY.md) |
 | Tray and background | Closing the window during an overnight run asks whether to hide to the tray; the mission continues in the main process. The tray icon exists only while an overnight run is live. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
-| Quota waiting | In an overnight run, a usage limit whose reset time falls inside the mission time is waited out (`QUOTA_PAUSED`) and the run resumes by itself; otherwise the run ends as quota exhausted, which is not a failure. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Quota waiting | In an overnight run, a usage limit whose reset time falls inside the mission time is waited out (`QUOTA_PAUSED`) and the run resumes by itself; otherwise the run ends as quota exhausted, which is not a failure. (0.3 adds a probe before the resume and probing when the reset time is unknown.) | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Evidence builder | One `TaskEvidenceBuilder` assembles everything reviewers, verifiers and debuggers are told that the repository cannot show: check results, commits, changed files, reviews, repair history, dependency handoffs, graph revisions, messages sent and received, decisions with their text, and the result the agent reported. Agent-written text is quoted and labelled. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
 | Command classes | Shell commands are classified (`SAFE_READ`, `SAFE_PROJECT_WRITE`, `GIT_LOCAL`, `NETWORK`, `SYSTEM_CHANGE`, `DESTRUCTIVE`, `UNKNOWN`). Heredoc commit messages and `cat > file <<'EOF'` inside the worktree no longer need approval; `git config` of keys that can run code, Git redirected outside the worktree, and the NEXUS database are gated or refused. The project's own package scripts count as verification commands for reviewers and verifiers. | [SECURITY](docs/SECURITY.md) |
 
@@ -109,7 +135,21 @@ cost beyond that document.
 2. Projects view, "Open Project", and pick a folder. NEXUS resolves the Git root, then profiles the
    project read-only: package managers, languages, frameworks, scripts, and the build, test, lint and
    typecheck commands it will use as automated checks. Nothing in the folder is changed.
-3. In the project, write the mission, choose a mode, a preset, a planning mode and a review mode, and start the run.
+3. In the project, write the mission, choose a mode, a preset, a strategy, a planning mode and a review mode, and start the run.
+
+The strategy selector is shown for every mode except ASK and AUDIT (read-only) and for OVERNIGHT. It defaults to
+`ADAPTIVE`. Strategies configure the same engine; they do not add a second one:
+
+| Strategy | What it configures (`src/main/modules/strategy/strategies.ts`) |
+|---|---|
+| `ADAPTIVE` | Asks the policy engine, records the decision and its reason, then runs the chosen strategy. The choice is fixed for the run. With no policy evidence it follows the default table. |
+| `SINGLE` | No planner. The mission becomes one worker task (strongest tier, balanced in ECO), one agent at a time. Checks, review, verification and merge still apply. |
+| `BUILD` | Planning `single`, review `auto`, the preset's agent limit. |
+| `SWARM` | As BUILD with the swarm planner guidance and the maximum preset's agent limit (the ECO cap in ECO). |
+| `CONSENSUS` | Consensus planning (three planners, critic, synthesizer) and dual review. |
+| `SPECULATIVE` | No planner. Two candidates by default (three at most) implement the same task in separate worktrees; objective checks pick one; it then goes through review and verification. Uses more Claude usage. |
+
+Details: [ORCHESTRATION](docs/ORCHESTRATION.md) (Strategies), [ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md).
 
 Constraints enforced by the code:
 
@@ -118,8 +158,11 @@ Constraints enforced by the code:
 - Agents work from the commit that is `HEAD` when the run starts. Uncommitted changes are not
   visible to writing agents, and the UI warns about a dirty repository.
 
-Ctrl+K opens the command palette; Ctrl+1 to Ctrl+7 switch between Projects, Run, Agents, Memory,
-Settings, Performance and Intelligence.
+Navigation is a left sidebar in three groups: Workspace (Home, Projects, Missions, Agents), Intelligence
+(Arena, Policy, Usage, Performance, Repository) and System (Overnight, Activity, Memory, Settings). Ctrl+K opens
+the command palette, Ctrl+B shows or hides the sidebar, Ctrl+1 to Ctrl+9 open the first nine entries in that order
+(Home, Projects, Missions, Agents, Arena, Policy, Usage, Performance, Repository), and Esc closes an overlay
+(`src/renderer/src/app/nav.ts`, `hotkeysModel.ts`).
 
 ## Run modes
 
@@ -138,6 +181,10 @@ All modes share the same engine. What the code does differently per mode:
 
 So BUILD, SWARM, REPAIR, MISSION and LOOP differ only in the planner prompt (and the `maxIterations`
 override for LOOP). The one-line descriptions in the UI describe intent, not separate code paths.
+
+Since 0.3 a run also has a strategy (see "Launching and opening a project"). The strategy sets the planning mode,
+review mode and agent limit through the run configuration, and `SWARM` also sets the run mode to `swarm`. A run
+created without a strategy (ASK, AUDIT, or a caller that sends none) behaves exactly as before 0.3.
 
 ## Planning mode and review mode
 
@@ -233,8 +280,12 @@ This is Electron's `userData` directory; the exact path is reported by the app (
 | `pnpm stress` | `vitest run -c vitest.stress.config.ts`: seeded orchestration stress campaign with scripted agents (no Claude usage). See [TESTING](docs/TESTING.md). |
 | `pnpm smoke:claude` | Manual test against the real Claude runtime. Consumes Claude usage. |
 | `pnpm smoke:power` | Manual test of the real `WindowsPowerController`: schedules a Windows shutdown one hour away, checks it was accepted, aborts it at once and checks nothing is left armed. Never part of `pnpm test`. |
+| `pnpm smoke:usage` | Manual test against the real Claude runtime: account information and the experimental usage report. No prompt is sent and no model turn runs. Writes evidence to `docs/acceptance/usage-report-*.json`. |
 | `pnpm accept:proposal` | `node scripts/dynamic-proposal-acceptance.mjs` (real Claude, see below) |
 | `pnpm accept:rotation` | `node scripts/session-rotation-acceptance.mjs` (real Claude, see below) |
+| `pnpm accept:arena` | `node scripts/arena-acceptance.mjs` (real Claude, consumes usage): a small Arena campaign |
+| `pnpm accept:speculative` | `node scripts/strategy-acceptance.mjs speculative` (real Claude, consumes usage) |
+| `pnpm accept:adaptive` | `node scripts/strategy-acceptance.mjs adaptive` (real Claude, consumes usage) |
 | `pnpm package` | `electron-vite build && electron-builder --win nsis` |
 
 Automated tests never call the real Claude API; they use `FakeAgentRuntime`.
@@ -249,6 +300,8 @@ with the **real Claude runtime**, consumes Claude usage, and writes evidence to 
 
 | `node scripts/dynamic-proposal-acceptance.mjs [path-to-NEXUS.exe]` | A CSV export whose contract is only readable after a worker runs `npm run generate-schema` (it is packed in a vendor bundle a read-only planner cannot unpack). The contract demands a module no task of the plan delivers; the gate is a real `ADD_TASK` proposal, a graph revision, the new task executed and the original task resumed. |
 | `node scripts/session-rotation-acceptance.mjs [path-to-NEXUS.exe\|-] [turns]` | One worker task with a low rotation threshold (`sessionRotationTurns`, default 8 here): the gate is a real session rotated with a structured handoff and a second real session finishing the task. |
+| `node scripts/arena-acceptance.mjs [path-to-NEXUS.exe\|-] [caseIds] [strategies]` | A real Arena campaign: by default `bugfix-localized`, `feature-small` and `ui-state-bug` under `SINGLE` and `BUILD`, one repetition, ECO budget. Records what NEXUS measured; changes no threshold. |
+| `node scripts/strategy-acceptance.mjs speculative\|adaptive [path-to-NEXUS.exe]` | One real SPECULATIVE task (two candidates, tournament, review, verification) or one real ADAPTIVE mission (profile, decision, reason, outcome). |
 | `node scripts/packaged-validation.mjs <NEXUS.exe> <db-dir>...` | No Claude usage. Launches a packaged or installed build on copies of existing databases and checks the schema upgrade, old runs, auth status, project opening and the Overnight UI. |
 
 These launch the window off-screen (`NEXUS_WINDOW_OFFSCREEN=1`); set `NEXUS_ACCEPT_SHOW=1` to see it.
@@ -272,8 +325,10 @@ earlier single-mission acceptance script.
 - MCP support is basic: a list of servers (stdio, http, sse) with per-role enablement. No tool-level
   permissions, no connection test, no discovery UI.
 - Quota detection depends on signals from the SDK (`rate_limit_event` with status rejected, assistant
-  `rate_limit` or `billing_error`, or the SDK's usage-limit message prefixes). A quota pause is never
-  resumed automatically; you resume the run. NEXUS has no spending cap of its own: bounds are turns
+  `rate_limit` or `billing_error`, or the SDK's usage-limit message prefixes). Since 0.3 a quota pause is
+  resumed automatically after the reset the runtime reported, or after a probe finds Claude available again
+  (see [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md)); you can still resume by hand. A pause you made yourself is never resumed
+  automatically. NEXUS has no spending cap of its own: bounds are turns
   per agent, retries, repair iterations and run duration.
 - A task interrupted while its checks were running restarts at the implement stage (the task state
   `running` does not record the stage), consuming a new attempt.
@@ -284,6 +339,33 @@ earlier single-mission acceptance script.
   is whatever the model produces. A passing verification means the verifier agent judged the criteria
   met, not that the software is correct.
 - Single window, single instance.
+
+### Limitations of 0.3 features
+
+- No real usage limit, real Arena campaign, real speculative task or real ADAPTIVE mission had been run when this was written; see
+  [V0_3_RELEASE_REPORT](docs/V0_3_RELEASE_REPORT.md). Their behaviour is covered by unit, integration, scenario and seeded
+  stress tests with the scripted runtime (`FakeAgentRuntime`). The only 0.3 check against the real runtime that is
+  recorded here is `pnpm smoke:usage` (2026-10-04, Claude Agent SDK 0.3.288, no prompt sent): the usage report answered in
+  about one second with plan windows (`five_hour`, `seven_day` and a model-scoped bucket), each with a utilization
+  percentage and a reset time, and the account mode was `subscription`. Evidence: `docs/acceptance/usage-report-*.json`.
+- NEXUS has no figure for the tokens remaining in a subscription and shows none. Observed usage covers NEXUS's own sessions only.
+- The usage report is an experimental SDK method that can change or disappear. When it is missing or fails, recovery
+  probes with one minimal session per interval.
+- Quota recovery depends on what the runtime reports. With no reset time NEXUS probes on a backoff schedule; an ordinary
+  (non-overnight) run with no wait limit probes for as long as NEXUS runs. See [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md).
+- Only the Claude runtime exists. `AgentRuntime` is an interface with `ClaudeSdkRuntime` and `FakeAgentRuntime`; no other provider is implemented.
+- `ALWAYS_FOR_HIGH_RISK` speculation behaves as `AUTO`. Candidates are proposed for exact and category-level contexts, never global ones.
+  Learning runs only when you ask for it. A run created without a strategy records no mission outcome.
+- The ADAPTIVE decision is fixed when the run is created. An explicit strategy choice is used as given and records no decision.
+- Arena: every built-in case is a small JavaScript project, so results say nothing about other languages or large repositories.
+  Creating a campaign from a user repository is not offered. Overnight Arena under the supervisor is not implemented.
+  Pausing a campaign does not pause runs already running. Budgets are checked after each trial (the wall-clock budget on a timer),
+  so the running trial can exceed them. Regression detection compares only the oldest and the newest NEXUS version group.
+  See [ARENA](docs/ARENA.md).
+- Small samples: a preference needs at least `MODERATE` evidence (12 weighted trials) before it is proposed. No p-values are
+  computed, and a table that says two strategies are not separated means exactly that. See [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md).
+- A speculative task costs one extra implementing session per extra candidate and applies to a single-task run only; a
+  planned task graph has no speculative tasks.
 
 ### Limitations of 0.2.1 features
 

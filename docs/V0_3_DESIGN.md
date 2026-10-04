@@ -435,4 +435,39 @@ exhaustion stays NOT VERIFIED and the recovery path is proven by simulation only
 
 ## Implementation notes
 
-(filled in during implementation)
+Found while writing the 0.3 documentation from the code. Where the two differ, the documents describe the code.
+
+| Topic | Design | Implementation |
+|---|---|---|
+| Arena project marker | `ALTER TABLE projects ADD COLUMN kind` is the only change to an existing table | Migration 004 alters no table. Arena projects are identified by `arena_trials.project_id`: `projects.list()` excludes them, `listArena()` returns them |
+| Evaluator hash | SHA-256 over the evaluator directory | `hashEvaluator` also hashes the evaluation command and timeout |
+| Import trust | The confirmation is stored with the evaluator hash | `trusted` is a boolean on `arena_case_versions`; `trustCaseVersion` re-hashes when trusting and `loadVerifiedCase` re-hashes on every use |
+| Case budgets | Case budgets listed | Schema has `maxWallClockMinutes`, `maxAgentSessions`, `maxAgentsPerTrial`, `maxTurnsPerAgent`; the case-level `maxAgentSessions` is read by no code |
+| Overnight Arena | A campaign started through the supervisor | Only a stored `overnight` flag on the campaign. Nothing in `overnight/` reads it and the IPC schema does not set it |
+| Campaign pause reasons | `user`, `quota`, `budget`, `restart` | Only `user` and `quota` are set. A budget completes the campaign with an error note. Campaign state `failed` is never set |
+| `arena.createCampaign` budgets | Full budget set | The IPC input exposes `maxConcurrentTrials` and `maxWallClockMinutes` only; `maxTrials`, `maxAgentSessions`, `maxAgentsPerTrial` and `overnight` are service-only |
+| Trial with no integration branch | Evaluated as failed acceptance | An `arena_evaluations` row is written (not passed, skip reason, score 0); the evaluator is not run. Trial state is `failed` or `blocked` by how the run ended. A wall-clock timeout cancels the run and blocks the trial |
+| Regression grouping | Groups by (NEXUS version, policy version, model) | Groups by campaign NEXUS version only; compares the oldest group with the newest over common case versions |
+| Convenience score | Weights 15/10/5/5/5 | Same weights; findings and repairs use `w/(1+n)`, time and usage use credit relative to the best passing peer of the same case in the same campaign. Scores are recomputed when another trial of the case finishes |
+| Policy context of a trial | Case category, complexity and risk | The run's `TaskProfile` context key when present (inferred from the prompt), else the case's declared values |
+| Repository-origin cases | A trial repository is a clone at the chosen commit | `provisionFromRepository` exists and is tested; `ArenaService` has no way to create such a case or campaign |
+| `usage_snapshots` | Kept and finally read | Still written per turn and read by no service. Aggregation uses `usage_events` and `usage_windows` |
+| `RUNTIME_UNAVAILABLE` | Entered from auth and runtime errors | The machine handles a `crashed` signal that nothing in `src/main` produces; only a probe outcome `runtime` enters it |
+| `THROTTLED` | Overloaded or short retry-after | `overloaded` and `server_error` only; decays after 120 s or on the next agent message. No retry-after rule |
+| Window status from a usage report | Not specified | NEXUS derives it from the percentage: 100 or more is `rejected`, 90 or more is `allowed_warning`. At 100 percent a report only gives `LIMIT_APPROACHING` and pauses nothing |
+| Local work while waiting | In-flight checks and merges finish; `allowLocalTasksWhileWaiting` | In-flight checks and merges finish. The setting is stored and shown but no code reads it; a closed gate starts no task |
+| Overnight quota wait | Uses `planQuotaWait` and the shared probe | As designed, plus: the supervisor writes `quota_pauses` rows of scope `overnight` (`limit_type` null) and `quota_resumes` rows; `usage.overnightWaitForReset` off, `usage.maxQuotaWaitMinutes` exceeded and `MAX_QUOTA_WAITS` (6) end the run as `QUOTA_EXHAUSTED`. Without a probe object the 0.2.1 margin of 90 s applies |
+| Test timing overrides | Not in the design | `NEXUS_USAGE_TICK_MS`, `NEXUS_USAGE_RESUME_DELAY_S`, `NEXUS_USAGE_PROBE_S` (unpackaged builds only) and `NEXUS_USAGE_DEMO_RESET_S` (demo script) |
+| `ALWAYS_FOR_HIGH_RISK` | A distinct speculation policy | Only `OFF` is tested anywhere; `AUTO` and `ALWAYS_FOR_HIGH_RISK` behave the same |
+| Resource layer | Defers speculation and may reduce parallelism | Also defers SWARM when Claude is not `AVAILABLE` or a limit was hit within the hour; halves the worker count (`THROTTLE_WORKER_DIVISOR` 2) when THROTTLED or LIMIT_APPROACHING |
+| Candidate contexts | Proposed for a context | Proposed for exact contexts and category-level contexts (`category`, then wildcards), never the global one |
+| Learning trigger | `learn()` recomputes statistics | Runs only through `policy.learn`, a user action; decisions use the statistics of its last run |
+| Pooled label | Wilson interval on counts | `poolRow` computes label and interval on weighted effective counts; stored `strategy_statistics` rows use raw counts, so the two labels can differ |
+| Fallback sufficiency | Each fallback level needs sufficient evidence | The threshold is WEAK (`levelSufficient`) |
+| Outcome recording | A `mission_outcomes` row at the run's end | Also when a run pauses for an intervention, recorded as `blocked`; upserted by run. A completed run with no mission criteria counts as success |
+| Explicit strategy | Every run records a decision | A concrete strategy skips the engine: a task profile and the snapshot id are stored, no decision. The `user` layer and `forced` input exist but are unused |
+| `USER_SPECIFIED` basis | Profiler takes user-specified fields | The orchestrator and the Arena never pass them, so the basis is not produced in 0.3 |
+| Pin and rollback | Pointer moves only | A promotion while pinned builds on the pointer's snapshot while new decisions keep using the pinned one; rollback goes back one step only |
+| Policy configuration | Not described | `policy.setConfig` (exploration, speculation) creates a snapshot with origin `config`; no other field can be changed |
+| ADAPTIVE without a policy service | Not described | The orchestrator resolves it to BUILD and records nothing |
+| Provider abstraction | Not in the 0.3 design | Only the `AgentRuntime` interface with `ClaudeSdkRuntime` and `FakeAgentRuntime` exists; no provider class or registry |
