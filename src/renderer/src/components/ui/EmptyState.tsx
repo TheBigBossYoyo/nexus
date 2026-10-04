@@ -7,7 +7,7 @@ export function Spinner({ size = 14, className }: { size?: number; className?: s
       width={size}
       height={size}
       viewBox="0 0 16 16"
-      className={cn('animate-spin text-fg-muted', className)}
+      className={cn('motion-safe:animate-spin text-text-muted', className)}
       role="status"
       aria-label="Loading"
     >
@@ -17,32 +17,40 @@ export function Spinner({ size = 14, className }: { size?: number; className?: s
   )
 }
 
+/** Placeholder block for content that is loading. Pulses only when the user allows motion. */
+export function Skeleton({ className, ...rest }: { className?: string; 'data-testid'?: string }) {
+  return <div aria-hidden="true" className={cn('rounded-md bg-surface-hover motion-safe:animate-pulse', className)} {...rest} />
+}
+
+/** An intentional, calm "nothing here" state: quiet icon, one line of title, one short explanation, one action. */
 export function EmptyState({
   title,
   children,
   action,
   icon,
   className,
+  ...rest
 }: {
   title: string
   children?: ReactNode
   action?: ReactNode
   icon?: ReactNode
   className?: string
+  'data-testid'?: string
 }) {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-2 px-4 py-10 text-center', className)}>
-      {icon ? <div className="text-fg-faint">{icon}</div> : null}
-      <div className="font-medium text-fg">{title}</div>
-      {children ? <div className="max-w-md text-fg-muted">{children}</div> : null}
-      {action ? <div className="mt-1">{action}</div> : null}
+    <div className={cn('flex flex-col items-center justify-center gap-1.5 px-4 py-10 text-center', className)} {...rest}>
+      {icon ? <div className="mb-1 text-text-muted">{icon}</div> : null}
+      <div className="text-heading font-semibold text-text-primary">{title}</div>
+      {children ? <div className="max-w-md text-text-secondary">{children}</div> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   )
 }
 
 export function Loading({ label = 'Loading' }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 p-4 text-fg-muted">
+    <div className="flex items-center gap-2 p-4 text-text-secondary" role="status">
       <Spinner />
       <span>{label}…</span>
     </div>
@@ -52,16 +60,29 @@ export function Loading({ label = 'Loading' }: { label?: string }) {
 export function ErrorNote({ error, className }: { error: unknown; className?: string }) {
   const message = error instanceof Error ? error.message : String(error)
   return (
-    <div
-      role="alert"
-      className={cn('border-l-2 border-tone-danger bg-tone-danger/10 px-3 py-2 text-tone-danger', className)}
-    >
+    <div role="alert" className={cn('rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-danger', className)}>
       {message}
     </div>
   )
 }
 
-/** Inline notice with a coloured left border. */
+const NOTICE_STYLES = {
+  warning: 'border-warning/30 bg-warning-subtle',
+  danger: 'border-danger/30 bg-danger-subtle',
+  active: 'border-info/30 bg-info-subtle',
+  neutral: 'border-border bg-surface-muted',
+  success: 'border-success/30 bg-success-subtle',
+} as const
+
+const NOTICE_ACCENT = {
+  warning: 'bg-warning',
+  danger: 'bg-danger',
+  active: 'bg-info',
+  neutral: 'bg-text-muted',
+  success: 'bg-success',
+} as const
+
+/** Inline notice: quiet tinted surface, a thin accent bar, primary-coloured text so contrast never depends on the tint. */
 export function Notice({
   tone = 'warning',
   title,
@@ -75,17 +96,11 @@ export function Notice({
   className?: string
   'data-testid'?: string
 }) {
-  const styles = {
-    warning: 'border-tone-warning bg-tone-warning/10',
-    danger: 'border-tone-danger bg-tone-danger/10',
-    active: 'border-tone-active bg-tone-active/10',
-    neutral: 'border-tone-neutral bg-surface-2',
-    success: 'border-tone-success bg-tone-success/10',
-  }[tone]
   return (
-    <div className={cn('border-l-2 px-3 py-2', styles, className)} {...rest}>
-      {title ? <div className="mb-0.5 font-medium">{title}</div> : null}
-      <div className="text-fg-muted">{children}</div>
+    <div className={cn('relative overflow-hidden rounded-md border py-2 pl-4 pr-3', NOTICE_STYLES[tone], className)} {...rest}>
+      <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-1', NOTICE_ACCENT[tone])} />
+      {title ? <div className="mb-0.5 font-semibold text-text-primary">{title}</div> : null}
+      <div className="text-text-secondary">{children}</div>
     </div>
   )
 }

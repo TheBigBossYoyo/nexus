@@ -65,6 +65,15 @@ export function MissionComposer({ project }: { project: Project }) {
     setConfirmOpen(false)
     setOvernightError(null)
   }
+  // "Start Overnight" in the palette and on the Overnight page opens the composer already in Overnight mode.
+  const composerIntent = useUiStore((s) => s.composerIntent)
+  const setComposerIntent = useUiStore((s) => s.setComposerIntent)
+  useEffect(() => {
+    if (composerIntent !== 'overnight') return
+    setMode(OVERNIGHT_MODE)
+    setComposerIntent(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerIntent])
   const [presetChoice, setPresetChoice] = useState<Preset | null>(null)
   const [maxAgentsChoice, setMaxAgentsChoice] = useState<number | null>(null)
   const [approvalChoice, setApprovalChoice] = useState<boolean | null>(null)

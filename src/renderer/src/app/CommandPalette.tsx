@@ -1,39 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Command } from 'cmdk'
-import { useOpenProject, useProjects, useRefreshAuth, useRuns, useSettings, useUpdateSettings } from '../lib/queries'
+import {
+  useOpenProject,
+  useProjects,
+  useRefreshAuth,
+  useRuns,
+  useSettings,
+  useUpdateSettings,
+} from '../lib/queries'
 import { useUiStore, type View } from '../store/ui'
+import { Kbd, SearchIcon } from '../components/ui'
+import { useModal } from '../components/ui/useModal'
 import { useRunControls } from './useRunControls'
-import { useCurrentProject } from './useCurrent'
+import { useCurrentProject, useSelectedRun } from './useCurrent'
+import { buildPaletteItems, filterPalette, type PaletteItem } from './paletteModel'
 
-const VIEW_ITEMS: { view: View; label: string; keys: string }[] = [
-  { view: 'projects', label: 'Go to Projects', keys: 'Ctrl 1' },
-  { view: 'run', label: 'Go to Runs', keys: 'Ctrl 2' },
-  { view: 'agents', label: 'Go to Agents', keys: 'Ctrl 3' },
-  { view: 'memory', label: 'Go to Memory', keys: 'Ctrl 4' },
-  { view: 'settings', label: 'Go to Settings', keys: 'Ctrl 5' },
-  { view: 'performance', label: 'Go to Performance', keys: 'Ctrl 6' },
-  { view: 'intelligence', label: 'Go to Repository Intelligence', keys: 'Ctrl 7' },
-  { view: 'auth', label: 'Go to Authentication', keys: '' },
-]
-
-function Item({ label, hint, onSelect, value }: { label: string; hint?: string; onSelect: () => void; value?: string }) {
-  return (
-    <Command.Item
-      value={value ?? label}
-      onSelect={onSelect}
-      className="flex h-[var(--row-h)] cursor-pointer items-center justify-between px-3 data-[selected=true]:bg-surface-3"
-    >
-      <span className="truncate">{label}</span>
-      {hint ? <span className="ml-3 shrink-0 font-mono text-[0.8rem] text-fg-faint">{hint}</span> : null}
-    </Command.Item>
-  )
-}
-
-const GROUP =
-  '[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[0.75rem] ' +
-  '[&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider ' +
-  '[&_[cmdk-group-heading]]:text-fg-faint'
-
+/** Ctrl+K. Arrow keys move, Enter runs, Esc closes; type to search commands, missions, tasks and agents. */
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen)
   const setOpen = useUiStore((s) => s.setPaletteOpen)
@@ -43,126 +25,190 @@ export function CommandPalette() {
 
 function PaletteBody({ close }: { close: () => void }) {
   const [search, setSearch] = useState('')
-  const setView = useUiStore((s) => s.setView)
-  const selectProject = useUiStore((s) => s.selectProject)
-  const openRun = useUiStore((s) => s.openRun)
+  const ui = useUiStore.getState
+  const navCollapsed = useUiStore((s) => s.navCollapsed)
   const project = useCurrentProject()
-  const projects = useProjects().data ?? []
-  const runs = useRuns(project?.id ?? null).data ?? []
+  const projectsData = useProjects().data
+  const runsData = useRuns(project?.id ?? null).data
+  const { detail } = useSelectedRun()
   const controls = useRunControls()
   const openProject = useOpenProject()
   const refreshAuth = useRefreshAuth()
   const settings = useSettings().data
   const updateSettings = useUpdateSettings()
+  const rootRef = useRef<HTMLDivElement>(null)
+  useModal(rootRef, true, close, 'input')
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [close])
+  const items = useMemo(
+    () =>
+      buildPaletteItems({
+        hasProject: !!project,
+        canPause: controls.canPause,
+        canResume: controls.canResume,
+        canApprovePlan: controls.canApprovePlan,
+        hasRun: !!controls.run,
+        theme: settings?.appearance.theme ?? 'light',
+        density: settings?.appearance.density ?? 'compact',
+        navCollapsed,
+        tasks: (detail?.tasks ?? []).map((t) => ({ id: t.id, title: t.title, key: t.key })),
+        agents: (detail?.agents ?? []).map((a) => ({
+          id: a.id,
+          label: `${a.role.replace('_', ' ')} agent · ${a.id.slice(0, 6)}`,
+        })),
+        projects: (projectsData ?? []).map((p) => ({ id: p.id, name: p.name })),
+        runs: [...(runsData ?? [])]
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .map((r) => ({ id: r.id, prompt: r.prompt, mode: r.mode })),
+      }),
+    [
+      project,
+      controls.canPause,
+      controls.canResume,
+      controls.canApprovePlan,
+      controls.run,
+      settings,
+      navCollapsed,
+      detail,
+      projectsData,
+      runsData,
+    ],
+  )
+  const sections = useMemo(() => filterPalette(items, search), [items, search])
 
-  const run = (fn: () => void) => () => {
+  const perform = (item: PaletteItem) => {
     close()
-    fn()
+    const id = item.id
+    const [kind, arg] = id.split(/:(.*)/s) as [string, string | undefined]
+    const go = (view: View) => ui().setView(view)
+    if (kind === 'view' && arg) return go(arg as View)
+    if (kind === 'project' && arg) {
+      ui().selectProject(arg)
+      return go('projects')
+    }
+    if (kind === 'run' && arg) {
+      const r = (runsData ?? []).find((x) => x.id === arg)
+      return ui().openRun(arg, r?.projectId)
+    }
+    if (kind === 'task' && arg) {
+      ui().selectTask(arg)
+      return go('run')
+    }
+    if (kind === 'agent' && arg) {
+      ui().selectAgent(arg)
+      return go('agents')
+    }
+    switch (id) {
+      case 'project.open':
+        void openProject
+          .mutateAsync({})
+          .then((p) => {
+            if (p) {
+              ui().selectProject(p.id)
+              go('projects')
+            }
+          })
+          .catch(() => undefined)
+        return
+      case 'mission.new':
+        ui().setComposerIntent(null)
+        return go('projects')
+      case 'overnight.start':
+        ui().setComposerIntent('overnight')
+        return go('projects')
+      case 'mission.approve':
+        return controls.approvePlan()
+      case 'mission.pause':
+        return controls.pause()
+      case 'mission.resume':
+        return controls.resume()
+      case 'mission.show':
+        return go('run')
+      case 'theme.toggle':
+        if (settings)
+          updateSettings.mutate({
+            settings: {
+              ...settings,
+              appearance: {
+                ...settings.appearance,
+                theme: settings.appearance.theme === 'dark' ? 'light' : 'dark',
+              },
+            },
+          })
+        return
+      case 'density.toggle':
+        if (settings)
+          updateSettings.mutate({
+            settings: {
+              ...settings,
+              appearance: {
+                ...settings.appearance,
+                density: settings.appearance.density === 'compact' ? 'comfortable' : 'compact',
+              },
+            },
+          })
+        return
+      case 'nav.toggle':
+        return ui().toggleNav()
+      case 'auth.refresh':
+        return refreshAuth.mutate()
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh]" data-testid="command-palette">
-      <div className="absolute inset-0 bg-black/50" onClick={close} aria-hidden="true" />
-      <Command
-        label="Command palette"
-        className="relative flex max-h-[60vh] w-[34rem] max-w-[94vw] flex-col border border-border-strong bg-surface-1 shadow-xl"
-      >
-        <Command.Input
-          autoFocus
-          value={search}
-          onValueChange={setSearch}
-          placeholder="Type a command or search…"
-          className="h-9 shrink-0 border-b bg-transparent px-3 outline-none placeholder:text-fg-faint"
-        />
-        <Command.List className="min-h-0 flex-1 overflow-auto py-1">
-          <Command.Empty className="px-3 py-4 text-center text-fg-muted">No matching commands</Command.Empty>
-
-          <Command.Group heading="Navigate" className={GROUP}>
-            {VIEW_ITEMS.map((v) => (
-              <Item key={v.view} label={v.label} hint={v.keys} onSelect={run(() => setView(v.view))} />
-            ))}
-          </Command.Group>
-
-          {controls.run ? (
-            <Command.Group heading="Selected run" className={GROUP}>
-              {controls.canApprovePlan ? <Item label="Approve plan" onSelect={run(controls.approvePlan)} /> : null}
-              {controls.canPause ? <Item label="Pause run" onSelect={run(controls.pause)} /> : null}
-              {controls.canResume ? <Item label="Resume run" onSelect={run(controls.resume)} /> : null}
-              <Item label="Show selected run" onSelect={run(() => setView('run'))} />
-            </Command.Group>
-          ) : null}
-
-          <Command.Group heading="Projects" className={GROUP}>
-            <Item
-              label="Open project…"
-              onSelect={run(() => {
-                void openProject
-                  .mutateAsync({})
-                  .then((p) => {
-                    if (p) {
-                      selectProject(p.id)
-                      setView('projects')
-                    }
-                  })
-                  .catch(() => undefined)
-              })}
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh]"
+      data-testid="command-palette"
+    >
+      <div className="scrim anim-fade absolute inset-0" onClick={close} aria-hidden="true" />
+      <div ref={rootRef} className="anim-pop relative">
+        <Command
+          label="Command palette"
+          shouldFilter={false}
+          loop
+          className="flex max-h-[60vh] w-[36rem] max-w-[94vw] flex-col overflow-hidden rounded-lg border border-border-strong bg-surface-elevated shadow-elevated"
+        >
+          <div className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
+            <SearchIcon size={14} className="shrink-0 text-text-muted" />
+            <Command.Input
+              autoFocus
+              value={search}
+              onValueChange={setSearch}
+              placeholder="Search commands, missions, tasks, agents…"
+              aria-label="Search commands"
+              className="h-full min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-text-muted"
             />
-            {projects.map((p) => (
-              <Item
-                key={p.id}
-                value={`Switch to project ${p.name} ${p.id}`}
-                label={`Switch to project: ${p.name}`}
-                onSelect={run(() => {
-                  selectProject(p.id)
-                  setView('projects')
-                })}
-              />
-            ))}
-          </Command.Group>
-
-          {runs.length > 0 ? (
-            <Command.Group heading="Runs" className={GROUP}>
-              {[...runs]
-                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-                .slice(0, 10)
-                .map((r) => (
-                  <Item
-                    key={r.id}
-                    value={`Open run ${r.mode} ${r.prompt} ${r.id}`}
-                    label={`Open run: ${r.prompt}`}
-                    hint={r.mode.toUpperCase()}
-                    onSelect={run(() => openRun(r.id, r.projectId))}
-                  />
+            <Kbd>Esc</Kbd>
+          </div>
+          <Command.List className="min-h-0 flex-1 overflow-auto p-1.5">
+            <Command.Empty className="px-3 py-6 text-center text-text-muted">
+              No matching commands
+            </Command.Empty>
+            {sections.map((s) => (
+              <Command.Group
+                key={s.group}
+                heading={s.group}
+                className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-text-muted"
+              >
+                {s.items.map((item) => (
+                  <Command.Item
+                    key={item.id}
+                    value={item.id}
+                    onSelect={() => perform(item)}
+                    className="flex h-8 cursor-pointer items-center justify-between rounded-md px-2.5 text-body data-[selected=true]:bg-accent-subtle data-[selected=true]:text-text-primary"
+                  >
+                    <span className="truncate">{item.label}</span>
+                    {item.hint ? (
+                      <span className="ml-3 shrink-0 font-mono text-caption text-text-muted">
+                        {item.hint}
+                      </span>
+                    ) : null}
+                  </Command.Item>
                 ))}
-            </Command.Group>
-          ) : null}
-
-          <Command.Group heading="System" className={GROUP}>
-            <Item label="Refresh authentication status" onSelect={run(() => refreshAuth.mutate())} />
-            {settings ? (
-              <Item
-                label={`Switch to ${settings.appearance.theme === 'dark' ? 'light' : 'dark'} theme`}
-                onSelect={run(() =>
-                  updateSettings.mutate({
-                    settings: {
-                      ...settings,
-                      appearance: { ...settings.appearance, theme: settings.appearance.theme === 'dark' ? 'light' : 'dark' },
-                    },
-                  }),
-                )}
-              />
-            ) : null}
-          </Command.Group>
-        </Command.List>
-      </Command>
+              </Command.Group>
+            ))}
+          </Command.List>
+        </Command>
+      </div>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import type { PushMessage, RunEvent } from '@shared/events'
 import { api } from './bridge'
 import { qk } from './queries'
 import { useLiveStore } from '../store/live'
+import { toast as defaultToast } from '../store/toasts'
 
 type Key = readonly unknown[]
 
@@ -16,7 +17,8 @@ function toOutputKind(kind: string): AgentOutputKind {
 /** Which cached queries a durable event makes stale. Pure; unit-tested. */
 export function keysForEvent(event: RunEvent): Key[] {
   const { runId, taskId, agentId } = event
-  const keys: Key[] = [qk.eventsRoot(runId)]
+  // Every durable event can appear in the cross-run Activity feed and change the Home summary.
+  const keys: Key[] = [qk.eventsRoot(runId), qk.activityRoot()]
   const family = event.type.split('.')[0]
   switch (family) {
     case 'run':
@@ -83,6 +85,22 @@ export function keysForEvent(event: RunEvent): Key[] {
     case 'overnight':
       keys.push(qk.run(runId), qk.runsList(), qk.overnight(runId), qk.overnightActive(), qk.overnightReport(runId))
       break
+    case 'usage':
+      // Quota pauses and resumes change the run, the global usage status and what Home summarises.
+      keys.push(qk.run(runId), qk.runsList(), qk.usageRoot(), qk.homeRoot())
+      break
+    case 'strategy':
+      keys.push(qk.run(runId), qk.policyRoot())
+      break
+    case 'policy':
+      keys.push(qk.run(runId), qk.policyRoot(), qk.homeRoot())
+      break
+    case 'speculative':
+      keys.push(qk.run(runId), qk.speculative(runId), qk.runSummary(runId))
+      break
+    case 'outcome':
+      keys.push(qk.policyRoot(), qk.usageRoot(), qk.homeRoot(), qk.arenaRoot())
+      break
     default:
       // criterion.*, user.* and anything added later: refresh the run itself.
       keys.push(qk.run(runId), qk.runsList())
@@ -99,11 +117,14 @@ export interface PushOptions {
   /** Window in which invalidations are merged. */
   debounceMs?: number
   live?: Pick<ReturnType<typeof useLiveStore.getState>, 'append' | 'clear'>
+  /** Receives usage notices; defaults to the app toast store. */
+  notify?: (title: string, detail: string, notice: 'limit_reached' | 'resumed' | 'wait_ended') => void
 }
 
 export function createPushHandler(qc: QueryClient, options: PushOptions = {}): PushHandler {
   const debounceMs = options.debounceMs ?? 150
   const live = options.live ?? useLiveStore.getState()
+  const notify = options.notify ?? ((title: string, detail: string) => defaultToast.notice(title, detail))
   const pending = new Map<string, Key>()
   let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -151,6 +172,20 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
           // The push carries the whole record: render from it immediately, then refresh what hangs off it.
           qc.setQueryData(qk.overnight(message.status.runId), message.status)
           schedule([qk.overnightActive(), qk.overnightReport(message.status.runId), qk.run(message.status.runId), qk.runsList()])
+          break
+        case 'usage':
+          // The push carries the whole overview: render from it immediately, then refresh what hangs off it.
+          qc.setQueryData(qk.usageOverview(), message.overview)
+          schedule([qk.homeRoot(), qk.runsList()])
+          break
+        case 'usage.notice':
+          notify(message.title, message.detail, message.notice)
+          break
+        case 'arena':
+          schedule([qk.arenaRoot(), qk.arenaCampaign(message.campaignId), qk.homeRoot(), qk.usageRoot()])
+          break
+        case 'policy':
+          schedule([qk.policyRoot(), qk.homeRoot()])
           break
         case 'auth.changed':
           schedule([qk.auth(), qk.models()])

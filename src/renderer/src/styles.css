@@ -1,67 +1,175 @@
 @import 'tailwindcss';
 
-/* Tokens. Dark is the default; the light theme overrides the same variables under [data-theme='light']. */
-@theme {
-  --color-surface-0: #0b0d10;
-  --color-surface-1: #11141a;
-  --color-surface-2: #171b22;
-  --color-surface-3: #1f242d;
-  --color-border: #232934;
-  --color-border-strong: #343c4a;
+/*
+ * NEXUS design tokens. Light is the default; dark overrides the same variables under [data-theme='dark'].
+ * Semantic names first (background, surface, text-primary, accent, success ...). The legacy names used across
+ * the app (surface-0..3, fg, fg-muted, fg-faint, tone-*, accent-fg) are aliases onto the same palette so every
+ * screen stays consistent. See docs/UI_DESIGN_SYSTEM.md.
+ */
+@theme static {
+  /* Surfaces */
+  --color-background: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-surface-muted: #f2f3f5;
+  --color-surface-hover: #eaecef;
+  --color-border: #e4e6ea;
+  --color-border-strong: #cdd1d8;
 
-  --color-fg: #d7dce4;
-  --color-fg-muted: #9099a8;
-  --color-fg-faint: #6a7383;
+  /* Text. All three pass WCAG AA (4.5:1) on background, surface and surface-muted. */
+  --color-text-primary: #15181d;
+  --color-text-secondary: #444b57;
+  --color-text-muted: #5b6370;
 
-  --color-accent: #5b9dff;
-  --color-accent-fg: #07101f;
+  /* The one accent. */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-subtle: #eeeffd;
+  --color-accent-fg: #ffffff;
+  --color-focus-ring: #4f46e5;
 
-  /* One semantic colour per state family. */
-  --color-tone-neutral: #7d8696;
-  --color-tone-active: #4da3ff;
-  --color-tone-waiting: #e5b13a;
-  --color-tone-review: #a78bfa;
-  --color-tone-success: #3fb97a;
-  --color-tone-danger: #f0555a;
-  --color-tone-warning: #f0883e;
+  /* Semantic status colours and their quiet backgrounds. */
+  --color-success: #17743f;
+  --color-success-subtle: #e6f4ec;
+  --color-warning: #8f5200;
+  --color-warning-subtle: #fcf1dc;
+  --color-danger: #be2230;
+  --color-danger-subtle: #fcebed;
+  --color-info: #1b5eb8;
+  --color-info-subtle: #e7f0fb;
 
-  --font-sans: system-ui, 'Segoe UI Variable Text', 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'JetBrains Mono', Menlo, monospace;
+  /* Scrim behind dialogs and drawers. */
+  --color-scrim: rgb(16 18 24 / 0.3);
+
+  /* Legacy aliases (kept so existing views stay on-palette). */
+  --color-surface-0: var(--color-background);
+  --color-surface-1: var(--color-surface);
+  --color-surface-2: var(--color-surface-muted);
+  --color-surface-3: var(--color-surface-hover);
+  --color-fg: var(--color-text-primary);
+  --color-fg-muted: var(--color-text-secondary);
+  --color-fg-faint: var(--color-text-muted);
+
+  /* State families used by lib/status.ts. */
+  --color-tone-neutral: var(--color-text-muted);
+  --color-tone-neutral-subtle: #eff0f2;
+  --color-tone-active: var(--color-info);
+  --color-tone-active-subtle: var(--color-info-subtle);
+  --color-tone-waiting: var(--color-warning);
+  --color-tone-waiting-subtle: var(--color-warning-subtle);
+  --color-tone-review: #6b3fbf;
+  --color-tone-review-subtle: #f0eafb;
+  --color-tone-success: var(--color-success);
+  --color-tone-success-subtle: var(--color-success-subtle);
+  --color-tone-danger: var(--color-danger);
+  --color-tone-danger-subtle: var(--color-danger-subtle);
+  --color-tone-warning: #b4410b;
+  --color-tone-warning-subtle: #fdeee4;
+
+  /* One 4 px spacing grid: p-1 = 4px, p-2 = 8px, p-3 = 12px, p-4 = 16px ... */
+  --spacing: 4px;
+
+  /* Radii: 4 / 6 / 8 and nothing larger except pills. */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 8px;
+
+  /* One subtle elevation, for popovers, menus and dialogs only. */
+  --shadow-elevated: 0 1px 2px rgb(16 24 40 / 0.06), 0 8px 24px -6px rgb(16 24 40 / 0.16);
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow: var(--shadow-elevated);
+  --shadow-md: var(--shadow-elevated);
+  --shadow-lg: var(--shadow-elevated);
+  --shadow-xl: var(--shadow-elevated);
+  --shadow-2xl: var(--shadow-elevated);
+
+  /* Type scale. Sizes are rem so the "font size" setting scales everything: 13 px at the default. */
+  --text-title: 1.385rem; /* 18 px page title, 600 */
+  --text-title--line-height: 1.5rem;
+  --text-heading: 1rem; /* 13 px section heading, 600 */
+  --text-heading--line-height: 1.25rem;
+  --text-body: 1rem; /* 13 px */
+  --text-body--line-height: 1.25rem;
+  --text-small: 0.923rem; /* 12 px secondary */
+  --text-small--line-height: 1.15rem;
+  --text-caption: 0.846rem; /* 11 px */
+  --text-caption--line-height: 1rem;
+  --text-code: 0.923rem; /* 12 px mono */
+  --text-code--line-height: 1.15rem;
+
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, 'Liberation Mono', monospace;
+
+  /* Motion: 120 to 180 ms, decelerating. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 140ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   --font-size: 13px;
   --density: 1;
-  --row-h: calc(1.625rem * var(--density));
-  --pad-x: calc(0.5rem * var(--density));
-  --pad-y: calc(0.375rem * var(--density));
+  /* Density tokens: compact is the default. */
+  --row-h: 28px;
+  --control-h: 28px;
+  --pad-x: 8px;
+  --pad-y: 6px;
+  --nav-w: 220px;
+  --nav-w-collapsed: 52px;
 }
 
 :root[data-density='comfortable'] {
   --density: 1.25;
+  --row-h: 34px;
+  --control-h: 34px;
+  --pad-x: 12px;
+  --pad-y: 8px;
 }
 
-:root[data-theme='light'] {
-  color-scheme: light;
-  --color-surface-0: #f4f5f7;
-  --color-surface-1: #ffffff;
-  --color-surface-2: #f0f2f5;
-  --color-surface-3: #e5e8ed;
-  --color-border: #dcdfe5;
-  --color-border-strong: #c2c7d0;
-  --color-fg: #1b1f27;
-  --color-fg-muted: #4b5463;
-  --color-fg-faint: #7a8392;
-  --color-accent: #1f6feb;
-  --color-accent-fg: #ffffff;
-  --color-tone-neutral: #6b7483;
-  --color-tone-active: #1f6feb;
-  --color-tone-waiting: #b7791f;
-  --color-tone-review: #7c4dff;
-  --color-tone-success: #1a8a4f;
-  --color-tone-danger: #d1242f;
-  --color-tone-warning: #c4561a;
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-background: #0d0f12;
+  --color-surface: #14171b;
+  --color-surface-elevated: #1b1f25;
+  --color-surface-muted: #191c21;
+  --color-surface-hover: #232830;
+  --color-border: #262b32;
+  --color-border-strong: #373e48;
+
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #b4bac4;
+  --color-text-muted: #959ca8;
+
+  --color-accent: #8e94ff;
+  --color-accent-hover: #a4a9ff;
+  --color-accent-subtle: #1f2142;
+  --color-accent-fg: #0d0f12;
+  --color-focus-ring: #a4a9ff;
+
+  --color-success: #4fc08a;
+  --color-success-subtle: #12261c;
+  --color-warning: #e9a94a;
+  --color-warning-subtle: #2a2110;
+  --color-danger: #ff7a82;
+  --color-danger-subtle: #2c1417;
+  --color-info: #6aa8f5;
+  --color-info-subtle: #12202f;
+
+  --color-scrim: rgb(0 0 0 / 0.55);
+
+  --color-tone-neutral-subtle: #1e2227;
+  --color-tone-review: #b596f5;
+  --color-tone-review-subtle: #221a33;
+  --color-tone-warning: #f29b62;
+  --color-tone-warning-subtle: #2c1b10;
+
+  --shadow-elevated: 0 1px 2px rgb(0 0 0 / 0.4), 0 10px 28px -6px rgb(0 0 0 / 0.55);
 }
 
 @layer base {
@@ -75,11 +183,13 @@
   }
   body {
     margin: 0;
-    background-color: var(--color-surface-0);
-    color: var(--color-fg);
+    background-color: var(--color-background);
+    color: var(--color-text-primary);
     font-family: var(--font-sans);
-    line-height: 1.4;
+    font-size: 1rem;
+    line-height: 1.45;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     overflow: hidden;
   }
   *,
@@ -92,15 +202,18 @@
     scrollbar-color: var(--color-border-strong) transparent;
   }
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   *::-webkit-scrollbar-thumb {
     background: var(--color-border-strong);
-    border-radius: 4px;
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: content-box;
   }
+  /* A visible focus ring everywhere, for keyboard users only. */
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
   }
   button,
@@ -110,16 +223,100 @@
     font: inherit;
     color: inherit;
   }
+  button {
+    cursor: default;
+  }
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='range'] {
+    accent-color: var(--color-accent);
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+  }
   ::selection {
-    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 26%, transparent);
   }
   [data-separator] {
     background: var(--color-border);
-    transition: background 100ms;
+    transition: background 120ms;
   }
   [data-separator='hover'],
   [data-separator='active'],
   [data-separator='focus'] {
     background: var(--color-accent);
+  }
+}
+
+/* Numbers that line up in columns and counters. */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility scrim {
+  background: var(--color-scrim);
+}
+
+@keyframes nx-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes nx-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes nx-slide-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes nx-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@utility anim-fade {
+  animation: nx-fade-in 140ms var(--ease-out);
+}
+@utility anim-pop {
+  animation: nx-pop-in 140ms var(--ease-out);
+}
+@utility anim-slide {
+  animation: nx-slide-in 160ms var(--ease-out);
+}
+
+/* Reduced motion: no transitions, no animations. State changes are instantaneous. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

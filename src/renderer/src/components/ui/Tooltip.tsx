@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react'
 import { cn } from '../../lib/cn'
 
-/** CSS-only tooltip (hover and keyboard focus). Not for essential information. */
+/** CSS-only tooltip (hover and keyboard focus, short delay). Not for essential information. */
 export function Tooltip({
   text,
   children,
   side = 'bottom',
+  align = 'center',
   className,
 }: {
-  text: string
+  text: ReactNode
   children: ReactNode
-  side?: 'top' | 'bottom'
+  side?: 'top' | 'bottom' | 'right'
+  align?: 'start' | 'center' | 'end'
   className?: string
 }) {
   return (
@@ -19,9 +21,16 @@ export function Tooltip({
       <span
         role="tooltip"
         className={cn(
-          'pointer-events-none absolute left-1/2 z-50 hidden -translate-x-1/2 whitespace-nowrap rounded-[3px] border border-border-strong bg-surface-3 px-1.5 py-0.5 text-[0.8rem] text-fg shadow',
-          'group-hover/tip:block group-focus-within/tip:block',
-          side === 'bottom' ? 'top-full mt-1' : 'bottom-full mb-1',
+          'pointer-events-none absolute z-50 hidden w-max max-w-64 rounded-md bg-text-primary px-2 py-1 text-left text-small font-normal text-background',
+          'group-hover/tip:block group-focus-within/tip:block group-hover/tip:anim-fade group-focus-within/tip:anim-fade',
+          side === 'right'
+            ? 'left-full top-1/2 ml-2 -translate-y-1/2'
+            : cn(
+                align === 'center' && 'left-1/2 -translate-x-1/2',
+                align === 'start' && 'left-0',
+                align === 'end' && 'right-0',
+                side === 'bottom' ? 'top-full mt-1' : 'bottom-full mb-1',
+              ),
         )}
       >
         {text}

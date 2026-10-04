@@ -1,4 +1,5 @@
-import { PanelGroup, ResizablePanel, ResizeHandle } from '../components/ui/Resizable'
+import { useMemo } from 'react'
+import { ShellSlotsContext } from '../components/ui/PageHeader'
 import { useApplySavedAppearance } from './appearance'
 import { ApprovalBar, useAutoOpenApprovals } from '../views/approvals/ApprovalBar'
 import { ApprovalDrawer } from '../views/approvals/ApprovalDrawer'
@@ -6,38 +7,53 @@ import { RecoveryDialog } from '../views/recovery/RecoveryDialog'
 import { AuthBanner } from './AuthBanner'
 import { CommandPalette } from './CommandPalette'
 import { ErrorBoundary } from './ErrorBoundary'
+import { GlobalStatus } from './GlobalStatus'
 import { useHotkeys } from './hotkeys'
+import { QuotaBanner } from './QuotaBanner'
 import { Sidebar } from './Sidebar'
 import { Toasts } from './Toasts'
-import { TopBar } from './TopBar'
 import { ViewRouter } from './ViewRouter'
 
+function Banners() {
+  return (
+    <>
+      <QuotaBanner />
+      <ApprovalBar />
+      <AuthBanner />
+    </>
+  )
+}
+
+/** Left navigation + content column. Every page renders a PageHeader, which takes the status cluster and banners from here. */
 export function AppShell() {
   useHotkeys()
   useApplySavedAppearance()
   useAutoOpenApprovals()
+  const slots = useMemo(
+    () => ({
+      status: (
+        <ErrorBoundary label="Status failed">
+          <GlobalStatus />
+        </ErrorBoundary>
+      ),
+      banners: (
+        <ErrorBoundary label="Banners failed">
+          <Banners />
+        </ErrorBoundary>
+      ),
+    }),
+    [],
+  )
   return (
-    <div className="flex h-full flex-col" data-testid="app-shell">
-      <ErrorBoundary label="Top bar failed">
-        <TopBar />
+    <div className="flex h-full bg-background" data-testid="app-shell">
+      <ErrorBoundary label="Navigation failed">
+        <Sidebar />
       </ErrorBoundary>
-      <ApprovalBar />
-      <AuthBanner />
-      <div className="min-h-0 flex-1">
-        <PanelGroup id="shell">
-          <ResizablePanel id="sidebar" defaultSize="230px" minSize="180px" maxSize="380px">
-            <ErrorBoundary label="Sidebar failed">
-              <Sidebar />
-            </ErrorBoundary>
-          </ResizablePanel>
-          <ResizeHandle />
-          <ResizablePanel id="main" minSize="480px">
-            <main className="h-full min-h-0 overflow-hidden bg-surface-0">
-              <ViewRouter />
-            </main>
-          </ResizablePanel>
-        </PanelGroup>
-      </div>
+      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        <ShellSlotsContext.Provider value={slots}>
+          <ViewRouter />
+        </ShellSlotsContext.Provider>
+      </main>
       <ApprovalDrawer />
       <RecoveryDialog />
       <CommandPalette />

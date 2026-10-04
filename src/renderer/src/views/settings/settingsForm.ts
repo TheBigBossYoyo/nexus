@@ -24,12 +24,19 @@ export type SettingsValidation =
 /** Validates with the same SettingsSchema main uses. Errors are keyed by dotted path, e.g. "execution.maxIterations". */
 export function validateSettings(draft: Settings): SettingsValidation {
   const parsed = SettingsSchema.safeParse(normalizeSettings(draft))
-  if (parsed.success) return { ok: true, settings: parsed.data }
   const errors: Record<string, string> = {}
-  for (const issue of parsed.error.issues) {
-    const key = issue.path.join('.')
-    errors[key] ??= issue.message
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const key = issue.path.join('.')
+      errors[key] ??= issue.message
+    }
   }
+  // The probe schedule doubles from the interval up to the maximum, so the maximum cannot be below the interval.
+  const u = draft.usage
+  if (u.unknownResetProbeMaxMinutes < u.unknownResetProbeMinutes) {
+    errors['usage.unknownResetProbeMaxMinutes'] ??= 'Must be at least the probe interval.'
+  }
+  if (parsed.success && Object.keys(errors).length === 0) return { ok: true, settings: parsed.data }
   return { ok: false, errors }
 }
 

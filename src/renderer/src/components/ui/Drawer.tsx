@@ -1,9 +1,9 @@
-import { useEffect, useRef, type ReactNode } from 'react'
-import { cn } from '../../lib/cn'
+import { useId, useRef, type ReactNode } from 'react'
 import { IconButton } from './Button'
 import { XIcon } from './icons'
+import { useModal } from './useModal'
 
-/** Right-side drawer. Esc and the scrim close it. */
+/** Right-side drawer. Esc and the scrim close it; focus is trapped while it is open. */
 export function Drawer({
   open,
   onClose,
@@ -20,33 +20,28 @@ export function Drawer({
   testId?: string
 }) {
   const ref = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    ref.current?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  const titleId = useId()
+  useModal(ref, open, onClose)
 
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
+      <div className="scrim anim-fade absolute inset-0" onClick={onClose} aria-hidden="true" />
       <aside
         ref={ref}
         tabIndex={-1}
         role="dialog"
-        aria-label={typeof title === 'string' ? title : 'Drawer'}
+        aria-modal="true"
+        aria-labelledby={titleId}
         data-testid={testId}
         style={{ width }}
-        className={cn('relative flex h-full max-w-full flex-col border-l border-border-strong bg-surface-1 shadow-xl outline-none')}
+        className="anim-slide relative flex h-full max-w-full flex-col border-l border-border-strong bg-surface-elevated shadow-elevated outline-none"
       >
-        <header className="flex h-9 shrink-0 items-center justify-between border-b px-3">
-          <h2 className="font-semibold">{title}</h2>
-          <IconButton label="Close" onClick={onClose}>
+        <header className="flex h-11 shrink-0 items-center justify-between border-b px-4">
+          <h2 id={titleId} className="m-0 text-heading font-semibold">
+            {title}
+          </h2>
+          <IconButton label="Close" onClick={onClose} size="sm">
             <XIcon />
           </IconButton>
         </header>

@@ -54,6 +54,26 @@ export const qk = {
   overnight: (runId: string) => ['overnight', 'run', runId] as const,
   overnightActive: () => ['overnight', 'active'] as const,
   overnightReport: (runId: string) => ['overnight', 'report', runId] as const,
+  // v0.3. Phase 2/3 add their own hooks on top of these keys.
+  homeRoot: () => ['home'] as const,
+  home: () => ['home', 'summary'] as const,
+  activityRoot: () => ['activity'] as const,
+  activity: (limit: number, beforeSeq: number | null) => ['activity', 'recent', { limit, beforeSeq }] as const,
+  usageRoot: () => ['usage'] as const,
+  usageOverview: () => ['usage', 'overview'] as const,
+  usageTotals: () => ['usage', 'totals'] as const,
+  usageLimitHistory: () => ['usage', 'limitHistory'] as const,
+  usageEfficiency: () => ['usage', 'efficiency'] as const,
+  arenaRoot: () => ['arena'] as const,
+  arenaCases: () => ['arena', 'cases'] as const,
+  arenaCampaigns: () => ['arena', 'campaigns'] as const,
+  arenaCampaign: (campaignId: string) => ['arena', 'campaign', campaignId] as const,
+  arenaResults: (campaignId: string | null) => ['arena', 'results', campaignId ?? 'all'] as const,
+  policyRoot: () => ['policy'] as const,
+  policyOverview: () => ['policy', 'overview'] as const,
+  policyDecisions: () => ['policy', 'decisions'] as const,
+  speculativeRoot: () => ['speculative'] as const,
+  speculative: (runId: string) => ['speculative', runId] as const,
   memoryRoot: () => ['memory'] as const,
   memory: (filter: MemoryFilter) =>
     ['memory', 'list', { projectId: filter.projectId ?? null, scope: filter.scope ?? null, query: filter.query ?? '' }] as const,
@@ -171,6 +191,15 @@ export const useOvernight = (runId: string | null) =>
 export const useActiveOvernight = () => useRead(qk.overnightActive(), 'overnight.active', {})
 export const useOvernightReport = (runId: string | null, enabled = true) =>
   useRead(qk.overnightReport(runId ?? ''), 'overnight.report', { runId: runId ?? '' }, runId !== null && enabled)
+export const useHomeSummary = () => useRead(qk.home(), 'home.summary', {})
+export const useActivity = (opts: { limit?: number; beforeSeq?: number | null } = {}) => {
+  const limit = opts.limit ?? 100
+  const beforeSeq = opts.beforeSeq ?? null
+  const input: IpcInput<'activity.recent'> = { limit }
+  if (beforeSeq !== null) input.beforeSeq = beforeSeq
+  return useRead(qk.activity(limit, beforeSeq), 'activity.recent', input)
+}
+export const useUsageOverview = () => useRead(qk.usageOverview(), 'usage.overview', {})
 export const usePendingApprovals = () => useRead(qk.approvals(), 'approvals.pending', {})
 export const useMemory = (filter: MemoryFilter = {}) => {
   const input: IpcInput<'memory.list'> = {}
@@ -263,6 +292,16 @@ export const useDeleteMemory = () =>
 
 export const useRefreshIntelligence = () =>
   useWrite('intelligence.refresh', (qc) => void qc.invalidateQueries({ queryKey: qk.intelligenceRoot() }))
+
+// Usage. Each call answers with the new overview, which replaces the cached one directly.
+const applyUsage = (qc: QueryClient, overview: IpcOutputs['usage.overview']) => {
+  qc.setQueryData(qk.usageOverview(), overview)
+  void qc.invalidateQueries({ queryKey: qk.homeRoot() })
+  refreshRuns(qc)
+}
+export const useUsageRefresh = () => useWrite('usage.refresh', applyUsage)
+export const useUsageResumeNow = () => useWrite('usage.resumeNow', applyUsage)
+export const useUsageEndWait = () => useWrite('usage.endWait', applyUsage)
 
 // Overnight Mode. Every write returns the new status, which replaces the cached record directly.
 const applyOvernight = (qc: QueryClient, status: IpcOutputs['overnight.get']) => {

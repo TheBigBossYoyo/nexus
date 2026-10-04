@@ -53,4 +53,37 @@ describe('settings form', () => {
     expect(buildMcpServer({ name: 'a', type: 'sse', command: '', args: '', url: '' }, []).ok).toBe(false)
     expect(buildMcpServer({ name: 'bad name', type: 'http', command: '', args: '', url: 'https://y' }, []).ok).toBe(false)
   })
+
+  it('defaults to the light theme and validates the usage behavior section', () => {
+    const s = clone()
+    expect(s.appearance.theme).toBe('light')
+    expect(s.usage.autoResume).toBe(true)
+    expect(validateSettings(s).ok).toBe(true)
+  })
+
+  it('reports usage errors under usage.* and keeps the same object shape', () => {
+    const s = clone()
+    s.usage.resumeDelaySeconds = 5
+    s.usage.maxQuotaWaitMinutes = -1
+    const v = validateSettings(s)
+    expect(v.ok).toBe(false)
+    if (!v.ok) expect(Object.keys(v.errors)).toEqual(expect.arrayContaining(['usage.resumeDelaySeconds', 'usage.maxQuotaWaitMinutes']))
+  })
+
+  it('rejects a maximum probe interval below the first interval', () => {
+    const s = clone()
+    s.usage.unknownResetProbeMinutes = 30
+    s.usage.unknownResetProbeMaxMinutes = 10
+    const v = validateSettings(s)
+    expect(v.ok).toBe(false)
+    if (!v.ok) expect(v.errors['usage.unknownResetProbeMaxMinutes']).toMatch(/at least/)
+    s.usage.unknownResetProbeMaxMinutes = 30
+    expect(validateSettings(s).ok).toBe(true)
+  })
+
+  it('treats 0 as a valid maximum quota wait (inherit the mission deadline)', () => {
+    const s = clone()
+    s.usage.maxQuotaWaitMinutes = 0
+    expect(validateSettings(s).ok).toBe(true)
+  })
 })

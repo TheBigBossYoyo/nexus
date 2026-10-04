@@ -16,7 +16,7 @@ export function CodeBlock({
     <pre
       style={{ maxHeight }}
       className={cn(
-        'm-0 overflow-auto rounded-[3px] border bg-surface-0 p-2 font-mono text-[0.92em] leading-snug',
+        'm-0 overflow-auto rounded-md border bg-surface-muted p-3 font-mono text-code leading-snug',
         wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre',
         className,
       )}
@@ -27,5 +27,5 @@ export function CodeBlock({
 }
 
 export function InlineCode({ children, className }: { children: string; className?: string }) {
-  return <code className={cn('rounded-[3px] bg-surface-2 px-1 font-mono text-[0.92em]', className)}>{children}</code>
+  return <code className={cn('rounded-sm bg-surface-hover px-1 font-mono text-code', className)}>{children}</code>
 }

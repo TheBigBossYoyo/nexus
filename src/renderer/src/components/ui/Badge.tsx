@@ -6,11 +6,12 @@ export function StatusDot({ tone, className, pulse = false }: { tone: Tone; clas
   return (
     <span
       aria-hidden="true"
-      className={cn('inline-block size-1.5 shrink-0 rounded-full', TONE_CLASSES[tone].dot, pulse && 'animate-pulse', className)}
+      className={cn('inline-block size-1.5 shrink-0 rounded-full', TONE_CLASSES[tone].dot, pulse && 'motion-safe:animate-pulse', className)}
     />
   )
 }
 
+/** Restrained label: quiet tinted background, readable text. Always carries text; colour is never the only signal. */
 export function Badge({
   tone = 'neutral',
   children,
@@ -23,12 +24,13 @@ export function Badge({
   className?: string
   mono?: boolean
   'data-testid'?: string
+  title?: string
 }) {
   const t = TONE_CLASSES[tone]
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 whitespace-nowrap rounded-[3px] px-1.5 text-[0.8rem] leading-[1.35rem]',
+        'inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-sm px-1.5 text-caption font-medium',
         t.soft,
         t.text,
         mono && 'font-mono',
@@ -52,11 +54,11 @@ export function StatusBadge({ status, className }: { status: StatusInfo; classNa
 }
 
 /** Plain dot + text, for dense lists. */
-export function StatusText({ status }: { status: StatusInfo }) {
+export function StatusText({ status, className }: { status: StatusInfo; className?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className={cn('inline-flex items-center gap-1.5', className)}>
       <StatusDot tone={status.tone} />
-      <span className={TONE_CLASSES[status.tone].text}>{status.label}</span>
+      <span className="text-text-primary">{status.label}</span>
     </span>
   )
 }

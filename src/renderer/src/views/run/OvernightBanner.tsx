@@ -33,7 +33,7 @@ const END_OPTIONS: SelectOption<EndAction>[] = END_ACTIONS.map((a) => ({
   label: END_ACTION_LABEL[a],
 }))
 
-function ChangeEndActionDialog({
+export function ChangeEndActionDialog({
   status,
   open,
   onClose,
@@ -98,7 +98,7 @@ function ChangeEndActionDialog({
   )
 }
 
-function ExtendDialog({
+export function ExtendDialog({
   runId,
   open,
   onClose,
@@ -151,7 +151,7 @@ function ExtendDialog({
   )
 }
 
-function ReportDialog({
+export function ReportDialog({
   runId,
   open,
   onClose,

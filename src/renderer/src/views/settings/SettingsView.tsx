@@ -3,7 +3,8 @@ import type { Settings } from '@shared/settings'
 import { useSettings, useUpdateSettings } from '../../lib/queries'
 import { cn } from '../../lib/cn'
 import { applyAppearance } from '../../app/appearance'
-import { Button, ErrorNote, Loading } from '../../components/ui'
+import { useUiStore } from '../../store/ui'
+import { Button, ErrorNote, Loading, PageHeader } from '../../components/ui'
 import { isSameSettings, normalizeSettings, validateSettings } from './settingsForm'
 import {
   AdvancedSection,
@@ -15,15 +16,17 @@ import {
   MemorySection,
   ModelsSection,
   PermissionsSection,
+  UsageSection,
   type SectionProps,
 } from './sections'
 
-type SectionId = 'claude' | 'models' | 'execution' | 'git' | 'permissions' | 'memory' | 'mcp' | 'appearance' | 'advanced'
+type SectionId = 'claude' | 'models' | 'execution' | 'usage' | 'git' | 'permissions' | 'memory' | 'mcp' | 'appearance' | 'advanced'
 
-const SECTIONS: { id: SectionId; label: string; render: (p: SectionProps) => ReactNode; prefix: string }[] = [
+const SECTIONS: { id: SectionId; label: string; description?: string; render: (p: SectionProps) => ReactNode; prefix: string }[] = [
   { id: 'claude', label: 'Claude', prefix: 'claude', render: (p) => <ClaudeSection {...p} /> },
   { id: 'models', label: 'Models', prefix: 'models', render: (p) => <ModelsSection {...p} /> },
   { id: 'execution', label: 'Execution', prefix: 'execution', render: (p) => <ExecutionSection {...p} /> },
+  { id: 'usage', label: 'Usage behavior', prefix: 'usage', render: (p) => <UsageSection {...p} /> },
   { id: 'git', label: 'Git', prefix: 'git', render: (p) => <GitSection {...p} /> },
   { id: 'permissions', label: 'Permissions', prefix: 'permissions', render: (p) => <PermissionsSection {...p} /> },
   { id: 'memory', label: 'Memory', prefix: 'memory', render: (p) => <MemorySection {...p} /> },
@@ -35,7 +38,14 @@ const SECTIONS: { id: SectionId; label: string; render: (p: SectionProps) => Rea
 export function SettingsView() {
   const query = useSettings()
   const update = useUpdateSettings()
-  const [section, setSection] = useState<SectionId>('claude')
+  const requested = useUiStore((s) => s.settingsSection)
+  const [section, setSection] = useState<SectionId>(() => (SECTIONS.some((s) => s.id === requested) ? (requested as SectionId) : 'claude'))
+  // "Resume settings" on the quota banner asks for the Usage behavior section while Settings may already be open.
+  useEffect(() => {
+    if (!requested) return
+    if (SECTIONS.some((s) => s.id === requested)) setSection(requested as SectionId)
+    useUiStore.setState({ settingsSection: null })
+  }, [requested])
   // null means "no unsaved edits": the form shows the saved settings.
   const [draft, setDraft] = useState<Settings | null>(null)
 
@@ -76,51 +86,53 @@ export function SettingsView() {
   }
 
   return (
-    <div className="flex h-full min-h-0" data-testid="settings-view">
-      <nav className="w-44 shrink-0 border-r bg-surface-1 py-2" aria-label="Settings sections">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            data-testid={`settings-section-${s.id}`}
-            aria-current={s.id === section ? 'page' : undefined}
-            onClick={() => setSection(s.id)}
-            className={cn(
-              'flex h-[var(--row-h)] w-full items-center justify-between border-l-2 px-3 text-left',
-              s.id === section ? 'border-accent bg-surface-3' : 'border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg',
-            )}
-          >
-            {s.label}
-            {hasErrorIn(s.prefix) ? <span className="size-1.5 rounded-full bg-tone-danger" title="Has errors" /> : null}
-          </button>
-        ))}
-      </nav>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-auto p-4">
-          <h1 className="mb-3 mt-0 text-[1.15rem] font-semibold">{active?.label}</h1>
-          {active?.render({ draft: current, set, error: errorFor })}
+    <div className="flex h-full min-h-0 flex-col" data-testid="settings-view">
+      <PageHeader title="Settings" context="System" />
+      <div className="flex min-h-0 flex-1">
+        <nav className="w-52 shrink-0 overflow-y-auto border-r bg-background p-2" aria-label="Settings sections">
+          <ul className="m-0 flex list-none flex-col gap-px p-0">
+            {SECTIONS.map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  data-testid={`settings-section-${s.id}`}
+                  aria-current={s.id === section ? 'page' : undefined}
+                  onClick={() => setSection(s.id)}
+                  className={cn(
+                    'flex h-[var(--row-h)] w-full items-center justify-between rounded-md px-2.5 text-left font-medium transition-colors',
+                    s.id === section ? 'bg-accent-subtle text-accent' : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
+                  )}
+                >
+                  {s.label}
+                  {hasErrorIn(s.prefix) ? <span className="size-1.5 rounded-full bg-danger" title="Has errors" /> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-auto px-8 py-6">
+            <h2 className="mb-4 mt-0 text-heading font-semibold">{active?.label}</h2>
+            {active?.render({ draft: current, set, error: errorFor })}
+          </div>
+          <footer className="flex h-12 shrink-0 items-center justify-end gap-2 border-t bg-surface px-6">
+            {invalidCount > 0 ? (
+              <span className="mr-auto text-danger" data-testid="settings-invalid" role="alert">
+                {invalidCount} invalid value{invalidCount === 1 ? '' : 's'}
+              </span>
+            ) : dirty ? (
+              <span className="mr-auto text-text-secondary" role="status">
+                Unsaved changes
+              </span>
+            ) : null}
+            <Button disabled={!draft} onClick={() => setDraft(null)} data-testid="settings-revert">
+              Revert
+            </Button>
+            <Button variant="primary" loading={update.isPending} disabled={!dirty || !validation?.ok} onClick={save} data-testid="settings-save">
+              Save
+            </Button>
+          </footer>
         </div>
-        <footer className="flex h-11 shrink-0 items-center justify-end gap-2 border-t bg-surface-1 px-4">
-          {invalidCount > 0 ? (
-            <span className="mr-auto text-tone-danger" data-testid="settings-invalid">
-              {invalidCount} invalid value{invalidCount === 1 ? '' : 's'}
-            </span>
-          ) : dirty ? (
-            <span className="mr-auto text-tone-waiting">Unsaved changes</span>
-          ) : null}
-          <Button disabled={!draft} onClick={() => setDraft(null)} data-testid="settings-revert">
-            Revert
-          </Button>
-          <Button
-            variant="primary"
-            loading={update.isPending}
-            disabled={!dirty || !validation?.ok}
-            onClick={save}
-            data-testid="settings-save"
-          >
-            Save
-          </Button>
-        </footer>
       </div>
     </div>
   )

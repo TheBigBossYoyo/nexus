@@ -38,7 +38,7 @@ const TIER_LABEL: Record<ModelTier, string> = { strongest: 'Strongest', balanced
 const ROLE_LABEL = (r: AgentRole) => r.replace('_', ' ')
 
 function Stack({ children }: { children: ReactNode }) {
-  return <div className="flex max-w-xl flex-col gap-3">{children}</div>
+  return <div className="flex max-w-xl flex-col gap-4">{children}</div>
 }
 
 export function ClaudeSection({ draft, set, error }: SectionProps) {
@@ -133,7 +133,7 @@ export function ModelsSection({ draft, set, error }: SectionProps) {
         <div className="border">
           <DataTable columns={columns} rows={AGENT_ROLES} rowKey={(r) => r} />
         </div>
-        <p className="mb-0 mt-2 text-[0.85rem] text-fg-faint">The ECO preset moves most roles one tier down at run time; this table is the BALANCED and MAXIMUM baseline.</p>
+        <p className="mb-0 mt-2 text-small text-text-muted">The ECO preset moves most roles one tier down at run time; this table is the BALANCED and MAXIMUM baseline.</p>
       </div>
     </div>
   )
@@ -292,7 +292,7 @@ export function McpSection({ draft, set }: SectionProps) {
 
       {servers.length === 0 ? <div className="text-fg-muted">No MCP servers configured.</div> : null}
       {servers.map((s) => (
-        <div key={s.name} data-testid={`mcp-${s.name}`} className={cn('border border-l-2 p-3', s.enabled ? 'border-l-tone-success' : 'border-l-border-strong')}>
+        <div key={s.name} data-testid={`mcp-${s.name}`} className={cn('rounded-lg border bg-surface p-3', s.enabled && 'border-success/40')}>
           <div className="flex items-center gap-2">
             <span className="font-mono font-medium">{s.name}</span>
             <Badge mono>{s.type}</Badge>
@@ -315,8 +315,8 @@ export function McpSection({ draft, set }: SectionProps) {
                   aria-pressed={on}
                   onClick={() => toggleRole(s, r)}
                   className={cn(
-                    'rounded-[3px] border px-1.5 text-[0.85rem] capitalize',
-                    on ? 'border-accent bg-accent/15 text-fg' : 'border-border-strong text-fg-muted hover:bg-surface-3',
+                    'rounded-md border px-2 text-small capitalize',
+                    on ? 'border-accent/40 bg-accent-subtle text-accent' : 'border-border-strong text-text-secondary hover:bg-surface-hover',
                   )}
                 >
                   {ROLE_LABEL(r)}
@@ -367,7 +367,7 @@ export function AppearanceSection({ draft, set }: SectionProps) {
   const a = draft.appearance
   return (
     <Stack>
-      <p className="m-0 text-fg-muted">Changes preview immediately. Save to keep them.</p>
+      <p className="m-0 text-text-secondary">Changes preview immediately. Save to keep them.</p>
       <Field label="Theme">
         {(id) => (
           <Select
@@ -376,26 +376,27 @@ export function AppearanceSection({ draft, set }: SectionProps) {
             value={a.theme}
             onChange={(v) => set('appearance', { theme: v })}
             options={[
+              { value: 'light', label: 'Light (default)' },
               { value: 'dark', label: 'Dark' },
-              { value: 'light', label: 'Light' },
             ]}
           />
         )}
       </Field>
-      <Field label="Density">
+      <Field label="Density" hint="Compact fits more rows; comfortable adds space around controls and rows.">
         {(id) => (
           <Select
             id={id}
+            data-testid="density-select"
             value={a.density}
             onChange={(v) => set('appearance', { density: v })}
             options={[
-              { value: 'compact', label: 'Compact' },
+              { value: 'compact', label: 'Compact (default)' },
               { value: 'comfortable', label: 'Comfortable' },
             ]}
           />
         )}
       </Field>
-      <Field label={`Base font size: ${a.fontSize}px`} hint="10 to 20">
+      <Field label={`Font size: ${a.fontSize}px`} hint="10 to 20">
         {(id) => (
           <input
             id={id}
@@ -405,10 +406,90 @@ export function AppearanceSection({ draft, set }: SectionProps) {
             step={1}
             value={a.fontSize}
             onChange={(e) => set('appearance', { fontSize: Number(e.target.value) })}
-            className="accent-accent"
+            className="w-full max-w-xs"
           />
         )}
       </Field>
+    </Stack>
+  )
+}
+
+/** Usage behavior: how NEXUS waits for and resumes after a Claude usage limit. Nothing here implies a quota NEXUS cannot measure. */
+export function UsageSection({ draft, set, error }: SectionProps) {
+  const u = draft.usage
+  const patch = (p: Partial<Settings['usage']>) => set('usage', p)
+  return (
+    <Stack>
+      <p className="m-0 text-text-secondary">
+        When Claude reports a usage limit, NEXUS pauses the affected missions, keeps their work, and resumes them when Claude is available again.
+      </p>
+      <Toggle
+        checked={u.autoResume}
+        onChange={(v) => patch({ autoResume: v })}
+        label="Auto resume after reset"
+        description="Resume paused missions by themselves once Claude is available. Off: you resume them."
+        data-testid="usage-auto-resume"
+      />
+      <Field
+        label="Resume delay (seconds)"
+        hint="Wait this long after a reset Claude reported before checking availability."
+        error={error('usage.resumeDelaySeconds')}
+      >
+        {(id) => <NumberField id={id} min={15} max={3600} value={u.resumeDelaySeconds} onChange={(v) => patch({ resumeDelaySeconds: v })} className="max-w-40" data-testid="usage-resume-delay" />}
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label="Unknown-reset probe interval (minutes)"
+          hint="When no reset time is reported, availability is checked at this interval, doubling up to the maximum."
+          error={error('usage.unknownResetProbeMinutes')}
+        >
+          {(id) => <NumberField id={id} min={5} max={240} value={u.unknownResetProbeMinutes} onChange={(v) => patch({ unknownResetProbeMinutes: v })} data-testid="usage-probe-minutes" />}
+        </Field>
+        <Field label="Maximum probe interval (minutes)" error={error('usage.unknownResetProbeMaxMinutes')}>
+          {(id) => <NumberField id={id} min={5} max={720} value={u.unknownResetProbeMaxMinutes} onChange={(v) => patch({ unknownResetProbeMaxMinutes: v })} data-testid="usage-probe-max-minutes" />}
+        </Field>
+      </div>
+      <Field
+        label="Maximum quota wait (minutes)"
+        hint="0 inherits the mission deadline: NEXUS sets no limit of its own."
+        error={error('usage.maxQuotaWaitMinutes')}
+      >
+        {(id) => <NumberField id={id} min={0} max={10080} value={u.maxQuotaWaitMinutes} onChange={(v) => patch({ maxQuotaWaitMinutes: v })} className="max-w-40" data-testid="usage-max-wait" />}
+      </Field>
+      <Toggle
+        checked={u.pauseAllOnGlobalLimit}
+        onChange={(v) => patch({ pauseAllOnGlobalLimit: v })}
+        label="Pause all Claude dispatch on global limit"
+        description="One limit holds every mission, not only the one that hit it."
+        data-testid="usage-pause-all"
+      />
+      <Toggle
+        checked={u.allowLocalTasksWhileWaiting}
+        onChange={(v) => patch({ allowLocalTasksWhileWaiting: v })}
+        label="Allow deterministic local tasks while waiting"
+        description="Tasks that need no Claude session, such as running checks, may continue."
+        data-testid="usage-allow-local"
+      />
+      <Toggle
+        checked={u.notifyOnResume}
+        onChange={(v) => patch({ notifyOnResume: v })}
+        label="Notify when resumed"
+        data-testid="usage-notify"
+      />
+      <Toggle
+        checked={u.overnightWaitForReset}
+        onChange={(v) => patch({ overnightWaitForReset: v })}
+        label="In Overnight: wait for reset if before mission deadline"
+        description="Otherwise an Overnight mission ends when it hits a usage limit."
+        data-testid="usage-overnight-wait"
+      />
+      <Toggle
+        checked={u.useRuntimeUsageReport}
+        onChange={(v) => patch({ useRuntimeUsageReport: v })}
+        label="Use the runtime's usage report"
+        description="An experimental Claude runtime feature. If it is not available, NEXUS falls back to conservative probing."
+        data-testid="usage-runtime-report"
+      />
     </Stack>
   )
 }
@@ -447,7 +528,7 @@ export function AdvancedSection({ draft, set }: SectionProps) {
             ]}
           />
         ) : null}
-        <p className="mb-0 mt-2 text-[0.85rem] text-fg-faint">
+        <p className="mb-0 mt-2 text-small text-text-muted">
           Worktrees live under the data directory, never inside your repository. If one is removed by hand, run{' '}
           <InlineCode>git worktree prune</InlineCode> in the repository.
         </p>

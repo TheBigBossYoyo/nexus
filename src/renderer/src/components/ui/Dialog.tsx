@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import { Button, IconButton } from './Button'
 import { XIcon } from './icons'
+import { useModal } from './useModal'
 
 export function Dialog({
   open,
@@ -20,41 +21,33 @@ export function Dialog({
   testId?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    // Focus the first control if there is one, otherwise the dialog itself.
-    const first = ref.current?.querySelector<HTMLElement>('input, textarea, select, button[data-autofocus]')
-    ;(first ?? ref.current)?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  const titleId = useId()
+  useModal(ref, open, onClose, 'input, textarea, select, button[data-autofocus]')
 
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
+      <div className="scrim anim-fade absolute inset-0" onClick={onClose} aria-hidden="true" />
       <div
         ref={ref}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         data-testid={testId}
         style={{ width }}
-        className="relative flex max-h-[76vh] max-w-[94vw] flex-col border border-border-strong bg-surface-1 shadow-xl outline-none"
+        className="anim-pop relative flex max-h-[76vh] max-w-[94vw] flex-col rounded-lg border border-border-strong bg-surface-elevated shadow-elevated outline-none"
       >
-        <header className="flex h-9 shrink-0 items-center justify-between border-b px-3">
-          <h2 className="font-semibold">{title}</h2>
-          <IconButton label="Close" onClick={onClose}>
+        <header className="flex h-11 shrink-0 items-center justify-between border-b px-4">
+          <h2 id={titleId} className="m-0 text-heading font-semibold">
+            {title}
+          </h2>
+          <IconButton label="Close" onClick={onClose} size="sm">
             <XIcon />
           </IconButton>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
-        {footer ? <footer className="flex shrink-0 justify-end gap-2 border-t px-3 py-2">{footer}</footer> : null}
+        <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+        {footer ? <footer className="flex shrink-0 justify-end gap-2 border-t px-4 py-3">{footer}</footer> : null}
       </div>
     </div>
   )
@@ -102,7 +95,7 @@ export function ConfirmDialog({
         </>
       }
     >
-      <div className="text-fg-muted">{children}</div>
+      <div className="text-text-secondary">{children}</div>
     </Dialog>
   )
 }
