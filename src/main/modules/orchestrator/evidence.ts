@@ -144,7 +144,12 @@ export class TaskEvidenceBuilder {
       scope: task ? 'task' : 'run',
       results: results.shown,
       ...(results.omitted > 0 ? { omittedResults: results.omitted } : {}),
-      decisions: decisions.shown.map((d) => ({ id: d.id, title: oneLine(d.title), at: d.createdAt })),
+      decisions: decisions.shown.map((d) => ({
+        id: d.id,
+        title: oneLine(d.title),
+        at: d.createdAt,
+        text: [d.decision, d.rationale ? `Rationale: ${d.rationale}` : ''].filter((part) => part.trim() !== '').join('\n'),
+      })),
       proposals: proposals.shown.map((p) => ({
         id: p.id,
         type: p.type,

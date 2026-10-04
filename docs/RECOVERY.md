@@ -135,3 +135,13 @@ never resumes by itself: when your limit resets, resume the run.
 - Run-level background work (planning, finalization) that throws fails the run unless it is paused or
   finished; it never crashes the application.
 - A startup failure (database cannot be opened, schema newer than the app) shows an error dialog and exits.
+
+## Overnight runs (0.2.1)
+
+An overnight run is recovered by its supervisor, not through the recovery dialog: `runs.recoverable` leaves
+out runs with a live overnight record. What happens on the next start depends on how long NEXUS was away
+and whether Windows restarted; the table is in [OVERNIGHT_MODE](OVERNIGHT_MODE.md), "Restart of NEXUS or
+Windows". In short: a short absence resumes the run and leaves the Windows failsafe as it is; a long absence
+or a restart of Windows ends the unattended session without a power action, asks Windows to drop any
+pending shutdown, and leaves the run paused for a manual resume. A step interrupted by a crash (arming,
+cancelling, scheduling the final timer, finalizing) is completed on the next start.

@@ -29,12 +29,12 @@ const { repo, git, baseCommit } = createFixtureRepo('nexus-rot', {
 
 const MISSION = [
   'Add a text utility module to this library as ONE task (do not split it into several tasks): src/text.js with node:test tests in test/text.test.js.',
-  'It exports four functions, to be written and committed one after the other, each with its own tests:',
-  '1. `slugify(text)`: lower-case, strip diacritics (NFD), replace every run of non-alphanumeric characters with a single "-", trim "-" from both ends; throws TypeError when the argument is not a string.',
-  '2. `wrap(text, width)`: greedy word wrap to lines of at most `width` characters, words longer than the width on their own line; throws TypeError unless width is a positive integer.',
-  '3. `truncate(text, max)`: returns the text unchanged when it fits, otherwise cuts at the last word boundary that fits and appends "…", never exceeding `max` characters.',
-  '4. `countWords(text)`: the number of words, where a word is a run of letters, digits or apostrophes.',
-  'Record one design decision with the decision tool: how word boundaries are defined, since wrap, truncate and countWords must agree on it. `npm test` must pass.',
+  'It exports four functions, each with its own tests. In wrap, truncate and countWords a word is a maximal run of non-whitespace characters.',
+  '1. `slugify(text)`: lower-case, strip diacritics (NFD), replace every run of characters other than a-z and 0-9 with a single "-", trim "-" from both ends; throws TypeError when the argument is not a string.',
+  '2. `wrap(text, width)`: greedy word wrap into lines of at most `width` characters, a word longer than the width alone on its line; returns the lines joined with a line feed; throws TypeError unless width is a positive integer.',
+  '3. `truncate(text, max)`: returns the text unchanged when it fits; otherwise the longest prefix of whole words that fits in `max - 1` characters followed by "…" (when not even the first word fits: its first `max - 1` characters followed by "…").',
+  '4. `countWords(text)`: the number of words; 0 for an empty or all-whitespace string.',
+  'Record one design decision with the decision tool stating that word definition. `npm test` must pass. Commit as you see fit.',
 ].join('\n')
 
 const evidence = { kind: 'session-rotation', startedAt: new Date().toISOString(), executable: exe ?? 'dev build', mission: MISSION, sessionRotationTurns: ROTATION_TURNS }

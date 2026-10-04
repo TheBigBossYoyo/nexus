@@ -162,7 +162,8 @@ export interface OrchestrationEvidence {
   omittedMessages?: number
   /** Messages received that were left out because of the cap. */
   omittedReceived?: number
-  decisions: { id: string; title: string; at: string }[]
+  /** `text` is the decision and its rationale as the agent recorded them (agent-written, bounded). */
+  decisions: { id: string; title: string; at: string; text?: string }[]
   proposals: { id: string; type: string; status: string; title: string; at: string }[]
   /** Everything below is optional: the canonical TaskEvidenceBuilder fills it, a section with no data is not rendered. */
   artifacts?: { id: string; kind: string; title: string; task: string }[]
@@ -375,9 +376,13 @@ export function renderOrchestrationEvidence(e: OrchestrationEvidence): string {
     evidenceGroup('Messages received', e.messages.filter((m) => m.direction === 'received').map(messageRecord), e.omittedReceived, MESSAGE_GROUP_BUDGET),
     evidenceGroup(
       'Decisions recorded',
-      e.decisions.map((d) => `- record decision ${shortId(d.id)}: at ${oneLine(d.at, 40)}, title "${oneLine(d.title)}"`),
+      // A criterion can be about what was decided, so the recorded text is shown (quoted: it is the agent's own).
+      e.decisions.map((d) => {
+        const line = `- record decision ${shortId(d.id)}: at ${oneLine(d.at, 40)}, title "${oneLine(d.title)}"`
+        return d.text ? `${line}\n  decision text (agent-written):\n${quoteBlock(d.text, 1_200, '  ')}` : line
+      }),
       e.omitted?.decisions,
-      5_000,
+      12_000,
     ),
     evidenceGroup(
       'Graph proposals made',

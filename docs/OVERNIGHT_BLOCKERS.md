@@ -1,5 +1,11 @@
 # Overnight Blockers
 
+> Status on 2026-10-04 (0.2.1): item 1 is replaced by Overnight Mode (NEXUS performs the power action
+> itself; see `docs/OVERNIGHT_MODE.md`). Item 2 is closed: a real Claude worker proposed, and NEXUS applied,
+> a graph change (`docs/acceptance/dynamic-proposal-2026-10-04T09-44-04-448Z.json`). Item 3 is still open:
+> the root cause is not proven. Item 4 is still open: the installer was not executed. Item 5 is unchanged.
+> See `docs/V0_2_1_RELEASE_REPORT.md`.
+
 Items that could not be completed or proven during the overnight run of 2026-10-03/04.
 
 ## 1. Mandatory shutdown was not performed
