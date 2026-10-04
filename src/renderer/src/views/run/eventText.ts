@@ -26,7 +26,7 @@ export function eventCategory(type: EventType): EventCategory {
     case 'routing':
       return 'graph'
     default:
-      // run, plan, user, decision, criterion, memory, intelligence, context
+      // run, plan, user, decision, criterion, memory, intelligence, context, overnight, checkpoint
       return 'run'
   }
 }
@@ -121,6 +121,41 @@ const RENDER: Renderers = {
   'intelligence.refreshed': (p) => `Repository intelligence refreshed: ${plural(p.facts, 'fact')}, ${p.stale} stale`,
   'context.composed': (p) =>
     `Context composed: ${p.included} included, ${p.excluded} excluded, ${p.chars.toLocaleString()} chars`,
+  'overnight.started': (p) =>
+    `Overnight mode started: end action ${p.endAction}, deadline ${p.deadlineAt}${p.failsafeDeadline ? `, failsafe ${p.failsafeDeadline}` : ', no failsafe'}`,
+  'overnight.state_changed': (p) => `Overnight ${p.from} → ${p.to}${p.detail ? ` (${trunc(p.detail)})` : ''}`,
+  'overnight.failsafe': (p) => {
+    const when = p.deadline ? ` (${p.deadline})` : ''
+    const outcome = p.ok ? '' : ' FAILED'
+    switch (p.action) {
+      case 'armed':
+        return `Failsafe shutdown armed${when}${outcome}`
+      case 'cancelled':
+        return `Failsafe shutdown cancelled${outcome}`
+      case 'rearmed':
+        return `Failsafe shutdown re-armed${when}${outcome}`
+      case 'lost':
+        return 'Failsafe shutdown lost (Windows restarted)'
+      case 'failed':
+        return `Failsafe shutdown could not be armed${outcome}`
+    }
+  },
+  'overnight.quota': (p) => {
+    switch (p.action) {
+      case 'waiting':
+        return `Usage limit reached: waiting${p.resumeAt ? `, resumes ${p.resumeAt}` : ''}`
+      case 'resumed':
+        return 'Usage limit reset: run resumed'
+      case 'exhausted':
+        return 'Usage limit exhausted: run ended'
+    }
+  },
+  'overnight.watchdog': (p) => `Watchdog ${p.stage}: ${trunc(p.detail)}`,
+  'overnight.report': (p) => `Final report written (${p.chars.toLocaleString()} chars)${p.path ? ` to ${p.path}` : ''}`,
+  'overnight.power': (p) => `Power ${p.operation} (${p.action}): ${p.ok ? 'ok' : 'failed'}${p.executeAt ? `, at ${p.executeAt}` : ''}, ${trunc(p.detail)}`,
+  'overnight.amended': (p) => `Overnight policy changed by the user: ${trunc(p.change)}`,
+  'overnight.approval': (p) => `Unattended ${p.kind} approval ${p.decision}`,
+  'checkpoint.saved': (p) => `Checkpoint saved (${trunc(p.reason)})`,
   'review.arbitrated': (p) => `Findings arbitrated: ${p.accepted} accepted, ${p.rejected} rejected`,
   'user.intervention': (p) => `User: ${p.action}${p.detail ? ` (${trunc(p.detail)})` : ''}`,
 }

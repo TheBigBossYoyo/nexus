@@ -137,8 +137,8 @@ export interface ReviewPromptInput {
   attempt: number
   /** Dual review: this reviewer's focus. */
   lens?: string
-  /** Messages the task's agents sent (type, recipient, subject); never their reasoning. */
-  sentMessages?: OrchestrationEvidence['messages']
+  /** From TaskEvidenceBuilder. The reviewer sees only the messages the task's agents sent (type, recipient, subject), never their reasoning. */
+  evidence?: OrchestrationEvidence
 }
 
 /**
@@ -152,7 +152,7 @@ export function buildReviewPrompt(input: ReviewPromptInput): Pack {
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
     { name: 'Check results', body: renderChecks(input.checkResults) },
-    { name: 'Orchestration records', body: input.sentMessages ? renderSentMessages(input.sentMessages) : null },
+    { name: 'Orchestration records', body: input.evidence ? renderSentMessages(input.evidence.messages) : null },
     { name: 'Review focus', body: input.lens ?? null },
     {
       name: 'Instructions',

@@ -53,6 +53,10 @@ export async function launchApp(dataDir: string, pickPath: string | null): Promi
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
   env['NEXUS_DATA_DIR'] = dataDir
   env['NEXUS_FAKE_RUNTIME'] = '1'
+  // Off-screen and never focused: a test run must not put windows in front of whoever is using the machine.
+  if (process.env['NEXUS_E2E_SHOW'] !== '1') env['NEXUS_WINDOW_OFFSCREEN'] = '1'
+  // The scripted runtime always comes with the fake power controller; a faster supervisor pass keeps the tests short.
+  env['NEXUS_OVERNIGHT_TICK_MS'] = '500'
   delete env['ELECTRON_RENDERER_URL']
   delete env['ELECTRON_RUN_AS_NODE']
   const app = await electron.launch({ args: ['.'], cwd: REPO_ROOT, env })

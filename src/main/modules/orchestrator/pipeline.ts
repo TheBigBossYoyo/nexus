@@ -41,7 +41,7 @@ import type { AgentOutcome, AgentRunResult, SessionControl } from './agent-runne
 import { ARBITRATION_ARTIFACT } from './arbitration'
 import { composeForTask } from './context-source'
 import type { Core } from './core'
-import { gatherEvidence } from './evidence'
+import { buildTaskEvidence } from './evidence'
 import { renderMessage } from './messaging'
 import { recordTaskOutcome } from './outcomes'
 import { purposeFor } from './task-kind'
@@ -504,7 +504,7 @@ export class TaskPipeline {
         patch: diff.patch,
         checkResults: checks,
         attempt,
-        sentMessages: gatherEvidence(repos, run.id, task).messages,
+        evidence: buildTaskEvidence(repos, run.id, task, { changedFiles: diff.files }),
         ...(lens ? { lens } : {}),
       }).prompt
     if (this.reviewIsDual(run, task)) return this.reviewDual(run, task, worktree, diff, checks, attempt, control, promptFor)
@@ -700,7 +700,7 @@ export class TaskPipeline {
         diffStat: diffStat(diff),
         checkResults: checks,
         reviewSummary,
-        evidence: gatherEvidence(repos, run.id, task),
+        evidence: buildTaskEvidence(repos, run.id, task, { changedFiles: diff.files }),
       }).prompt,
       schema: VerifierOutputSchema,
       jsonSchema: verifierOutputJsonSchema,
@@ -873,7 +873,7 @@ export class TaskPipeline {
       findings: failure.findings,
       failures: failure.failures,
       checkResults: failure.checkResults,
-      evidence: gatherEvidence(repos, run.id, parent),
+      evidence: buildTaskEvidence(repos, run.id, parent),
     })
     const instructions = this.core.messages.takeInstructions(parent.id)
     const prompt = instructions.length === 0 ? built.prompt : [built.prompt, '## Instructions from the user', ...instructions.map((m) => `- ${m.body}`)].join('\n\n')

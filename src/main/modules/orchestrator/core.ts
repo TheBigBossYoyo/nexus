@@ -9,6 +9,7 @@ import {
   type TaskState,
   type Verification,
 } from '@shared/domain'
+import type { PauseCause } from '@shared/events'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage } from '@shared/result'
 import { runCommandLine } from '@main/modules/process'
@@ -166,14 +167,16 @@ export class Core {
   }
 
   /** Pause a run, remembering the state to return to. Returns null when it cannot be paused. */
-  pauseRun(runId: string, reason: PauseReason, detail?: string): Run | null {
+  pauseRun(runId: string, reason: PauseReason, detail?: string, cause?: PauseCause): Run | null {
     const { repos, bus } = this.deps
     const run = repos.runs.require(runId)
     if (!canPauseRun(run.state)) return null
     return bus.transaction(() => {
       const paused = this.setRunState(runId, 'paused', { resumeState: run.state, pauseReason: reason }, detail)
       this.markRunInactive(runId)
-      bus.emit({ runId, type: 'run.paused', payload: { reason, ...(detail ? { detail } : {}) } })
+      // Without an explicit cause: a 'user' pause that carries a detail was raised by NEXUS itself (an intervention).
+      const why: PauseCause = cause ?? (reason === 'user' ? (detail ? 'intervention' : 'user') : reason)
+      bus.emit({ runId, type: 'run.paused', payload: { reason, cause: why, ...(detail ? { detail } : {}) } })
       return paused
     })
   }

@@ -50,6 +50,10 @@ export const qk = {
   contextRoot: () => ['context'] as const,
   contextPacks: (filter: { taskId?: string | null; agentId?: string | null }) =>
     ['context', 'packs', { taskId: filter.taskId ?? null, agentId: filter.agentId ?? null }] as const,
+  overnightRoot: () => ['overnight'] as const,
+  overnight: (runId: string) => ['overnight', 'run', runId] as const,
+  overnightActive: () => ['overnight', 'active'] as const,
+  overnightReport: (runId: string) => ['overnight', 'report', runId] as const,
   memoryRoot: () => ['memory'] as const,
   memory: (filter: MemoryFilter) =>
     ['memory', 'list', { projectId: filter.projectId ?? null, scope: filter.scope ?? null, query: filter.query ?? '' }] as const,
@@ -162,6 +166,11 @@ export const useContextPacks = (filter: { taskId?: string | null; agentId?: stri
   if (filter.agentId) input.agentId = filter.agentId
   return useRead(qk.contextPacks(filter), 'context.packs', input, Boolean(filter.taskId || filter.agentId))
 }
+export const useOvernight = (runId: string | null) =>
+  useRead(qk.overnight(runId ?? ''), 'overnight.get', { runId: runId ?? '' }, runId !== null)
+export const useActiveOvernight = () => useRead(qk.overnightActive(), 'overnight.active', {})
+export const useOvernightReport = (runId: string | null, enabled = true) =>
+  useRead(qk.overnightReport(runId ?? ''), 'overnight.report', { runId: runId ?? '' }, runId !== null && enabled)
 export const usePendingApprovals = () => useRead(qk.approvals(), 'approvals.pending', {})
 export const useMemory = (filter: MemoryFilter = {}) => {
   const input: IpcInput<'memory.list'> = {}
@@ -254,3 +263,23 @@ export const useDeleteMemory = () =>
 
 export const useRefreshIntelligence = () =>
   useWrite('intelligence.refresh', (qc) => void qc.invalidateQueries({ queryKey: qk.intelligenceRoot() }))
+
+// Overnight Mode. Every write returns the new status, which replaces the cached record directly.
+const applyOvernight = (qc: QueryClient, status: IpcOutputs['overnight.get']) => {
+  if (status) qc.setQueryData(qk.overnight(status.runId), status)
+  void qc.invalidateQueries({ queryKey: qk.overnightActive() })
+  refreshRuns(qc)
+}
+export const useCancelPower = () => useWrite('overnight.cancelPower', applyOvernight)
+export const useChangeEndAction = () => useWrite('overnight.changeEndAction', applyOvernight)
+export const useExtendMission = () => useWrite('overnight.extend', applyOvernight)
+export const useCancelOvernightMission = () => useWrite('overnight.cancelMission', applyOvernight)
+/** Errors are shown inside the confirmation dialog, so the global toast is suppressed. */
+export const useStartOvernight = () => {
+  const qc = useQueryClient()
+  return useMutation<IpcOutputs['overnight.start'], IpcError, IpcInput<'overnight.start'>>({
+    mutationFn: (input) => api.invoke('overnight.start', input),
+    meta: { silent: true },
+    onSuccess: (out) => applyOvernight(qc, out.overnight),
+  })
+}

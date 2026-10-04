@@ -1,5 +1,5 @@
 import { canonicalizePath, isPathInside, isSecretPath } from './paths'
-import { tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, tokenize } from './shell-tokenizer'
 import type { Segment, Shell } from './shell-tokenizer'
 
 export type CommandLevel = 'safe' | 'write' | 'needs_approval' | 'forbidden'
@@ -7,9 +7,30 @@ export type CommandRisk = 'low' | 'medium' | 'high'
 /** How a single sub-command may be used by restricted roles. */
 export type SegmentKind = 'readonly' | 'verify' | 'install' | 'other'
 
+/**
+ * What a command does, independent of who runs it (0.2.1). SAFE_READ, SAFE_PROJECT_WRITE and GIT_LOCAL
+ * never need approval for writing roles inside their worktree; the rest are gated or forbidden.
+ */
+export type CommandClass = 'SAFE_READ' | 'SAFE_PROJECT_WRITE' | 'GIT_LOCAL' | 'NETWORK' | 'SYSTEM_CHANGE' | 'DESTRUCTIVE' | 'UNKNOWN'
+
+const CLASS_SEVERITY: Record<CommandClass, number> = {
+  SAFE_READ: 0,
+  SAFE_PROJECT_WRITE: 1,
+  GIT_LOCAL: 2,
+  UNKNOWN: 3,
+  NETWORK: 4,
+  SYSTEM_CHANGE: 5,
+  DESTRUCTIVE: 6,
+}
+
+function maxClass(classes: CommandClass[]): CommandClass {
+  return classes.reduce<CommandClass>((m, c) => (CLASS_SEVERITY[c] > CLASS_SEVERITY[m] ? c : m), 'SAFE_READ')
+}
+
 export interface SegmentInfo {
   command: string
   kind: SegmentKind
+  class?: CommandClass
 }
 
 export interface CommandClassification {
@@ -20,6 +41,10 @@ export interface CommandClassification {
   risk: CommandRisk | null
   /** One entry per inspected sub-command (including nested shells and substitutions). */
   segments: SegmentInfo[]
+  /** Most severe class among every inspected sub-command and finding (SAFE_READ for an empty command). */
+  commandClass: CommandClass
+  /** Every distinct class seen, most severe last. */
+  classes: CommandClass[]
 }
 
 export interface ClassifyOptions {
@@ -36,6 +61,7 @@ interface Finding {
   level: 'needs_approval' | 'forbidden'
   risk: CommandRisk
   reason: string
+  cls: CommandClass
 }
 
 class Analysis {
@@ -59,11 +85,11 @@ class Analysis {
       .filter((p) => p.length > 0)
   }
 
-  add(level: Finding['level'], risk: CommandRisk, reason: string): void {
-    this.findings.push({ level, risk, reason })
+  add(level: Finding['level'], risk: CommandRisk, reason: string, cls: CommandClass = 'UNKNOWN'): void {
+    this.findings.push({ level, risk, reason, cls })
   }
-  ask(risk: CommandRisk, reason: string): void {
-    this.add('needs_approval', risk, reason)
+  ask(risk: CommandRisk, reason: string, cls: CommandClass = 'UNKNOWN'): void {
+    this.add('needs_approval', risk, reason, cls)
   }
 }
 
@@ -77,16 +103,19 @@ export function classifyCommand(command: string, shell: Shell, opts: ClassifyOpt
   }
   const reasons = [...new Set(a.findings.map((f) => f.reason))]
   const segments = a.segments
+  const all = [...a.segments.map((s) => s.class ?? 'UNKNOWN'), ...a.findings.map((f) => f.cls)]
+  const classes = [...new Set(all)].sort((x, y) => CLASS_SEVERITY[x] - CLASS_SEVERITY[y])
+  const commandClass = maxClass(all)
   if (a.findings.some((f) => f.level === 'forbidden')) {
     const forbidden = a.findings.filter((f) => f.level === 'forbidden')
-    return { level: 'forbidden', reasons: [...new Set(forbidden.map((f) => f.reason))], risk: 'high', segments }
+    return { level: 'forbidden', reasons: [...new Set(forbidden.map((f) => f.reason))], risk: 'high', segments, commandClass, classes }
   }
   if (a.findings.length > 0) {
     const risk = a.findings.reduce<CommandRisk>((m, f) => (RISK_ORDER[f.risk] > RISK_ORDER[m] ? f.risk : m), 'low')
-    return { level: 'needs_approval', reasons, risk, segments }
+    return { level: 'needs_approval', reasons, risk, segments, commandClass, classes }
   }
   const readOnly = segments.every((s) => s.kind === 'readonly')
-  return { level: readOnly ? 'safe' : 'write', reasons: [], risk: null, segments }
+  return { level: readOnly ? 'safe' : 'write', reasons: [], risk: null, segments, commandClass, classes }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -103,28 +132,45 @@ const DANGEROUS_ENV_NAME = '(?:git_[a-z0-9_]*|ld_[a-z0-9_]*|dyld_[a-z0-9_]*|node
 const DANGEROUS_ENV_ASSIGN = new RegExp(`(?:\\$\\{?env:|\\benv:)${DANGEROUS_ENV_NAME}\\}?\\s*\\+?=|\\bset\\s+"?${DANGEROUS_ENV_NAME}=`, 'i')
 const DANGEROUS_ENV_WORD = new RegExp(`^${DANGEROUS_ENV_NAME}=`, 'i')
 const ENV_ASSIGN_REASON = 'sets an environment variable that makes tools run programs (GIT_*, PAGER, EDITOR, LD_*, PATH, ...)'
+const POWER_REASON = 'shutting down, restarting, suspending or powering off the machine is forbidden for every role'
+/** Power-state APIs and WMI/CIM methods; plain command names are matched per segment instead. */
+const POWER_TEXT =
+  /\b(win32shutdown|win32shutdowntracker|setsuspendstate|exitwindowsex|initiatesystemshutdown(?:ex)?|ntshutdownsystem|ntinitiatepoweraction|ntsetsystempowerstate)\b|powrprof(?:\.dll)?\s*,|\binvoke-(?:wmi|cim)method\b[^|;&\n]*-(?:method)?name\s+['"]?(?:win32)?(?:shutdown|reboot)\b|\bsystemctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)\b|\bloginctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate)\b/i
+/** Executables that power off, restart or suspend the machine. Matched on the normalised base name. */
+const POWER_CMDS = new Set([
+  'shutdown', 'psshutdown', 'psshutdown64', 'stop-computer', 'restart-computer', 'poweroff', 'halt', 'reboot', 'slidetoshutdown', 'telinit',
+])
+/** Commands that launch or schedule another program: their arguments may name a power command. */
+const LAUNCHER_CMDS = new Set([
+  'start-process', 'saps', 'start', 'invoke-item', 'ii', 'invoke-expression', 'iex', 'eval', 'invoke-command', 'icm', 'start-job', 'start-threadjob',
+  'schtasks', 'at', 'new-scheduledtaskaction', 'register-scheduledtask', 'set-scheduledtask', 'runas', 'explorer', 'conhost', 'wt', 'set-alias', 'new-alias', 'sal', 'nal', 'alias',
+  'rundll32', 'mshta', 'wscript', 'cscript', 'forfiles', 'wmic', 'invoke-wmimethod', 'invoke-cimmethod',
+])
 const DOTNET_NETWORK = /net\.webclient|downloadstring|downloadfile|start-bitstransfer|system\.net\.http/i
 
-function analyzeText(text: string, shell: Shell, a: Analysis, depth: number): void {
+function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number): void {
+  // A quoted heredoc used only as a git commit message is inert prose, not shell (bash only).
+  const text = shell === 'bash' ? neutralizeCommitHeredocs(rawText) : rawText
   if (depth > MAX_NESTING) {
     a.ask('high', 'shell commands are nested too deeply to inspect')
     return
   }
   if (CREDENTIAL_STORE.test(text)) {
-    a.add('forbidden', 'high', 'Claude credential stores must never be read or printed')
+    a.add('forbidden', 'high', 'Claude credential stores must never be read or printed', 'SYSTEM_CHANGE')
   }
   if (SECURITY_TOOLING.test(text)) {
-    a.add('forbidden', 'high', 'disabling or modifying security tooling is not permitted')
+    a.add('forbidden', 'high', 'disabling or modifying security tooling is not permitted', 'SYSTEM_CHANGE')
   }
+  if (POWER_TEXT.test(text)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
   if (MACHINE_ENV.test(text)) {
-    a.ask('high', 'changes machine/user environment variables')
+    a.ask('high', 'changes machine/user environment variables', 'SYSTEM_CHANGE')
   }
   if (SECRET_ENV_REF.test(text)) {
     a.ask('high', 'accessing secrets: references a key/token/secret-like environment variable')
   }
   if (DANGEROUS_ENV_ASSIGN.test(text)) a.ask('high', ENV_ASSIGN_REASON)
   if (DOTNET_NETWORK.test(text)) {
-    a.ask('medium', 'network operation (.NET web client / BITS transfer)')
+    a.ask('medium', 'network operation (.NET web client / BITS transfer)', 'NETWORK')
   }
   for (const seg of tokenize(text, shell)) analyzeSegment(seg, shell, a, depth)
 }
@@ -145,6 +191,7 @@ function normalizeName(word: string): string {
 }
 
 function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number): void {
+  const findingsBefore = a.findings.length
   const words = [...seg.words]
   const hasPathSep = words[0] !== undefined && /[\\/]/.test(words[0]) && !/^\.[\\/]node_modules[\\/]\.bin[\\/]/.test(words[0])
 
@@ -170,7 +217,7 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
   for (let guard = 0; guard < 4 && words[i] !== undefined; guard++) {
     const w = normalizeName(words[i] ?? '')
     if (w === 'sudo' || w === 'doas' || w === 'gsudo') {
-      a.ask('high', `${w} runs with elevated privileges`)
+      a.ask('high', `${w} runs with elevated privileges`, 'SYSTEM_CHANGE')
       i = skipFlags(words, i + 1)
       wrapped = true
     } else if (w === 'env') {
@@ -196,7 +243,9 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
 
   const nameWord = words[i]
   if (nameWord === undefined) {
-    a.segments.push({ command: '', kind: seg.words.length === 0 && seg.redirects.every((r) => isHarmlessRedirect(r.op, r.target)) ? 'readonly' : 'other' })
+    const bare = seg.words.length === 0 && seg.redirects.every((r) => isHarmlessRedirect(r.op, r.target))
+    const own = a.findings.slice(findingsBefore).map((x) => x.cls)
+    a.segments.push({ command: '', kind: bare ? 'readonly' : 'other', class: own.length > 0 ? maxClass(own) : bare ? 'SAFE_READ' : 'SAFE_PROJECT_WRITE' })
     return
   }
   const cmd = normalizeName(nameWord)
@@ -210,6 +259,9 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     a.ask('high', 'piping into Invoke-Expression executes arbitrary text')
   }
 
+  if (POWER_CMDS.has(cmd)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+  else if (LAUNCHER_CMDS.has(cmd) && launchesPowerCommand(args)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+
   const handledNested = analyzeNestedShell(cmd, args, a, depth)
   if (!handledNested) analyzeCommand(cmd, args, lc, a)
 
@@ -220,7 +272,76 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     else if (isVerification(cmd, args, lc, a)) kind = 'verify'
     else if (isPlainInstall(cmd, args, lc)) kind = 'install'
   }
-  a.segments.push({ command: cmd, kind })
+  a.segments.push({ command: cmd, kind, class: segmentClass(cmd, args, kind, handledNested, seg, a.findings.slice(findingsBefore)) })
+}
+
+/** Commands whose only effect (once path checks pass) is writing files inside the project. */
+const PROJECT_WRITE_CMDS = new Set([
+  'mkdir', 'md', 'touch', 'cp', 'copy', 'copy-item', 'cpi', 'new-item', 'ni', 'set-content', 'add-content', 'ac', 'out-file',
+  'mv', 'move', 'move-item', 'mi', 'rename-item', 'rni', 'ren', 'rename', 'rm', 'del', 'erase', 'remove-item', 'ri', 'rmdir', 'rd', 'unlink', 'tee', 'tee-object',
+])
+/** git subcommands that only change the local repository (index, refs, worktrees, configuration of this repo). */
+const GIT_LOCAL_SUBS = new Set([
+  'add', 'commit', 'branch', 'worktree', 'stash', 'switch', 'checkout', 'merge', 'tag', 'restore', 'reset', 'cherry-pick', 'revert', 'mv', 'rm',
+  'init', 'apply', 'am', 'bisect', 'notes', 'config', 'remote', 'submodule', 'rebase', 'range-diff', 'sparse-checkout', 'maintenance', 'gc', 'fsck',
+  'format-patch', 'archive', 'bundle', 'clean', 'reflog', 'update-index', 'write-tree', 'commit-tree', 'hash-object', 'mktree', 'symbolic-ref', 'pack-refs', 'repack',
+])
+
+function segmentClass(cmd: string, args: string[], kind: SegmentKind, nested: boolean, seg: Segment, own: Finding[]): CommandClass {
+  if (own.length > 0) return maxClass(own.map((x) => x.cls))
+  if (nested) return 'SAFE_READ' // the wrapped commands are classified on their own
+  if (kind === 'readonly' || kind === 'verify') return 'SAFE_READ'
+  if (kind === 'install') return 'SAFE_PROJECT_WRITE'
+  if (cmd === 'git' && GIT_LOCAL_SUBS.has(gitSubcommand(args) ?? '')) return 'GIT_LOCAL'
+  if (cmd === 'git' && isReadOnlyGit(args, args.map((x) => x.toLowerCase()))) return 'SAFE_READ'
+  if (PROJECT_WRITE_CMDS.has(cmd)) return 'SAFE_PROJECT_WRITE'
+  if (READONLY_SIMPLE.has(cmd) && seg.redirects.length > 0) return 'SAFE_PROJECT_WRITE'
+  return 'UNKNOWN'
+}
+
+/** First git subcommand after global options, lowercased. */
+function gitSubcommand(args: string[]): string | undefined {
+  let i = 0
+  while (i < args.length) {
+    const w = args[i] ?? ''
+    if (w === '-c' || ['-C', '--git-dir', '--work-tree', '--namespace', '--exec-path'].includes(w)) i += 2
+    else if (/^--config-env/i.test(w)) i += w.includes('=') ? 1 : 2
+    else if (w.startsWith('-')) i++
+    else break
+  }
+  return args[i]?.toLowerCase()
+}
+
+const POWER_WRAPPERS = new Set(['cmd', 'start', 'call', 'powershell', 'pwsh', 'sh', 'bash', 'command', 'start-process', 'saps', 'runas', 'sudo', 'env', 'nohup', 'timeout'])
+
+/** True when a shell command line (as one string) runs a power command, directly or through a launcher word. */
+function textRunsPowerCommand(text: string, depth = 0): boolean {
+  if (depth > 3) return false
+  for (const shell of ['bash', 'powershell'] as const) {
+    for (const seg of tokenize(text, shell)) {
+      const words = seg.words.filter((w) => w !== '&' && w !== '.')
+      const first = normalizeName(words[0] ?? '')
+      if (POWER_CMDS.has(first)) return true
+      if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => !w.startsWith('-') && !w.startsWith('/') && POWER_CMDS.has(normalizeName(w)))) return true
+      if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => /\s/.test(w) && textRunsPowerCommand(w, depth + 1))) return true
+    }
+  }
+  return false
+}
+
+/** True when any argument of a launcher/scheduler command names a power command (path, .exe, flag value or command line). */
+function launchesPowerCommand(args: string[]): boolean {
+  for (const raw of args) {
+    const values = [raw]
+    if (raw.startsWith('-') || raw.startsWith('/')) {
+      const m = /^[-/]\w+[:=](.+)$/.exec(raw)
+      if (m?.[1] !== undefined) values.push(m[1])
+    }
+    for (const v of values) {
+      if (/\s/.test(v) ? textRunsPowerCommand(v) : POWER_CMDS.has(normalizeName(v))) return true
+    }
+  }
+  return false
 }
 
 function isHarmlessRedirect(op: string, target: string): boolean {
@@ -264,10 +385,10 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
         if (isSecretPath(v)) a.ask('high', `accessing secrets: ${v}`)
       }
       if (destructive && v.split(/[\\/]/).some((s) => s.toLowerCase() === '.git')) {
-        a.ask('high', 'deleting or moving a .git directory')
+        a.ask('high', 'deleting or moving a .git directory', 'DESTRUCTIVE')
       }
       const outside = outsideRoots(v, a)
-      if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`)
+      if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
     }
   }
   for (const r of seg.redirects) {
@@ -365,9 +486,7 @@ function analyzeNestedShell(cmd: string, args: string[], a: Analysis, depth: num
 const HIGH_ALWAYS: Record<string, string> = {
   setx: 'setx changes persistent environment variables',
   schtasks: 'schtasks manages scheduled tasks',
-  shutdown: 'shutdown affects the whole machine',
-  'restart-computer': 'restarts the machine',
-  'stop-computer': 'shuts down the machine',
+  powercfg: 'powercfg changes power and sleep configuration',
   format: 'format erases a volume',
   'format-volume': 'format-volume erases a volume',
   diskpart: 'diskpart modifies disks',
@@ -446,6 +565,10 @@ const MEDIUM_ALWAYS: Record<string, string> = {
   'invoke-command': 'runs commands that cannot be inspected',
 }
 
+const NETWORK_HIGH = new Set(['ssh', 'scp', 'sftp', 'nc', 'ncat', 'netcat', 'telnet'])
+const EXEC_HIGH = new Set(['iex', 'invoke-expression', 'eval'])
+const PROCESS_KILL = new Set(['taskkill', 'stop-process', 'kill', 'pkill', 'killall', 'spps'])
+
 const KEYLIKE = /key|token|secret|passw|credential|auth/i
 const REGISTRY_PATH = /^(hklm|hkcu|hkcr|hku|hkcc)(:|\\)|^registry::|^hkey_/i
 const REGISTRY_WRITERS = /^(set|new|remove|clear|rename|move|copy)-(item|itemproperty)$|^(sp|si|ni|ri|rp|rni|mi|ci|cpi|cp|mp)$/
@@ -455,13 +578,14 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
   const pos = positional.map((x) => x.toLowerCase())
 
   const high = HIGH_ALWAYS[cmd]
-  if (high !== undefined) a.ask('high', high)
+  if (high !== undefined) a.ask('high', high, NETWORK_HIGH.has(cmd) ? 'NETWORK' : EXEC_HIGH.has(cmd) ? 'UNKNOWN' : 'SYSTEM_CHANGE')
   const medium = MEDIUM_ALWAYS[cmd]
-  if (medium !== undefined) a.ask('medium', medium)
+  if (medium !== undefined) a.ask('medium', medium, PROCESS_KILL.has(cmd) ? 'SYSTEM_CHANGE' : cmd === 'invoke-command' ? 'UNKNOWN' : 'NETWORK')
+  if (cmd === 'wmic' && lc.some((x) => /^(win32)?(shutdown|reboot)$/.test(x))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
 
   if (DELETE_CMDS.has(cmd)) analyzeDelete(cmd, args, lc, a)
   if (cmd === 'rmdir' || cmd === 'rd') {
-    if (lc.includes('/s') || lc.includes('/q')) a.ask('high', `recursive delete (${cmd} /s)`)
+    if (lc.includes('/s') || lc.includes('/q')) a.ask('high', `recursive delete (${cmd} /s)`, 'DESTRUCTIVE')
   }
 
   switch (cmd) {
@@ -491,29 +615,29 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
       const m = lc.indexOf('-m')
       const mod = lc[m + 1]
       if (m >= 0 && mod === 'pip') analyzePip('pip', lc.slice(m + 2).filter((x) => !x.startsWith('-')), a)
-      if (m >= 0 && mod === 'twine' && lc.slice(m + 2).includes('upload')) a.ask('high', 'publishes a package (twine upload)')
+      if (m >= 0 && mod === 'twine' && lc.slice(m + 2).includes('upload')) a.ask('high', 'publishes a package (twine upload)', 'NETWORK')
       break
     }
     case 'twine':
-      if (pos[0] === 'upload') a.ask('high', 'publishes a package (twine upload)')
+      if (pos[0] === 'upload') a.ask('high', 'publishes a package (twine upload)', 'NETWORK')
       break
     case 'cargo':
-      if (['publish', 'yank', 'login', 'owner'].includes(pos[0] ?? '')) a.ask('high', `publishes or manages a crate (cargo ${pos[0]})`)
-      else if (pos[0] === 'install') a.ask('medium', 'cargo install writes binaries outside the worktree')
-      else if (pos[0] === 'update') a.ask('medium', 'dependency upgrade (cargo update)')
+      if (['publish', 'yank', 'login', 'owner'].includes(pos[0] ?? '')) a.ask('high', `publishes or manages a crate (cargo ${pos[0]})`, 'NETWORK')
+      else if (pos[0] === 'install') a.ask('medium', 'cargo install writes binaries outside the worktree', 'SYSTEM_CHANGE')
+      else if (pos[0] === 'update') a.ask('medium', 'dependency upgrade (cargo update)', 'NETWORK')
       break
     case 'go':
-      if (pos[0] === 'install') a.ask('medium', 'go install writes binaries outside the worktree')
+      if (pos[0] === 'install') a.ask('medium', 'go install writes binaries outside the worktree', 'SYSTEM_CHANGE')
       break
     case 'dotnet':
-      if (pos[0] === 'tool' && (lc.includes('-g') || lc.includes('--global'))) a.ask('high', 'global dotnet tool install')
-      if (pos[0] === 'nuget' && pos[1] === 'push') a.ask('high', 'publishes a package (dotnet nuget push)')
+      if (pos[0] === 'tool' && (lc.includes('-g') || lc.includes('--global'))) a.ask('high', 'global dotnet tool install', 'SYSTEM_CHANGE')
+      if (pos[0] === 'nuget' && pos[1] === 'push') a.ask('high', 'publishes a package (dotnet nuget push)', 'NETWORK')
       break
     case 'docker':
-      if (['push', 'login'].includes(pos[0] ?? '')) a.ask('high', `docker ${pos[0]} contacts or publishes to a registry`)
+      if (['push', 'login'].includes(pos[0] ?? '')) a.ask('high', `docker ${pos[0]} contacts or publishes to a registry`, 'NETWORK')
       break
     case 'gem':
-      if (pos[0] === 'push') a.ask('high', 'publishes a package (gem push)')
+      if (pos[0] === 'push') a.ask('high', 'publishes a package (gem push)', 'NETWORK')
       break
     case 'vsce':
     case 'ovsx':
@@ -522,7 +646,7 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
     case 'hatch':
     case 'lerna':
     case 'changeset':
-      if (pos[0] === 'publish') a.ask('high', `publishes a package (${cmd} publish)`)
+      if (pos[0] === 'publish') a.ask('high', `publishes a package (${cmd} publish)`, 'NETWORK')
       break
     case 'winget':
     case 'choco':
@@ -534,24 +658,24 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
     case 'yum':
     case 'pacman':
       if (['install', 'upgrade', 'uninstall', 'remove', 'update', 'import', 'source', 'add', 'sync'].includes(pos[0] ?? '')) {
-        a.ask('high', `system software change (${cmd} ${pos[0]})`)
+        a.ask('high', `system software change (${cmd} ${pos[0]})`, 'SYSTEM_CHANGE')
       }
       break
     case 'reg':
       if (['add', 'delete', 'import', 'load', 'unload', 'copy', 'save', 'restore', 'flags'].includes(pos[0] ?? '')) {
-        a.ask('high', `registry change (reg ${pos[0]})`)
+        a.ask('high', `registry change (reg ${pos[0]})`, 'SYSTEM_CHANGE')
       }
       break
     case 'net':
     case 'net1':
       if (['user', 'localgroup', 'share', 'stop', 'start', 'pause', 'continue', 'accounts', 'config', 'use'].includes(pos[0] ?? '')) {
-        a.ask('high', `net ${pos[0]} changes accounts, services or shares`)
+        a.ask('high', `net ${pos[0]} changes accounts, services or shares`, 'SYSTEM_CHANGE')
       }
       break
     case 'start-process':
     case 'saps':
     case 'start':
-      if (lc.includes('runas')) a.ask('high', 'starts a process with elevated privileges (-Verb RunAs)')
+      if (lc.includes('runas')) a.ask('high', 'starts a process with elevated privileges (-Verb RunAs)', 'SYSTEM_CHANGE')
       break
     case 'printenv':
       if (positional.length === 0 || positional.some((x) => KEYLIKE.test(x))) a.ask('high', 'accessing secrets: printenv reads environment variables')
@@ -560,10 +684,10 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
       analyzeFind(args, lc, a)
       break
     case 'robocopy':
-      if (lc.some((x) => ['/mir', '/purge', '/mov', '/move'].includes(x))) a.ask('high', 'robocopy mirror/purge/move can delete files')
+      if (lc.some((x) => ['/mir', '/purge', '/mov', '/move'].includes(x))) a.ask('high', 'robocopy mirror/purge/move can delete files', 'DESTRUCTIVE')
       break
     case 'certutil':
-      if (lc.includes('-urlcache') || lc.includes('-verifyctl')) a.ask('medium', 'network download (certutil)')
+      if (lc.includes('-urlcache') || lc.includes('-verifyctl')) a.ask('medium', 'network download (certutil)', 'NETWORK')
       break
     default:
       break
@@ -576,7 +700,7 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
     }
   }
   if (REGISTRY_WRITERS.test(cmd) && args.some((w) => REGISTRY_PATH.test(w) || REGISTRY_PATH.test(w.replace(/^-\w+:/, '')))) {
-    a.ask('high', 'modifies the Windows registry')
+    a.ask('high', 'modifies the Windows registry', 'SYSTEM_CHANGE')
   }
 }
 
@@ -595,16 +719,17 @@ function analyzeDelete(cmd: string, args: string[], lc: string[], a: Analysis): 
     lc.includes('/q')
   const force =
     lc.some((x) => /^--?(fo|for|forc|force)$/.test(x) || x === '/f') || cluster.includes('f')
-  if (recursive) a.ask('high', `recursive delete (${cmd})`)
-  else if (force) a.ask('medium', `forced delete (${cmd})`)
+  if (recursive) a.ask('high', `recursive delete (${cmd})`, 'DESTRUCTIVE')
+  else if (force) a.ask('medium', `forced delete (${cmd})`, 'DESTRUCTIVE')
 }
 
 function analyzeFind(args: string[], lc: string[], a: Analysis): void {
-  if (lc.includes('-delete')) a.ask('high', 'find -delete removes files')
+  if (lc.includes('-delete')) a.ask('high', 'find -delete removes files', 'DESTRUCTIVE')
   const e = lc.findIndex((x) => x === '-exec' || x === '-execdir' || x === '-ok' || x === '-okdir')
   if (e >= 0) {
     const payload = normalizeName(args[e + 1] ?? '')
-    if (DELETE_CMDS.has(payload) || MOVE_CMDS.has(payload)) a.ask('high', `find -exec ${payload} deletes or moves files`)
+    if (POWER_CMDS.has(payload)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+    else if (DELETE_CMDS.has(payload) || MOVE_CMDS.has(payload)) a.ask('high', `find -exec ${payload} deletes or moves files`, 'DESTRUCTIVE')
     else a.ask('medium', 'find -exec runs commands for each match')
   }
 }
@@ -640,63 +765,63 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
         hasFlag('--force', '-f', '--delete', '-d', '--mirror', '--prune') ||
         rlc.some((x) => x.startsWith('--force-with-lease') || x.startsWith('+') || x.startsWith(':')) ||
         /[f]/.test(rshort)
-      a.ask(force ? 'high' : 'medium', force ? 'git push --force/--delete rewrites or removes remote history' : 'git push publishes commits to a remote')
+      a.ask(force ? 'high' : 'medium', force ? 'git push --force/--delete rewrites or removes remote history' : 'git push publishes commits to a remote', force ? 'DESTRUCTIVE' : 'NETWORK')
       break
     }
     case 'reset':
-      if (hasFlag('--hard', '--merge', '--keep')) a.ask('high', 'git reset --hard discards uncommitted work')
+      if (hasFlag('--hard', '--merge', '--keep')) a.ask('high', 'git reset --hard discards uncommitted work', 'DESTRUCTIVE')
       break
     case 'clean':
       if ((hasFlag('--force') || rshort.includes('f')) && !hasFlag('-n', '--dry-run') && !rshort.includes('n')) {
-        a.ask('high', 'git clean -f permanently deletes untracked files')
+        a.ask('high', 'git clean -f permanently deletes untracked files', 'DESTRUCTIVE')
       }
       break
     case 'branch':
       if (rshort.includes('D') || (hasFlag('--delete') && hasFlag('--force')) || (rshort.includes('d') && rshort.includes('f'))) {
-        a.ask('high', 'git branch -D force-deletes a branch')
+        a.ask('high', 'git branch -D force-deletes a branch', 'DESTRUCTIVE')
       }
       break
     case 'checkout': {
       const creates = rest.includes('-b') || rest.includes('-B') || hasFlag('--orphan')
       if (hasFlag('--', '-f', '--force', '--ours', '--theirs') || rpos.includes('.') || rest.includes('-B') || (!creates && rpos.length >= 2)) {
-        a.ask('high', 'git checkout can discard uncommitted changes')
+        a.ask('high', 'git checkout can discard uncommitted changes', 'DESTRUCTIVE')
       }
       break
     }
     case 'switch':
-      if (hasFlag('-f', '--force', '--discard-changes')) a.ask('high', 'git switch --discard-changes discards uncommitted work')
+      if (hasFlag('-f', '--force', '--discard-changes')) a.ask('high', 'git switch --discard-changes discards uncommitted work', 'DESTRUCTIVE')
       break
     case 'restore': {
       const staged = hasFlag('--staged') || rest.includes('-S')
       const worktree = hasFlag('--worktree') || rest.includes('-W')
-      if (!staged || worktree) a.ask('high', 'git restore discards uncommitted changes in the working tree')
+      if (!staged || worktree) a.ask('high', 'git restore discards uncommitted changes in the working tree', 'DESTRUCTIVE')
       break
     }
     case 'rebase':
-      a.ask('high', 'git rebase rewrites history')
+      a.ask('high', 'git rebase rewrites history', 'DESTRUCTIVE')
       break
     case 'filter-branch':
     case 'filter-repo':
-      a.ask('high', `git ${sub} rewrites history`)
+      a.ask('high', `git ${sub} rewrites history`, 'DESTRUCTIVE')
       break
     case 'worktree':
-      if (['remove', 'prune', 'move'].includes(rlc[0] ?? '')) a.ask('high', `git worktree ${rlc[0]} removes or relocates worktrees`)
+      if (['remove', 'prune', 'move'].includes(rlc[0] ?? '')) a.ask('high', `git worktree ${rlc[0]} removes or relocates worktrees`, 'DESTRUCTIVE')
       break
     case 'config':
-      if (hasFlag('--global', '--system', '--file', '-f')) a.ask('high', 'git config --global/--system changes configuration outside the repository')
+      if (hasFlag('--global', '--system', '--file', '-f')) a.ask('high', 'git config --global/--system changes configuration outside the repository', 'SYSTEM_CHANGE')
       break
     case 'stash':
-      if (['drop', 'clear'].includes(rlc[0] ?? '')) a.ask('medium', `git stash ${rlc[0]} discards stashed work`)
+      if (['drop', 'clear'].includes(rlc[0] ?? '')) a.ask('medium', `git stash ${rlc[0]} discards stashed work`, 'DESTRUCTIVE')
       break
     case 'reflog':
-      if (['expire', 'delete'].includes(rlc[0] ?? '')) a.ask('high', 'git reflog expire/delete destroys recovery points')
+      if (['expire', 'delete'].includes(rlc[0] ?? '')) a.ask('high', 'git reflog expire/delete destroys recovery points', 'DESTRUCTIVE')
       break
     case 'gc':
     case 'prune':
-      if (sub === 'prune' || rlc.some((x) => x.startsWith('--prune=now'))) a.ask('high', 'git prune permanently deletes unreachable objects')
+      if (sub === 'prune' || rlc.some((x) => x.startsWith('--prune=now'))) a.ask('high', 'git prune permanently deletes unreachable objects', 'DESTRUCTIVE')
       break
     case 'update-ref':
-      if (hasFlag('-d')) a.ask('high', 'git update-ref -d deletes a ref')
+      if (hasFlag('-d')) a.ask('high', 'git update-ref -d deletes a ref', 'DESTRUCTIVE')
       break
     case 'credential':
       a.ask('high', 'accessing secrets: git credential reads stored credentials')
@@ -705,10 +830,10 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
     case 'fetch':
     case 'pull':
     case 'ls-remote':
-      a.ask('medium', `network operation (git ${sub})`)
+      a.ask('medium', `network operation (git ${sub})`, 'NETWORK')
       break
     case 'submodule':
-      if (['update', 'add'].includes(rlc[0] ?? '')) a.ask('medium', `network operation (git submodule ${rlc[0]})`)
+      if (['update', 'add'].includes(rlc[0] ?? '')) a.ask('medium', `network operation (git submodule ${rlc[0]})`, 'NETWORK')
       break
     default:
       break
@@ -725,15 +850,15 @@ function analyzeGh(positional: string[], lc: string[], a: Analysis): void {
     const writes =
       lc.some((x) => ['-f', '--field', '--raw-field', '--input'].includes(x)) ||
       lc.some((x, idx) => (x === '-x' || x === '--method') && lc[idx + 1] !== 'get')
-    a.ask(writes ? 'high' : 'medium', writes ? 'gh api performs a write against GitHub' : 'network operation (gh api)')
+    a.ask(writes ? 'high' : 'medium', writes ? 'gh api performs a write against GitHub' : 'network operation (gh api)', 'NETWORK')
     return
   }
   if (['release', 'secret', 'variable', 'auth', 'ssh-key', 'gpg-key', 'extension', 'codespace', 'alias', 'config'].includes(sub)) {
-    a.ask('high', `gh ${sub} ${verb ?? ''} publishes or changes GitHub/account state`.replace('  ', ' '))
+    a.ask('high', `gh ${sub} ${verb ?? ''} publishes or changes GitHub/account state`.replace('  ', ' '), 'NETWORK')
     return
   }
   const read = verb !== undefined && GH_READ_VERBS.has(verb)
-  a.ask(read ? 'medium' : 'high', `network operation (gh ${sub} ${verb ?? ''})`.replace('  ', ' '))
+  a.ask(read ? 'medium' : 'high', `network operation (gh ${sub} ${verb ?? ''})`.replace('  ', ' '), 'NETWORK')
 }
 
 const PM_PUBLISH = new Set(['publish', 'unpublish', 'deprecate', 'dist-tag', 'login', 'adduser', 'token', 'owner', 'access', 'team', 'logout'])
@@ -743,21 +868,21 @@ function analyzePackageManager(cmd: string, lc: string[], a: Analysis): void {
   const sub = positional[0]
   const sub2 = positional[1]
   if (PM_PUBLISH.has(sub ?? '') || (sub === 'npm' && PM_PUBLISH.has(sub2 ?? ''))) {
-    a.ask('high', `publishes or changes registry state (${cmd} ${sub === 'npm' ? 'npm ' : ''}${sub === 'npm' ? sub2 : sub})`)
+    a.ask('high', `publishes or changes registry state (${cmd} ${sub === 'npm' ? 'npm ' : ''}${sub === 'npm' ? sub2 : sub})`, 'NETWORK')
     return
   }
   const globalFlag = lc.some((x) => x === '-g' || x === '--global' || x === '--location=global')
   const mutating = ['install', 'i', 'add', 'uninstall', 'remove', 'rm', 'un', 'update', 'up', 'upgrade', 'link', 'unlink', 'ln']
   if ((globalFlag && mutating.includes(sub ?? '')) || (cmd === 'yarn' && sub === 'global')) {
-    a.ask('high', `global package change (${cmd} ${sub ?? ''} -g) modifies the system outside the worktree`)
+    a.ask('high', `global package change (${cmd} ${sub ?? ''} -g) modifies the system outside the worktree`, 'SYSTEM_CHANGE')
     return
   }
   const upgrade = ['update', 'upgrade', 'up'].includes(sub ?? '')
   if (upgrade || (sub === 'audit' && lc.includes('fix') && lc.includes('--force'))) {
     const named = positional.slice(1)
     const sweeping = named.length === 0 || lc.some((x) => x === '-l' || x === '--latest' || x === '-i' || x === '--interactive')
-    if (upgrade && sweeping) a.ask('medium', `dependency upgrade at large (${cmd} ${sub})`)
-    else if (sub === 'audit') a.ask('medium', 'npm audit fix --force can introduce breaking upgrades')
+    if (upgrade && sweeping) a.ask('medium', `dependency upgrade at large (${cmd} ${sub})`, 'NETWORK')
+    else if (sub === 'audit') a.ask('medium', 'npm audit fix --force can introduce breaking upgrades', 'NETWORK')
   }
 }
 
@@ -765,7 +890,7 @@ function analyzePip(cmd: string, pos: string[], a: Analysis): void {
   if (!['install', 'uninstall'].includes(pos[0] ?? '') && !(cmd === 'pipx' && pos[0] !== undefined)) return
   if (cmd === 'uv' && pos[0] !== 'pip') return
   if (a.venv) return
-  a.ask('medium', `${cmd} ${pos[0] ?? ''} outside a virtual environment changes the global Python installation`)
+  a.ask('medium', `${cmd} ${pos[0] ?? ''} outside a virtual environment changes the global Python installation`, 'SYSTEM_CHANGE')
 }
 
 // ---------------------------------------------------------------------------------------------

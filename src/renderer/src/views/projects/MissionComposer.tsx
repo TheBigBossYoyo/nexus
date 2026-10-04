@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { PRESETS, RUN_MODES, type Preset, type Project, type RunMode } from '@shared/domain'
 import { presetMaxAgents } from '@shared/settings'
 import type { PlanningMode, ReviewMode } from '@shared/v2'
-import { useCreateRun, usePlanningRecommendation, useSettings } from '../../lib/queries'
+import { useCreateRun, usePlanningRecommendation, useSettings, useStartOvernight } from '../../lib/queries'
 import { useDebounced } from '../../lib/useDebounced'
 import { useUiStore } from '../../store/ui'
-import { Button, Field, NumberField, Notice, Panel, Select, Textarea, Toggle } from '../../components/ui'
+import { Button, Field, NumberField, Notice, Panel, Select, Textarea, Toggle, type SelectOption } from '../../components/ui'
 import {
   buildCreateRunInput,
   DIRTY_REPO_WARNING,
@@ -17,8 +17,22 @@ import {
   validateMission,
   type MissionDraft,
 } from './mission'
+import { OvernightConfirmDialog, OvernightPanel } from './OvernightPanel'
+import {
+  OVERNIGHT_MODE,
+  OVERNIGHT_MODE_INFO,
+  buildOvernightStartInput,
+  defaultOvernightForm,
+  summarizeOvernight,
+  validateOvernight,
+  type OvernightForm,
+} from './overnight'
 
-const MODE_OPTIONS = RUN_MODES.map((m) => ({ value: m, label: m.toUpperCase() }))
+type ComposerMode = RunMode | typeof OVERNIGHT_MODE
+const MODE_OPTIONS: SelectOption<ComposerMode>[] = [
+  ...RUN_MODES.map((m) => ({ value: m as ComposerMode, label: m.toUpperCase() })),
+  { value: OVERNIGHT_MODE, label: 'OVERNIGHT', testId: 'mode-overnight' },
+]
 const PLANNING_OPTIONS: { value: PlanningMode; label: string }[] = [
   { value: 'single', label: 'SINGLE' },
   { value: 'consensus', label: 'CONSENSUS' },
@@ -36,7 +50,21 @@ export function MissionComposer({ project }: { project: Project }) {
   const openRun = useUiStore((s) => s.openRun)
 
   const [prompt, setPrompt] = useState('')
-  const [mode, setMode] = useState<RunMode>('build')
+  const [composerMode, setComposerMode] = useState<ComposerMode>('build')
+  const overnightMode = composerMode === OVERNIGHT_MODE
+  // Overnight is a composer mode only: it creates an ordinary MISSION run through overnight.start.
+  const mode: RunMode = overnightMode ? 'mission' : composerMode
+  const startOvernight = useStartOvernight()
+  const [overnight, setOvernight] = useState<OvernightForm>(defaultOvernightForm)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [overnightError, setOvernightError] = useState<string | null>(null)
+  const setMode = (m: ComposerMode) => {
+    setComposerMode(m)
+    // The authorization belongs to one deliberate look at the panel; changing the mode withdraws it.
+    setOvernight((f) => ({ ...f, authorized: false }))
+    setConfirmOpen(false)
+    setOvernightError(null)
+  }
   const [presetChoice, setPresetChoice] = useState<Preset | null>(null)
   const [maxAgentsChoice, setMaxAgentsChoice] = useState<number | null>(null)
   const [approvalChoice, setApprovalChoice] = useState<boolean | null>(null)
@@ -52,6 +80,24 @@ export function MissionComposer({ project }: { project: Project }) {
   const maxAgents = maxAgentsChoice ?? presetAgents
   const requirePlanApproval = approvalChoice ?? settings?.execution.requirePlanApproval ?? true
   const maxIterations = iterationsChoice ?? settings?.execution.maxIterations ?? 3
+
+  // A fresh composer never carries an authorization over from an earlier visit.
+  useEffect(() => setOvernight((f) => ({ ...f, authorized: false })), [project.id])
+  const overnightForm: OvernightForm = { ...overnight, preset, recommendedPlanning: recommendation.data?.mode ?? null }
+  const overnightValidation = validateOvernight(overnightForm, prompt)
+
+  const submitOvernight = async () => {
+    setOvernightError(null)
+    try {
+      const out = await startOvernight.mutateAsync(buildOvernightStartInput(overnightForm, project.id, prompt))
+      setPrompt('')
+      setConfirmOpen(false)
+      setOvernight((f) => ({ ...f, authorized: false }))
+      openRun(out.run.id, out.run.projectId)
+    } catch (e) {
+      setOvernightError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const draft: MissionDraft = {
     projectId: project.id,
@@ -69,6 +115,7 @@ export function MissionComposer({ project }: { project: Project }) {
 
   const submit = async () => {
     setSubmitted(true)
+    if (overnightMode) return
     if (problem || !settings) return
     try {
       const run = await create.mutateAsync(buildCreateRunInput(draft))
@@ -115,8 +162,8 @@ export function MissionComposer({ project }: { project: Project }) {
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Mode" hint={MODE_INFO[mode]}>
-            {(id) => <Select id={id} value={mode} onChange={setMode} options={MODE_OPTIONS} data-testid="mode-select" />}
+          <Field label="Mode" hint={overnightMode ? OVERNIGHT_MODE_INFO : MODE_INFO[mode]}>
+            {(id) => <Select id={id} value={composerMode} onChange={setMode} options={MODE_OPTIONS} data-testid="mode-select" />}
           </Field>
           <Field label="Preset" hint={PRESET_INFO[preset]}>
             {(id) => (
@@ -125,6 +172,16 @@ export function MissionComposer({ project }: { project: Project }) {
           </Field>
         </div>
 
+        {overnightMode ? (
+          <OvernightPanel
+            form={overnightForm}
+            onChange={(patch) => setOvernight((f) => ({ ...f, ...patch }))}
+            validation={overnightValidation}
+            presetAgents={presetAgents}
+            recommendation={recommendation.data?.mode ?? null}
+          />
+        ) : (
+          <>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Planning" hint={PLANNING_MODE_INFO[planningMode]}>
             {(id) => (
@@ -164,12 +221,17 @@ export function MissionComposer({ project }: { project: Project }) {
           </div>
         ) : null}
 
+          </>
+        )}
+
         {preset === 'maximum' ? (
           <Notice tone="warning" title="Subscription usage" data-testid="maximum-warning">
             {MAXIMUM_PRESET_WARNING}
           </Notice>
         ) : null}
 
+        {!overnightMode ? (
+          <>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Max agents in parallel" hint={maxAgentsChoice === null ? 'From the preset' : 'Overridden'}>
             {(id) => (
@@ -200,7 +262,27 @@ export function MissionComposer({ project }: { project: Project }) {
           description="Pause after planning so you can review the task graph before any agent edits files."
           data-testid="plan-approval-toggle"
         />
+          </>
+        ) : null}
 
+        {overnightMode ? (
+          <div className="flex items-center justify-between gap-3 border-t pt-3">
+            <span className="text-[0.85rem] text-fg-faint" role="status">
+              {overnightValidation.canStart ? 'Ready. You will be asked to confirm.' : (overnightValidation.errors.authorization ?? Object.values(overnightValidation.errors)[0])}
+            </span>
+            <Button
+              variant="primary"
+              disabled={!settings || !overnightValidation.canStart}
+              onClick={() => {
+                setOvernightError(null)
+                setConfirmOpen(true)
+              }}
+              data-testid="overnight-start"
+            >
+              START OVERNIGHT RUN
+            </Button>
+          </div>
+        ) : (
         <div className="flex items-center justify-between gap-3 border-t pt-3">
           <span className="text-[0.85rem] text-fg-faint">Ctrl+Enter to start</span>
           <Button
@@ -213,6 +295,15 @@ export function MissionComposer({ project }: { project: Project }) {
             Start {mode.toUpperCase()} run
           </Button>
         </div>
+        )}
+        <OvernightConfirmDialog
+          open={confirmOpen && overnightMode}
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={() => void submitOvernight()}
+          lines={summarizeOvernight(overnightForm)}
+          loading={startOvernight.isPending}
+          error={overnightError}
+        />
       </div>
     </Panel>
   )

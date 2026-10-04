@@ -22,6 +22,7 @@ import {
   type TaskError,
   type Worktree,
 } from '@shared/domain'
+import type { PauseCause } from '@shared/events'
 import type { RecoverableRun } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage, NexusError } from '@shared/result'
@@ -44,7 +45,7 @@ import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
 import { Core } from './core'
-import { gatherEvidence } from './evidence'
+import { buildTaskEvidence } from './evidence'
 import type { OrchestratorDeps } from './deps'
 import type { InsertTaskSpec } from './graph-service'
 import { refreshProjectFacts } from './intelligence'
@@ -62,6 +63,11 @@ export interface CreateRunInput {
   preset: Preset
   prompt: string
   overrides?: Partial<RunConfig>
+  /**
+   * Runs after the run row exists and before any agent starts. A rejection cancels the run: Overnight
+   * Mode arms its failsafe here, so autonomous work never begins without it.
+   */
+  prepare?: (run: Run) => Promise<void>
 }
 
 export interface AddTaskInput {
@@ -164,6 +170,18 @@ export class Orchestrator implements PipelineHost {
       bus.emit({ runId: row.id, type: 'run.created', payload: { mode: row.mode, preset: row.preset } })
       return row
     })
+
+    if (input.prepare) {
+      try {
+        await input.prepare(run)
+      } catch (e) {
+        bus.transaction(() => {
+          this.core.setRunState(run.id, 'cancelled', { error: errorMessage(e) })
+          bus.emit({ runId: run.id, type: 'run.cancelled', payload: {} })
+        })
+        throw e
+      }
+    }
 
     if (input.mode === 'ask') {
       this.materialize(run, {
@@ -268,7 +286,7 @@ export class Orchestrator implements PipelineHost {
         return
       }
       if (result.outcome === 'auth') {
-        this.core.pauseRun(runId, 'user', 'Claude authentication required')
+        this.core.pauseRun(runId, 'user', 'Claude authentication required', 'auth')
         return
       }
 
@@ -474,7 +492,7 @@ export class Orchestrator implements PipelineHost {
     // The limit bounds active time: paused intervals (user, quota, recovery) do not count, and a resume
     // after the limit paused the run grants a fresh window.
     if (run.startedAt && this.core.runActiveMs(run) > run.config.maxDurationMinutes * 60_000) {
-      await this.pauseRun(runId, 'user', `Mission duration limit of ${run.config.maxDurationMinutes} minutes reached`)
+      await this.pauseRun(runId, 'user', `Mission duration limit of ${run.config.maxDurationMinutes} minutes reached`, 'time_limit')
       this.core.resetRunActive(runId)
       return
     }
@@ -756,7 +774,7 @@ export class Orchestrator implements PipelineHost {
             diffStat: stat || '(no changes)',
             checkResults: checks.commands,
             planSummary: run.plan?.summary,
-            evidence: gatherEvidence(repos, runId, null),
+            evidence: buildTaskEvidence(repos, runId, null),
           }).prompt,
           outputSchema: verifierOutputJsonSchema,
           control,
@@ -875,11 +893,11 @@ export class Orchestrator implements PipelineHost {
 
   // ───────────────────────────── human intervention ─────────────────────────────
 
-  async pauseRun(runId: string, reason: 'user' | 'quota' | 'recovery' = 'user', detail?: string): Promise<Run> {
+  async pauseRun(runId: string, reason: 'user' | 'quota' | 'recovery' = 'user', detail?: string, cause?: PauseCause): Promise<Run> {
     const { repos, bus } = this.deps
     const run = repos.runs.require(runId)
     if (!canPauseRun(run.state)) throw new NexusError('invalid_state', `A ${run.state} run cannot be paused`)
-    this.core.pauseRun(runId, reason, detail)
+    this.core.pauseRun(runId, reason, detail, cause)
     if (reason === 'user' && !detail) bus.emit({ runId, type: 'user.intervention', payload: { action: 'pause' } })
     await this.stopRunSessions(runId, 'paused')
     return repos.runs.require(runId)
@@ -1203,7 +1221,7 @@ export class Orchestrator implements PipelineHost {
       this.core.markRunInactive(run.id, lastActivity ? Date.parse(lastActivity) : Date.now())
       bus.transaction(() => {
         this.core.setRunState(run.id, 'paused', { resumeState: run.state, pauseReason: 'recovery' }, 'application restarted')
-        bus.emit({ runId: run.id, type: 'run.paused', payload: { reason: 'recovery', detail: 'NEXUS was closed while this run was active' } })
+        bus.emit({ runId: run.id, type: 'run.paused', payload: { reason: 'recovery', cause: 'recovery', detail: 'NEXUS was closed while this run was active' } })
         bus.emit({ runId: run.id, type: 'run.recovered', payload: { action: 'detected', staleAgents: stale } })
       })
     }
@@ -1309,13 +1327,12 @@ export class Orchestrator implements PipelineHost {
     const promise = work()
       .catch((e: unknown) => {
         this.core.log(`run ${runId} background work failed: ${errorMessage(e)}`)
-        const run = this.deps.repos.runs.get(runId)
-        if (run && !TERMINAL_RUN_STATES.includes(run.state) && run.state !== 'paused') {
-          try {
-            this.failRun(runId, errorMessage(e))
-          } catch (inner) {
-            this.core.log(`could not fail run ${runId}: ${errorMessage(inner)}`)
-          }
+        try {
+          const run = this.deps.repos.runs.get(runId)
+          if (run && !TERMINAL_RUN_STATES.includes(run.state) && run.state !== 'paused') this.failRun(runId, errorMessage(e))
+        } catch (inner) {
+          // Also reached when the database closed under work that shutdown could not wait for.
+          this.core.log(`could not fail run ${runId}: ${errorMessage(inner)}`)
         }
       })
       .finally(() => {
@@ -1358,6 +1375,9 @@ export class Orchestrator implements PipelineHost {
     this.closing = true
     const runIds = new Set([...this.active.values()].map((p) => p.runId))
     for (const runId of this.runControls.keys()) runIds.add(runId)
+    // Background work that has not started a session yet (facts refresh before planning) must also unwind
+    // before the database closes.
+    for (const runId of this.runWork.keys()) runIds.add(runId)
     await Promise.allSettled([...runIds].map((runId) => this.stopRunSessions(runId, 'shutdown')))
     await this.deps.runtime.shutdown()
   }

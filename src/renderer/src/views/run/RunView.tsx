@@ -7,6 +7,7 @@ import { ErrorBoundary } from '../../app/ErrorBoundary'
 import { TaskGraph } from './graph/TaskGraph'
 import { TaskInspector } from './inspector/TaskInspector'
 import { MissionHeader } from './MissionHeader'
+import { OvernightBanner } from './OvernightBanner'
 import { PlanInspector } from './PlanInspector'
 import { PlanPanel, PlannerActivity } from './PlanPanel'
 import { RunsList } from './RunsList'
@@ -129,6 +130,7 @@ function RunWorkspace({ runId }: { runId: string }) {
     <RunProvider detail={query.data} events={stream.events} showStage={showStage} showBottom={showBottom}>
       <div className="flex h-full min-h-0 flex-col" data-testid="run-view">
         <MissionHeader />
+        <OvernightBanner runId={runId} />
         <div className="min-h-0 flex-1">
           <PanelGroup id="run-main">
             <ResizablePanel id="run-center" minSize="35%">

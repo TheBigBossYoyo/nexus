@@ -15,6 +15,7 @@ import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
 import type { GitService } from '@main/modules/git'
+import type { OvernightSupervisor } from '@main/modules/overnight'
 import { attachArbitration, refreshProjectFacts, type Orchestrator } from '@main/modules/orchestrator'
 import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
@@ -26,6 +27,11 @@ export interface IpcContext {
   git: GitService
   runtime: AgentRuntime
   orchestrator: Orchestrator
+  /**
+   * Overnight Mode. The handlers reach power control only through the supervisor's typed operations;
+   * the power controller itself is never part of this context.
+   */
+  overnight?: OvernightSupervisor
   appInfo: () => Promise<AppInfo>
   /** Native folder picker; resolves null when cancelled. Lives in main, never in the renderer. */
   pickDirectory: () => Promise<string | null>
@@ -40,6 +46,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
   const projects = new ProjectService(repos, ctx.git)
   const queries = new QueryService(repos, ctx.git)
   let authCache: AuthStatus | null = null
+  const overnight = (): OvernightSupervisor => {
+    if (!ctx.overnight) throw new NexusError('runtime_unavailable', 'Overnight Mode is not available in this process')
+    return ctx.overnight
+  }
 
   return {
     'app.info': () => ctx.appInfo(),
@@ -85,6 +95,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       // Per-run and per-session bookkeeping lives in settings keys that no foreign key cascades to.
       for (const run of repos.runs.listByProject(projectId)) {
         repos.settings.deleteValue(`run-active:${run.id}`)
+        repos.settings.deleteValue(`overnight-heartbeat:${run.id}`)
         for (const task of repos.tasks.listByRun(run.id)) repos.settings.deleteValue(`graph-yield:${task.id}`)
         for (const approval of repos.approvals.listByRun(run.id)) repos.settings.deleteValue(`graph-approval:${approval.id}`)
         for (const agent of repos.agents.listByRun(run.id)) {
@@ -224,6 +235,23 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       const seen = new Set<string>()
       return packs.filter((p) => !seen.has(p.id) && seen.add(p.id))
     },
+
+    'overnight.start': ({ confirmed, confirmation, ...input }) => {
+      const defined = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as typeof input
+      return overnight().start({ ...defined, confirmed, confirmation })
+    },
+    'overnight.get': ({ runId }) => ctx.overnight?.status(runId) ?? null,
+    'overnight.active': () => ctx.overnight?.active() ?? [],
+    'overnight.cancelPower': ({ runId }) => overnight().cancelPower(runId),
+    'overnight.changeEndAction': ({ runId, ...change }) => {
+      const defined = Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined))
+      return overnight().changeEndPolicy(runId, defined)
+    },
+    'overnight.extend': ({ runId, minutes }) => overnight().extend(runId, minutes),
+    'overnight.cancelMission': ({ runId }) => overnight().cancelMission(runId),
+    'overnight.report': ({ runId }) => overnight().report(runId),
+    'overnight.audit': ({ runId }) => repos.powerAudit.listByRun(runId),
+    'overnight.checkpoints': ({ runId }) => repos.checkpoints.listByRun(runId).slice(-50),
   }
 }
 

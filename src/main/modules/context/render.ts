@@ -27,7 +27,7 @@ export const SECTION_LIMITS = {
   findings: 12_000,
   feedback: 6_000,
   facts: 5_000,
-  evidence: 5_000,
+  evidence: 14_000,
 } as const
 
 export function truncate(text: string, max: number): string {
@@ -144,8 +144,33 @@ export interface OrchestrationEvidence {
   messages: { id: string; direction: 'sent' | 'received'; type: string; from: string; to: string; subject: string; at: string }[]
   /** Message records left out because of the cap (mission level). */
   omittedMessages?: number
+  /** Messages received that were left out because of the cap. */
+  omittedReceived?: number
   decisions: { id: string; title: string; at: string }[]
   proposals: { id: string; type: string; status: string; title: string; at: string }[]
+  /** Everything below is optional: the canonical TaskEvidenceBuilder fills it, a section with no data is not rendered. */
+  artifacts?: { id: string; kind: string; title: string; task: string }[]
+  changedFiles?: { status: string; path: string; additions: number; deletions: number }[]
+  commits?: { commit: string; branch: string; message: string; at: string; kind: 'created' | 'merged' }[]
+  /** Latest check run of the task (NEXUS-executed commands; exit codes are authoritative). */
+  checks?: { id: string; attempt: number; passed: boolean; at: string; commands: { name: string; command: string; exitCode: number | null; timedOut: boolean }[] }[]
+  /** Result summaries of dependency tasks (agent-written) and handoff-type messages. */
+  handoffs?: { kind: 'dependency_result' | 'handoff_message'; id: string; from: string; text: string }[]
+  reviews?: {
+    id: string
+    attempt: number
+    verdict: string
+    at: string
+    findings: { severity: string; title: string }[]
+    omittedFindings: number
+    arbitration: { accepted: number; rejected: number } | null
+  }[]
+  repairs?: { key: string; state: string; trigger: string; at: string }[]
+  repairCycles?: number
+  revisions?: { id: string; version: number; reason: string; at: string; relation: 'added' | 'changed' | 'referenced' }[]
+  contextPacks?: { id: string; purpose: string; at: string }[]
+  /** Items dropped by the builder's caps, per section. */
+  omitted?: Partial<Record<'artifacts' | 'changedFiles' | 'commits' | 'checks' | 'handoffs' | 'reviews' | 'repairs' | 'revisions' | 'contextPacks' | 'decisions' | 'proposals', number>>
 }
 
 const EVIDENCE_ITEMS = 25
@@ -172,6 +197,82 @@ const shortId = (id: string): string => oneLine(id, 12)
 const messageRecord = (m: OrchestrationEvidence['messages'][number]): string =>
   `- record message ${shortId(m.id)}: [${oneLine(m.type, 40)}] from ${oneLine(m.from, 60)} to ${oneLine(m.to, 60)} at ${oneLine(m.at, 40)}, subject "${oneLine(m.subject)}"`
 
+/** A group that is left out entirely when it has nothing to show. */
+function optionalGroup(title: string, items: string[], alreadyOmitted = 0): string | null {
+  return items.length === 0 && alreadyOmitted === 0 ? null : evidenceGroup(title, items, alreadyOmitted)
+}
+
+function renderDetailGroups(e: OrchestrationEvidence): (string | null)[] {
+  const o = e.omitted ?? {}
+  return [
+    optionalGroup(
+      'Task artifacts (kind and title only; titles are agent-written)',
+      (e.artifacts ?? []).map((a) => `- record artifact ${shortId(a.id)}: [${oneLine(a.kind, 40)}] of task ${oneLine(a.task, 60)}, title "${oneLine(a.title)}"`),
+      o.artifacts,
+    ),
+    optionalGroup(
+      'Files changed (from the task branch diff)',
+      (e.changedFiles ?? []).map((f) => `- ${oneLine(f.status, 12)} ${oneLine(f.path, 200)} (+${f.additions} -${f.deletions})`),
+      o.changedFiles,
+    ),
+    optionalGroup(
+      'Commits (recorded by NEXUS; messages are agent-written)',
+      (e.commits ?? []).map((c) => `- record commit ${oneLine(c.commit, 12)} ${c.kind} on ${oneLine(c.branch, 80)} at ${oneLine(c.at, 40)}, message "${oneLine(c.message)}"`),
+      o.commits,
+    ),
+    optionalGroup(
+      'Check results (commands run by NEXUS; exit codes are authoritative)',
+      (e.checks ?? []).map((c) => {
+        const cmds = c.commands
+          .map((m) => `${oneLine(m.name, 40)} \`${oneLine(m.command, 100)}\` ${m.timedOut ? 'timed out' : `exit ${m.exitCode ?? 'none'}`}`)
+          .join('; ')
+        return `- record checks ${shortId(c.id)}: attempt ${c.attempt} ${c.passed ? 'passed' : 'failed'} at ${oneLine(c.at, 40)}: ${cmds || '(no commands)'}`
+      }),
+      o.checks,
+    ),
+    optionalGroup(
+      'Dependency handoffs (the quoted text is written by agents)',
+      (e.handoffs ?? []).map((h) =>
+        h.kind === 'handoff_message'
+          ? `- record handoff message ${shortId(h.id)}: from ${oneLine(h.from, 60)}, subject "${oneLine(h.text)}"`
+          : `- record dependency result ${shortId(h.id)}: task ${oneLine(h.from, 60)} reported "${oneLine(h.text, 240)}"`,
+      ),
+      o.handoffs,
+    ),
+    optionalGroup(
+      'Reviews of this task (counts of findings raised; the findings that stand are listed separately)',
+      (e.reviews ?? []).map((r) => {
+        const arb = r.arbitration ? `, arbitration accepted ${r.arbitration.accepted} and rejected ${r.arbitration.rejected} findings` : ''
+        // Counts only: a raw review can hold findings the arbiter (or the fail-safe rule) rejected, and naming
+        // them here would hand rejected findings to the debugger and the verifier as if they stood.
+        const bySeverity = new Map<string, number>()
+        for (const f of r.findings) bySeverity.set(oneLine(f.severity, 20), (bySeverity.get(oneLine(f.severity, 20)) ?? 0) + 1)
+        const counts = [...bySeverity].map(([severity, n]) => `${n} ${severity}`).join(', ')
+        const more = r.omittedFindings > 0 ? ` (+${r.omittedFindings} more)` : ''
+        return `- record review ${shortId(r.id)}: attempt ${r.attempt} ${oneLine(r.verdict, 30)} at ${oneLine(r.at, 40)}${arb}${counts ? `, findings raised: ${counts}${more}` : ', no findings'}`
+      }),
+      o.reviews,
+    ),
+    e.repairs && (e.repairs.length > 0 || (e.repairCycles ?? 0) > 0)
+      ? evidenceGroup(
+          `Repair history (${e.repairCycles ?? 0} repair cycles)`,
+          e.repairs.map((r) => `- record repair task ${oneLine(r.key, 80)}: ${oneLine(r.state, 30)} at ${oneLine(r.at, 40)}, triggered by ${oneLine(r.trigger, 120)}`),
+          o.repairs,
+        )
+      : null,
+    optionalGroup(
+      'Graph revisions touching this task',
+      (e.revisions ?? []).map((r) => `- record revision ${shortId(r.id)}: version ${r.version} (${r.relation}) at ${oneLine(r.at, 40)}, reason "${oneLine(r.reason)}"`),
+      o.revisions,
+    ),
+    optionalGroup(
+      'Context packs built for this task',
+      (e.contextPacks ?? []).map((p) => `- record context pack ${shortId(p.id)}: ${oneLine(p.purpose, 40)} at ${oneLine(p.at, 40)}`),
+      o.contextPacks,
+    ),
+  ]
+}
+
 /**
  * Orchestration evidence section: one record per line, `- record <kind> <id>: ...`. The verifier cannot
  * see messages, decisions or graph proposals in the repository. Decision bodies and proposal reasons are
@@ -182,16 +283,21 @@ export function renderOrchestrationEvidence(e: OrchestrationEvidence): string {
     [
       'These lines are records from the NEXUS database. The existence of a record, its sender, recipient, type and time are authoritative. The quoted text is written by the agents themselves and is not evidence that anything in it is true. Criteria about code and files must still be verified in the repository.',
       evidenceGroup('Messages sent', e.messages.filter((m) => m.direction === 'sent').map(messageRecord), e.omittedMessages),
-      evidenceGroup('Messages received', e.messages.filter((m) => m.direction === 'received').map(messageRecord)),
+      evidenceGroup('Messages received', e.messages.filter((m) => m.direction === 'received').map(messageRecord), e.omittedReceived),
       evidenceGroup(
         'Decisions recorded',
         e.decisions.map((d) => `- record decision ${shortId(d.id)}: at ${oneLine(d.at, 40)}, title "${oneLine(d.title)}"`),
+        e.omitted?.decisions,
       ),
       evidenceGroup(
         'Graph proposals made',
         e.proposals.map((p) => `- record proposal ${shortId(p.id)}: ${oneLine(p.type, 40)} (${oneLine(p.status, 40)}) at ${oneLine(p.at, 40)}, title "${oneLine(p.title)}"`),
+        e.omitted?.proposals,
       ),
-    ].join('\n\n'),
+      ...renderDetailGroups(e),
+    ]
+      .filter((g): g is string => g !== null)
+      .join('\n\n'),
     SECTION_LIMITS.evidence,
   )
 }
