@@ -14,12 +14,18 @@ and you choose what to do. Code: `Orchestrator.recoverOnStartup`, `listRecoverab
 | Reviews, verifications, check results, decisions, messages, memory | SQLite |
 | Event log (`run_events`) | SQLite |
 | Pending plan and task approvals | SQLite (the run stays `awaiting_approval`) |
+| Graph revisions and graph proposals (all statuses, with rejection reasons) | SQLite (`graph_revisions`, `graph_proposals`) |
+| Pending graph approvals and the link to their proposal | SQLite (`approval_requests` kind `graph`, settings key `graph-approval:<approvalId>`); still answerable after a restart |
+| Yield markers of tasks waiting for a new prerequisite | SQLite settings key `graph-yield:<taskId>` |
+| Consensus planning candidates and critiques | SQLite (`planning_candidates`, `planning_critiques`) |
+| Routing decisions, task outcomes, context packs, repository facts | SQLite |
 | Task and integration worktrees and their commits | Disk, `worktrees\<run>\...`, plus branches in your repository |
 | Claude session transcripts | Disk, written by the runtime under `~/.claude/projects` |
 
 Lost, because it only exists in memory: running `claude.exe` processes and their open turns, tool
 approvals that were waiting on you, the merge lock, the set of "already announced" deferral events, and any
-partially streamed text that was not yet a completed block.
+partially streamed text that was not yet a completed block. The in-memory count of graph proposals per task is
+rebuilt from the stored proposals, so the per-task limit holds across a restart.
 
 ## Startup
 
@@ -35,7 +41,7 @@ For every non-terminal run (`listActive`):
 3. Otherwise (planning, executing, testing, reviewing, verifying, repairing) it is set to `paused` with
    `resumeState` = the state it was in, `pauseReason: recovery`, and `run.paused` and
    `run.recovered { action: 'detected', staleAgents }` events are emitted.
-4. Pending approvals of kind `tool` are expired (their agents are gone). Plan and task approvals are kept.
+4. Pending approvals of kind `tool` are expired (their agents are gone). Plan, task and graph approvals are kept.
 
 Task states are not touched at this point. A task that was `running` stays `running` until the run is
 resumed.
@@ -92,9 +98,11 @@ relaunches a pipeline for each task without an active pipeline, by task state:
 | `review` | review stage (checks results are read back from the last persisted checks record) |
 | `verification` | verification stage |
 | `waiting` | Its repair child is cancelled, and the pipeline restarts at checks |
+| `assigned` or `running` with a prerequisite that is not completed | The task yielded to a prerequisite before its turn ended (or the process died first). It is not relaunched: it is marked as yielded and moved to `queued`, and starts again when its dependencies are completed. |
+| `queued` with a yield marker | Starts as a resume: the integration branch is merged into its worktree and a fresh session (same attempt) is told what the prerequisites produced. See ORCHESTRATION.md, Yield and resume. |
 
-Tasks in `ready` are scheduled normally; `blocked` and `failed` tasks wait for you. A run recovered from
-`planning` plans again; one recovered from `awaiting_approval` re-creates the plan approval if it is
+Tasks in `ready` or `queued` are scheduled normally; `blocked` and `failed` tasks wait for you. A run recovered from
+`planning` plans again (in consensus mode the earlier candidates and critique are replaced by the new round); one recovered from `awaiting_approval` re-creates the plan approval if it is
 missing. Mission verification runs again if the run was finalizing.
 
 ## Session resume versus a fresh session with handoff

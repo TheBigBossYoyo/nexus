@@ -13,7 +13,24 @@ verification. NEXUS never writes to your working tree.
 Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/ORCHESTRATION.md),
 [TASK_LIFECYCLE](docs/TASK_LIFECYCLE.md), [AGENT_RUNTIME](docs/AGENT_RUNTIME.md),
 [GIT_WORKTREES](docs/GIT_WORKTREES.md), [SECURITY](docs/SECURITY.md), [RECOVERY](docs/RECOVERY.md),
-[AUTHENTICATION](docs/AUTHENTICATION.md), [TESTING](docs/TESTING.md).
+[AUTHENTICATION](docs/AUTHENTICATION.md), [TESTING](docs/TESTING.md),
+[V0_2_DESIGN](docs/V0_2_DESIGN.md).
+
+## What's new in 0.2
+
+| Feature | What it does | Where to read more |
+|---|---|---|
+| Dynamic task graph | A working agent can call `propose_graph_change` to add a missing prerequisite, split a task, cancel an obsolete one, rewire dependencies, change a priority or replan the open work. Deterministic code validates the proposal (unique keys, no cycles, finished tasks immutable, criteria carried over). Safe changes apply at once, the rest wait for your approval. Every applied change is a numbered graph revision (version 1 is the approved plan) that you can diff. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Consensus planning | Optional planning mode: three planners with different lenses (risk-first, parallelism-first, minimal-change) plan independently, a critic reviews them, a synthesizer writes the final plan, which goes through the normal plan validation. Falls back to the single planner when no candidate is valid. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Adaptive model routing | One router picks the capability tier of every agent session from the role policy, task risk and size, attempt number, repair severity, escalation and measured performance. The requested policy, the resolved model and the reasons are stored per agent and shown in the Agents view. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Empirical performance | When an implementing task reaches a final state, one outcome row is stored. The Performance view aggregates them by role, model and task category with sample counts; a row has to reach 5 samples before it can influence routing. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Repository intelligence | Static, manifest and Git analysis stores facts about the project (languages, modules, commands, imports, test mapping, hot files and more) with source, confidence, supporting files and a freshness fingerprint. Stale facts are excluded from agent context. | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| Context packs with provenance | Every agent session gets a stored context pack that lists each candidate source (task, criteria, dependency results, decisions, repository facts, memory, messages, review findings) with why it was included or left out. The task inspector has a Context tab. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Dual review with an arbiter | Review mode `dual` (or `auto` for high-risk tasks) runs two reviewers with different lenses, merges duplicate findings, and lets an arbiter accept or reject each finding against the code. Only accepted critical or high findings request changes. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
+| Orchestration evidence | Verifiers see sanitized records of the messages, decisions and graph proposals of a task (existence, sender, type and time are authoritative; quoted text is not). | [ORCHESTRATION](docs/ORCHESTRATION.md), [SECURITY](docs/SECURITY.md) |
+| New views | Performance (Ctrl+6), Intelligence (Ctrl+7), and in the Run view a Plan inspector (candidate plans, critic findings, final plan, graph revisions with a diff, change proposals) plus a revision selector on the task graph. | |
+
+The design and its deviations from the implementation are in [V0_2_DESIGN](docs/V0_2_DESIGN.md).
 
 ## Requirements
 
@@ -81,7 +98,7 @@ cost beyond that document.
 2. Projects view, "Open Project", and pick a folder. NEXUS resolves the Git root, then profiles the
    project read-only: package managers, languages, frameworks, scripts, and the build, test, lint and
    typecheck commands it will use as automated checks. Nothing in the folder is changed.
-3. In the project, write the mission, choose a mode and a preset, and start the run.
+3. In the project, write the mission, choose a mode, a preset, a planning mode and a review mode, and start the run.
 
 Constraints enforced by the code:
 
@@ -90,8 +107,8 @@ Constraints enforced by the code:
 - Agents work from the commit that is `HEAD` when the run starts. Uncommitted changes are not
   visible to writing agents, and the UI warns about a dirty repository.
 
-Ctrl+K opens the command palette; Ctrl+1 to Ctrl+5 switch between Projects, Run, Agents, Memory and
-Settings.
+Ctrl+K opens the command palette; Ctrl+1 to Ctrl+7 switch between Projects, Run, Agents, Memory,
+Settings, Performance and Intelligence.
 
 ## Run modes
 
@@ -109,6 +126,21 @@ All modes share the same engine. What the code does differently per mode:
 
 So BUILD, SWARM, REPAIR, MISSION and LOOP differ only in the planner prompt (and the `maxIterations`
 override for LOOP). The one-line descriptions in the UI describe intent, not separate code paths.
+
+## Planning mode and review mode
+
+Both are chosen in the mission composer and stored in the run configuration (`planningMode`, `reviewMode`).
+Runs created before 0.2 have neither field and behave as the defaults.
+
+| Option | Values | Behaviour |
+|---|---|---|
+| Planning mode | `single` (default) | One planner agent, as in 0.1. |
+| | `consensus` | Three planners (risk-first, parallelism-first, minimal-change) run concurrently, then a critic and a synthesizer when at least two candidates are valid. With exactly one valid candidate it is used directly; with none, the single planner runs and is told the candidates' errors. Costs several planner sessions. The composer shows a recommendation from `planning.recommend` (a heuristic on prompt length, number of deliverables, scope keywords and repository size); it is advice only. |
+| Review mode | `auto` (default) | Two reviewers plus an arbiter for tasks whose risk is `high`; one reviewer for the rest (the `security_reviewer` role for high-risk tasks, `reviewer` otherwise). |
+| | `standard` | Always one reviewer, as in 0.1. |
+| | `dual` | Every reviewed task gets two reviewers and, when a significant finding survives deduplication, an arbiter. |
+
+ASK runs have no planner, so planning mode does not apply to them.
 
 ## Presets
 
@@ -186,10 +218,22 @@ This is Electron's `userData` directory; the exact path is reported by the app (
 | `pnpm test:unit` | `vitest run --project unit` |
 | `pnpm test:integration` | `vitest run --project integration` (includes `tests/scenarios`) |
 | `pnpm test:e2e` | `electron-vite build && playwright test` (Electron UI tests, see [TESTING](docs/TESTING.md)) |
+| `pnpm stress` | `vitest run -c vitest.stress.config.ts`: seeded orchestration stress campaign with scripted agents (no Claude usage). See [TESTING](docs/TESTING.md). |
 | `pnpm smoke:claude` | Manual test against the real Claude runtime. Consumes Claude usage. |
 | `pnpm package` | `electron-vite build && electron-builder --win nsis` |
 
 Automated tests never call the real Claude API; they use `FakeAgentRuntime`.
+
+Real-mission scripts (not part of any test run; each starts the app, drives it through its IPC bridge
+with the **real Claude runtime**, consumes Claude usage, and writes evidence to `docs/acceptance/`):
+
+| Command | Mission |
+|---|---|
+| `node scripts/adversarial-mission.mjs [path-to-NEXUS.exe]` | Four tasks (three modules and a report task that depends on them), fast-tier workers, a controlled app restart mid-run. Uses the default planning and review modes. |
+| `node scripts/v02-acceptance-mission.mjs [path-to-NEXUS.exe]` | The same mission with `planningMode: consensus` and `reviewMode: dual`, plus a repository convention that needs a task no one planned, to provoke a graph proposal. Also restarts the app mid-run. |
+
+Without an argument both launch the dev build (run `pnpm build` first). `scripts/acceptance-mission.mjs` is the
+earlier single-mission acceptance script.
 
 ## Current limitations
 
@@ -220,3 +264,36 @@ Automated tests never call the real Claude API; they use `FakeAgentRuntime`.
   is whatever the model produces. A passing verification means the verifier agent judged the criteria
   met, not that the software is correct.
 - Single window, single instance.
+
+### Limitations of 0.2 features
+
+- Graph proposals are rate limited. A task may submit at most 5 proposals in total (rejected and malformed
+  ones count; retries, resumes and repair sessions of the same task share the allowance), one proposal adds at
+  most 8 tasks, and a proposal adding more than 3 tasks needs your approval. Run-wide, once 20 proposals have been
+  applied, or 25 tasks have been added by proposals, a proposal that adds tasks no longer applies on its own
+  and waits for your approval.
+- Anything that touches another agent's task needs your approval: cancelling it, adding or removing a
+  dependency of it, changing its priority. So does `REPLAN`. A running task other than the proposer's own can never be
+  given or lose a prerequisite, and completed, failed and cancelled tasks cannot be changed at all.
+- An agent whose proposal is held for approval is told to carry on and not wait. It is not notified when you
+  decide; an approved change is applied to the graph when you approve it and takes effect through the scheduler.
+- Repair tasks (children created by the pipeline) cannot be changed or depended on through proposals.
+- Measured performance changes routing only for a (role, model, task category) group with at least 5
+  outcomes whose first-pass rate is below 50%, and then promotes by one tier. Below 5 samples the Performance view
+  marks the row as insufficient and routing ignores it. Outcomes are recorded only for top-level `implement` and
+  `repair` tasks that completed or failed.
+- Repository analysis is static: manifests, file names and sizes, regular-expression import extraction
+  (JavaScript/TypeScript, Python, Go, Rust) and Git history. It is bounded (4000 files, 5 seconds, 200 000 bytes read
+  per file, 200 commits of history) and never reads secret-looking files. It does not understand code semantics.
+- Freshness fingerprints hash each supporting file's path, size and modification time (at most 50 files per fact),
+  not content. A change that keeps size and mtime is not detected; a touched but unchanged file is reported stale.
+- Facts that agents recorded (`decision` facts) are the agents' own claims; they are marked as such in the
+  fact text and in the prompt. Orchestration evidence shown to verifiers contains agent-written text (subjects,
+  titles) that is not proof of anything.
+- There is no vector or embedding search: facts are selected by shared paths, modules and terms; memory by SQLite FTS5.
+  Full-text search over facts is used only by the Intelligence view.
+- Consensus planning and dual review multiply the number of Claude sessions for planning and review. Consensus
+  planning starts again from scratch after a pause or restart during planning.
+- A dual review whose arbiter returns no valid decision falls back to a fixed rule (see
+  [ORCHESTRATION](docs/ORCHESTRATION.md)), so confident critical and high findings stand and other findings are dropped.
+- Results are still merged manually: NEXUS never merges the integration branch into your branch.

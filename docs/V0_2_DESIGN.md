@@ -1,5 +1,8 @@
 # NEXUS v0.2 Design: Adaptive Orchestration and Empirical Intelligence
 
+Status: implemented in 0.2. This is the design; the user-facing description is in the README and the behaviour in ORCHESTRATION.md.
+Where the code differs from the text below, "Implementation notes" at the end lists the differences.
+
 ## Objectives
 
 1. **Dynamic DAG adaptation.** Agents propose graph changes; deterministic code validates and applies them; every applied change is a persisted graph revision.
@@ -97,8 +100,8 @@ dependencies, the proposal id) in the same transaction as the task changes, and 
 `graph.revised`. Version 1 is the approved plan. Revisions are diffable in the UI.
 
 Scheduler impact: none in `selectRunnable`; it already works from current rows. A yielding task
-goes `running → queued` and is picked up again when its new dependency completes. On restart its
-worktree first merges the integration branch so it sees the prerequisite's result.
+goes `running → queued` and is picked up again when its new dependency completes. When it starts
+again its worktree first merges the integration branch so it sees the prerequisite's result.
 
 ## Consensus planning
 
@@ -117,7 +120,7 @@ Policies: `STRONGEST`, `BALANCED`, `FAST`, `INHERIT` (runtime default model). `r
 from the run's role policy and applies ordered rules, each appending a reason: high risk or large
 complexity → at least `STRONGEST` for writing roles; second attempt after a failure → promote one
 step; repair after a HIGH or CRITICAL finding → `STRONGEST`; ECO preset caps non-gate roles; measured
-first-pass rate below 50% with at least 5 samples for this role, tier and category → promote. The
+first-pass rate below 50% with at least 5 samples for this role, model and category → promote (see Implementation notes). The
 tier resolves to a concrete model through settings only at session start. Every session persists a
 `RoutingDecision` (requested policy, resolved tier and model, reasons) and emits `routing.decided`.
 
@@ -142,7 +145,7 @@ their task passes verification.
 ## Context Engine V2
 
 `composeContext` selects candidate entries from: task spec, criteria, dependency outputs, decisions,
-repository facts (matched by the task's files and FTS), project memory, routed messages, worktree
+repository facts (matched by the task's files, modules and terms), project memory, routed messages, worktree
 state, and prior review findings for the task. Each candidate gets `included` plus a reason
 (why selected, or why dropped: not relevant, stale, over budget). The pack and entries are persisted
 and rendered through the v0.1 builder. The UI answers "why did this agent receive this context".
@@ -151,7 +154,7 @@ and rendered through the v0.1 builder. The UI answers "why did this agent receiv
 
 `reviewMode` `dual` (or `auto` on high risk) runs two reviewers concurrently with different lenses,
 deduplicates findings (same file with overlapping lines, or near-identical titles), then a finding
-arbiter checks each significant finding against the code and accepts or rejects it with a reason.
+arbiter checks the findings against the code and accepts or rejects each with a reason.
 Only accepted findings can request changes. All three records are persisted.
 
 ## Security
@@ -187,3 +190,29 @@ keep v0.1 behaviour: single planner, standard review unless a task is high risk.
 
 All listed tests pass; a real mission exercises a graph revision, routing decisions, repository
 facts in a context pack, review and verification; the packaged build launches and migrates.
+
+## Implementation notes
+
+Deviations and additions, each checked against the code (identifiers are in `src/`).
+
+| Topic | Design | Implementation |
+|---|---|---|
+| Measured-performance routing rule | Samples "for this role, tier and category" | `routeModel` looks up the aggregate for (role, the model that the current tier resolves to, category); `aggregatePerformance` groups by role, model and category, not tier. The rule needs `sufficient` (at least `MIN_ROUTING_SAMPLES` = 5) and a first-pass rate below 0.5, and promotes one step. |
+| Router rules not in the design | Five rules | Also: an explicit tier override stored on the task (retry escalation, `repairTier` from the second repair cycle), exempt from the ECO cap like the HIGH/CRITICAL repair rule; and a fallback to `INHERIT` with the runtime default model when no model is configured for the tier. Attempt 2 or later promotes one step; ECO caps rules for non-gate roles (all but `planner` and `verifier`). |
+| Which sessions use task history | Not specified | Only `implement`, `diagnose`, `research`, `audit`, `synthesis` and `ask` sessions pass the task's attempt, override and category to the router (`TASK_WORK_PURPOSES`). |
+| Outcome recording | A row "when an implementing task finishes" | `recordTaskOutcome` writes only for top-level tasks of kind `implement` or `repair` in state `completed` or `failed`; one row per task id (upsert, id `outcome-<taskId>`), so a retry updates it. In a dual review the arbiter's review row supersedes the reviewers' rows of that attempt. |
+| Context selection | Facts "matched by the task's files and FTS" | `selectFactsForTask` is a pure ranking by shared path or module, then command facts, then term overlap, at most 8 facts (`FACT_LIMIT`). The FTS5 index on facts is used only by the Intelligence view search (`intelligence.list` with a query). Excluded entries are capped at 30 per pack (`MAX_EXCLUDED_ENTRIES`). Review findings enter a pack only for `implement` and `diagnose` sessions and only at `critical` or `high` severity. Pack sources also include `failure`, `handoff` and `user_instruction`; repair, resume and rotation prompts are recorded as packs through `packForPrompt`. |
+| Fact refresh | "On project open and before planning" | Also on re-profile, on run creation (every mode, before planning; a failure never blocks the run) and on request (`intelligence.refresh`). Analysis-owned facts (sources `manifest`, `static_analysis`, `git`) are rewritten, or marked stale when no longer produced; facts from agents, verifiers or users are never overwritten and are marked stale by fingerprint. Analysis bounds: 4000 files, 5 seconds, 200 000 bytes per file, 200 commits, at most 50 files per fingerprint (path, size, mtime). |
+| Decision facts | "Become `decision` facts when their task passes verification" | Written just before the merge, source `agent`, confidence `medium`, statement prefixed "Agent-recorded decision (not independently verified)", supporting files are the changed files (at most 20). |
+| Dual review details | Dedupe on "same file with overlapping lines or near-identical titles"; the arbiter checks each significant finding | Lines are the same spot when ranges overlap or are within 3 lines; titles are compared only when neither finding has line information, same file (or both without), same category, token Jaccard of at least 0.6. With no `critical` or `high` finding after deduplication there is no arbiter. Otherwise the arbiter receives every merged finding by index; only accepted `critical` or `high` findings block. If it returns no valid decision, `applyArbitration` accepts only `critical` or `high` findings of `high` confidence. |
+| Arbitration storage | "All three records are persisted" | Two reviewer rows and one arbiter row exist in `reviews`; because that table has no arbitration column, the arbiter output is an `artifacts` row of kind `arbitration` titled with the arbiter review's id, attached to review rows by `attachArbitration` when read (`reviews.list`, `tasks.reviews`). |
+| Consensus fallbacks | One valid candidate used directly; none falls back to single planning | Also: a failing critic does not stop the synthesis; a synthesis that stays invalid after `MAX_PLAN_ATTEMPTS` (3) attempts is replaced by the preferred candidate (the critic's choice if its label matches, else the first valid one); each round replaces the candidate and critique rows of the previous round; a pause or stop during planning halts it and a resume plans again. The synthesizer also receives up to 10 repository facts. |
+| Planning recommendation | "Long, multi-area prompts on larger repos" | A score over prompt length (600 and 1500 characters), number of deliverables (3 and 5), scope keywords and repository files (500 and 2000); consensus at a score of 3 or more. |
+| Proposal records | States `proposed`, `applied`, `rejected`, `awaiting_approval` | Input without a valid proposal type is not persisted (the tool still answers with the errors) but counts against the submission limit; otherwise the proposal is stored first as `proposed` and then moves to a final or waiting state. The per-task limit counts every stored proposal and every malformed submission. |
+| Graph revisions | Written when a proposal is applied | Version 1 is written at `startExecution` (or lazily by the first change). User changes (`tasks.add`, `tasks.cancel`, `tasks.setPriority`) also write a revision with no proposal. |
+| Approval and the proposer | Approval stays answerable | The proposer is told to continue with its own task and not wait; it is not notified when the approval is decided. An approved proposal is validated again and applied (also while the run is paused). Graph approvals are kept across a restart; only `tool` approvals are expired on startup. |
+| Yield and resume | Task "resumed after the prerequisite merges" | The yield marker (`graph-yield:<taskId>`) is also honoured after a pause or restart: `restartOrphans` queues an `assigned` or `running` task with unmet prerequisites instead of relaunching it. A prerequisite that completed before the proposer's turn ended still yields. A conflicting sync merge is aborted and left to the agent. |
+| Proposal types and tool access | Not specified | Only sessions with a task, role `worker`, `debugger`, `architect` or `researcher` and purpose `implement`, `diagnose` or `research` get the tool; repair attempts propose with no task of their own. `REPLAN` cancels not-started tasks that are not listed and never touches started ones. |
+| Evidence limits | "One sanitized, bounded line per record" | 120 characters per agent-written field, 25 records per group, 5000 characters in total, 60 message records for the mission verifier. |
+| Migration | "No existing table is altered" | Confirmed: `002-v0-2.ts` only creates tables; `task_id` and `agent_id` columns are plain text without foreign keys, so history survives task deletion during replanning. |
+| UI | Mission header, graph with revision markers, plan inspector, Performance and Intelligence views | Implemented as Ctrl+6 (Performance) and Ctrl+7 (Intelligence), a Plan inspector tab and a revision bar in the Run view, a Context tab in the task inspector and a routing section in the agent detail. |

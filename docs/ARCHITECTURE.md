@@ -30,22 +30,32 @@ src/
     modules/
       persistence/   SQLite open, migrations, repositories
       events/        typed event bus: persist to run_events, then fan out
-      task-graph/    DAG validation, cycle detection, readiness
+      task-graph/    DAG validation, cycle detection, readiness; v0.2: proposals.ts (graph proposal validation,
+                     operations, snapshots and diffs)
       scheduler/     concurrency, leases, priorities, file-overlap serialization
       state/         task / agent / run state machines
       agent-runtime/ AgentRuntime interface, ClaudeSdkRuntime adapter, FakeAgentRuntime
       policies/      role tool policies, command classification, path boundaries, authorizer
       git/           GitService (spawn with arg arrays), worktree manager
       process/       runProcess / runCommandLine (no shell), process-tree kill
-      context/       context packs, role prompts, stage prompts (planner, review, verifier, repair, handoff)
+      context/       context packs, role prompts, stage prompts (planner, review, verifier, repair, handoff);
+                     v0.2: context-engine.ts (composeContext with per-entry provenance), render.ts (orchestration evidence)
       orchestrator/  run lifecycle, planner loop, task pipeline, repair loop, recovery, approvals,
-                     inter-agent messaging, project memory service
+                     inter-agent messaging, project memory service; v0.2: graph-service.ts (apply proposals,
+                     revisions, yield markers), consensus.ts (consensus planning), routing.ts (ModelRoutingService),
+                     outcomes.ts (task outcome recording), arbitration.ts (arbiter output storage),
+                     evidence.ts (orchestration evidence), intelligence.ts (fact refresh)
+      routing/       v0.2, pure: routeModel (tier rules and reasons), aggregatePerformance, buildTaskOutcome
+      review/        v0.2, pure: dedupeFindings, applyArbitration
+      planning/      v0.2, pure: planner lenses, recommendPlanningMode
+      intelligence/  v0.2: repository analysis (manifests, bounded walk, regex imports, Git history), fingerprints,
+                     refresh/reconcile, fact selection for a task
       profile/       read-only project discovery (ProjectProfile)
       ipc/           validated IPC handlers and read-model services
   preload/           narrow typed bridge (CJS, sandboxed)
   renderer/          React UI
 tests/
-  unit/ integration/ scenarios/ smoke/   (Playwright E2E is run by `pnpm test:e2e`)
+  unit/ integration/ scenarios/ stress/ smoke/   (Playwright E2E is run by `pnpm test:e2e`)
 ```
 
 Dependency direction: `renderer → preload bridge → ipc → orchestrator/services → domain
@@ -81,7 +91,8 @@ Dependency direction: `renderer → preload bridge → ipc → orchestrator/serv
    subagents are disabled (`Agent`/`Task` are never in `tools`).
 
 6. **Agents talk to NEXUS through an in-process MCP server** (`createSdkMcpServer`), exposing
-   `send_message`, `report_blocker`, `record_decision`, and `propose_memory`. Planner, reviewer, and
+   `send_message`, `report_blocker`, `record_decision`, `propose_memory` and, for the work roles that may
+   change the plan, `propose_graph_change`. Planner, reviewer, and
    verifier return data through `outputFormat: { type: 'json_schema' }`, validated again with zod.
 
 7. **Git model.** The user's working tree is never written to. A run gets an integration branch
@@ -106,6 +117,36 @@ Dependency direction: `renderer → preload bridge → ipc → orchestrator/serv
     No shell interpolation, no WSL, no Git Bash requirement (the runtime uses its PowerShell tool
     when Git Bash is absent). Paths are canonicalized with `fs.realpath` and compared
     case-insensitively.
+
+## v0.2 decisions
+
+11. **The graph is data that agents propose to change, never write.** `propose_graph_change` input is validated by
+    pure code (`validateProposal`) into a list of operations; `GraphService` executes them in one transaction
+    with a `graph_revisions` snapshot, so every change is persisted, ordered and diffable. The orchestrator
+    remains the only writer of task and dependency rows. The scheduler is unchanged. A task that waits for a
+    new prerequisite yields (`running -> queued`) and restarts in a worktree that has merged the integration branch.
+    Changes that touch someone else's work, or that exceed run-wide bounds, wait for user approval (kind `graph`).
+12. **One router decides every model.** `routeModel` is pure and total; the concrete model is looked up in
+    settings only when the session starts. The decision and its reasons are stored per agent. Measured
+    outcomes influence it only above a minimum sample count.
+13. **Outcomes are measurements, not estimates.** A `task_outcomes` row is derived from durable records
+    (reviews, verifications, attempts, repair children, events); token figures stay null unless the SDK reported them.
+14. **Facts carry provenance.** Repository facts have a source, confidence, supporting files and a fingerprint of
+    those files (path, size, mtime); analysis is static and bounded; agent-recorded facts are marked as unverified.
+15. **Context is explainable.** `composeContext` records every candidate source with an inclusion flag and a reason
+    in `context_packs` / `context_pack_entries`; repair, resume and rotation prompts are recorded the same way.
+16. **Consensus planning and dual review reuse the agent runner.** They run extra
+    sessions through the same agent runner; their merge rules (plan validation, `dedupeFindings`, `applyArbitration`)
+    are deterministic, with documented fallbacks when a session produces nothing usable.
+17. **Migration 002 is additive.** `002-v0-2.ts` only creates tables (`graph_revisions`, `graph_proposals`,
+    `planning_candidates`, `planning_critiques`, `routing_decisions`, `task_outcomes`, `repository_facts` with an
+    FTS5 mirror, `context_packs`, `context_pack_entries`); no v0.1 table is altered. `RunConfig` gains the optional
+    `planningMode` and `reviewMode`, stored in the existing `runs.config` JSON.
+
+The v0.2 renderer additions are the Performance and Intelligence views, the Plan inspector and revision bar in the
+Run view, a Context tab in the task inspector, and a routing section in the Agent detail. v0.2 IPC channels:
+`graph.revisions`, `graph.proposals`, `planning.candidates`, `planning.recommend`, `routing.list`,
+`performance.summary`, `intelligence.list`, `intelligence.refresh`, `context.packs`. Design: V0_2_DESIGN.md.
 
 ## Data location
 

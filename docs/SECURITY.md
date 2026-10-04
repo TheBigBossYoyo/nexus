@@ -76,7 +76,7 @@ The runtime evaluates the policy twice (SDK `tools` restriction, then the `PreTo
 | `Glob`, `Grep` | Base path in the read roots and no escaping pattern | Secret base path | Base path or `..`/absolute pattern reaching outside the read roots, `~` |
 | `Bash`, `PowerShell` | Classified `safe` or `write` and permitted for the role | Findings that need approval (below) | `forbidden` commands; commands the role may not run |
 | `WebFetch` | http(s) public hosts | `localhost`, private ranges, `.local`, `.internal` | Non-http(s), invalid URL |
-| `mcp__nexus__*` | Always | | |
+| `mcp__nexus__*` | Always (what each tool may do is enforced in its handler, see Agent-to-NEXUS tools) | | |
 | Other `mcp__*` | Server enabled for the role in Settings and the run | | Everything else |
 
 ## Path boundaries
@@ -150,6 +150,48 @@ NEXUS policy does not review.
 External MCP servers (Settings, MCP) are configured by you, run with your privileges, and are available only
 to the roles you tick. NEXUS applies no per-tool policy to them.
 
+## Agent-to-NEXUS tools (v0.2)
+
+The in-process `mcp__nexus__*` tools skip the command policy, so their handlers carry the trust decisions.
+
+**`propose_graph_change`.** A proposal is data, not a capability. The model's input is parsed by `GraphProposalInputSchema`
+and then validated by `validateProposal` against the graph as it is; an agent cannot widen its own tools, paths or approvals
+through it, and new tasks take the policy of their role like any planned task. Trust boundaries:
+
+- Only sessions with a task and a work role (`worker`, `debugger`, `architect`, `researcher`) in an implement, diagnose or
+  research purpose get the tool; planners, reviewers, verifiers, the critic, the synthesizer and the arbiter never do.
+- Completed, failed and cancelled tasks and repair tasks cannot be changed. A running task of another agent can neither gain
+  nor lose a prerequisite. Cancelling another agent's task, rewiring or reprioritising it, replanning, and adding more than 3
+  tasks need user approval (approval kind `graph`); so do task-adding proposals past the run-wide limits (20 applied proposals,
+  25 added tasks). At most 5 proposals per task and 8 new tasks per proposal. Exact numbers and rules: ORCHESTRATION.md.
+- A graph approval shows the exact operations. When you approve, the proposal is validated again against the current graph
+  before it is applied.
+- ASK and AUDIT runs stay read-only: a proposal cannot add a task with a writing role there.
+- Rejections tell the agent why and not to work around them. The rejected proposal is stored with its reasons.
+
+**`send_message`.** An agent can send only the types in `AGENT_MESSAGE_TYPES`. `user_instruction` and `review_finding` are
+authoritative message types written by the user and by NEXUS; an agent that claims one is stored as `information`. Subjects
+are whitespace-flattened and cut to 200 characters. Messages are still agent-written text: recipients treat them as input,
+not as instructions from the user.
+
+**Sanitized orchestration evidence.** Verifiers get records of messages, decisions and graph proposals from the database. Each
+record is one line built by NEXUS (`- record <kind> <id>: ...`); agent-written fields (subjects, titles) have control
+characters and all whitespace replaced by a space and are cut to 120 characters, so an agent cannot start a record of its own
+or fake one with a newline. The existence, sender, recipient, type and time of a record are authoritative; the quoted text is
+not, and the section says so. Decision bodies and proposal reasons are never shown to a verifier, and review findings and user
+instructions are left out of the message records. See ORCHESTRATION.md.
+
+**Agent-recorded decision facts.** When a task passes verification, the decisions its agents recorded (`record_decision`)
+become repository facts of kind `decision` with source `agent` and confidence `medium`. They are marked as unverified in two
+places: the stored statement starts with "Agent-recorded decision (not independently verified)", and the prompt that includes a
+fact shows its source and confidence for facts from agents, verifiers or users. Refreshing repository analysis never overwrites
+or deletes them; they are marked stale when the files that supported them change.
+
+**Repository analysis.** `intelligence/` reads file names, sizes, manifests and bounded file prefixes (at most 200 000 bytes per
+file, 4000 files, 5 seconds). It skips secret-looking files (`.env*`, `id_rsa`-style keys, `.pem`, `.key`, `.p12`, `.pfx`,
+`credentials`), never follows symbolic links or junctions, and treats paths outside the root as missing. It never writes to the
+project. `projects.open` accepts only absolute local paths (see IPC).
+
 ## Markdown and untrusted text
 
 Agent output, plans, review findings and user text are rendered with `react-markdown` and
@@ -179,6 +221,7 @@ Hidden reasoning is not stored. Claude's own transcripts are stored by the runti
   check commands are executed by NEXUS itself (`runCommandLine`, no shell, with a timeout and output cap).
   They come from the project's lockfile and scripts, but install scripts and tests are project code.
 - **Commits skip Git hooks** (`--no-verify`) and signing.
+- **Agent-written text is not evidence.** Message subjects, decision text and proposal reasons come from agents. NEXUS marks them as such where it shows them to other agents, but a verifier or reviewer model can still be influenced by them.
 - **Prompt rules are not enforcement.** Instructions such as "never push" are in the role prompts; only
   the classifier enforces them, and it can be overridden by your approval.
 - **Approvals show the command, not a prediction of its effects.** Read the exact command before approving.

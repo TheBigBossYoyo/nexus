@@ -79,6 +79,19 @@ Diffs shown in the UI: a task's diff is its worktree against the merge base with
 The integration branch therefore contains only verified work, merged with `--no-ff`, one merge commit per
 task. Mission-level checks and verification run on it before the run completes (ORCHESTRATION.md).
 
+## Tasks added or yielded by graph proposals (v0.2)
+
+- A task added by an applied graph proposal is an ordinary task: a writing task gets its branch and worktree from the
+  integration tip when it starts, like a planned one, and is verified and merged the same way.
+- A task that yields to a new prerequisite keeps its worktree and branch. Leftovers are committed first
+  (`commitLeftovers`), so nothing is lost. When it starts again (after the prerequisite was verified and merged), NEXUS merges
+  the integration branch into the task's worktree under the per-run merge lock, with the message
+  `Sync <key> with <integration branch>`, so the task sees the prerequisite's work. If that merge conflicts it is aborted
+  (never left in progress), the new session is told to run `git merge <integration branch>` itself, and a conflict that remains
+  at the final merge into the integration branch still goes through the repair path described below.
+- A task cancelled by a proposal (split, cancel, replan) stops without a merge; a task that was waiting for the merge lock when it
+  was cancelled is not merged. Its branch and worktree are left like those of any cancelled task.
+
 ## What NEXUS never does
 
 In NEXUS's own Git calls (everything in `GitService`, as used by the orchestrator):

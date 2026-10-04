@@ -120,7 +120,9 @@ sum over agents. A figure that goes down is treated as a counter restart.
 
 Planner, per-task reviewer and verifier, the mission verifier and the handoff request pass a JSON
 Schema (draft-07, generated from the zod schemas by `z.toJSONSchema` in `context-builder.ts`:
-`missionPlanJsonSchema`, `reviewOutputJsonSchema`, `verifierOutputJsonSchema`, `handoffJsonSchema`).
+`missionPlanJsonSchema`, `reviewOutputJsonSchema`, `verifierOutputJsonSchema`, `handoffJsonSchema`). v0.2 adds
+`planCritiqueJsonSchema` (the consensus critic) and `arbiterOutputJsonSchema` (the finding arbiter); the consensus
+planners and the synthesizer use `missionPlanJsonSchema`.
 The SDK enforces the schema; NEXUS validates the returned object again with the zod schema before
 using it. Review and verification gates retry once on invalid output (`TaskPipeline.gate`).
 
@@ -131,10 +133,13 @@ reserved and rejected for external servers). Tools, handled by `AgentRunner.buil
 
 | Tool | Effect |
 |---|---|
-| `send_message` | Persists and routes a message (types from `MESSAGE_TYPES`) to a task, a role, or the sender's dependants. |
+| `send_message` | Persists and routes a message to a task, a role, or the sender's dependants. The type must be one of `AGENT_MESSAGE_TYPES` (`question`, `information`, `blocker`, `interface_change`, `handoff`, `decision_request`, `acknowledgement`); the subject is at most 200 characters (`MAX_AGENT_SUBJECT_CHARS`), whitespace-flattened. The tool's schema only offers those types, and if a type outside them still arrives (`user_instruction`, `review_finding`) the message is stored as `information` and the reply says so. |
 | `report_blocker` | Records a `blocker` message; if the agent's turn then succeeds, the task becomes `blocked` (`task.blocked`) instead of continuing to checks. |
 | `record_decision` | Inserts a `decisions` row, visible to dependants and architect-informed context. |
 | `propose_memory` | Creates a `proposed` memory entry. |
+| `propose_graph_change` | v0.2. Submits a graph proposal (`type`, `reason`, `evidence`, `changes`; types `ADD_TASK`, `SPLIT_TASK`, `CANCEL_TASK`, `ADD_DEPENDENCY`, `REMOVE_DEPENDENCY`, `REPRIORITIZE`, `REPLAN`). Registered only for sessions that have a task and whose role is `worker`, `debugger`, `architect` or `researcher` with purpose `implement`, `diagnose` or `research` (`canProposeGraphChange`); the role prompt gets a "Changing the plan" section only then. The tool schema shown to the model is lenient; `GraphProposalInputSchema` and the validator in the orchestrator decide, and the reply says exactly what happened: applied as plan vN (and, when the task yields, to finish its turn now), rejected with the list of errors, or awaiting user approval. A repair attempt's proposals have no task of their own. See ORCHESTRATION.md, Graph proposals. |
+
+All `mcp__nexus__*` tools are allowed without calling the authorizer: the policy for what they may do is enforced in the handlers (message types, proposal validation, limits and approvals), not in the tool policy.
 
 Tool handler errors are returned to the model as error results, never thrown into the SDK.
 
@@ -199,5 +204,6 @@ automated tests.
   equals the requested one.
 - `mcp__nexus__*` tools bypass `authorize`, as in the real runtime.
 - It records `sessions` (the specs it received) and `handles`, so tests can assert on prompts and tools.
-- `createDemoScript()` (`demo-script.ts`) is a scripted three-task plan used by UI tests. The main
+- A script reaches the in-process tools through `ctx.nexusTools` (for example `ctx.nexusTools.proposeGraphChange(...)`), which are the real handlers of `AgentRunner.buildSpec`.
+- `createDemoScript()` (`demo-script.ts`) is a scripted three-task plan used by UI tests; since v0.2 the `api` worker also proposes an `ADD_TASK` for a `docs` task (plan revision 2), and the script answers the consensus critic, synthesizer and arbiter purposes too. The main
   process uses it only when `NEXUS_FAKE_RUNTIME=1` and the app is not packaged.
