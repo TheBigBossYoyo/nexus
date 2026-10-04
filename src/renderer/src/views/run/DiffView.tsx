@@ -210,7 +210,7 @@ function FileBody({ row, findings, truncatedPatch }: { row: Row; findings: Revie
       {body}
       {annotations && annotations.unanchored.length > 0 ? (
         <div className="flex flex-col gap-1 border-t p-2">
-          <div className="text-[0.8rem] uppercase tracking-wider text-text-muted">Findings without a line in this diff</div>
+          <div className="text-[0.8rem] text-text-muted">Findings without a line in this diff</div>
           {annotations.unanchored.map((f, i) => (
             <FindingCard key={`${f.title}-${i}`} finding={f} compact />
           ))}

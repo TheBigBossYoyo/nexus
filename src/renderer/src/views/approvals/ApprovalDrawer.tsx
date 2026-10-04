@@ -53,7 +53,7 @@ function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
       </div>
       {isGraph ? (
         <div className="flex flex-col gap-1 border-l-2 border-tone-review bg-surface-muted px-2.5 py-1.5" data-testid="approval-graph-change">
-          <div className="text-caption font-semibold uppercase tracking-wider text-tone-review">Proposed plan change</div>
+          <div className="text-caption font-semibold text-tone-review">Proposed plan change</div>
           <div className="whitespace-pre-wrap break-words">{approval.reason}</div>
           {approval.command ? (
             <div className="whitespace-pre-wrap break-words font-mono text-[0.9em] text-text-secondary" data-testid="approval-graph-summary">

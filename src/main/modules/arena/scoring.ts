@@ -264,7 +264,7 @@ export function resultNotes(rows: readonly StrategyComparisonRow[], context: { a
   for (const r of rows) {
     if (r.n > 0 && r.cases < MIN_CASES_FOR_EVIDENCE) {
       notes.push(
-        `${r.strategy}: all ${r.n} trial${r.n === 1 ? '' : 's'} come from ${r.cases} case${r.cases === 1 ? '' : 's'}; repetitions of one case are not independent, so the label is capped at WEAK.`,
+        `${r.strategy}: ${r.n === 1 ? 'the 1 trial comes' : `all ${r.n} trials come`} from ${r.cases} case${r.cases === 1 ? '' : 's'}; repetitions of one case are not independent, so the label is capped at WEAK.`,
       )
     }
   }

@@ -91,7 +91,7 @@ function VerificationTab({ task }: { task: Task }) {
           return (
             <>
               <section className="flex flex-col gap-2" data-testid="inspector-checks">
-                <h3 className="m-0 text-caption font-semibold uppercase tracking-wide text-text-muted">Check commands</h3>
+                <h3 className="m-0 text-caption font-semibold text-text-muted">Check commands</h3>
                 {checks.length === 0 ? <p className="m-0 text-small text-text-muted">No check commands have run for this task yet.</p> : null}
                 {checks.map((v) => (
                   <div key={v.id} className="flex flex-col gap-1.5">
@@ -109,7 +109,7 @@ function VerificationTab({ task }: { task: Task }) {
                 ))}
               </section>
               <section className="flex flex-col gap-2">
-                <h3 className="m-0 text-caption font-semibold uppercase tracking-wide text-text-muted">Verifier evidence</h3>
+                <h3 className="m-0 text-caption font-semibold text-text-muted">Verifier evidence</h3>
                 {verifiers.length === 0 ? <p className="m-0 text-small text-text-muted">No verifier result for this task yet.</p> : null}
                 {verifiers.map((v) => (
                   <VerificationCard key={v.id} verification={v} label={task.key} />
@@ -157,7 +157,7 @@ function ContextTab({ task }: { task: Task }) {
                   {sections.length === 0 ? <div className="text-text-muted">The pack has no entries.</div> : null}
                   {sections.map((s) => (
                     <section key={s.section} className="flex flex-col gap-0.5" data-testid="context-section" data-section={s.section}>
-                      <h4 className="m-0 text-caption font-semibold uppercase tracking-wide text-text-muted">
+                      <h4 className="m-0 text-caption font-semibold text-text-muted">
                         {s.section}
                         <span className="ml-1.5 font-mono font-normal normal-case tracking-normal text-text-muted">
                           {s.includedCount} included{s.excludedCount > 0 ? `, ${s.excludedCount} excluded` : ''}, {s.includedChars.toLocaleString()} chars

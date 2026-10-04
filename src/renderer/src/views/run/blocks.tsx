@@ -208,7 +208,7 @@ export function MessageRow({ message: m }: { message: Message }) {
         <span className="font-medium">{m.fromLabel}</span>
         <span className="text-text-muted">→</span>
         <span className="font-medium">{m.toLabel}</span>
-        <span className="ml-auto font-mono text-small uppercase tracking-wide text-text-secondary">
+        <span className="ml-auto font-mono text-small text-text-secondary">
           {m.type.replace(/_/g, ' ')}
           {sev ? <span className={sev.tone === 'danger' ? 'text-tone-danger' : ''}> · {sev.label.toUpperCase()}</span> : null}
         </span>

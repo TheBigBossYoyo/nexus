@@ -64,7 +64,7 @@ export function LoadMore({
 export function Caption({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <h3
-      className={`m-0 text-caption font-medium uppercase tracking-wide text-text-muted ${className}`}
+      className={`m-0 text-caption font-medium text-text-muted ${className}`}
     >
       {children}
     </h3>

@@ -117,7 +117,7 @@ export function IntelligenceView() {
         ) : (
           groups.map((g) => (
             <section key={g.id} data-testid={`intelligence-group-${g.id}`}>
-              <h2 className="sticky top-0 m-0 border-b bg-surface-muted px-5 py-1.5 text-caption font-semibold uppercase tracking-wider text-text-secondary">
+              <h2 className="sticky top-0 m-0 border-b bg-surface-muted px-5 py-1.5 text-caption font-semibold text-text-secondary">
                 {g.label} <span className="font-mono font-normal text-text-muted">{g.facts.length}</span>
               </h2>
               <ul className="m-0 list-none p-0">
