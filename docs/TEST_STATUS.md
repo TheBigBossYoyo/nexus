@@ -1,6 +1,7 @@
 # Test Status
 
-Factual status as of 2026-10-04 13:20 (+01:00), version 0.2.1, branch `v0.2.1`, commit `10be52f`. Details and
+Factual status as of 2026-10-04 13:20 (+01:00), version 0.2.1, commit `10be52f` (recorded on branch `v0.2.1`,
+since merged into `main` as `4062355`, tag `v0.2.1`). Details and
 evidence: `docs/V0_2_1_RELEASE_REPORT.md`. The 0.2.0 and 0.1 sections below are the earlier records, unchanged.
 
 ## 0.2.1: automated (no Claude usage), final tree

@@ -1,6 +1,7 @@
 # NEXUS 0.2.1 Release Report
 
-Date: 2026-10-04. Branch `v0.2.1` (not merged into `main`). Code commit `10be52f`; this report and the last
+Date: 2026-10-04. Developed on branch `v0.2.1`, since merged into `main` (merge commit `4062355`, tag
+`v0.2.1`). Code commit `10be52f`; this report and the last
 two evidence files are in the commit after it.
 
 ## Verdict
@@ -231,7 +232,8 @@ Also found while fixing: a stuck helper process left by a sub-agent, and a shutd
   failing the task without a retry. In Overnight Mode such a pause ends the run as blocked.
 - Shell policy for `git commit` (gap 4 of 0.2.0): plain `git commit` was never blocked for writing roles.
   What was blocked was heredoc content parsed as shell (commit messages, and `cat > file <<'EOF'`); both fixed.
-- The release is on branch `v0.2.1`; `main` is unchanged.
+- The release was developed on branch `v0.2.1` and has since been merged into `main` (merge commit
+  `4062355`, tagged `v0.2.1`).
 
 ## Evidence
 
