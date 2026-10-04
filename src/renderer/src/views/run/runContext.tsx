@@ -8,6 +8,7 @@ import { mergeEvents } from './eventText'
 export type StageView = 'overview' | 'graph' | 'plan'
 
 export const BOTTOM_TABS = [
+  'agents',
   'timeline',
   'communications',
   'tools',
@@ -16,6 +17,7 @@ export const BOTTOM_TABS = [
   'verification',
   'decisions',
   'criteria',
+  'usage',
 ] as const
 export type BottomTab = (typeof BOTTOM_TABS)[number]
 

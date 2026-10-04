@@ -10,7 +10,7 @@ import {
   InlineCode,
   KeyValue,
   Notice,
-  Panel,
+  Card,
   RefreshIcon,
   Toggle,
   TrashIcon,
@@ -86,7 +86,7 @@ export function ProjectDetail({ project }: { project: Project }) {
     : []
 
   return (
-    <Panel
+    <Card
       title="Project"
       data-testid="project-detail"
       actions={
@@ -108,8 +108,8 @@ export function ProjectDetail({ project }: { project: Project }) {
     >
       <div className="flex flex-col gap-3">
         <div>
-          <div className="text-[1.15rem] font-semibold">{project.name}</div>
-          <div className="break-all font-mono text-[0.88em] text-fg-muted">{project.rootPath}</div>
+          <div className="text-heading font-semibold">{project.name}</div>
+          <div className="break-all font-mono text-code text-text-muted">{project.rootPath}</div>
         </div>
 
         {p ? (
@@ -153,6 +153,6 @@ export function ProjectDetail({ project }: { project: Project }) {
       >
         The project is removed from NEXUS. Files in your repository are not deleted.
       </ConfirmDialog>
-    </Panel>
+    </Card>
   )
 }

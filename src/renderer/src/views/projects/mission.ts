@@ -1,6 +1,7 @@
 import type { Preset, RunMode } from '@shared/domain'
 import { ipcInputs, type IpcInput } from '@shared/ipc'
 import type { PlanningMode, ReviewMode } from '@shared/v2'
+import type { Strategy } from '@shared/v3'
 
 export const MODE_INFO: Record<RunMode, string> = {
   ask: 'Answers a question with one read-only researcher task. No planner, worktree, review or verification; works outside Git.',
@@ -50,6 +51,9 @@ export interface MissionDraft {
   /** Omitted from the request when undefined (main applies its defaults). */
   planningMode?: PlanningMode
   reviewMode?: ReviewMode
+  /** Sent as strategy when set; the composer leaves it unset for ask and audit. */
+  strategy?: Strategy
+  speculativeCandidates?: number
 }
 
 export function buildCreateRunInput(d: MissionDraft): IpcInput<'runs.create'> {
@@ -63,6 +67,8 @@ export function buildCreateRunInput(d: MissionDraft): IpcInput<'runs.create'> {
   if (d.maxAgents !== null) input.maxParallelAgents = d.maxAgents
   if (d.planningMode !== undefined) input.planningMode = d.planningMode
   if (d.reviewMode !== undefined) input.reviewMode = d.reviewMode
+  if (d.strategy !== undefined) input.strategy = d.strategy
+  if (d.strategy === 'SPECULATIVE' && d.speculativeCandidates !== undefined) input.speculativeCandidates = d.speculativeCandidates
   if (d.mode === 'loop') input.maxIterations = d.maxIterations
   return input
 }

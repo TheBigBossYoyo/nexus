@@ -53,7 +53,7 @@ export function Tabs<T extends string>({
             data-testid={t.testId}
             onClick={() => onChange(t.id)}
             className={cn(
-              '-mb-px inline-flex h-[var(--row-h)] items-center gap-1.5 border-b-2 px-2.5 font-medium transition-colors',
+              '-mb-px inline-flex h-[var(--row-h)] items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 font-medium transition-colors',
               selected ? 'border-accent text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary',
             )}
           >

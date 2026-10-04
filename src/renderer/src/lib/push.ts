@@ -176,7 +176,7 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
         case 'usage':
           // The push carries the whole overview: render from it immediately, then refresh what hangs off it.
           qc.setQueryData(qk.usageOverview(), message.overview)
-          schedule([qk.homeRoot(), qk.runsList()])
+          schedule([qk.usageRoot(), qk.homeRoot(), qk.runsList()])
           break
         case 'usage.notice':
           notify(message.title, message.detail, message.notice)

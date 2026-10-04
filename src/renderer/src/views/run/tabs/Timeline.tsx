@@ -69,13 +69,13 @@ export function Timeline({ loading, error }: { loading: boolean; error: unknown 
             onClick={() => toggle(c)}
             className={cn(
               'rounded-[3px] border px-1.5 text-[0.82rem] leading-5',
-              active.has(c) ? 'border-border-strong bg-surface-3 text-fg' : 'border-transparent text-fg-faint hover:text-fg-muted',
+              active.has(c) ? 'border-border-strong bg-surface-hover text-text-primary' : 'border-transparent text-text-muted hover:text-text-secondary',
             )}
           >
             {c}
           </button>
         ))}
-        <span className="ml-auto font-mono text-[0.85em] text-fg-faint" data-testid="timeline-count">
+        <span className="ml-auto font-mono text-small text-text-muted" data-testid="timeline-count">
           {filtered.length === events.length ? `${events.length} events` : `${filtered.length} of ${events.length} events`}
         </span>
         {!pinned ? (
@@ -90,7 +90,7 @@ export function Timeline({ loading, error }: { loading: boolean; error: unknown 
         ) : error ? (
           <div className="p-3 text-tone-danger">{error instanceof Error ? error.message : String(error)}</div>
         ) : filtered.length === 0 ? (
-          <div className="p-3 text-fg-muted">{events.length === 0 ? 'No events recorded yet.' : 'No events match the selected categories.'}</div>
+          <div className="p-3 text-text-secondary">{events.length === 0 ? 'No events recorded yet.' : 'No events match the selected categories.'}</div>
         ) : (
           <div style={{ height: filtered.length * ROW_HEIGHT, position: 'relative' }}>
             {visible.map((e, i) => {
@@ -103,13 +103,13 @@ export function Timeline({ loading, error }: { loading: boolean; error: unknown 
                   data-testid="timeline-row"
                   data-type={e.type}
                   style={{ position: 'absolute', top: (first + i) * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 }}
-                  className="flex items-center gap-2 whitespace-nowrap px-2 font-mono text-[0.88em] hover:bg-surface-2"
+                  className="flex items-center gap-2 whitespace-nowrap px-2 font-mono text-small hover:bg-surface-muted"
                 >
-                  <span className="w-[4.5rem] shrink-0 text-fg-faint">{clockTimeSeconds(e.createdAt)}</span>
+                  <span className="w-[4.5rem] shrink-0 text-text-muted">{clockTimeSeconds(e.createdAt)}</span>
                   <StatusDot tone={tone} />
-                  <span className="w-[5.5rem] shrink-0 truncate text-fg-faint">{eventCategory(e.type)}</span>
-                  {task ? <span className="max-w-[10rem] shrink-0 truncate text-fg-muted">{task.key}</span> : null}
-                  {agent ? <span className="max-w-[9rem] shrink-0 truncate text-fg-faint">{agent.label}</span> : null}
+                  <span className="w-[5.5rem] shrink-0 truncate text-text-muted">{eventCategory(e.type)}</span>
+                  {task ? <span className="max-w-[10rem] shrink-0 truncate text-text-secondary">{task.key}</span> : null}
+                  {agent ? <span className="max-w-[9rem] shrink-0 truncate text-text-muted">{agent.label}</span> : null}
                   <span className={cn('min-w-0 flex-1 truncate font-sans text-[1.04em]', tone === 'danger' && TONE_CLASSES.danger.text)} title={describeEvent(e)}>
                     {describeEvent(e)}
                   </span>

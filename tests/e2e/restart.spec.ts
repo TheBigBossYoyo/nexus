@@ -6,6 +6,7 @@ async function startMission(page: Page): Promise<string> {
   await page.getByTestId('open-project').click()
   await expect(page.getByTestId('project-detail')).toBeVisible()
   await page.getByTestId('mission-prompt').fill('Add an API module and a UI module, then integrate them.')
+  await page.getByTestId('strategy-select').selectOption('BUILD')
   await page.getByTestId('create-run').click()
   await expect(page.getByTestId('plan-panel')).toBeVisible()
   await dismissApprovalDrawer(page)

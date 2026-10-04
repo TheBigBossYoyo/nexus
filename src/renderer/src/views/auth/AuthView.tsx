@@ -12,6 +12,7 @@ import {
   KeyValue,
   Loading,
   Notice,
+  PageHeader,
   Panel,
   RefreshIcon,
   StatusDot,
@@ -47,20 +48,18 @@ export function AuthView() {
   const needsLogin = status ? status.state === 'authentication_required' || status.state === 'unknown' : false
 
   return (
-    <div className="h-full overflow-auto p-4">
-      <div className="mx-auto flex max-w-3xl flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h1 className="m-0 text-[1.15rem] font-semibold">Claude authentication</h1>
-          <Button
-            icon={<RefreshIcon size={12} />}
-            loading={refresh.isPending}
-            onClick={() => refresh.mutate()}
-            data-testid="auth-refresh"
-          >
+    <div className="flex h-full min-h-0 flex-col" data-testid="auth-view">
+      <PageHeader
+        title="Authentication"
+        context="System"
+        actions={
+          <Button icon={<RefreshIcon size={12} />} loading={refresh.isPending} onClick={() => refresh.mutate()} data-testid="auth-refresh">
             Refresh
           </Button>
-        </div>
-
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-auto p-6">
+      <div className="mx-auto flex max-w-3xl flex-col gap-4">
         {auth.isPending ? (
           <Loading label="Checking Claude status" />
         ) : auth.isError ? (
@@ -70,7 +69,7 @@ export function AuthView() {
             <Panel title="Status" data-testid="auth-status">
               <div className="mb-3 flex items-center gap-2">
                 <StatusDot tone={summary.tone} className="size-2.5" />
-                <span className={cn('text-[1.1rem] font-medium', TONE_CLASSES[summary.tone].text)} data-testid="auth-state-label">
+                <span className={cn('text-heading font-semibold', TONE_CLASSES[summary.tone].text)} data-testid="auth-state-label">
                   {summary.label}
                 </span>
               </div>
@@ -87,7 +86,7 @@ export function AuthView() {
 
             {status.apiKeyEnvDetected ? (
               <Notice tone="warning" title="API key detected in the environment" data-testid="api-key-warning">
-                <p className="m-0 text-fg">{API_KEY_WARNING}</p>
+                <p className="m-0 text-text-primary">{API_KEY_WARNING}</p>
                 <p className="mb-0 mt-1.5" data-testid="api-key-stripped">
                   {status.apiKeyEnvStripped
                     ? 'Subscription Mode is on: the key is removed from every agent environment, so agents cannot use it.'
@@ -128,7 +127,7 @@ export function AuthView() {
         </Panel>
 
         <Panel title="How login works">
-          <div className="flex flex-col gap-2 text-fg-muted">
+          <div className="flex flex-col gap-2 text-text-secondary">
             <p className="m-0">
               NEXUS never sees or stores your credentials. Sign-in is handled entirely by the official Claude Code login flow:
               run <InlineCode>claude auth login</InlineCode> in a terminal. NEXUS only asks the Claude runtime what it reports.
@@ -139,6 +138,7 @@ export function AuthView() {
             </p>
           </div>
         </Panel>
+      </div>
       </div>
     </div>
   )

@@ -69,7 +69,7 @@ export function Check({
       />
       <span className="min-w-0">
         <span className="leading-5">{label}</span>
-        {hint ? <span className="block text-[0.85rem] text-fg-muted">{hint}</span> : null}
+        {hint ? <span className="block text-small text-text-muted">{hint}</span> : null}
       </span>
     </label>
   )
@@ -86,10 +86,10 @@ function Group({
 }) {
   return (
     <fieldset
-      className="m-0 flex min-w-0 flex-col gap-2 border border-border-strong p-2.5"
+      className="m-0 flex min-w-0 flex-col gap-3 rounded-lg border bg-surface p-3"
       data-testid={testId}
     >
-      <legend className="px-1 text-[0.75rem] font-semibold uppercase tracking-wider text-fg-faint">
+      <legend className="px-1 text-small font-semibold text-text-secondary">
         {title}
       </legend>
       {children}
@@ -214,7 +214,7 @@ export function OvernightPanel({
           )}
         </Field>
         <div role="group" aria-label="Apply the end action when" className="flex flex-col gap-1">
-          <span className="text-[0.85rem] font-medium text-fg-muted">Apply the end action on</span>
+          <span className="text-small font-medium text-text-secondary">Apply the end action on</span>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             {CONDITION_KEYS.map((k) => (
               <Check
@@ -302,13 +302,20 @@ export function OvernightPanel({
           hint={form.forceCloseApplications ? FORCED_SHUTDOWN_NOTE : NORMAL_SHUTDOWN_NOTE}
           testId="overnight-force-close"
         />
-        <div className="text-[0.85rem] text-fg-muted" data-testid="overnight-failsafe-note">
+        <div className="text-small text-text-muted" data-testid="overnight-failsafe-note">
           {FAILSAFE_TIMER_NOTE}
         </div>
       </Group>
 
       <Group title="Run policy">
-        <Field label="Quota policy">
+        <Field
+          label="When the Claude usage limit is reached"
+          hint={
+            form.quotaPolicy === 'WAIT_AND_RETRY'
+              ? 'NEXUS waits for the reset and resumes the run automatically. No work is lost.'
+              : 'The run ends at the limit and the report says what was left.'
+          }
+        >
           {(id) => (
             <Select
               id={id}

@@ -175,18 +175,18 @@ export function ReportDialog({
         <div className="flex flex-col gap-2">
           {report.data.path ? (
             <div
-              className="font-mono text-[0.9em] text-fg-muted"
+              className="font-mono text-small text-text-secondary"
               data-testid="overnight-report-path"
             >
               {report.data.path}
             </div>
           ) : (
-            <div className="text-fg-faint">Not saved into the project.</div>
+            <div className="text-text-muted">Not saved into the project.</div>
           )}
           {report.data.text ? (
             <Markdown>{report.data.text}</Markdown>
           ) : (
-            <div className="text-fg-faint">No report text.</div>
+            <div className="text-text-muted">No report text.</div>
           )}
         </div>
       ) : null}
@@ -228,14 +228,14 @@ export function OvernightBanner({ runId }: { runId: string }) {
             {m.state}
           </span>
         </span>
-        {m.detail ? <span className="text-fg-muted">{m.detail}</span> : null}
-        <span className="font-mono text-[0.9em] text-fg-muted">
+        {m.detail ? <span className="text-text-secondary">{m.detail}</span> : null}
+        <span className="font-mono text-small text-text-secondary">
           Failsafe shutdown: <span data-testid="overnight-failsafe">{m.failsafe}</span>
         </span>
-        <span className="font-mono text-[0.9em] text-fg-muted">
+        <span className="font-mono text-small text-text-secondary">
           Mission deadline: <span data-testid="overnight-deadline">{m.deadline}</span>
         </span>
-        <span className="font-mono text-[0.9em] text-fg-muted">
+        <span className="font-mono text-small text-text-secondary">
           End action: <span data-testid="overnight-end-action-label">{m.endAction}</span>
         </span>
         {m.countdown ? (

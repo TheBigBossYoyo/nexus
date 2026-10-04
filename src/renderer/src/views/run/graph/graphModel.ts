@@ -1,8 +1,8 @@
 import { Graph, layout } from '@dagrejs/dagre'
 import type { Task, TaskDependency } from '@shared/domain'
 
-export const NODE_WIDTH = 232
-export const NODE_HEIGHT = 92
+export const NODE_WIDTH = 224
+export const NODE_HEIGHT = 74
 
 export interface GraphEdgeModel {
   id: string

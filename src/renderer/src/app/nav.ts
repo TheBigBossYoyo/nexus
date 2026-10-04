@@ -103,4 +103,10 @@ export const VIEWS_WITH_OWN_HEADER: readonly View[] = [
   'overnight',
   'activity',
   'settings',
+  'agents',
+  'memory',
+  'performance',
+  'intelligence',
+  'auth',
+  'run',
 ]

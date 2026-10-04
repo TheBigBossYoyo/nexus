@@ -6,14 +6,15 @@ import { formatCost, formatDateTime, formatDuration } from '../../lib/format'
 import { useGraphProposals, useGraphRevisions, usePlanningCandidates } from '../../lib/queries'
 import { severityStatus, type Tone } from '../../lib/status'
 import { diffSnapshots, isEmptyDiff, sortRevisions } from '../../lib/v2logic'
+import { CandidatesSection } from './CandidatesSection'
 import { useRunCtx } from './runContext'
 
 function Section({ title, count, testId, children }: { title: string; count?: number; testId?: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-1.5" data-testid={testId}>
-      <h3 className="m-0 border-b pb-1 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">
+      <h3 className="m-0 border-b pb-1 text-heading font-semibold text-text-primary">
         {title}
-        {count !== undefined ? <span className="ml-1.5 font-mono text-fg-faint">{count}</span> : null}
+        {count !== undefined ? <span className="ml-1.5 font-mono text-text-muted">{count}</span> : null}
       </h3>
       {children}
     </section>
@@ -21,7 +22,7 @@ function Section({ title, count, testId, children }: { title: string; count?: nu
 }
 
 function Muted({ children }: { children: ReactNode }) {
-  return <div className="text-fg-faint">{children}</div>
+  return <div className="text-text-muted">{children}</div>
 }
 
 function PlanTaskList({ plan }: { plan: MissionPlan }) {
@@ -30,14 +31,14 @@ function PlanTaskList({ plan }: { plan: MissionPlan }) {
       {plan.tasks.map((t) => (
         <li key={t.id} className="flex flex-col gap-0.5 border-l-2 border-border-strong pl-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-[0.9em]">{t.id}</span>
+            <span className="font-mono text-small">{t.id}</span>
             <Badge mono>{t.role}</Badge>
-            <span className="text-fg-faint">
+            <span className="text-text-muted">
               {t.complexity} complexity · {t.risk} risk
             </span>
           </div>
           <div>{t.title}</div>
-          {t.dependencies.length > 0 ? <div className="font-mono text-[0.88em] text-fg-faint">after {t.dependencies.join(', ')}</div> : null}
+          {t.dependencies.length > 0 ? <div className="font-mono text-small text-text-muted">after {t.dependencies.join(', ')}</div> : null}
         </li>
       ))}
     </ul>
@@ -47,12 +48,12 @@ function PlanTaskList({ plan }: { plan: MissionPlan }) {
 function CandidateCard({ candidate: c }: { candidate: PlanningCandidate }) {
   const [open, setOpen] = useState(false)
   return (
-    <article className="flex flex-col gap-1 border bg-surface-1 p-2" data-testid="plan-candidate" data-valid={c.valid ? 'true' : 'false'}>
+    <article className="flex flex-col gap-1 rounded-md border bg-surface p-2" data-testid="plan-candidate" data-valid={c.valid ? 'true' : 'false'}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{c.label}</span>
         <Badge tone={c.valid ? 'success' : 'danger'}>{c.valid ? 'valid' : 'invalid'}</Badge>
-        <span className="text-fg-muted">{c.lens}</span>
-        <span className="ml-auto flex gap-3 font-mono text-[0.88em] text-fg-muted">
+        <span className="text-text-secondary">{c.lens}</span>
+        <span className="ml-auto flex gap-3 font-mono text-small text-text-secondary">
           <span>{c.model ?? 'model unknown'}</span>
           <span>{formatDuration(c.durationMs)}</span>
           {c.costUsd !== null ? <span>{formatCost(c.costUsd)}</span> : null}
@@ -80,7 +81,7 @@ function CandidateCard({ candidate: c }: { candidate: PlanningCandidate }) {
           </button>
           {open ? (
             <div className="flex flex-col gap-1.5">
-              <p className="m-0 whitespace-pre-wrap break-words text-fg-muted">{c.plan.summary}</p>
+              <p className="m-0 whitespace-pre-wrap break-words text-text-secondary">{c.plan.summary}</p>
               <PlanTaskList plan={c.plan} />
             </div>
           ) : null}
@@ -95,10 +96,10 @@ function CandidateCard({ candidate: c }: { candidate: PlanningCandidate }) {
 function CritiqueCard({ critique }: { critique: PlanningCritique }) {
   const o = critique.output
   return (
-    <article className="flex flex-col gap-1.5 border bg-surface-1 p-2" data-testid="plan-critique">
+    <article className="flex flex-col gap-1.5 rounded-md border bg-surface p-2" data-testid="plan-critique">
       <p className="m-0 whitespace-pre-wrap break-words">{o.summary}</p>
       <div>
-        <span className="text-fg-faint">Preferred candidate: </span>
+        <span className="text-text-muted">Preferred candidate: </span>
         <span className="font-medium" data-testid="critique-preferred">
           {o.preferredCandidate}
         </span>
@@ -110,15 +111,15 @@ function CritiqueCard({ critique }: { critique: PlanningCritique }) {
           {o.findings.map((f, i) => {
             const sev = severityStatus(f.severity)
             return (
-              <li key={i} className="flex flex-col gap-0.5 border-l-2 border-tone-review bg-surface-2 px-2 py-1" data-testid="critique-finding">
+              <li key={i} className="flex flex-col gap-0.5 border-l-2 border-tone-review bg-surface-muted px-2 py-1" data-testid="critique-finding">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge tone={sev.tone}>{sev.label}</Badge>
-                  <span className="font-mono text-[0.88em] text-fg-muted">{f.candidate}</span>
+                  <span className="font-mono text-small text-text-secondary">{f.candidate}</span>
                 </div>
                 <div className="whitespace-pre-wrap break-words">{f.issue}</div>
                 {f.recommendation ? (
-                  <div className="whitespace-pre-wrap break-words text-fg-muted">
-                    <span className="text-fg-faint">Recommendation: </span>
+                  <div className="whitespace-pre-wrap break-words text-text-secondary">
+                    <span className="text-text-muted">Recommendation: </span>
                     {f.recommendation}
                   </div>
                 ) : null}
@@ -135,10 +136,10 @@ function DiffList({ title, tone, lines }: { title: string; tone: Tone; lines: st
   if (lines.length === 0) return null
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="text-[0.85rem] text-fg-muted">
-        <Badge tone={tone}>{title}</Badge> <span className="font-mono text-fg-faint">{lines.length}</span>
+      <div className="text-[0.85rem] text-text-secondary">
+        <Badge tone={tone}>{title}</Badge> <span className="font-mono text-text-muted">{lines.length}</span>
       </div>
-      <ul className="m-0 list-none p-0 font-mono text-[0.9em]">
+      <ul className="m-0 list-none p-0 font-mono text-small">
         {lines.map((l, i) => (
           <li key={i} className="break-words">
             {l}
@@ -152,8 +153,8 @@ function DiffList({ title, tone, lines }: { title: string; tone: Tone; lines: st
 function RevisionDiffView({ from, to }: { from: GraphRevision; to: GraphRevision }) {
   const diff = useMemo(() => diffSnapshots(from.snapshot, to.snapshot), [from, to])
   return (
-    <div className="flex flex-col gap-2 border bg-surface-1 p-2" data-testid="revision-diff">
-      <div className="text-fg-muted">
+    <div className="flex flex-col gap-2 rounded-md border bg-surface p-2" data-testid="revision-diff">
+      <div className="text-text-secondary">
         Changes from v{from.version} to v{to.version}
       </div>
       {isEmptyDiff(diff) ? <Muted>No differences between these snapshots.</Muted> : null}
@@ -188,19 +189,19 @@ function Revisions({ revisions }: { revisions: readonly GraphRevision[] }) {
               v{r.version}
             </Badge>
             <span className="min-w-0 flex-1 break-words">{r.reason}</span>
-            <span className="font-mono text-[0.88em] text-fg-faint">{r.snapshot.tasks.length} tasks</span>
-            <span className="text-fg-faint">{formatDateTime(r.createdAt)}</span>
+            <span className="font-mono text-small text-text-muted">{r.snapshot.tasks.length} tasks</span>
+            <span className="text-text-muted">{formatDateTime(r.createdAt)}</span>
           </li>
         ))}
       </ul>
       {sorted.length > 1 ? (
         <>
           <div className="flex items-center gap-2">
-            <label htmlFor="rev-from" className="text-fg-muted">
+            <label htmlFor="rev-from" className="text-text-secondary">
               Compare
             </label>
             <Select id="rev-from" className="w-auto!" value={String(from.version)} onChange={(v) => setFromChoice(Number(v))} options={options} data-testid="revision-from" />
-            <label htmlFor="rev-to" className="text-fg-muted">
+            <label htmlFor="rev-to" className="text-text-secondary">
               with
             </label>
             <Select id="rev-to" className="w-auto!" value={String(to.version)} onChange={(v) => setToChoice(Number(v))} options={options} data-testid="revision-to" />
@@ -227,23 +228,23 @@ function ProposalList({ proposals }: { proposals: readonly GraphProposal[] }) {
       {sorted.map((p) => {
         const st = PROPOSAL_STATUS[p.status]
         return (
-          <li key={p.id} className="flex flex-col gap-1 border bg-surface-1 p-2" data-testid="proposal" data-status={p.status}>
+          <li key={p.id} className="flex flex-col gap-1 rounded-md border bg-surface p-2" data-testid="proposal" data-status={p.status}>
             <div className="flex flex-wrap items-center gap-2">
               <Badge mono>{p.type}</Badge>
               <Badge tone={st.tone}>{st.label}</Badge>
-              <span className="text-fg-muted">by {p.proposedBy}</span>
-              <span className="ml-auto text-fg-faint">{formatDateTime(p.createdAt)}</span>
+              <span className="text-text-secondary">by {p.proposedBy}</span>
+              <span className="ml-auto text-text-muted">{formatDateTime(p.createdAt)}</span>
             </div>
             <div className="whitespace-pre-wrap break-words">{p.reason}</div>
-            <div className="whitespace-pre-wrap break-words text-fg-muted">
-              <span className="text-fg-faint">Evidence: </span>
+            <div className="whitespace-pre-wrap break-words text-text-secondary">
+              <span className="text-text-muted">Evidence: </span>
               {p.evidence}
             </div>
             {p.changes.tasks.length > 0 ? (
-              <div className="font-mono text-[0.88em] text-fg-faint">tasks: {p.changes.tasks.map((t) => t.key).join(', ')}</div>
+              <div className="font-mono text-small text-text-muted">tasks: {p.changes.tasks.map((t) => t.key).join(', ')}</div>
             ) : null}
             {p.changes.targetTask ? (
-              <div className="font-mono text-[0.88em] text-fg-faint">
+              <div className="font-mono text-small text-text-muted">
                 target: {p.changes.targetTask}
                 {p.changes.dependsOn ? ` after ${p.changes.dependsOn}` : ''}
               </div>
@@ -270,8 +271,9 @@ export function PlanInspector() {
   const consensus = run.config.planningMode === 'consensus'
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-surface-1" data-testid="plan-inspector">
-      <div className="flex flex-col gap-4 p-3">
+    <div className="h-full min-h-0 overflow-auto bg-surface" data-testid="plan-inspector">
+      <div className="flex flex-col gap-4 p-4">
+        <CandidatesSection />
         <Section title="Candidate plans" count={candidates.data?.candidates.length} testId="plan-candidates">
           {candidates.isPending ? (
             <Loading />

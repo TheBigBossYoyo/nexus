@@ -31,6 +31,7 @@ test.describe('mission happy path', () => {
       // Compose a BUILD + BALANCED mission.
       await page.getByTestId('mission-prompt').fill('Add an API module and a UI module, then integrate them.')
       await page.getByTestId('mode-select').selectOption('build')
+      await page.getByTestId('strategy-select').selectOption('BUILD')
       await page.getByTestId('preset-select').selectOption('balanced')
       await page.getByTestId('create-run').click()
 

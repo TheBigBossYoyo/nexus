@@ -107,8 +107,8 @@ export function ProjectsView() {
             <div className="h-full overflow-auto bg-background p-5">
               {current ? (
                 <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                  <ProjectDetail key={current.id} project={current} />
                   <MissionComposer key={`composer-${current.id}`} project={current} />
+                  <ProjectDetail key={current.id} project={current} />
                 </div>
               ) : (
                 <EmptyState

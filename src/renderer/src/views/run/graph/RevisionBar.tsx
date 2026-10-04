@@ -23,8 +23,8 @@ export function RevisionBar({
   const diff = selected && previous ? diffSnapshots(previous.snapshot, selected.snapshot) : null
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-surface-1 px-2 py-1" data-testid="revision-bar">
-      <label htmlFor="graph-revision-select" className="text-fg-muted">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-surface px-2 py-1" data-testid="revision-bar">
+      <label htmlFor="graph-revision-select" className="text-text-secondary">
         Plan revision
       </label>
       <Select
@@ -36,7 +36,7 @@ export function RevisionBar({
         data-testid="revision-select"
       />
       {selected ? (
-        <span className="min-w-0 flex-1 truncate text-fg-muted" title={selected.reason} data-testid="revision-summary">
+        <span className="min-w-0 flex-1 truncate text-text-secondary" title={selected.reason} data-testid="revision-summary">
           {diff
             ? `+${diff.addedTasks.length} added, ~${diff.changedTasks.length} changed, −${diff.removedTasks.length} removed${
                 diff.removedTasks.length > 0 ? ` (${diff.removedTasks.map((t) => t.key).join(', ')})` : ''

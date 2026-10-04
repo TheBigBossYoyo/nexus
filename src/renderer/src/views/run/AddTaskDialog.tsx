@@ -73,9 +73,9 @@ export function AddTaskDialog({ open, onClose }: { open: boolean; onClose: () =>
           </Field>
         </div>
         <fieldset className="m-0 flex flex-col gap-1 border p-2">
-          <legend className="px-1 text-[0.85rem] font-medium text-fg-muted">Depends on</legend>
+          <legend className="px-1 text-[0.85rem] font-medium text-text-secondary">Depends on</legend>
           {detail.tasks.length === 0 ? (
-            <div className="text-fg-faint">No existing tasks.</div>
+            <div className="text-text-muted">No existing tasks.</div>
           ) : (
             <div className="flex max-h-32 flex-col gap-0.5 overflow-auto" data-testid="add-task-deps">
               {detail.tasks.map((t) => (
@@ -86,7 +86,7 @@ export function AddTaskDialog({ open, onClose }: { open: boolean; onClose: () =>
                     onChange={(e) => set('dependsOn', e.target.checked ? [...form.dependsOn, t.id] : form.dependsOn.filter((d) => d !== t.id))}
                   />
                   <span className="truncate">{t.title}</span>
-                  <span className="font-mono text-[0.85em] text-fg-faint">{t.key}</span>
+                  <span className="font-mono text-small text-text-muted">{t.key}</span>
                 </label>
               ))}
             </div>

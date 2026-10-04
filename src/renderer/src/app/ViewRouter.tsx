@@ -16,7 +16,6 @@ import { AuthView } from '../views/auth/AuthView'
 import { PerformanceView } from '../views/performance/PerformanceView'
 import { IntelligenceView } from '../views/intelligence/IntelligenceView'
 import { ErrorBoundary } from './ErrorBoundary'
-import { RunControls } from './RunControls'
 import { VIEW_META, VIEWS_WITH_OWN_HEADER } from './nav'
 
 function renderView(view: View) {
@@ -69,7 +68,6 @@ export function ViewRouter() {
           <PageHeader
             title={meta.title}
             {...(meta.context ? { context: meta.context } : {})}
-            actions={view === 'run' ? <RunControls /> : undefined}
           />
         )}
         <div className="min-h-0 flex-1">{renderView(view)}</div>

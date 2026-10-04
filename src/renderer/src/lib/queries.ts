@@ -86,7 +86,7 @@ export interface MemoryFilter {
 }
 
 /** Reads. A null id disables the query. */
-function useRead<C extends IpcChannel>(
+export function useRead<C extends IpcChannel>(
   key: readonly unknown[],
   channel: C,
   input: IpcInput<C>,
@@ -214,7 +214,7 @@ export const useMemory = (filter: MemoryFilter = {}) => {
 type AfterSuccess<C extends IpcChannel> = (qc: QueryClient, output: IpcOutputs[C], input: IpcInput<C>) => void
 
 /** Errors surface as toasts through the QueryClient's MutationCache (see queryClient.ts). */
-function useWrite<C extends IpcChannel>(channel: C, after?: AfterSuccess<C>) {
+export function useWrite<C extends IpcChannel>(channel: C, after?: AfterSuccess<C>) {
   const qc = useQueryClient()
   return useMutation<IpcOutputs[C], IpcError, IpcInput<C>>({
     mutationFn: (input) => api.invoke(channel, input),

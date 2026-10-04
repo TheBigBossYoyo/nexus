@@ -13,21 +13,21 @@ import { buildGraphModel, isEdgeSatisfied, layoutGraph, type Position } from './
 const nodeTypes: NodeTypes = { task: TaskNode }
 
 const COLOR = {
-  satisfied: 'var(--color-tone-success)',
+  satisfied: 'var(--color-text-muted)',
   pending: 'var(--color-border-strong)',
-  repair: 'var(--color-tone-warning)',
+  repair: 'var(--color-warning)',
 }
 
-/** Fits the viewport once, the first time nodes exist. Later state changes never move the camera. */
-function FitOnce({ hasNodes }: { hasNodes: boolean }) {
+/** Fits the viewport when the first nodes appear and whenever the number of nodes changes; state changes never move the camera. */
+function FitOnce({ count }: { count: number }) {
   const { fitView } = useReactFlow()
-  const done = useRef(false)
+  const last = useRef(0)
   useEffect(() => {
-    if (!hasNodes || done.current) return
-    done.current = true
-    const id = requestAnimationFrame(() => void fitView({ padding: 0.15, duration: 0 }))
+    if (count === 0 || last.current === count) return
+    last.current = count
+    const id = requestAnimationFrame(() => void fitView({ padding: 0.2, maxZoom: 1, duration: 0 }))
     return () => cancelAnimationFrame(id)
-  }, [hasNodes, fitView])
+  }, [count, fitView])
   return null
 }
 
@@ -99,8 +99,13 @@ function GraphInner({
           type: 'smoothstep',
           selectable: false,
           data: { kind: e.kind, satisfied },
-          style: { stroke: color, strokeWidth: satisfied ? 1.75 : 1.25, strokeDasharray: e.kind === 'repair' ? '5 4' : undefined },
-          markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 },
+          style: {
+            stroke: color,
+            strokeWidth: satisfied ? 1.5 : 1,
+            // Solid = satisfied, dashed = still pending, dotted = repair link: not colour alone.
+            strokeDasharray: e.kind === 'repair' ? '1 4' : satisfied ? undefined : '5 4',
+          },
+          markerEnd: { type: MarkerType.ArrowClosed, color, width: 12, height: 12 },
         }
       }),
     [model.edges, tasksById],
@@ -121,7 +126,7 @@ function GraphInner({
       proOptions={{ hideAttribution: true }}
       colorMode={colorMode}
     >
-      <FitOnce hasNodes={nodes.length > 0} />
+      <FitOnce count={nodes.length} />
       <Background gap={20} />
       <Controls showInteractive={false} position="bottom-left" />
     </ReactFlow>

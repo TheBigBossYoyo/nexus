@@ -11,7 +11,7 @@ import { clockTimeSeconds, useRunCtx } from '../runContext'
 import { useStickyScroll } from '../useStickyScroll'
 
 function Empty({ children }: { children: string }) {
-  return <div className="p-3 text-fg-muted">{children}</div>
+  return <div className="p-3 text-text-secondary">{children}</div>
 }
 
 function taskKeyOf(tasksById: ReadonlyMap<string, Task>, taskId: string | null): string {
@@ -61,17 +61,17 @@ export function ToolActivityTab() {
       ) : (
         <>
           {rows.length > shown.length ? (
-            <div className="px-3 py-1 text-fg-faint">Showing the latest {shown.length} of {rows.length} tool calls.</div>
+            <div className="px-3 py-1 text-text-muted">Showing the latest {shown.length} of {rows.length} tool calls.</div>
           ) : null}
-          <ul className="m-0 list-none p-0 font-mono text-[0.9em]">
+          <ul className="m-0 list-none p-0 font-mono text-small">
             {shown.map((r) => {
               const s = TOOL_STATUS[r.status]
               const agent = r.agentId ? agentsById.get(r.agentId) : undefined
               return (
                 <li key={r.key} className="flex items-baseline gap-2 border-b px-3 py-0.5" data-testid="tool-row" data-status={r.status}>
-                  <span className="shrink-0 text-fg-faint">[{clockTimeSeconds(r.at)}]</span>
-                  <span className="shrink-0 text-fg-muted">{agent?.label ?? 'agent'}</span>
-                  <span className="shrink-0 text-fg-faint">&gt;</span>
+                  <span className="shrink-0 text-text-muted">[{clockTimeSeconds(r.at)}]</span>
+                  <span className="shrink-0 text-text-secondary">{agent?.label ?? 'agent'}</span>
+                  <span className="shrink-0 text-text-muted">&gt;</span>
                   <span className="shrink-0 text-accent">{r.toolName}</span>
                   <span className="min-w-0 flex-1 break-all">{r.summary}</span>
                   <Badge tone={s.tone}>{s.label}</Badge>
@@ -169,15 +169,15 @@ export function DecisionsTab() {
       {[...query.data]
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .map((d) => (
-          <article key={d.id} className="flex flex-col gap-1 border bg-surface-1 p-2.5" data-testid="decision">
+          <article key={d.id} className="flex flex-col gap-1 rounded-md border bg-surface p-2.5" data-testid="decision">
             <div className="flex items-center gap-2">
               <span className="font-medium">{d.title}</span>
-              <span className="font-mono text-[0.88em] text-fg-muted">{taskKeyOf(tasksById, d.taskId)}</span>
-              <span className="ml-auto text-fg-faint">{formatDateTime(d.createdAt)}</span>
+              <span className="font-mono text-small text-text-secondary">{taskKeyOf(tasksById, d.taskId)}</span>
+              <span className="ml-auto text-text-muted">{formatDateTime(d.createdAt)}</span>
             </div>
             <div className="whitespace-pre-wrap break-words">{d.decision}</div>
-            <div className="whitespace-pre-wrap break-words text-fg-muted">
-              <span className="text-fg-faint">Rationale: </span>
+            <div className="whitespace-pre-wrap break-words text-text-secondary">
+              <span className="text-text-muted">Rationale: </span>
               {d.rationale}
             </div>
           </article>

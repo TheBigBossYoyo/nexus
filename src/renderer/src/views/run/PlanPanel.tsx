@@ -6,7 +6,7 @@ import { useLiveText } from '../../store/live'
 import { clockTimeSeconds, useRunCtx } from './runContext'
 
 function List({ items, empty }: { items: readonly string[]; empty: string }) {
-  if (items.length === 0) return <div className="text-fg-faint">{empty}</div>
+  if (items.length === 0) return <div className="text-text-muted">{empty}</div>
   return (
     <ul className="m-0 list-disc pl-5">
       {items.map((s, i) => (
@@ -21,7 +21,7 @@ function List({ items, empty }: { items: readonly string[]; empty: string }) {
 function Block({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-1">
-      <h3 className="m-0 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">{title}</h3>
+      <h3 className="m-0 text-heading font-semibold text-text-primary">{title}</h3>
       {children}
     </section>
   )
@@ -72,13 +72,13 @@ export function PlanPanel() {
           </Block>
           <Block title="Risks">
             {plan.risks.length === 0 ? (
-              <div className="text-fg-faint">None identified.</div>
+              <div className="text-text-muted">None identified.</div>
             ) : (
               <ul className="m-0 list-disc pl-5">
                 {plan.risks.map((r, i) => (
                   <li key={i} className="whitespace-pre-wrap break-words">
                     {r.description}
-                    {r.mitigation ? <span className="text-fg-muted"> Mitigation: {r.mitigation}</span> : null}
+                    {r.mitigation ? <span className="text-text-secondary"> Mitigation: {r.mitigation}</span> : null}
                   </li>
                 ))}
               </ul>
@@ -88,12 +88,12 @@ export function PlanPanel() {
             <div className="overflow-auto border">
               <table className="w-full border-collapse text-left" data-testid="plan-tasks">
                 <thead>
-                  <tr className="border-b bg-surface-2/60 text-[0.8rem] uppercase tracking-wider text-fg-muted">
-                    <th className="px-2 py-1 font-semibold">Task</th>
-                    <th className="px-2 py-1 font-semibold">Role</th>
-                    <th className="px-2 py-1 font-semibold">Depends on</th>
-                    <th className="px-2 py-1 font-semibold">Size / risk</th>
-                    <th className="px-2 py-1 font-semibold" />
+                  <tr className="border-b bg-surface-muted text-caption text-text-muted">
+                    <th className="px-3 py-1.5 font-medium">Task</th>
+                    <th className="px-3 py-1.5 font-medium">Role</th>
+                    <th className="px-3 py-1.5 font-medium">Depends on</th>
+                    <th className="px-3 py-1.5 font-medium">Size / risk</th>
+                    <th className="px-3 py-1.5 font-medium" />
                   </tr>
                 </thead>
                 <tbody>
@@ -101,10 +101,10 @@ export function PlanPanel() {
                     <tr key={t.id} className="border-b last:border-b-0 align-top">
                       <td className="px-2 py-1">
                         <div className="font-medium">{t.title}</div>
-                        <div className="font-mono text-[0.85em] text-fg-faint">{t.id}</div>
+                        <div className="font-mono text-small text-text-muted">{t.id}</div>
                       </td>
                       <td className="px-2 py-1">{t.role}</td>
-                      <td className="px-2 py-1 font-mono text-[0.88em]">{t.dependencies.length > 0 ? t.dependencies.join(', ') : '—'}</td>
+                      <td className="px-2 py-1 font-mono text-small">{t.dependencies.length > 0 ? t.dependencies.join(', ') : '—'}</td>
                       <td className="px-2 py-1">
                         {t.complexity} / {t.risk}
                       </td>
@@ -171,41 +171,41 @@ export function PlannerActivity() {
       data-testid="planner-activity"
       className="h-full"
       actions={
-        <span className="flex items-center gap-1.5 text-fg-muted">
+        <span className="flex items-center gap-1.5 text-text-secondary">
           <Spinner size={12} />
           Planning
         </span>
       }
     >
       {!agent ? (
-        <div className="text-fg-muted">Waiting for the planner agent to start.</div>
+        <div className="text-text-secondary">Waiting for the planner agent to start.</div>
       ) : (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2 text-fg-muted">
-            <span className="font-medium text-fg">{agent.label}</span>
+          <div className="flex flex-wrap items-center gap-2 text-text-secondary">
+            <span className="font-medium text-text-primary">{agent.label}</span>
             <Badge mono>{agent.state}</Badge>
-            <span className="font-mono text-[0.9em]">{agent.model ?? 'model unknown'}</span>
+            <span className="font-mono text-small">{agent.model ?? 'model unknown'}</span>
             {agent.activity ? <span>{agent.activity}</span> : null}
           </div>
           {toolRows.length > 0 ? (
-            <ul className="m-0 list-none p-0 font-mono text-[0.88em]">
+            <ul className="m-0 list-none p-0 font-mono text-small">
               {toolRows.map((t) => (
                 <li key={t.id} className="flex gap-2 border-b py-0.5">
-                  <span className="text-fg-faint">[{clockTimeSeconds(t.startedAt)}]</span>
+                  <span className="text-text-muted">[{clockTimeSeconds(t.startedAt)}]</span>
                   <span className="text-accent">{t.toolName}</span>
-                  <span className="min-w-0 flex-1 truncate text-fg-muted">{summarizeInput(t.input)}</span>
-                  <span className={t.status === 'failed' || t.status === 'denied' ? 'text-tone-danger' : 'text-fg-faint'}>{t.status}</span>
+                  <span className="min-w-0 flex-1 truncate text-text-secondary">{summarizeInput(t.input)}</span>
+                  <span className={t.status === 'failed' || t.status === 'denied' ? 'text-tone-danger' : 'text-text-muted'}>{t.status}</span>
                 </li>
               ))}
             </ul>
           ) : null}
           {items.map((o) => (
-            <div key={o.id} className="whitespace-pre-wrap break-words border-l-2 pl-2 text-fg-muted">
+            <div key={o.id} className="whitespace-pre-wrap break-words border-l-2 pl-2 text-text-secondary">
               {o.content}
             </div>
           ))}
           {live ? <div className="whitespace-pre-wrap break-words border-l-2 border-accent pl-2">{live}</div> : null}
-          {items.length === 0 && !live && toolRows.length === 0 ? <div className="text-fg-faint">No output yet.</div> : null}
+          {items.length === 0 && !live && toolRows.length === 0 ? <div className="text-text-muted">No output yet.</div> : null}
         </div>
       )}
     </Panel>
