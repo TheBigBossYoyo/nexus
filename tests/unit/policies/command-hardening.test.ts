@@ -346,3 +346,15 @@ describe('readiness review: git config behind a value option, and Git\'s own fil
     }
   })
 })
+
+describe('readiness review: moving refs outside nexus/', () => {
+  it('asks before a branch or tag is moved, overwritten or a ref is written directly', async () => {
+    const asks = ['git branch -f main HEAD~3', 'git branch -M feature main', 'git branch --force release abc123', 'git tag -f v1.0.0', 'git tag -d v1.0.0', 'git update-ref refs/heads/main abc123', 'git update-ref HEAD abc123', 'git update-ref --stdin']
+    for (const command of asks) {
+      expect(cls(command, 'bash').level, command).not.toBe('safe')
+      for (const role of WRITING) expect((await decide(role, 'bash', command)).behavior, `${role}: ${command}`).not.toBe('allow')
+    }
+    const free = ['git branch feature', 'git branch --list', 'git tag v1.2.3', 'git update-ref refs/heads/nexus/x/task abc123']
+    for (const command of free) expect(cls(command, 'bash').reasons.join(' '), command).not.toMatch(/moves|replaces|overwrites/)
+  })
+})
