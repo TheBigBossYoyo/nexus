@@ -77,6 +77,17 @@ for (const source of sources) {
     entry.checks['the old run is readable with all its tasks and agents'] = old !== null && old.tasks.length === entry.before.tasks && old.agents.length === entry.before.agents
     entry.checks['an old run is not an overnight run'] = old !== null && (await call('overnight.get', { runId: old.run.id })) === null
     entry.checks['no overnight run is active'] = (await call('overnight.active')).length === 0
+    // Before any other project is opened: the sidebar lists the missions of the current project, and the
+    // old run belongs to the project of the older database.
+    if (old) {
+      await page.click('[data-testid="nav-run"]')
+      await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
+      entry.checks['the old run opens in Mission Control'] = await page.waitForSelector('[data-testid="run-view"]', { timeout: 15_000 }).then(() => true, () => false)
+      await page.waitForTimeout(600)
+      mkdirSync(join(root, 'test-results', 'screenshots'), { recursive: true })
+      await page.screenshot({ path: join(root, 'test-results', 'screenshots', `packaged-${evidence.databases.length}-old-run.png`) }).catch(() => undefined)
+      await page.click('[data-testid="nav-home"]')
+    }
 
     const auth = await call('auth.status', { refresh: true })
     entry.auth = { state: auth.state, mode: auth.mode, subscriptionType: auth.subscriptionType }
@@ -119,13 +130,6 @@ for (const source of sources) {
     entry.providers = providers.ok ? providers.value.statuses.map((s) => ({ id: s.id, installed: s.installed, version: s.version, auth: s.auth, supported: s.supported, health: s.health })) : null
     entry.checks['Providers renders; Claude is detected; no other provider is enabled'] =
       providersView && providers.ok === true && providers.value.statuses.some((s) => s.id === 'claude' && s.required) && providers.value.policy.enabled.codex === false && providers.value.policy.enabled.gemini === false && providers.value.policy.crossModelReview.enabled === false
-    if (old) {
-      await page.click('[data-testid="nav-run"]')
-      await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
-      entry.checks['the old run opens in Mission Control'] = await page.waitForSelector('[data-testid="run-view"]', { timeout: 15_000 }).then(() => true, () => false)
-      await page.waitForTimeout(600)
-      await shot('old-run')
-    }
     const cases = await call('arena.cases')
     const arenaStatus = await call('arena.status')
     entry.arena = { builtinCases: cases.length, node: arenaStatus }
