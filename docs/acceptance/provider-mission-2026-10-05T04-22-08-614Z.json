@@ -1,0 +1,398 @@
+{
+  "kind": "provider-mission",
+  "startedAt": "2026-10-05T04:19:14.539Z",
+  "executable": "dev build",
+  "mission": "Fix a bug: `overlaps` in src/overlaps.js returns true for intervals that only touch at one end when either interval is marked half-open.\nSupport an optional `open: true` property on an interval, meaning its end point is excluded: `overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 })` must be false, while the same call without `open` stays true.\nKeep the existing behaviour for intervals without `open`, add regression tests next to the existing ones, and keep `npm test` passing.",
+  "baseCommit": "0a94020ae62e6d49124bc4d639a0e5da6126724c",
+  "app": {
+    "version": "0.6.0",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "providers": [
+    {
+      "id": "claude",
+      "installed": "installed",
+      "version": "2.1.288",
+      "auth": "authenticated",
+      "authDetail": "Claude subscription",
+      "supported": true,
+      "health": "healthy",
+      "writes": true,
+      "confinement": "nexus_policy"
+    },
+    {
+      "id": "codex",
+      "installed": "installed",
+      "version": "0.130.0",
+      "auth": "authenticated",
+      "authDetail": "ChatGPT login",
+      "supported": true,
+      "health": "unknown",
+      "writes": false,
+      "confinement": "provider_sandbox"
+    },
+    {
+      "id": "gemini",
+      "installed": "not_installed",
+      "version": null,
+      "auth": "unknown",
+      "authDetail": null,
+      "supported": false,
+      "health": "unavailable",
+      "writes": false,
+      "confinement": "none"
+    }
+  ],
+  "policyBefore": {
+    "enabled": {
+      "claude": true,
+      "codex": false,
+      "gemini": false
+    },
+    "models": {
+      "codex": null,
+      "gemini": null
+    },
+    "crossModelReview": {
+      "enabled": false,
+      "reviewer": "codex"
+    },
+    "heterogeneousSpeculation": {
+      "enabled": false,
+      "secondCandidate": "codex"
+    },
+    "fallbackToClaude": true
+  },
+  "codexUsable": true,
+  "codexProbe": {
+    "ok": true,
+    "detail": "Answered in 5.2 s."
+  },
+  "plan": {
+    "summary": "`overlaps` in src/overlaps.js (line 3) compares both ends inclusively (`a.start <= b.end && b.start <= a.end`) and ignores any `open` flag, so intervals that only touch are always reported as overlapping. The fix is to make each end comparison strict when the interval whose end is being compared has `open: true`, leaving the comparison inclusive otherwise. One task covers the source change and the regression tests in test/overlaps.test.js, since the change is a few lines and the tests need the fix to pass.",
+    "assumptions": [
+      "`open: true` excludes only the interval's `end` point; `start` is always included (half-open [start, end)).",
+      "The flag applies per interval and in either argument position: a touch at a point is not an overlap when the interval whose `end` is at that point is open. An `open` flag on the interval whose `start` is at the touching point has no effect, e.g. overlaps({start:1,end:3}, {start:3,end:5,open:true}) stays true.",
+      "Only a truthy `open` (documented as `true`) changes behaviour; missing or false `open` means a closed interval.",
+      "No input validation is added and degenerate or empty intervals (e.g. start === end with open: true) are out of scope.",
+      "README.md does not document the API (it is a single descriptive line), so no docs change is needed beyond updating the JSDoc comment on the function."
+    ],
+    "acceptanceCriteria": [
+      "overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 }) returns false.",
+      "overlaps({ start: 1, end: 3 }, { start: 3, end: 5 }) still returns true.",
+      "The symmetric call overlaps({ start: 3, end: 5 }, { start: 1, end: 3, open: true }) returns false.",
+      "The two existing tests in test/overlaps.test.js are unchanged and pass.",
+      "New regression tests for the `open` behaviour exist in test/overlaps.test.js.",
+      "`npm test` exits 0 with no failing tests."
+    ],
+    "tasks": [
+      {
+        "id": "fix-open-interval-overlap",
+        "title": "Honour `open: true` in overlaps and add regression tests",
+        "description": "Repository: small ESM JavaScript package (package.json has \"type\": \"module\", test script is `node --test`, no dependencies). src/overlaps.js exports `overlaps(a, b)`, currently `return a.start <= b.end && b.start <= a.end`, which treats both intervals as closed and ignores any `open` property. src/index.js re-exports it and needs no change.\n\nBug: intervals that only touch at one end are reported as overlapping even when an interval is marked half-open.\n\nRequired behaviour: an interval may carry an optional `open: true` property meaning its `end` point is excluded (its `start` is always included). Change the comparison so each end check is strict when the interval owning that end is open: the check against `b.end` must be `a.start < b.end` when `b.open` is truthy, otherwise `a.start <= b.end`; the check against `a.end` must be `b.start < a.end` when `a.open` is truthy, otherwise `b.start <= a.end`. Intervals without `open` must behave exactly as before. Update the JSDoc comment above the function to describe the optional `open` flag, matching the existing one-line comment style. Keep the code simple: no validation, no new helpers or files, no unrelated refactoring.\n\nTests: in test/overlaps.test.js (node:test with node:assert/strict, importing `overlaps` from '../src/index.js', one-line `test(...)` calls) keep the two existing tests unmodified and add regression tests in the same style covering:\n- overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 }) is false\n- the same intervals with arguments swapped is false\n- overlaps({ start: 1, end: 3 }, { start: 3, end: 5, open: true }) is true (the open end at 5 is not the touching point)\n- overlaps({ start: 1, end: 4, open: true }, { start: 3, end: 5 }) is true (genuine overlap with an open interval)\n- both intervals open and touching, e.g. { start: 1, end: 3, open: true } and { start: 3, end: 5, open: true }, is false\n\nRun `npm test` from the repository root and confirm it passes. Do not hard-code results for specific inputs.",
+        "role": "worker",
+        "dependencies": [],
+        "parallelizable": false,
+        "suggestedFiles": [
+          "src/overlaps.js",
+          "test/overlaps.test.js"
+        ],
+        "acceptanceCriteria": [
+          "overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 }) returns false, and so does the call with the arguments swapped.",
+          "overlaps({ start: 1, end: 3 }, { start: 3, end: 5 }) returns true and overlaps({ start: 1, end: 2 }, { start: 3, end: 5 }) returns false, as before.",
+          "overlaps({ start: 1, end: 4, open: true }, { start: 3, end: 5 }) returns true.",
+          "The two original tests in test/overlaps.test.js are still present and unmodified, and new tests covering the listed `open` cases are added in the same file.",
+          "The implementation uses general comparisons on start/end/open, with no special-casing of specific input values.",
+          "`npm test` exits 0 with all tests passing.",
+          "Only src/overlaps.js and test/overlaps.test.js are modified."
+        ],
+        "complexity": "small",
+        "risk": "low",
+        "requiresApproval": false
+      }
+    ],
+    "risks": [
+      {
+        "description": "The request does not define whether `open` on the interval whose start is at the touching point should matter; a different reading (any open flag makes a touch non-overlapping) would give different results for overlaps({start:1,end:3}, {start:3,end:5,open:true}).",
+        "mitigation": "The plan follows the stated definition (\"its end point is excluded\") and records this as an assumption, with an explicit test for the case so the chosen behaviour is visible and easy to change."
+      },
+      {
+        "description": "The fix could accidentally change behaviour for closed intervals.",
+        "mitigation": "The existing tests are kept unmodified and must pass, and the inclusive comparison is retained whenever `open` is not set."
+      }
+    ]
+  },
+  "finishedAt": "2026-10-05T04:22:08.494Z",
+  "run": {
+    "id": "880783a9-d83c-4182-9b36-2e1facd9fe83",
+    "state": "completed",
+    "error": null,
+    "integrationBranch": "nexus/880783a9/integration"
+  },
+  "tasks": [
+    {
+      "key": "fix-open-interval-overlap",
+      "state": "completed",
+      "kind": "implement"
+    }
+  ],
+  "agents": [
+    {
+      "id": "42e8a01f-813a-4879-a42c-1edb152b42d9",
+      "role": "planner",
+      "label": "Planner",
+      "model": "claude-opus-5-5",
+      "state": "stopped"
+    },
+    {
+      "id": "6d2c4b37-a3bc-439d-ae98-9be408c7d43b",
+      "role": "worker",
+      "label": "Worker/fix-open-interval-overlap",
+      "model": "claude-sonnet-5-5",
+      "state": "stopped"
+    },
+    {
+      "id": "f33ee61f-5440-4cbd-906a-1f901d13d43f",
+      "role": "reviewer",
+      "label": "Reviewer/fix-open-interval-overlap",
+      "model": "gpt-5.5",
+      "state": "stopped"
+    },
+    {
+      "id": "442463ac-061f-400d-b4d8-9e55e25b7adf",
+      "role": "verifier",
+      "label": "Verifier/fix-open-interval-overlap",
+      "model": "claude-opus-5-5",
+      "state": "stopped"
+    },
+    {
+      "id": "9290b6a5-08a7-4b68-bcc6-c8755d5fc793",
+      "role": "verifier",
+      "label": "Verifier/mission",
+      "model": "claude-opus-5-5",
+      "state": "stopped"
+    }
+  ],
+  "providerSessions": [
+    {
+      "agentId": "42e8a01f-813a-4879-a42c-1edb152b42d9",
+      "role": "planner",
+      "requested": "claude",
+      "provider": "claude",
+      "model": "claude-opus-5-5",
+      "runtimeVersion": "2.1.288",
+      "authMode": "Claude subscription",
+      "reason": "Claude is the default provider.",
+      "fallbackReason": null,
+      "outcome": "completed",
+      "error": null,
+      "inputTokens": 1234,
+      "outputTokens": 2712
+    },
+    {
+      "agentId": "6d2c4b37-a3bc-439d-ae98-9be408c7d43b",
+      "role": "worker",
+      "requested": "claude",
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "runtimeVersion": "2.1.288",
+      "authMode": "Claude subscription",
+      "reason": "Claude is the default provider.",
+      "fallbackReason": null,
+      "outcome": "completed",
+      "error": null,
+      "inputTokens": 2285,
+      "outputTokens": 1449
+    },
+    {
+      "agentId": "f33ee61f-5440-4cbd-906a-1f901d13d43f",
+      "role": "reviewer",
+      "requested": "codex",
+      "provider": "codex",
+      "model": "gpt-5.5",
+      "runtimeVersion": "0.130.0",
+      "authMode": "ChatGPT login",
+      "reason": "Cross-model review: a reviewer from Codex.",
+      "fallbackReason": null,
+      "outcome": "completed",
+      "error": null,
+      "inputTokens": 120624,
+      "outputTokens": 2004
+    },
+    {
+      "agentId": "442463ac-061f-400d-b4d8-9e55e25b7adf",
+      "role": "verifier",
+      "requested": "claude",
+      "provider": "claude",
+      "model": "claude-opus-5-5",
+      "runtimeVersion": "2.1.288",
+      "authMode": "Claude subscription",
+      "reason": "Claude is the default provider.",
+      "fallbackReason": null,
+      "outcome": "completed",
+      "error": null,
+      "inputTokens": 3027,
+      "outputTokens": 2814
+    },
+    {
+      "agentId": "9290b6a5-08a7-4b68-bcc6-c8755d5fc793",
+      "role": "verifier",
+      "requested": "claude",
+      "provider": "claude",
+      "model": "claude-opus-5-5",
+      "runtimeVersion": "2.1.288",
+      "authMode": "Claude subscription",
+      "reason": "Claude is the default provider.",
+      "fallbackReason": null,
+      "outcome": "completed",
+      "error": null,
+      "inputTokens": 2646,
+      "outputTokens": 2151
+    }
+  ],
+  "reviews": [
+    {
+      "taskId": "d1e5572f-1383-4f4a-b4f1-fe83331da217",
+      "attempt": 1,
+      "verdict": "approved",
+      "summary": "No concrete defects found. The inspected implementation matches the required open-end comparison semantics, the original tests are preserved, the requested regression cases are present, and the committed diff only changes src/overlaps.js and test/overlaps.test.js. I could not rerun npm test locally because the execution policy rejected npm/node commands, but the provided test output shows all 7 tests passing.",
+      "findings": 0,
+      "agentId": "f33ee61f-5440-4cbd-906a-1f901d13d43f"
+    }
+  ],
+  "providersAfter": [
+    {
+      "id": "claude",
+      "health": "healthy",
+      "healthDetail": null
+    },
+    {
+      "id": "codex",
+      "health": "healthy",
+      "healthDetail": "Answered in 5.2 s."
+    },
+    {
+      "id": "gemini",
+      "health": "unavailable",
+      "healthDetail": null
+    }
+  ],
+  "performance": [
+    {
+      "provider": "claude",
+      "sessions": 4,
+      "completed": 4,
+      "failed": 0,
+      "fallbacksFrom": 0,
+      "inputTokens": 9192,
+      "outputTokens": 9126,
+      "lastUsedAt": "2026-10-05T04:21:40.434Z"
+    },
+    {
+      "provider": "codex",
+      "sessions": 1,
+      "completed": 1,
+      "failed": 0,
+      "fallbacksFrom": 0,
+      "inputTokens": 120624,
+      "outputTokens": 2004,
+      "lastUsedAt": "2026-10-05T04:20:15.428Z"
+    },
+    {
+      "provider": "gemini",
+      "sessions": 0,
+      "completed": 0,
+      "failed": 0,
+      "fallbacksFrom": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "lastUsedAt": null
+    }
+  ],
+  "usageByProvider": [
+    {
+      "provider": "claude",
+      "observed": {
+        "sessions": 4,
+        "inputTokens": 9192,
+        "outputTokens": 9126
+      },
+      "windows": [
+        {
+          "limitType": "five_hour",
+          "utilizationPercent": 29,
+          "resetsAt": "2026-10-05T08:10:00.375907+00:00"
+        },
+        {
+          "limitType": "seven_day",
+          "utilizationPercent": 72,
+          "resetsAt": "2026-10-10T04:00:00.375935+00:00"
+        },
+        {
+          "limitType": "iguana_necktie",
+          "utilizationPercent": 0,
+          "resetsAt": "2026-11-05T07:59:00+00:00"
+        }
+      ],
+      "windowsSource": "runtime"
+    },
+    {
+      "provider": "codex",
+      "observed": {
+        "sessions": 1,
+        "inputTokens": 120624,
+        "outputTokens": 2004
+      },
+      "windows": [],
+      "windowsSource": "not_exposed"
+    },
+    {
+      "provider": "gemini",
+      "observed": {
+        "sessions": 0,
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "windows": [],
+      "windowsSource": "not_exposed"
+    }
+  ],
+  "claudeUsage": {
+    "status": "LIMIT_APPROACHING",
+    "session": {
+      "sessions": 4,
+      "turns": 27,
+      "inputTokens": 9192,
+      "outputTokens": 9126,
+      "cacheReadTokens": 198157,
+      "cacheCreationTokens": 33014,
+      "durationMs": 90794,
+      "limitEvents": 0
+    }
+  },
+  "approvals": [],
+  "independentTestRun": {
+    "lines": [
+      "# tests 7",
+      "# pass 7",
+      "# fail 0"
+    ],
+    "pass": 7,
+    "fail": 0
+  },
+  "userCheckout": {
+    "head": "0a94020ae62e6d49124bc4d639a0e5da6126724c",
+    "branch": "main",
+    "status": ""
+  },
+  "gatesPassed": true
+}
