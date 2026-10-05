@@ -970,7 +970,13 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
     case 'branch':
       if (rshort.includes('D') || (hasFlag('--delete') && hasFlag('--force')) || (rshort.includes('d') && rshort.includes('f'))) {
         a.ask('high', 'git branch -D force-deletes a branch', 'DESTRUCTIVE')
+      } else if (rshort.includes('f') || rshort.includes('M') || rshort.includes('C') || hasFlag('--force')) {
+        // -f, -M and -C move or overwrite an existing branch, which may be one of the user's.
+        a.ask('high', 'git branch -f/-M/-C moves or overwrites an existing branch', 'DESTRUCTIVE')
       }
+      break
+    case 'tag':
+      if (rshort.includes('f') || rshort.includes('d') || hasFlag('--force', '--delete')) a.ask('high', 'git tag -f/-d replaces or deletes a tag', 'DESTRUCTIVE')
       break
     case 'checkout': {
       const creates = rest.includes('-b') || rest.includes('-B') || hasFlag('--orphan')
@@ -1014,6 +1020,10 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
       break
     case 'update-ref':
       if (hasFlag('-d')) a.ask('high', 'git update-ref -d deletes a ref', 'DESTRUCTIVE')
+      // Writing a ref directly moves a branch without any of git's checks. Only refs in NEXUS's own namespace are free.
+      else if (hasFlag('--stdin') || rpos.some((ref) => ref.startsWith('refs/') && !ref.startsWith('refs/heads/nexus/')) || (rpos[0] !== undefined && !rpos[0].startsWith('refs/'))) {
+        a.ask('high', 'git update-ref moves a ref outside nexus/', 'DESTRUCTIVE')
+      }
       break
     case 'credential':
       a.ask('high', 'accessing secrets: git credential reads stored credentials')
