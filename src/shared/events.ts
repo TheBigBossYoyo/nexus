@@ -202,3 +202,5 @@ export type PushMessage =
   | { kind: 'backlog'; projectId: string }
   /** v0.5. A workspace, its repositories, graph, contracts, missions or release trains changed. */
   | { kind: 'workspace'; workspaceId: string }
+  /** v0.6. A provider's status, the provider policy or the record of provider sessions changed. */
+  | { kind: 'providers' }

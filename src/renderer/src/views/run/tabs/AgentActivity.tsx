@@ -4,6 +4,8 @@ import { formatSpan, formatTokens } from '../../../lib/format'
 import { agentStatus } from '../../../lib/status'
 import { useUiStore } from '../../../store/ui'
 import { useNow, useRunCtx } from '../runContext'
+import { useProviderSessions } from '../../../lib/queries-v6'
+import { agentProvider } from '../../providers/providersModel'
 
 const rank = (s: string) => (s === 'working' || s === 'starting' ? 0 : s === 'waiting' || s === 'blocked' ? 1 : 2)
 
@@ -15,6 +17,8 @@ export function AgentActivityTab() {
   const setView = useUiStore((s) => s.setView)
   const live = detail.agents.some((a) => a.state === 'working' || a.state === 'starting')
   const now = useNow(live)
+  // v0.6: which provider ran each agent. Until a session is recorded the model name alone is shown.
+  const providerSessions = useProviderSessions(detail.run.id).data ?? []
   const rows = useMemo(
     () => [...detail.agents].sort((a, b) => rank(a.state) - rank(b.state) || b.createdAt.localeCompare(a.createdAt)),
     [detail.agents],
@@ -30,7 +34,7 @@ export function AgentActivityTab() {
       <li aria-hidden="true" className="sticky top-0 z-[1] flex items-center gap-3 border-b bg-surface px-4 py-1 text-caption text-text-muted">
         <span className="w-20 shrink-0">State</span>
         <span className="w-20 shrink-0">Role</span>
-        <span className="hidden w-28 shrink-0 @[640px]:inline">Model</span>
+        <span className="hidden w-28 shrink-0 @[640px]:inline">Provider · model</span>
         <span className="w-16 shrink-0">Task</span>
         <span className="min-w-0 flex-1">Activity</span>
         <span className="hidden w-14 shrink-0 text-right @[440px]:inline">Time</span>
@@ -40,6 +44,7 @@ export function AgentActivityTab() {
       {rows.map((a) => {
         const st = agentStatus(a.state)
         const task = a.taskId ? tasksById.get(a.taskId) : undefined
+        const provider = agentProvider(providerSessions, a.id)
         return (
           <li key={a.id} className="flex items-center gap-3 border-b px-4 py-1.5 text-small" data-testid={`activity-agent-${a.id}`}>
             <span className="inline-flex w-20 shrink-0 items-center gap-1.5">
@@ -47,7 +52,9 @@ export function AgentActivityTab() {
               <span>{st.label}</span>
             </span>
             <span className="w-20 shrink-0 truncate font-medium" title={a.role}>{a.role}</span>
-            <span className="hidden w-28 shrink-0 truncate text-text-muted @[640px]:inline">{a.model ?? 'model unknown'}</span>
+            <span className="hidden w-28 shrink-0 truncate text-text-muted @[640px]:inline" title={provider ? `${provider.label}${provider.fallbackReason ? `. ${provider.fallbackReason}` : ''}` : undefined} data-testid={`activity-provider-${a.id}`} data-provider={provider?.label ?? ''}>
+              {provider ? provider.label : (a.model ?? 'model unknown')}
+            </span>
             {task ? (
               <button
                 type="button"

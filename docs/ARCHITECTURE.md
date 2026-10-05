@@ -242,6 +242,17 @@ The v0.3 renderer replaces the 0.2 shell (navigation in three groups, a contextu
 adds Home, Arena, Policy and Usage views. v0.3 IPC channels are in ARENA.md, ADAPTIVE_POLICY.md and
 USAGE_INTELLIGENCE.md. Design: V0_3_DESIGN.md.
 
+## v0.6: providers
+
+`src/shared/provider.ts` holds the provider model, the provider policy schema and the pure routing decision
+(`routeSession`). `src/main/modules/providers/` holds `ProviderService` (discovery, policy, health, the record of
+provider sessions) and its router, which implements `AgentRuntime`: the main process hands the router to the
+orchestrator, the usage service, the Arena, programs and workspaces in place of the Claude runtime, so none of
+them changed. `ClaudeAgentRuntimeProvider` wraps the Claude SDK runtime; `CodexRuntimeProvider` and
+`CodexCliRuntime` drive the Codex command line tool through the process runner, read-only;
+`GeminiRuntimeProvider` only detects. `provider_sessions` (migration 008) records which provider ran each
+session and why. Design and use: PROVIDERS.md.
+
 ## v0.5: the workspace module
 
 `src/shared/workspace.ts` holds the data, the zod schemas and the pure decisions (`dependencyOrder`,

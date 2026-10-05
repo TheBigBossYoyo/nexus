@@ -22,6 +22,7 @@ import {
   type WorkspaceRepository,
   type WorkspaceSummary,
 } from './workspace'
+import { ProviderIdSchema, ProviderPolicySchema, type ProviderPolicy, type ProviderSession, type ProvidersOverview, type ProviderStatus } from './provider'
 import {
   BACKLOG_STATUSES,
   BackgroundJobKindSchema,
@@ -542,6 +543,14 @@ export const ipcInputs = {
   /** Always refused in 0.5: NEXUS prepares release trains and does not publish them. */
   'workspace.publishRelease': z.object({ trainId: Id }).strict(),
   'workspace.cancelRelease': z.object({ trainId: Id }).strict(),
+  // v0.6: providers.
+  'providers.overview': Empty,
+  /** Detects every provider again (versions and sign-in state; no prompt is sent). */
+  'providers.refresh': Empty,
+  'providers.setPolicy': z.object({ policy: ProviderPolicySchema }).strict(),
+  /** One minimal real session with the provider. Explicit, because it uses that provider's quota. */
+  'providers.probe': z.object({ provider: ProviderIdSchema }).strict(),
+  'providers.sessions': z.object({ runId: Id }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -661,6 +670,11 @@ export interface IpcOutputs {
   'workspace.prepareRelease': ReleaseTrain
   'workspace.publishRelease': never
   'workspace.cancelRelease': ReleaseTrain
+  'providers.overview': ProvidersOverview
+  'providers.refresh': ProvidersOverview
+  'providers.setPolicy': ProviderPolicy
+  'providers.probe': { ok: boolean; detail: string; status: ProviderStatus | null }
+  'providers.sessions': ProviderSession[]
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]

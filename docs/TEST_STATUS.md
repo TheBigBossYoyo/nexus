@@ -1,7 +1,66 @@
 # Test Status
 
-Factual status as of 2026-10-05 03:15 (+01:00), version 0.4.0, branch `nexus-0.4` (released as `v0.4.0`). Details and
-evidence: `docs/V0_4_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
+Factual status as of 2026-10-05 06:45 (+01:00), version 0.6.0, branch `nexus-0.6` (released as `v0.6.0`). Details and
+evidence: `docs/V0_6_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
+
+## 0.6.0: automated (no Claude usage)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm lint` | pass |
+| `pnpm test` | 139 files, 2650 tests passed, 423 s |
+| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 8 files passed, 4901 s, on `b7afbcf` (before the security hardening) |
+| Orchestrator stress, 100 seeds, after the hardening of NEXUS's git calls | passed |
+| Overnight stresses, 5000 histories each, after the bookkeeping fix | passed |
+| `pnpm test:e2e` | 24 Playwright tests passed, 1 capture-only test skipped by design |
+| `pnpm package` | produced `release/NEXUS-Setup-0.6.0.exe` (207,358,553 bytes, SHA-256 `eb1a8855...de4e65ba`) |
+| `node scripts/packaged-validation.mjs` on 0.1, 0.2.0 and 0.2.1 databases | 20 of 20 checks each, schema 8 |
+| `node scripts/migration-campaign.mjs` (0.7 development build, nine real databases 0.1 to 0.6) | 9 of 9 checks each |
+
+## 0.6.0: manual
+
+| Check | Result |
+|---|---|
+| Mission with real Claude and a real Codex review (`node scripts/provider-acceptance.mjs`) | passed twice, 14 of 14 gates each |
+| `pnpm smoke:providers` (real Codex, read-only review of a commit with a defect, a planted `codex.cmd`) | passed: the defect found, the write refused, the planted file not run |
+
+Not verified: Gemini; heterogeneous speculation with a real second provider (Codex is read-only); a real
+provider outage; the real mission on the packaged build; the installer.
+
+## Intermittent failures (0.6.0)
+
+Under machine load: the timing evaluator of `performance-optimization` (fixed: it measures again before it
+fails), and an E2E test that did not wait for the first agent session (fixed). See the release report.
+
+## 0.5.0: automated (no Claude usage)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm lint` | pass |
+| `pnpm test` | 137 files, 2606 tests passed, 300 s |
+| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 8 files passed, 3834 s, on `e775702` (before the audit fixes) |
+| Workspace and program stresses, 1000 histories each, after the audit fixes | passed |
+| Program stress, 5000 histories, after the program fix | passed; seed 1552 is a permanent test |
+| `pnpm test:e2e` | 22 Playwright tests passed, 1 capture-only test skipped by design |
+| `pnpm package` | produced `release/NEXUS-Setup-0.5.0.exe` (207,343,181 bytes, SHA-256 `bbc711e5...625927cc`) |
+| `node scripts/packaged-validation.mjs` on 0.1, 0.2.0 and 0.2.1 databases | 19 of 19 checks each, schema 7 |
+
+## 0.5.0: manual
+
+| Check | Result |
+|---|---|
+| Cross-repository mission with real Claude (`node scripts/workspace-acceptance.mjs`) | passed twice, 15 of 15 gates each, first attempt: three repositories, a shared contract, provider then consumers, global verification, a prepared release train, original checkouts untouched |
+
+Not verified: a workspace program and an overnight workspace mission with real Claude; a real usage limit during
+a cross-repository mission; a cross-repository mission on the packaged build with real Claude; the installer.
+
+## Intermittent failures (0.5.0)
+
+The timing-based hidden evaluator of the Arena case `performance-optimization` failed once (ratio 24.1 against a
+limit of 24) in a full `pnpm test` that ran beside a stress run and other work; the file passed alone and in
+the three full runs after it.
 
 ## 0.4.0: automated (no Claude usage)
 

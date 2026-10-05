@@ -52,6 +52,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     keywords: 'claude tokens limit quota subscription',
   },
   {
+    view: 'providers',
+    label: 'Providers',
+    group: 'intelligence',
+    keywords: 'provider claude codex gemini model cross-model review heterogeneous routing fallback',
+  },
+  {
     view: 'performance',
     label: 'Performance',
     group: 'intelligence',
@@ -97,6 +103,7 @@ export const VIEW_META: Record<View, { title: string; context?: string }> = {
   agents: { title: 'Agents', context: 'Workspace' },
   arena: { title: 'Arena', context: 'Intelligence' },
   policy: { title: 'Policy', context: 'Intelligence' },
+  providers: { title: 'Providers', context: 'Intelligence' },
   usage: { title: 'Usage', context: 'Intelligence' },
   performance: { title: 'Performance', context: 'Intelligence' },
   intelligence: { title: 'Repository', context: 'Intelligence' },
@@ -115,6 +122,7 @@ export const VIEWS_WITH_OWN_HEADER: readonly View[] = [
   'workspaces',
   'arena',
   'policy',
+  'providers',
   'usage',
   'overnight',
   'activity',

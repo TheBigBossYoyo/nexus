@@ -195,6 +195,15 @@ export const UsageIcon = (p: IconProps) => (
     <path d="M2.5 13.5v-4M6.5 13.5v-8M10.5 13.5v-6M14 13.5H2" />
   </Svg>
 )
+/** Three connected nodes: one router, two runtimes. */
+export const ProvidersIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="3.5" r="1.75" />
+    <circle cx="3.5" cy="12.5" r="1.75" />
+    <circle cx="12.5" cy="12.5" r="1.75" />
+    <path d="M7.2 5.1 4.3 10.9M8.8 5.1l2.9 5.8M5.25 12.5h5.5" />
+  </Svg>
+)
 export const MoonIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M13 9.6A5.5 5.5 0 0 1 6.4 3 5.5 5.5 0 1 0 13 9.6z" />

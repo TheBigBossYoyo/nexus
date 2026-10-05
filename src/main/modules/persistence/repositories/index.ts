@@ -38,6 +38,7 @@ import {
   WorkspaceRepositoryStore,
   WorkspaceTaskStore,
 } from './workspace'
+import { ProviderSessionStore } from './provider'
 import {
   ContextPackRepository,
   FactRepository,
@@ -146,6 +147,8 @@ export interface Repositories {
   expertise: ExpertiseRepository
   backgroundJobs: BackgroundJobRepository
   // v0.5
+  /** v0.6: which provider ran each agent session. */
+  providerSessions: ProviderSessionStore
   workspaces: WorkspaceRepositoryStore
   enrolledRepositories: EnrolledRepositoryStore
   workspaceServices: ServiceStore
@@ -227,6 +230,7 @@ export function createRepositories(db: Database): Repositories {
     backlog: new BacklogRepository(db),
     expertise: new ExpertiseRepository(db),
     backgroundJobs: new BackgroundJobRepository(db),
+    providerSessions: new ProviderSessionStore(db),
     workspaces: new WorkspaceRepositoryStore(db),
     enrolledRepositories: new EnrolledRepositoryStore(db),
     workspaceServices: new ServiceStore(db),

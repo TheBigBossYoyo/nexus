@@ -21,7 +21,32 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [PROGRAMS](docs/PROGRAMS.md),
 [LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md),
 [WORKSPACES](docs/WORKSPACES.md), [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md),
-[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md).
+[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md).
+
+## What's new in 0.6
+
+The 0.6 feature set removes the assumption that an agent is Claude. Claude stays required and first-class; other
+providers are optional, off until you enable them, and never needed. Released as 0.6.0. Details:
+[PROVIDERS](docs/PROVIDERS.md).
+
+| Feature | What it does |
+|---|---|
+| Provider discovery | NEXUS asks each provider's own command line tool for its version and sign-in state. It reads no credential and sends no prompt to do so |
+| Providers page | Status, version, sign-in, models, capabilities, plan usage as the provider reports it, counts of recent sessions, an explicit test session |
+| Codex provider | Sessions through `codex exec`, with the login that tool already has. Read-only in 0.6: it reviews, researches and criticises, and changes no file. NEXUS checks afterwards that nothing changed |
+| Provider policy | Nothing is sent to a provider you have not enabled, and enabling one routes nothing by itself |
+| Cross-model review | Claude implements, another provider reviews independently, Claude verifies. A reviewer's finding is a claim to check, never the verdict |
+| Heterogeneous speculation | Candidate B of a speculative task written by another provider. Implemented and tested with scripted providers; not available with Codex, which is read-only |
+| Fallback | When the chosen provider cannot be used, Claude does the session and the reason is recorded, or the session is refused if you switched fallback off |
+| Evidence | The mission inspector shows the provider and model of every agent; mission outcomes and Arena trials record `provider:model`, so evidence is not pooled across providers |
+
+Statements that hold for the 0.6 feature set:
+
+- With no other provider enabled, every session runs on Claude exactly as before.
+- NEXUS never handles another provider's credentials and implements no login for it.
+- Usage is shown per provider as that provider states it. Different quota systems are not converted into one
+  percentage, and another provider's limits never pause a run for Claude quota.
+- Gemini is detected only.
 
 ## What's new in 0.5
 

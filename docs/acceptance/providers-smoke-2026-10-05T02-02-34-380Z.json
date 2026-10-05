@@ -1,0 +1,99 @@
+{
+  "kind": "providers-smoke",
+  "startedAt": "2026-10-05T02:02:34.380Z",
+  "codex": {
+    "id": "codex",
+    "displayName": "Codex",
+    "required": false,
+    "checkedAt": "2026-10-05T02:02:34.381Z",
+    "models": [
+      {
+        "value": "gpt-5.5",
+        "displayName": "gpt-5.5"
+      }
+    ],
+    "installed": "installed",
+    "version": "0.130.0",
+    "auth": "authenticated",
+    "authDetail": "Logged in using ChatGPT",
+    "supported": true,
+    "supportDetail": null,
+    "health": "unknown",
+    "healthDetail": null,
+    "capabilities": {
+      "sessions": true,
+      "resume": true,
+      "structuredOutput": "prompted",
+      "toolAuthorization": false,
+      "nexusTools": false,
+      "mcp": false,
+      "usageReport": false,
+      "confinement": "provider_sandbox",
+      "writes": false
+    }
+  },
+  "gemini": {
+    "id": "gemini",
+    "displayName": "Gemini",
+    "required": false,
+    "installed": "not_installed",
+    "version": null,
+    "auth": "unknown",
+    "authDetail": null,
+    "supported": false,
+    "supportDetail": "The Gemini command line tool was not found on PATH.",
+    "health": "unavailable",
+    "healthDetail": null,
+    "models": [],
+    "capabilities": {
+      "sessions": false,
+      "resume": false,
+      "structuredOutput": "none",
+      "toolAuthorization": false,
+      "nexusTools": false,
+      "mcp": false,
+      "usageReport": false,
+      "confinement": "none",
+      "writes": false
+    },
+    "checkedAt": "2026-10-05T02:02:34.826Z"
+  },
+  "review": {
+    "eventTypes": [
+      "session.started",
+      "text",
+      "tool.started",
+      "tool.completed",
+      "text",
+      "tool.started",
+      "tool.completed",
+      "text",
+      "turn.completed",
+      "session.ended"
+    ],
+    "sessionId": "01a109cc-750c-78a0-ad17-3f29d385e8e9",
+    "outcome": "success",
+    "structuredOutput": {
+      "verdict": "request_changes",
+      "findings": [
+        "average does not do what its comment says for an empty list: sum([]) returns 0, then average divides by values.length (0), producing NaN instead of 0."
+      ],
+      "wroteFile": false
+    },
+    "usage": [
+      {
+        "model": "gpt-5.5",
+        "inputTokens": 46304,
+        "outputTokens": 351,
+        "cacheReadTokens": 35968,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "contextWindow": null
+      }
+    ],
+    "errors": [],
+    "durationMs": 20341,
+    "commandsRun": 2,
+    "workingDirectoryUnchanged": true
+  }
+}

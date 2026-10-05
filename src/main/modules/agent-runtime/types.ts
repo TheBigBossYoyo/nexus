@@ -52,6 +52,8 @@ export interface ExternalMcpServer {
 export interface SessionSpec {
   agentId: string
   role: AgentRole
+  /** v0.6: the agent's label ("Worker/api · candidate B"). Providers ignore it; the provider router reads it. */
+  label?: string
   /** Absolute working directory (the task worktree for writing roles). */
   cwd: string
   /** Model id or alias. Undefined uses the runtime default. */

@@ -21,6 +21,8 @@ import { ProjectService } from './modules/ipc/services'
 import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { createV4Handlers } from './modules/ipc/v4-handlers'
 import { createV5Handlers } from './modules/ipc/v5-handlers'
+import { createV6Handlers } from './modules/ipc/v6-handlers'
+import { ClaudeAgentRuntimeProvider, CODEX_CAPABILITIES, CodexRuntimeProvider, FakeRuntimeProvider, GeminiRuntimeProvider, ProviderService } from './modules/providers'
 import { Orchestrator } from './modules/orchestrator'
 import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload, WorkspaceMissionWorkload } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
@@ -180,7 +182,7 @@ async function bootstrap(): Promise<void> {
   const fakeUsage = process.env['NEXUS_FAKE_USAGE']
   if (fakeRuntime && fakeUsage === 'unknown') fakeRuntime.usage.set({ reportSupported: false })
   else if (fakeRuntime && fakeUsage && Number.isFinite(Number(fakeUsage))) fakeRuntime.usage.set({ utilizationPercent: Number(fakeUsage) })
-  const runtime: AgentRuntime =
+  const claudeRuntime: AgentRuntime =
     fakeRuntime ??
     new ClaudeSdkRuntime({
         executablePath: settings.claude.executablePath || undefined,
@@ -191,9 +193,40 @@ async function bootstrap(): Promise<void> {
 
   const logger = (line: string): void => console.error(`[nexus] ${line}`)
 
+  // v0.6: every session passes through the provider router. Claude is the required provider; the others are
+  // detected, off until the user enables them, and never needed. With the scripted runtime (UI tests) the
+  // other providers are scripted too, so no test ever reaches a real provider.
+  const subscriptionMode = (): boolean => repos.settings.get().claude.subscriptionMode
+  const probeCwd = (): string => app.getPath('temp')
+  const providers = new ProviderService({
+    providers: fakeRuntime
+      ? [
+          new FakeRuntimeProvider('claude', fakeRuntime, { authDetail: 'Scripted runtime', health: 'healthy' }),
+          new FakeRuntimeProvider('codex', new FakeAgentRuntime({ script: createDemoScript() }), { capabilities: CODEX_CAPABILITIES, ...(process.env['NEXUS_FAKE_CODEX'] === 'auth' ? { auth: 'auth_required' as const, health: 'unavailable' as const } : {}) }, 'scripted-codex'),
+          new FakeRuntimeProvider('gemini', null, { installed: 'not_installed', version: null, auth: 'unknown', authDetail: null, supportDetail: 'The Gemini command line tool was not found on PATH.', health: 'unavailable' }),
+        ]
+      : [
+          new ClaudeAgentRuntimeProvider({ runtime: claudeRuntime, subscriptionMode, probeCwd }),
+          new CodexRuntimeProvider({ probeCwd, snapshot: (cwd) => git.workingState(cwd) }),
+          new GeminiRuntimeProvider(),
+        ],
+    sessions: repos.providerSessions,
+    settings: repos.settings,
+    runOfAgent: (agentId) => repos.agents.get(agentId)?.runId ?? null,
+    onChange: () => push({ kind: 'providers' }),
+    logger,
+  })
+  repos.providerSessions.closeInterrupted(new Date().toISOString())
+  void providers.refresh().catch((e: unknown) => logger(`provider detection: ${e instanceof Error ? e.message : String(e)}`))
+  const runtime: AgentRuntime = providers.router
+
   // Usage intelligence observes what the runtime reports (limits, resets, per-session usage) and is the
   // gate every new Claude session passes. It reads nothing but the Agent SDK's own events and calls.
-  const usage = new UsageIntelligenceService({ repos, bus, runtime, push, logger })
+  const isOtherProvider = (agentId: string): boolean => {
+    const provider = repos.providerSessions.latestProviderOfAgent(agentId)
+    return provider !== null && provider !== 'claude'
+  }
+  const usage = new UsageIntelligenceService({ repos, bus, runtime, push, logger, isOtherProvider })
   const probe = new RuntimeAvailabilityProbe({ runtime, settings: () => repos.settings.get() })
   // The policy engine decides the strategy of ADAPTIVE runs from stored evidence and records every
   // mission's outcome. It never changes the active policy by itself.
@@ -567,6 +600,7 @@ async function bootstrap(): Promise<void> {
       },
     }),
     v4: createV4Handlers({ repos, programs, background: backgroundJobs }),
+    v6: createV6Handlers({ providers }),
     v5: createV5Handlers({
       workspaces,
       pickDirectory: async () => {

@@ -452,6 +452,7 @@ export class AgentRunner {
     return {
       agentId: agent.id,
       role,
+      label: input.label,
       cwd: input.cwd,
       model,
       systemPromptAppend: rolePrompt(role, input.purpose),

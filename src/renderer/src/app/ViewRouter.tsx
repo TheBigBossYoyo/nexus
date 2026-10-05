@@ -9,6 +9,7 @@ import { ProgramsView } from '../views/programs/ProgramsView'
 import { WorkspacesView } from '../views/workspaces/WorkspacesView'
 import { ArenaView } from '../views/arena/ArenaView'
 import { PolicyView } from '../views/policy/PolicyView'
+import { ProvidersView } from '../views/providers/ProvidersView'
 import { UsageView } from '../views/usage/UsageView'
 import { OvernightView } from '../views/overnight/OvernightView'
 import { ActivityView } from '../views/activity/ActivityView'
@@ -38,6 +39,8 @@ function renderView(view: View) {
       return <ArenaView />
     case 'policy':
       return <PolicyView />
+    case 'providers':
+      return <ProvidersView />
     case 'usage':
       return <UsageView />
     case 'overnight':

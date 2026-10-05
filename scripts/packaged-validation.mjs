@@ -21,7 +21,7 @@ if (!exe || !existsSync(exe) || sources.length === 0) {
 }
 const root = resolve(import.meta.dirname, '..')
 const VERSION = require(join(root, 'package.json')).version
-const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6, 7]
+const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6, 7, 8]
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 function schemaOf(dbPath) {
@@ -77,6 +77,17 @@ for (const source of sources) {
     entry.checks['the old run is readable with all its tasks and agents'] = old !== null && old.tasks.length === entry.before.tasks && old.agents.length === entry.before.agents
     entry.checks['an old run is not an overnight run'] = old !== null && (await call('overnight.get', { runId: old.run.id })) === null
     entry.checks['no overnight run is active'] = (await call('overnight.active')).length === 0
+    // Before any other project is opened: the sidebar lists the missions of the current project, and the
+    // old run belongs to the project of the older database.
+    if (old) {
+      await page.click('[data-testid="nav-run"]')
+      await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
+      entry.checks['the old run opens in Mission Control'] = await page.waitForSelector('[data-testid="run-view"]', { timeout: 15_000 }).then(() => true, () => false)
+      await page.waitForTimeout(600)
+      mkdirSync(join(root, 'test-results', 'screenshots'), { recursive: true })
+      await page.screenshot({ path: join(root, 'test-results', 'screenshots', `packaged-${evidence.databases.length}-old-run.png`) }).catch(() => undefined)
+      await page.click('[data-testid="nav-home"]')
+    }
 
     const auth = await call('auth.status', { refresh: true })
     entry.auth = { state: auth.state, mode: auth.mode, subscriptionType: auth.subscriptionType }
@@ -105,19 +116,20 @@ for (const source of sources) {
     await shot('programs')
     const programs = await page.evaluate(() => globalThis.nexus.invoke('program.list', {}))
     entry.checks['Programs renders; an upgraded database has no program'] = programsView && programs.ok === true && programs.value.programs.length === 0
-    // 0.5: the Workspaces page renders, and an upgraded database has no workspace.
+    // 0.5 and 0.6: the Workspaces and Providers pages render; an upgraded database has no workspace; the real
+    // providers are detected (Claude is always among them) and nothing but Claude is enabled.
     await page.click('[data-testid="nav-workspaces"]')
     const workspacesView = await page.waitForSelector('[data-testid="view-workspaces"]', { timeout: 15_000 }).then(() => true, () => false)
     await shot('workspaces')
     const workspaces = await page.evaluate(() => globalThis.nexus.invoke('workspace.list', {}))
     entry.checks['Workspaces renders; an upgraded database has no workspace'] = workspacesView && workspaces.ok === true && workspaces.value.length === 0
-    if (old) {
-      await page.click('[data-testid="nav-run"]')
-      await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
-      entry.checks['the old run opens in Mission Control'] = await page.waitForSelector('[data-testid="run-view"]', { timeout: 15_000 }).then(() => true, () => false)
-      await page.waitForTimeout(600)
-      await shot('old-run')
-    }
+    await page.click('[data-testid="nav-providers"]')
+    const providersView = await page.waitForSelector('[data-testid="providers-list"]', { timeout: 30_000 }).then(() => true, () => false)
+    await shot('providers')
+    const providers = await page.evaluate(() => globalThis.nexus.invoke('providers.overview', {}))
+    entry.providers = providers.ok ? providers.value.statuses.map((s) => ({ id: s.id, installed: s.installed, version: s.version, auth: s.auth, supported: s.supported, health: s.health })) : null
+    entry.checks['Providers renders; Claude is detected; no other provider is enabled'] =
+      providersView && providers.ok === true && providers.value.statuses.some((s) => s.id === 'claude' && s.required) && providers.value.policy.enabled.codex === false && providers.value.policy.enabled.gemini === false && providers.value.policy.crossModelReview.enabled === false
     const cases = await call('arena.cases')
     const arenaStatus = await call('arena.status')
     entry.arena = { builtinCases: cases.length, node: arenaStatus }
@@ -149,7 +161,7 @@ for (const source of sources) {
     await app.close().catch(() => undefined)
   }
   entry.after = schemaOf(join(dataDir, 'nexus.db'))
-  entry.checks['schema upgraded to version 7'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
+  entry.checks['schema upgraded to version 8'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
   const oldVersion = Math.max(...entry.before.versions)
   entry.checks['the database as the older release left it was kept as a .bak copy'] = oldVersion >= LATEST_SCHEMA.at(-1) || existsSync(join(dataDir, `nexus.db.v${oldVersion}.bak`))
   entry.checks['no row was lost in the upgrade'] = entry.after.runs === entry.before.runs && entry.after.tasks === entry.before.tasks && entry.after.agents === entry.before.agents && entry.after.events >= entry.before.events

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { Agent } from '@shared/domain'
 import { useStopAgent } from '../../lib/queries'
+import { useProviderSessions } from '../../lib/queries-v6'
+import { agentProvider } from '../providers/providersModel'
 import { agentStatus } from '../../lib/status'
 import { formatCount } from '../../lib/format'
 import { Button, ConfirmDialog, StatusBadge, StopIcon, Tabs, type TabItem } from '../../components/ui'
@@ -21,6 +23,7 @@ export function AgentDetail({ agent }: { agent: Agent }) {
   const [tab, setTab] = useState<TabId>('output')
   const [confirmStop, setConfirmStop] = useState(false)
   const stop = useStopAgent()
+  const provider = agentProvider(useProviderSessions(agent.runId).data ?? [], agent.id)
 
   const tabs: TabItem<TabId>[] = [
     { id: 'output', label: 'Output', testId: 'agent-tab-output' },
@@ -45,8 +48,22 @@ export function AgentDetail({ agent }: { agent: Agent }) {
             <StatusBadge status={agentStatus(agent.state)} className="shrink-0" />
           </div>
           <div className="text-small text-text-muted">
-            <span className="capitalize">{agent.role}</span> · {claudeModelLabel(agent.model)}
-            {agent.model ? <span className="font-mono text-code"> ({agent.model})</span> : null}
+            <span className="capitalize">{agent.role}</span> ·{' '}
+            {provider && !provider.label.startsWith('Claude ·') && provider.label !== 'Claude' ? (
+              <span data-testid="agent-provider" title={provider.fallbackReason ?? undefined}>
+                {provider.label}
+              </span>
+            ) : (
+              <>
+                {claudeModelLabel(agent.model)}
+                {agent.model ? <span className="font-mono text-code"> ({agent.model})</span> : null}
+              </>
+            )}
+            {provider?.fallbackReason ? (
+              <span className="block text-text-secondary" data-testid="agent-provider-fallback">
+                {provider.fallbackReason}
+              </span>
+            ) : null}
           </div>
           <div className="mt-0.5 truncate text-small text-text-secondary">{agentActivityLine(agent)}</div>
         </div>
