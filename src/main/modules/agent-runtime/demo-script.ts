@@ -1,5 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import type { MissionPlan } from '@shared/domain'
 import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fake-runtime'
 
@@ -74,6 +74,43 @@ export function createDemoScript(): FakeScript {
       // A task whose key clashes with an existing branch (e.g. `integration`) gets a short id suffix on its directory.
       const key = basename(spec.cwd).replace(/-[0-9a-f]{8}$/, '')
       await ctx.emitText(`Working on ${key} in ${spec.cwd}`)
+      // 0.5: a task of a cross-repository mission. The provider extends its contract; a consumer makes its copy
+      // of the contract equal to the content it was given.
+      if (spec.prompt.includes('part of a change across several repositories')) {
+        const write = async (path: string, content: string): Promise<void> => {
+          const target = join(spec.cwd, path)
+          await ctx.useTool('Write', { file_path: target, content: content.slice(0, 200) }, async () => {
+            await mkdir(dirname(target), { recursive: true })
+            await writeFile(target, content)
+            return 'File written'
+          })
+        }
+        const provided = /PROVIDES the contract "[^"]+" \([^)]+\) at (\S+?)\. /.exec(spec.prompt)?.[1]
+        if (provided) {
+          const current = await readFile(join(spec.cwd, provided), 'utf8').catch(() => '{}')
+          let next = `${current}\n`
+          try {
+            const schema = JSON.parse(current) as { properties?: Record<string, unknown> }
+            const marker = spec.prompt.includes('[demo:breaking]') ? 'renamed' : 'added'
+            const properties = { ...(schema.properties ?? {}) }
+            if (marker === 'renamed') delete properties[Object.keys(properties).at(-1) ?? '']
+            properties[`${marker}Field${Object.keys(properties).length}`] = { type: 'string' }
+            next = `${JSON.stringify({ ...schema, properties }, null, 2)}\n`
+          } catch {
+            // Not JSON: a line is appended, which is still a change of the contract file.
+          }
+          await write(provided, next)
+        }
+        for (const m of spec.prompt.matchAll(/<(contract_[a-z0-9_]+)>\n([\s\S]*?)\n<\/\1>\nThis repository keeps its own copy of the contract at (\S+?)\. /g)) {
+          // `[demo:skip-consumer]` in the goal leaves the copies as they are (a consumer left behind).
+          if (spec.prompt.includes('[demo:skip-consumer]')) continue
+          await write(m[3] ?? 'contract.copy', `${(m[2] ?? '').replace(/&lt;/g, '<')}`)
+        }
+        await write(`change-${Date.now().toString(36)}.txt`, 'cross-repository change\n')
+        await ctx.sleep(200)
+        await ctx.completeTurn({ text: provided ? `Extended the contract at ${provided}.` : 'Adapted this repository to the contract.' })
+        return
+      }
       if (behaviour === 'stall') {
         // Until the session is stopped (a pause, the mission deadline, or the app closing).
         await ctx.sleep(60 * 60_000)
@@ -265,6 +302,26 @@ export function createDemoScript(): FakeScript {
       await ctx.completeTurn({
         text: fence({ action: 'revise', reason: `The user asked: ${asked.slice(0, 200)}`, milestones: [...remaining, demoMilestone('requested', 'Requested follow-up', asked.slice(0, 300))], defer: [], strategyNote: null }),
       })
+      return
+    }
+    if (p.includes('NEXUS WORKSPACE PLANNER')) {
+      // One task per allowed repository, each after the repositories it depends on, naming the contracts it touches.
+      const block = /<workspace>\n([\s\S]*?)\n<\/workspace>/.exec(p)?.[1] ?? ''
+      // The description has three lists; repositories are the first, up to the line that starts the dependencies.
+      const repositoryList = block.split(/^Dependencies /m)[0] ?? ''
+      const repositories = [...repositoryList.matchAll(/^- ([a-z0-9-]+) \[[a-z_]+\](?! \(NOT allowed)/gm)].map((m) => m[1] ?? '')
+      const edges = [...block.matchAll(/^- ([a-z0-9-]+) -> ([a-z0-9-]+) \(/gm)].map((m) => ({ from: m[1] ?? '', to: m[2] ?? '' }))
+      const contracts = [...block.matchAll(/^- ([a-z0-9-]+) \[[a-z_]+\] ([a-z0-9-]+):\S+; consumers: (.*)$/gm)].map((m) => ({ key: m[1] ?? '', provider: m[2] ?? '', consumers: [...(m[3] ?? '').matchAll(/([a-z0-9-]+)(?: \(copy at [^)]*\))?/g)].map((c) => c[1] ?? '') }))
+      const tasks = repositories.map((repository) => ({
+        key: `change-${repository}`.slice(0, 40),
+        repository,
+        title: `Change ${repository}`,
+        objective: `Make the change in ${repository}.`,
+        acceptanceCriteria: [`${repository} carries the change`],
+        dependsOn: [...new Set(edges.filter((e) => e.from === repository && repositories.includes(e.to)).map((e) => `change-${e.to}`.slice(0, 40)))],
+        contracts: contracts.filter((c) => c.provider === repository || c.consumers.includes(repository)).map((c) => c.key),
+      }))
+      await ctx.completeTurn({ text: fence({ summary: 'Change the provider first, then each consumer.', tasks, risks: [] }) })
       return
     }
     if (p.includes('NEXUS BACKGROUND ANALYSIS')) {
