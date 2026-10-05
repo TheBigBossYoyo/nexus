@@ -129,6 +129,7 @@ const MAX_RATIO = 24
 const BATCH_MS = 40
 const BATCHES = 7
 const GIVE_UP_MS = 4000
+const ROUNDS = 4
 
 function timePerCall(fn, what) {
   let t0 = performance.now()
@@ -154,9 +155,18 @@ function timePerCall(fn, what) {
 function assertScalesLinearly(name, makeInput, run) {
   const small = makeInput(SMALL)
   const large = makeInput(LARGE)
-  const ts = timePerCall(() => run(small), `${name} (${SMALL} items)`)
-  const tl = timePerCall(() => run(large), `${name} (${LARGE} items)`)
-  const ratio = tl / ts
+  // Load on the machine can only make a measurement slower. A ratio above the limit is therefore measured
+  // again, up to ROUNDS times, and the best time of each size is kept: a linear implementation on a busy
+  // machine gets its chance to show a clean measurement, and a quadratic one stays near 64 however often it
+  // is measured.
+  let ts = Infinity
+  let tl = Infinity
+  let ratio = Infinity
+  for (let round = 0; round < ROUNDS && ratio >= MAX_RATIO; round++) {
+    ts = Math.min(ts, timePerCall(() => run(small), `${name} (${SMALL} items)`))
+    tl = Math.min(tl, timePerCall(() => run(large), `${name} (${LARGE} items)`))
+    ratio = tl / ts
+  }
   assert.ok(
     ratio < MAX_RATIO,
     `${name}: ${LARGE} items took ${tl.toFixed(2)} ms against ${ts.toFixed(3)} ms for ${SMALL} (ratio ${ratio.toFixed(1)}; about 8 is linear, about 64 is quadratic)`,

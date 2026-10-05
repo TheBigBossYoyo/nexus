@@ -100,11 +100,13 @@ describe('built-in Arena suite', () => {
     }, 300_000)
   }
 
-  it('every built-in case is version 2 with a node-version-independent, glob-free evaluation command', () => {
+  it('every built-in case has its recorded version and a node-version-independent, glob-free evaluation command', () => {
+    // Version 3: the timing evaluator of performance-optimization measures again before it fails (0.6).
+    const VERSIONS: Record<string, number> = { 'performance-optimization': 3 }
     const repos = createRepositories(openDatabase(':memory:'))
     for (const r of registerCases(repos, CASES_DIR, 'builtin')) {
       const d = r.version.definition
-      expect(d.version, d.id).toBe(2)
+      expect(d.version, d.id).toBe(VERSIONS[d.id] ?? 2)
       expect(d.hiddenEvaluation.command, d.id).toBe(`node --test hidden-tests/${d.id}.test.mjs`)
       expect(d.budgets.maxAgentsPerTrial, d.id).toBe(8)
     }
