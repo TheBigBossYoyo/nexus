@@ -235,7 +235,7 @@ describe('control plane service', () => {
     db = openDatabase(options.path ?? ':memory:')
     repos = createRepositories(db)
     const fake = fakeWorkloads()
-    const state = { now: new Date(2026, 9, 5, 21, 0, 0).getTime(), claude: true, unowned: [] as { id: string; title: string; requestedAgents: number }[] }
+    const state = { now: new Date(2026, 9, 5, 21, 0, 0).getTime(), claude: true, unowned: [] as { type: 'mission' | 'program'; refId: string; title: string; requestedAgents: number }[] }
     const notes: { kind: NotificationKind; title: string }[] = []
     let allocationChanges = 0
     const build = (): ControlPlane =>
@@ -246,7 +246,7 @@ describe('control plane service', () => {
         settings: repos.settings,
         adapters: { program: fake.adapter, arena: fake.adapter, workspace_mission: fake.adapter, scheduled_audit: fake.adapter, mission: fake.adapter },
         usage: { canDispatch: () => state.claude },
-        unownedActiveRuns: () => state.unowned,
+        unownedActiveWorkloads: () => state.unowned,
         notify: (kind, title) => void notes.push({ kind, title }),
         onAllocationChange: () => void allocationChanges++,
         now: () => state.now,
@@ -407,7 +407,7 @@ describe('control plane service', () => {
     const r = rig()
     control.setLimits({ maxAgents: 2, maxActiveItems: 4, resumeOnBoot: 'hold' })
     r.fake.workloads.set('run-9', { phase: 'working', activeAgents: 2, runIds: ['run-9'], detail: null, title: 'Fix the login bug', agents: 2 })
-    r.state.unowned = [{ id: 'run-9', title: 'Fix the login bug', requestedAgents: 2 }]
+    r.state.unowned = [{ type: 'mission', refId: 'run-9', title: 'Fix the login bug', requestedAgents: 2 }]
     r.fake.add('p1')
     control.enqueue({ type: 'program', programId: 'p1' })
     await control.idle()
@@ -512,7 +512,7 @@ describe('control plane service', () => {
       settings: repos.settings,
       adapters: {},
       usage: { canDispatch: () => true },
-      unownedActiveRuns: () => {
+      unownedActiveWorkloads: () => {
         if (broken) throw new Error('the run list could not be read')
         return []
       },

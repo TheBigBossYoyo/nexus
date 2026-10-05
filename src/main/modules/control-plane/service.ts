@@ -83,10 +83,10 @@ export interface ControlPlaneDeps {
   /** The Claude usage gate. */
   usage: { canDispatch(): boolean; onChange?(listener: () => void): () => void }
   /**
-   * Active runs that no engine owns (missions the user started directly). They are adopted as work items so
-   * that everything that uses agents is in one queue.
+   * Workloads that are working and were not started from the queue (a mission from the composer, a program
+   * from its page). They are adopted as work items so that everything that uses agents is in one queue.
    */
-  unownedActiveRuns?: () => { id: string; title: string; requestedAgents: number }[]
+  unownedActiveWorkloads?: () => { type: WorkItemType; refId: string; title: string; requestedAgents: number }[]
   /** One line per component other than the scheduler, which reports itself. */
   health?: Partial<Record<Exclude<HealthComponent, 'scheduler'>, () => { level: HealthLevel; detail: string }>>
   /** Shows one native notification. The control plane decides whether one is due. */
@@ -384,10 +384,10 @@ export class ControlPlane {
   }
 
   private adoptRuns(): void {
-    for (const run of this.deps.unownedActiveRuns?.() ?? []) {
-      if (this.deps.items.findOpenByRef('mission', run.id)) continue
+    for (const run of this.deps.unownedActiveWorkloads?.() ?? []) {
+      if (this.deps.items.findOpenByRef(run.type, run.refId)) continue
       const at = this.iso()
-      this.deps.items.insert({ id: newId(), type: 'mission', refId: run.id, title: run.title, priority: DEFAULT_PRIORITY, position: this.deps.items.maxPosition() + 1, state: 'RUNNING', requestedAgents: Math.max(1, run.requestedAgents), deadlineAt: null, notBefore: null, scheduleId: null, heldByUser: false, payload: null, detail: 'Started directly; adopted by the queue.', createdAt: at, updatedAt: at, startedAt: at, finishedAt: null })
+      this.deps.items.insert({ id: newId(), type: run.type, refId: run.refId, title: run.title, priority: DEFAULT_PRIORITY, position: this.deps.items.maxPosition() + 1, state: 'RUNNING', requestedAgents: Math.max(1, run.requestedAgents), deadlineAt: null, notBefore: null, scheduleId: null, heldByUser: false, payload: null, detail: 'Started directly; adopted by the queue.', createdAt: at, updatedAt: at, startedAt: at, finishedAt: null })
     }
   }
 

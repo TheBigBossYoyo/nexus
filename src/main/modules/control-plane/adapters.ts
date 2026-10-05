@@ -39,6 +39,25 @@ export function unownedActiveRuns(repos: Repositories): { id: string; title: str
     .map((run) => ({ id: run.id, title: oneLine(run.prompt) || 'Mission', requestedAgents: run.config.maxParallelAgents }))
 }
 
+/**
+ * Workloads that are working now and are not on the queue: a program, a campaign or a workspace mission the
+ * user started from its own page, and missions started from the composer. The queue adopts them, so the
+ * global capacity covers everything that uses agents however it was started.
+ */
+export function unownedActiveWorkloads(repos: Repositories, defaultAgents: () => number): { type: 'mission' | 'program' | 'arena' | 'workspace_mission'; refId: string; title: string; requestedAgents: number }[] {
+  const programs = repos.programs
+    .listOpen()
+    .filter((p) => p.state === 'PLANNING' || p.state === 'ACTIVE' || p.state === 'REPLANNING' || p.state === 'WAITING_FOR_QUOTA')
+    .map((p) => ({ type: 'program' as const, refId: p.id, title: p.name, requestedAgents: defaultAgents() }))
+  const campaigns = repos.arenaCampaigns.listByState(['running']).map((c) => ({ type: 'arena' as const, refId: c.id, title: c.name, requestedAgents: c.budgets.maxAgentsPerTrial }))
+  const missions = repos.workspaceMissions
+    .listOpen()
+    .filter((m) => m.state === 'PLANNING' || m.state === 'ACTIVE' || m.state === 'VERIFYING' || m.state === 'WAITING_FOR_QUOTA')
+    .map((m) => ({ type: 'workspace_mission' as const, refId: m.id, title: oneLine(m.goal) || 'Workspace mission', requestedAgents: defaultAgents() }))
+  const runs = unownedActiveRuns(repos).map((r) => ({ type: 'mission' as const, refId: r.id, title: r.title, requestedAgents: r.requestedAgents }))
+  return [...programs, ...campaigns, ...missions, ...runs]
+}
+
 export function createWorkloadAdapters(repos: Repositories, engines: AdapterEngines): Record<'mission' | 'program' | 'arena' | 'workspace_mission' | 'background_job' | 'scheduled_audit', WorkloadAdapter> {
   const snapshotOf = (phase: WorkloadPhase, runIds: (string | null | undefined)[], detail: string | null): WorkloadSnapshot => {
     const ids = [...new Set(runIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]

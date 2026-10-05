@@ -23,7 +23,7 @@ import { createV4Handlers } from './modules/ipc/v4-handlers'
 import { createV5Handlers } from './modules/ipc/v5-handlers'
 import { createV6Handlers } from './modules/ipc/v6-handlers'
 import { createV7Handlers } from './modules/ipc/v7-handlers'
-import { activeAgentsOf, ControlPlane, createWorkloadAdapters, unownedActiveRuns } from './modules/control-plane'
+import { activeAgentsOf, ControlPlane, createWorkloadAdapters, unownedActiveWorkloads } from './modules/control-plane'
 import { ClaudeAgentRuntimeProvider, CodexRuntimeProvider, FakeRuntimeProvider, GeminiRuntimeProvider, ProviderService } from './modules/providers'
 import { Orchestrator } from './modules/orchestrator'
 import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload, WorkspaceMissionWorkload } from './modules/overnight'
@@ -546,7 +546,7 @@ async function bootstrap(): Promise<void> {
     settings: repos.settings,
     adapters: createWorkloadAdapters(repos, { orchestrator, programs, arena, workspaces, background: backgroundJobs, defaultAgents: () => repos.settings.get().execution.maxParallelAgents }),
     usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
-    unownedActiveRuns: () => unownedActiveRuns(repos),
+    unownedActiveWorkloads: () => unownedActiveWorkloads(repos, () => repos.settings.get().execution.maxParallelAgents),
     health: {
       database: () => {
         db.prepare('SELECT 1').get()
