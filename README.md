@@ -19,7 +19,34 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md),
 [ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md), [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md),
 [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [PROGRAMS](docs/PROGRAMS.md),
-[LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md).
+[LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md),
+[WORKSPACES](docs/WORKSPACES.md), [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md),
+[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md).
+
+## What's new in 0.5
+
+The 0.5 feature set goes from "change one repository" to "change several related repositories for one goal".
+This section describes the feature set; it does not announce a release.
+
+| Feature | What it does | Where to read more |
+|---|---|---|
+| Workspaces | A workspace is a set of related repositories you enroll explicitly. Each stays an ordinary NEXUS project; the workspace adds roles, an organization graph, contracts, a policy, memory about what lies between the repositories, and a decision trail. | [WORKSPACES](docs/WORKSPACES.md) |
+| Organization graph | Which repository depends on which. Edges come from the repositories' own manifests (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`), from the consumers of a contract, or from you, and every edge shows where it comes from. A cycle is reported, never ordered. | [WORKSPACES](docs/WORKSPACES.md) |
+| Cross-repository missions | One goal, planned by a read-only session into tasks that each change one repository, in dependency order. You approve the plan before anything runs. Each task is an ordinary mission run in its own repository, on its own branch and worktree; your checkouts are not changed. A later task is given what the tasks it depends on reported and the current content of the contracts it uses. | [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md) |
+| Contracts | A contract is a file one repository provides and others consume (OpenAPI as JSON, JSON Schema, TypeScript declarations, Protobuf, SQL `CREATE TABLE`, event schemas). NEXUS reads its surface, keeps versions, and reports a change as `identical`, `compatible`, `breaking` or `unknown`. | [CONTRACTS](docs/CONTRACTS.md) |
+| Global verification | When every task is done, each repository's checks, each contract the mission touched and each consumer's copy are verified together. A mission that fails verification is blocked, records no contract version and prepares no release. | [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md), [CONTRACTS](docs/CONTRACTS.md) |
+| Release trains | After a verified mission NEXUS prepares an order and version bumps for releasing the repositories. It never publishes: the policy field `publishing` is fixed to `never`, and the publish channel always refuses and records the request. | [RELEASE_TRAINS](docs/RELEASE_TRAINS.md) |
+| Workspace programs | An ordered series of cross-repository missions that you write, one per milestone. Each milestone's tasks start from the results of the earlier milestones in every repository they changed. | [WORKSPACES](docs/WORKSPACES.md) |
+| Overnight workspace missions | A cross-repository mission can be an overnight workload under the same supervisor: authorization, deadline and failsafe first, a report, and the end action. A plan that waits for approval ends the night as a blocker. | [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md), [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+
+Statements that hold for the 0.5 feature set:
+
+- The application state machine owns the truth. Claude proposes one thing, a cross-repository plan, and it is validated against the workspace before it is stored.
+- NEXUS does not publish, push, tag or merge. The result of each task stays on a branch in its repository.
+- Only repositories the workspace policy allows are ever worked in.
+- Compatibility is judged on the surface NEXUS can read from a contract file. `compatible` means no breaking change was seen in what is read, not that the contract is safe; a file that cannot be read is `unknown`.
+- Dependency discovery reads the root manifest of each repository only. Other relationships are declared by you.
+- The Workspaces view has no screen for workspace programs and no control to run a workspace mission overnight in this feature set; both are available through the IPC channels.
 
 ## What's new in 0.4
 

@@ -58,8 +58,9 @@ src/
       strategy/      v0.3: strategies.ts (five strategies as engine configuration), tournament.ts (pure ranking)
       policy/        v0.3: profiler.ts, stats.ts, engine.ts, learning.ts (pure); service.ts, snapshots.ts, simulator.ts
       arena/         v0.3: case-format.ts, fixtures.ts, evaluator.ts, scoring.ts, metrics.ts, campaign.ts (ArenaService)
-      overnight/     v0.2.1: supervisor, report, tray model; v0.3: AutonomousWorkload, MissionWorkload, ArenaCampaignWorkload; v0.4: ProgramWorkload
+      overnight/     v0.2.1: supervisor, report, tray model; v0.3: AutonomousWorkload, MissionWorkload, ArenaCampaignWorkload; v0.4: ProgramWorkload; v0.5: WorkspaceMissionWorkload
       program/       v0.4: engine.ts (ProgramEngine), reasoning.ts (prompts, parsing), memory.ts, background.ts
+      workspace/     v0.5: engine.ts (WorkspaceEngine), contracts.ts (contract surface readers), discovery.ts (manifests)
   preload/           narrow typed bridge (CJS, sandboxed)
   renderer/          React UI
 tests/
@@ -240,6 +241,40 @@ Claude runtime. Adding a provider would need a new implementation of the interfa
 The v0.3 renderer replaces the 0.2 shell (navigation in three groups, a contextual page header, a Ctrl+K palette) and
 adds Home, Arena, Policy and Usage views. v0.3 IPC channels are in ARENA.md, ADAPTIVE_POLICY.md and
 USAGE_INTELLIGENCE.md. Design: V0_3_DESIGN.md.
+
+## v0.5: the workspace module
+
+`src/shared/workspace.ts` holds the data, the zod schemas and the pure decisions (`dependencyOrder`,
+`validateWorkspacePlan`, `compareSurfaces`, `planRelease`, the mission state table). `src/main/modules/workspace/`
+holds `WorkspaceEngine` (it owns the database access and the clock), `contracts.ts` (reads a contract file into a
+surface; local and deterministic) and `discovery.ts` (reads manifests; no install, no network). IPC channels are
+`workspace.*` in `src/main/modules/ipc/v5-handlers.ts`. Design and use: WORKSPACES.md,
+MULTI_REPO_ORCHESTRATION.md, CONTRACTS.md, RELEASE_TRAINS.md.
+
+34. **A cross-repository task is an ordinary mission.** The engine does not schedule agents. It asks the orchestrator
+    (through the same `ProgramRunHost` interface the program engine uses) for one `mission` run per task in that
+    task's project, and for one read-only `ask` run to plan. Worktrees, review, verification and repair stay the
+    orchestrator's. The engine decides the order, the base of each run and what the whole verification says.
+35. **A plan is validated against the workspace and always approved by the user.** `validateWorkspacePlan` checks
+    repositories, the policy, task dependencies and the organization graph; a valid plan waits in
+    `AWAITING_APPROVAL`. The engine runs one writer per repository and at most `maxParallelRepositories` at once.
+36. **Edges have provenance.** Every dependency is stored with its source (`manifest`, `contract`, `user`), the file
+    that shows it and a sentence. Manifest edges are recomputed on discovery; the others are kept.
+37. **Contract versions are recorded for verified work.** A mission compares the provider's contract at its own base
+    and at its result, during verification, and stores a version only when the whole mission passed. `unknown` is
+    treated as breaking.
+38. **NEXUS prepares releases and never publishes.** `publishing` is the literal `never` in the policy schema,
+    `ReleaseTrain.publishAuthorized` is the literal `false`, and `workspace.publishRelease` always refuses and
+    records the request.
+39. **A workspace mission is an overnight workload.** `WorkspaceMissionWorkload` implements `AutonomousWorkload`; the
+    engine owns the mission, the supervisor owns the deadline, the failsafe and the power decision. The engine
+    subscribes to run events, observes the usage dispatch gate and recovers its open missions at startup
+    (`workspaces.recover()` runs after the program engine's recovery).
+40. **Migration 007 is additive.** `007-workspaces.ts` creates `workspaces`, `workspace_repositories`,
+    `workspace_services`, `workspace_dependencies`, `workspace_contracts`, `workspace_contract_consumers`,
+    `workspace_contract_versions`, `workspace_missions`, `workspace_tasks`, `workspace_programs`,
+    `workspace_release_trains`, `workspace_memory` and `workspace_decisions`, with indexes. No existing table is
+    altered.
 
 ## Data location
 
