@@ -105,6 +105,20 @@ for (const source of sources) {
     await shot('programs')
     const programs = await page.evaluate(() => globalThis.nexus.invoke('program.list', {}))
     entry.checks['Programs renders; an upgraded database has no program'] = programsView && programs.ok === true && programs.value.programs.length === 0
+    // 0.5 and 0.6: the Workspaces and Providers pages render; an upgraded database has no workspace; the real
+    // providers are detected (Claude is always among them) and nothing but Claude is enabled.
+    await page.click('[data-testid="nav-workspaces"]')
+    const workspacesView = await page.waitForSelector('[data-testid="view-workspaces"]', { timeout: 15_000 }).then(() => true, () => false)
+    await shot('workspaces')
+    const workspaces = await page.evaluate(() => globalThis.nexus.invoke('workspace.list', {}))
+    entry.checks['Workspaces renders; an upgraded database has no workspace'] = workspacesView && workspaces.ok === true && workspaces.value.length === 0
+    await page.click('[data-testid="nav-providers"]')
+    const providersView = await page.waitForSelector('[data-testid="providers-list"]', { timeout: 30_000 }).then(() => true, () => false)
+    await shot('providers')
+    const providers = await page.evaluate(() => globalThis.nexus.invoke('providers.overview', {}))
+    entry.providers = providers.ok ? providers.value.statuses.map((s) => ({ id: s.id, installed: s.installed, version: s.version, auth: s.auth, supported: s.supported, health: s.health })) : null
+    entry.checks['Providers renders; Claude is detected; no other provider is enabled'] =
+      providersView && providers.ok === true && providers.value.statuses.some((s) => s.id === 'claude' && s.required) && providers.value.policy.enabled.codex === false && providers.value.policy.enabled.gemini === false && providers.value.policy.crossModelReview.enabled === false
     if (old) {
       await page.click('[data-testid="nav-run"]')
       await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
