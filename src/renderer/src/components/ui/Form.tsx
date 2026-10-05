@@ -1,4 +1,11 @@
-import { useEffect, useId, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
+import {
+  useEffect,
+  useId,
+  useState,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+} from 'react'
 import { cn } from '../../lib/cn'
 
 const CONTROL =
@@ -74,12 +81,17 @@ export function Toggle({
   'data-testid'?: string
   'aria-label'?: string
 }) {
+  // The switch is named by its label and described by its description, unless the caller names it itself.
+  const id = useId()
+  const named = rest['aria-label'] === undefined && Boolean(label)
   return (
     <div className={cn('flex items-start gap-2.5', className)}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={named ? `${id}-label` : undefined}
+        aria-describedby={description ? `${id}-description` : undefined}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
@@ -99,8 +111,16 @@ export function Toggle({
       </button>
       {label || description ? (
         <div className="min-w-0">
-          {label ? <div className="leading-5">{label}</div> : null}
-          {description ? <div className="text-small text-text-muted">{description}</div> : null}
+          {label ? (
+            <div id={`${id}-label`} className="leading-5">
+              {label}
+            </div>
+          ) : null}
+          {description ? (
+            <div id={`${id}-description`} className="text-small text-text-muted">
+              {description}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

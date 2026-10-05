@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -17,6 +20,8 @@ import { createRepositories, MIGRATIONS, openDatabase, runMigrations, type Datab
 import {
   ClaudeAgentRuntimeProvider,
   cliInvocation,
+  resolveTool,
+  toolEnv,
   codexArgs,
   CodexCliRuntime,
   codexPrompt,
@@ -145,8 +150,12 @@ describe('provider routing (pure)', () => {
   })
 
   it('a resumed session stays with the provider that owns it', () => {
-    expect(routeSession({ role: 'reviewer', resumeProvider: 'codex' }, DEFAULT_PROVIDER_POLICY, all)).toMatchObject({ provider: 'codex', requested: 'codex' })
+    expect(routeSession({ role: 'reviewer', resumeProvider: 'codex' }, policy({ enabled: { claude: true, codex: true, gemini: false } }), all)).toMatchObject({ provider: 'codex', requested: 'codex' })
     expect(routeSession({ role: 'reviewer', resumeProvider: 'claude' }, REVIEW_BY_CODEX, all).provider).toBe('claude')
+    // A session of a provider the user has since switched off is not resumed there, and not sent elsewhere.
+    const off = routeSession({ role: 'reviewer', resumeProvider: 'codex' }, DEFAULT_PROVIDER_POLICY, all)
+    expect(off.provider).toBeNull()
+    expect(off.fallbackReason).toContain('cannot be resumed')
   })
 
   it('says what stops a provider from being enabled', () => {
@@ -170,18 +179,49 @@ describe('provider routing (pure)', () => {
 })
 
 describe('provider command lines', () => {
-  it('starts a tool only with checked arguments, through cmd.exe on Windows', () => {
-    expect(cliInvocation('codex', ['--version'], 'win32')).toEqual({ command: 'cmd.exe', args: ['/d', '/s', '/c', 'codex', '--version'] })
-    expect(cliInvocation('codex', ['login', 'status'], 'linux')).toEqual({ command: 'codex', args: ['login', 'status'] })
-    for (const bad of ['a b', 'x&calc', 'x|y', '"q"', '$(id)', 'a;b', '%PATH%', 'x^y', '`id`', '']) expect(() => cliInvocation('codex', [bad], 'win32'), bad).toThrow(/unsafe/)
+  it('starts a tool only by its absolute path and with checked arguments, through the system cmd.exe on Windows', () => {
+    const shim = 'C:\\Users\\me\\scoop\\bin\\codex.cmd'
+    expect(cliInvocation(shim, ['--version'], 'win32', { SystemRoot: 'C:\\Windows' })).toEqual({ command: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', `""${shim}" --version"`], verbatim: true })
+    expect(cliInvocation('C:\\Program Files (x86)\\tool\\codex.cmd', ['login', 'status'], 'win32', { SystemRoot: 'C:\\Windows' }).args[3]).toBe('""C:\\Program Files (x86)\\tool\\codex.cmd" login status"')
+    expect(cliInvocation('C:\\tools\\codex.exe', ['login', 'status'], 'win32')).toEqual({ command: 'C:\\tools\\codex.exe', args: ['login', 'status'], verbatim: false })
+    for (const bad of ['a b', 'x&calc', 'x|y', '"q"', '$(id)', 'a;b', '%PATH%', 'x^y', '`id`', '']) expect(() => cliInvocation(shim, [bad], 'win32'), bad).toThrow(/unsafe/)
+    // A bare name would be looked up by cmd.exe in the working directory first: never used.
+    expect(() => cliInvocation('codex', ['--version'], 'win32')).toThrow(/absolute path/)
+    for (const path of ['C:\\a%b\\codex.cmd', 'C:\\a&b\\codex.cmd', 'C:\\a"b\\codex.cmd', 'C:\\a^b\\codex.cmd']) expect(() => cliInvocation(path, [], 'win32'), path).toThrow(/cmd.exe interprets/)
+    expect(toolEnv({ PATH: 'x', ANTHROPIC_API_KEY: 'k', CLAUDE_CODE_OAUTH_TOKEN: 't', NODE_OPTIONS: '--require x' })).toEqual({ PATH: 'x', NoDefaultCurrentDirectoryInExePath: '1' })
+  })
+
+  it('finds a tool on PATH only: never in the working directory, never through a relative PATH entry', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'nexus-tool-'))
+    try {
+      const bin = join(root, 'bin')
+      const work = join(root, 'work')
+      mkdirSync(bin)
+      mkdirSync(join(work, 'tools'), { recursive: true })
+      const name = process.platform === 'win32' ? 'faketool.cmd' : 'faketool'
+      for (const dir of [bin, work, join(work, 'tools')]) writeFileSync(join(dir, name), process.platform === 'win32' ? '@echo real\r\n' : '#!/bin/sh\necho real\n', { mode: 0o755 })
+      const env = (path: string): NodeJS.ProcessEnv => ({ PATH: path, PATHEXT: '.COM;.EXE;.BAT;.CMD' })
+      // On PATH: found, by absolute path.
+      expect(await resolveTool('faketool', work, env(bin))).toBe(join(bin, name))
+      // Only in the working directory (which cmd.exe would search first): not found.
+      expect(await resolveTool('faketool', work, env(join(root, 'empty')))).toBeNull()
+      // PATH entries inside the working directory, and relative ones, are ignored.
+      expect(await resolveTool('faketool', work, env([join(work, 'tools'), '.', 'tools', work].join(delimiter)))).toBeNull()
+      expect(await resolveTool('faketool', work, env([join(work, 'tools'), bin].join(delimiter)))).toBe(join(bin, name))
+      expect(await resolveTool('../bin/faketool', work, env(bin))).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('builds Codex turns that are always read-only and never carry the prompt', () => {
     expect(codexArgs({ model: 'gpt-5.5' })).toEqual(['exec', '--json', '--skip-git-repo-check', '-m', 'gpt-5.5', '-c', 'sandbox_mode=read-only', '-s', 'read-only', '--color', 'never', '-'])
+    // A session id that looks like an option is refused.
+    expect(() => codexArgs({ model: 'gpt-5.5', resumeSessionId: '--dangerously-bypass-approvals-and-sandbox' })).toThrow(/session id/)
     expect(codexArgs({ model: 'gpt-5.5', resumeSessionId: '01a109bd-00c9-7721-b081-a10a59244867' })).toEqual(['exec', 'resume', '01a109bd-00c9-7721-b081-a10a59244867', '--json', '--skip-git-repo-check', '-m', 'gpt-5.5', '-c', 'sandbox_mode=read-only', '-'])
     expect(() => codexArgs({ model: 'x; rm -rf' })).toThrow()
     expect(() => codexArgs({ model: 'gpt', resumeSessionId: 'abc & calc' })).toThrow()
-    for (const args of [codexArgs({ model: 'm' }), codexArgs({ model: 'm', resumeSessionId: 'abcdefgh-1' })]) expect(() => cliInvocation('codex', args, 'win32')).not.toThrow()
+    for (const args of [codexArgs({ model: 'm' }), codexArgs({ model: 'm', resumeSessionId: 'abcdefgh-1' })]) expect(() => cliInvocation('C:\\bin\\codex.cmd', args, 'win32')).not.toThrow()
     const prompt = codexPrompt({ systemPromptAppend: 'SYSTEM', prompt: 'TASK', outputSchema: { type: 'object' } })
     expect(prompt).toContain('SYSTEM')
     expect(prompt).toContain('TASK')
@@ -274,8 +314,24 @@ describe('Codex command line runtime (scripted process)', () => {
     expect(out.turn?.outcome).toBe('error')
     expect(out.turn?.errors.join(' ')).toContain('changed the working directory')
     expect(out.ended).toMatchObject({ reason: 'crashed' })
+    expect(out.turn?.text).toBe('')
+    // The directory is not trusted again: a second attempt would start from the changed state and pass.
+    expect(() => changed.startSession(spec())).toThrow(/No further Codex session/)
     const same = new CodexCliRuntime({ exec: codex.exec, snapshot: async () => 'same' })
     expect((await collect(same.startSession(spec()))).turn?.outcome).toBe('success')
+    // Fail closed: a directory whose state cannot be read gets no session at all, and a state that cannot be read afterwards discards the result.
+    const before = codex.calls.length
+    const blind = await collect(new CodexCliRuntime({ exec: codex.exec, snapshot: async () => null }).startSession(spec()))
+    expect(blind.turn).toBeNull()
+    expect(blind.ended?.error).toContain('cannot verify')
+    expect(codex.calls.length).toBe(before)
+    let calls = 0
+    const lost = await collect(new CodexCliRuntime({ exec: codex.exec, snapshot: async () => (calls++ === 0 ? 'state' : null) }).startSession(spec()))
+    expect(lost.turn?.outcome).toBe('error')
+    expect(lost.ended?.reason).toBe('crashed')
+    // An answer that is JSON but not an object is not a structured answer.
+    const list = fakeCodex(() => [J({ type: 'thread.started', thread_id: THREAD }), J({ type: 'item.completed', item: { type: 'agent_message', text: '```json\n[1, 2]\n```' } }), J({ type: 'turn.completed', usage: {} })])
+    expect((await collect(new CodexCliRuntime({ exec: list.exec }).startSession(spec({ outputSchema: { type: 'object' } })))).turn?.outcome).toBe('structured_output_failed')
   })
 })
 
@@ -289,9 +345,12 @@ describe('provider discovery', () => {
 
   it('Codex: installed and signed in, signed out, too old, missing', async () => {
     const ok = await new CodexRuntimeProvider({ run: runner({ 'codex --version': { code: 0, stdout: 'codex-cli 0.130.0\n' }, 'codex login status': { code: 0, stdout: 'Logged in using ChatGPT\n' } }), probeCwd: () => '.' }).discover()
-    expect(ok).toMatchObject({ installed: 'installed', version: '0.130.0', auth: 'authenticated', authDetail: 'Logged in using ChatGPT', supported: true, health: 'unknown', capabilities: { writes: false, toolAuthorization: false, confinement: 'provider_sandbox', structuredOutput: 'prompted' } })
+    expect(ok).toMatchObject({ installed: 'installed', version: '0.130.0', auth: 'authenticated', authDetail: 'ChatGPT login', supported: true, health: 'unknown', capabilities: { writes: false, toolAuthorization: false, confinement: 'provider_sandbox', structuredOutput: 'prompted' } })
+    // What the tool prints about the login is never stored: only the kind of login.
+    const named = await new CodexRuntimeProvider({ run: runner({ 'codex --version': { code: 0, stdout: 'codex-cli 0.130.0' }, 'codex login status': { code: 0, stdout: 'Logged in as someone@example.com using an API key sk-abc' } }), probeCwd: () => '.' }).discover()
+    expect(named.authDetail).toBe('API key')
     const out = await new CodexRuntimeProvider({ run: runner({ 'codex --version': { code: 0, stdout: 'codex-cli 0.130.0' }, 'codex login status': { code: 1, stderr: 'Not logged in' } }), probeCwd: () => '.' }).discover()
-    expect(out).toMatchObject({ installed: 'installed', auth: 'auth_required', health: 'unavailable' })
+    expect(out).toMatchObject({ installed: 'installed', auth: 'auth_required', authDetail: null, health: 'unavailable' })
     const old = await new CodexRuntimeProvider({ run: runner({ 'codex --version': { code: 0, stdout: 'codex-cli 0.98.0' }, 'codex login status': { code: 0, stdout: 'Logged in using ChatGPT' } }), probeCwd: () => '.' }).discover()
     expect(old).toMatchObject({ supported: false, health: 'unavailable', capabilities: { sessions: false } })
     expect(old.supportDetail).toContain('older than')
@@ -409,6 +468,9 @@ describe('provider service: routing real sessions, fallback, outage, recovery', 
     // The provider works again: an explicit probe (or a new detection) brings it back.
     r.codexRuntime.script = completeWith({ text: 'codex is back' })
     expect(await r.service.probe('codex')).toMatchObject({ ok: true, status: { health: 'healthy' } })
+    // A test is a real session: asked again at once, the last result is given and no second session runs.
+    r.codex.probeResult = { ok: false, detail: 'would fail now' }
+    expect(await r.service.probe('codex')).toMatchObject({ ok: true })
     expect((await collect(r.service.router.startSession(spec({ agentId: r.agent.id })))).turn?.text).toBe('codex is back')
   })
 
@@ -446,10 +508,16 @@ describe('provider service: routing real sessions, fallback, outage, recovery', 
     const first = r.service.router.startSession(spec({ agentId: r.agent.id }))
     await collect(first)
     const sessionId = first.sessionId()!
-    r.service.setPolicy(DEFAULT_PROVIDER_POLICY)
+    r.service.setPolicy({ ...DEFAULT_PROVIDER_POLICY, enabled: { claude: true, codex: true, gemini: false } })
     await collect(r.service.router.resumeSession(spec({ agentId: r.agent.id }), sessionId))
     expect(r.codexRuntime.sessions).toHaveLength(2)
     expect(r.codexRuntime.sessions[1]!.resumeSessionId).toBe(sessionId)
+    // Once the user has switched the provider off, its session is not resumed anywhere.
+    r.service.setPolicy(DEFAULT_PROVIDER_POLICY)
+    const refused = await collect(r.service.router.resumeSession(spec({ agentId: r.agent.id }), sessionId))
+    expect(refused.ended?.error).toContain('cannot be resumed')
+    expect(r.codexRuntime.sessions).toHaveLength(2)
+    expect(r.claudeRuntime.sessions).toHaveLength(0)
   })
 
   it('one provider failing to answer detection does not fail the others', async () => {

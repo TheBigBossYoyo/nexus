@@ -142,9 +142,12 @@ export class CodexRuntimeProvider implements AgentRuntimeProvider {
   readonly id = 'codex' as const
   private version: string | null = null
   private readonly codex: CodexCliRuntime
+  /** Probes run in an empty temporary directory, where there is nothing to verify and nothing to change. */
+  private readonly probeRuntime: CodexCliRuntime
 
   constructor(private readonly deps: { run?: CommandRunner; runtime?: CodexCliRuntime; snapshot?: (cwd: string) => Promise<string | null>; probeCwd: () => string }) {
     this.codex = deps.runtime ?? new CodexCliRuntime({ version: () => this.version, ...(deps.snapshot ? { snapshot: deps.snapshot } : {}) })
+    this.probeRuntime = deps.runtime ?? new CodexCliRuntime({ version: () => this.version })
   }
 
   async discover(): Promise<ProviderStatus> {
@@ -166,7 +169,8 @@ export class CodexRuntimeProvider implements AgentRuntimeProvider {
       installed: 'installed',
       version: this.version,
       auth: authenticated ? 'authenticated' : login.code === null ? 'unknown' : 'auth_required',
-      authDetail: said || null,
+      // Only the kind of login is kept. What the tool printed is not stored: it could name an account.
+      authDetail: authenticated ? (/chatgpt/i.test(said) ? 'ChatGPT login' : /api key/i.test(said) ? 'API key' : 'Signed in') : null,
       supported,
       supportDetail: supported ? null : `Codex ${this.version} is older than ${CODEX_MIN_VERSION.join('.')}, the oldest version NEXUS can drive.`,
       // Detection sends no prompt, so whether a session works is not known until one ran or the user probes.
@@ -190,7 +194,7 @@ export class CodexRuntimeProvider implements AgentRuntimeProvider {
   }
 
   probe(): Promise<{ ok: boolean; detail: string }> {
-    return probeRuntime(this.codex, CODEX_DEFAULT_MODEL, this.deps.probeCwd())
+    return probeRuntime(this.probeRuntime, CODEX_DEFAULT_MODEL, this.deps.probeCwd())
   }
 }
 

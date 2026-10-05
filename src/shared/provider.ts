@@ -75,7 +75,7 @@ export const NO_CAPABILITIES: ProviderCapabilities = {
   writes: false,
 }
 
-const ModelName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/, 'a model name')
+const ModelName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/, 'a model name')
 
 /**
  * What the user allows. Nothing is sent to a provider that is not enabled here, and enabling a provider does
@@ -149,7 +149,12 @@ export function unusableReason(id: ProviderId, policy: ProviderPolicy, status: P
 export function routeSession(request: RouteRequest, policy: ProviderPolicy, statuses: readonly ProviderStatus[]): RouteDecision {
   const status = (id: ProviderId): ProviderStatus | undefined => statuses.find((s) => s.id === id)
   if (request.resumeProvider) {
-    return { provider: request.resumeProvider, requested: request.resumeProvider, reason: 'The session is resumed with the provider that owns it.', fallbackReason: null }
+    const owner = request.resumeProvider
+    // A session can only be resumed where it lives. Another provider's session is resumed only while that
+    // provider is still enabled and usable; otherwise the session is refused, never sent elsewhere.
+    const problem = owner === PRIMARY_PROVIDER ? null : unusableReason(owner, policy, status(owner), request.role)
+    if (problem === null) return { provider: owner, requested: owner, reason: 'The session is resumed with the provider that owns it.', fallbackReason: null }
+    return { provider: null, requested: owner, reason: 'The session belongs to this provider.', fallbackReason: `${problem}; its session cannot be resumed.` }
   }
   let requested: ProviderId = PRIMARY_PROVIDER
   let reason = 'Claude is the default provider.'

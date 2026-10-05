@@ -1086,11 +1086,13 @@ export class ArenaService {
     const models: Record<string, string> = {}
     for (const d of this.repos.routingDecisions.listByRun(run.id)) if (d.resolvedModel) models[d.role] = d.resolvedModel
     for (const a of this.repos.agents.listByRun(run.id)) {
-      if (!a.model || models[a.role]) continue
+      if (!a.model) continue
       // v0.6: the provider is part of what a trial measured. Another provider's agent is recorded as
-      // `<provider>:<model>`, which keeps its trials apart from Claude-only trials in every comparison.
+      // `<provider>:<model>`, which keeps its trials apart from Claude-only trials in every comparison. It
+      // replaces the model of the routing decision, which is always a Claude model.
       const provider = this.repos.providerSessions.latestProviderOfAgent(a.id)
-      models[a.role] = provider && provider !== 'claude' ? `${provider}:${a.model}` : a.model
+      if (provider && provider !== 'claude') models[a.role] = `${provider}:${a.model}`
+      else if (!models[a.role]) models[a.role] = a.model
     }
     const profile = this.repos.taskProfiles.getByRun(run.id)
     trial = this.setTrial(trial.id, { resultCommit, models, taskProfileId: profile?.id ?? trial.taskProfileId })

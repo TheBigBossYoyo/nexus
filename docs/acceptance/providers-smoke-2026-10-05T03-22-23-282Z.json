@@ -1,0 +1,100 @@
+{
+  "kind": "providers-smoke",
+  "startedAt": "2026-10-05T03:22:23.282Z",
+  "codex": {
+    "id": "codex",
+    "displayName": "Codex",
+    "required": false,
+    "checkedAt": "2026-10-05T03:22:23.283Z",
+    "models": [
+      {
+        "value": "gpt-5.5",
+        "displayName": "gpt-5.5"
+      }
+    ],
+    "installed": "installed",
+    "version": "0.130.0",
+    "auth": "authenticated",
+    "authDetail": "ChatGPT login",
+    "supported": true,
+    "supportDetail": null,
+    "health": "unknown",
+    "healthDetail": null,
+    "capabilities": {
+      "sessions": true,
+      "resume": true,
+      "structuredOutput": "prompted",
+      "toolAuthorization": false,
+      "nexusTools": false,
+      "mcp": false,
+      "usageReport": false,
+      "confinement": "provider_sandbox",
+      "writes": false
+    }
+  },
+  "gemini": {
+    "id": "gemini",
+    "displayName": "Gemini",
+    "required": false,
+    "installed": "not_installed",
+    "version": null,
+    "auth": "unknown",
+    "authDetail": null,
+    "supported": false,
+    "supportDetail": "The Gemini command line tool was not found on PATH.",
+    "health": "unavailable",
+    "healthDetail": null,
+    "models": [],
+    "capabilities": {
+      "sessions": false,
+      "resume": false,
+      "structuredOutput": "none",
+      "toolAuthorization": false,
+      "nexusTools": false,
+      "mcp": false,
+      "usageReport": false,
+      "confinement": "none",
+      "writes": false
+    },
+    "checkedAt": "2026-10-05T03:22:23.597Z"
+  },
+  "review": {
+    "eventTypes": [
+      "session.started",
+      "text",
+      "tool.started",
+      "tool.completed",
+      "text",
+      "tool.started",
+      "tool.completed",
+      "text",
+      "turn.completed",
+      "session.ended"
+    ],
+    "sessionId": "01a10a15-8629-74e3-99df-4477a8a3e41e",
+    "outcome": "success",
+    "structuredOutput": {
+      "verdict": "request_changes",
+      "findings": [
+        "average.js:5: `average([])` returns `NaN` because it computes `sum([]) / 0`, so it does not match the comment saying empty lists return 0."
+      ],
+      "wroteFile": false
+    },
+    "usage": [
+      {
+        "model": "gpt-5.5",
+        "inputTokens": 46980,
+        "outputTokens": 522,
+        "cacheReadTokens": 27776,
+        "cacheCreationTokens": 0,
+        "costUsd": 0,
+        "contextWindow": null
+      }
+    ],
+    "errors": [],
+    "durationMs": 18466,
+    "commandsRun": 2,
+    "workingDirectoryUnchanged": true,
+    "plantedToolRan": false
+  }
+}

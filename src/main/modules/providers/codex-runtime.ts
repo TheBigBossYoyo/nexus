@@ -21,7 +21,8 @@ export const CODEX_TOOL = 'codex'
 export const CODEX_DEFAULT_MODEL = 'gpt-5.5'
 /** One turn of a reviewing agent. Longer than that and the turn is ended as an error. */
 const TURN_TIMEOUT_MS = 30 * 60_000
-const SESSION_ID = /^[A-Za-z0-9-]{8,64}$/
+/** A Codex session id. It is placed on the command line, so it must not be able to look like an option. */
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
 
 export interface CodexExecResult {
@@ -66,7 +67,9 @@ function lastJson(text: string): unknown {
   const candidates = first !== -1 && last > first ? [...fences, text.slice(first, last + 1)] : fences
   for (const candidate of candidates) {
     try {
-      return JSON.parse(candidate) as unknown
+      const parsed = JSON.parse(candidate) as unknown
+      // A structured answer is an object; a bare number, string or list is not one.
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return parsed
     } catch {
       // Try the next candidate.
     }
@@ -100,6 +103,7 @@ class CodexHandle implements AgentSessionHandle {
     private readonly model: string,
     private readonly options: CodexRuntimeOptions,
     private readonly onFinished: (handle: CodexHandle) => void,
+    private readonly onTainted: (cwd: string) => void,
   ) {
     this.agentId = spec.agentId
     this.events = this.queue
@@ -141,7 +145,13 @@ class CodexHandle implements AgentSessionHandle {
 
   private async run(): Promise<void> {
     try {
-      const before = await this.options.snapshot?.(this.spec.cwd)
+      const verify = this.options.snapshot
+      const before = verify ? await verify(this.spec.cwd) : null
+      // Fail closed: when NEXUS is set up to verify and cannot, the session does not run.
+      if (verify && before === null) {
+        this.finish('crashed', 'NEXUS could not record the state of the working directory (it is not a Git working tree, or Git failed), so it cannot verify that a read-only Codex session changes nothing. The session was not started.')
+        return
+      }
       let prompt: string | null = codexPrompt(this.spec)
       let turns = 0
       while (prompt !== null && !this.stopped) {
@@ -149,11 +159,13 @@ class CodexHandle implements AgentSessionHandle {
         turns++
         if (this.stopped) break
         // Read-only is enforced by the Codex sandbox; NEXUS checks that it held.
-        const after = await this.options.snapshot?.(this.spec.cwd)
-        if (before != null && after != null && before !== after) {
-          const errors = [...result.errors, 'The Codex session changed the working directory although it was started read-only. Its result is not used.']
-          this.queue.push({ type: 'turn.completed', result: { ...result, outcome: 'error', structuredOutput: undefined, errors } })
-          this.finish('crashed', 'A read-only Codex session changed files.')
+        const after = verify ? await verify(this.spec.cwd) : null
+        if (verify && (after === null || before !== after)) {
+          const why = after === null ? 'NEXUS could not read the state of the working directory after the Codex session, so it cannot confirm that nothing changed.' : 'The Codex session changed the working directory although it was started read-only.'
+          // The directory is not trusted again for a Codex session: a second attempt would start from the changed state and pass.
+          this.onTainted(this.spec.cwd)
+          this.queue.push({ type: 'turn.completed', result: { ...result, text: '', outcome: 'error', structuredOutput: undefined, errors: [...result.errors, `${why} Its result is not used.`] } })
+          this.finish('crashed', why)
           return
         }
         this.queue.push({ type: 'turn.completed', result: { ...result, numTurns: turns } })
@@ -236,6 +248,8 @@ class CodexHandle implements AgentSessionHandle {
 
 export class CodexCliRuntime implements AgentRuntime {
   private readonly live = new Set<CodexHandle>()
+  /** Working directories in which a read-only session was seen to change something. */
+  private readonly tainted = new Set<string>()
 
   constructor(private readonly options: CodexRuntimeOptions = {}) {}
 
@@ -243,7 +257,8 @@ export class CodexCliRuntime implements AgentRuntime {
     if (!READ_ONLY_ROLES.includes(spec.role)) throw new Error(`Codex is read-only in NEXUS; it cannot run a ${spec.role} session`)
     // The router hands over a Codex model name or none; a name that is not one falls back to the default.
     const model = spec.model && MODEL.test(spec.model) ? spec.model : (this.options.defaultModel ?? CODEX_DEFAULT_MODEL)
-    const handle = new CodexHandle(spec, model, this.options, (h) => this.live.delete(h))
+    if (this.tainted.has(spec.cwd)) throw new Error('An earlier Codex session changed this working directory although it was read-only. No further Codex session runs there.')
+    const handle = new CodexHandle(spec, model, this.options, (h) => this.live.delete(h), (cwd) => this.tainted.add(cwd))
     this.live.add(handle)
     return handle
   }
