@@ -99,6 +99,12 @@ for (const source of sources) {
     }
     entry.pages = pages
     entry.checks['Home, Missions, Arena, Policy, Usage, Overnight and Settings render'] = Object.values(pages).every(Boolean)
+    // 0.4: the Programs page renders, and an upgraded database has no program.
+    await page.click('[data-testid="nav-programs"]')
+    const programsView = await page.waitForSelector('[data-testid="view-programs"]', { timeout: 15_000 }).then(() => true, () => false)
+    await shot('programs')
+    const programs = await page.evaluate(() => globalThis.nexus.invoke('program.list', {}))
+    entry.checks['Programs renders; an upgraded database has no program'] = programsView && programs.ok === true && programs.value.programs.length === 0
     if (old) {
       await page.click('[data-testid="nav-run"]')
       await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)

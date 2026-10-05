@@ -1,6 +1,6 @@
 # Test Status
 
-Factual status as of 2026-10-04 22:15 (+01:00), version 0.3.0, branch `nexus-0.3`. Details and evidence:
+Factual status as of 2026-10-05 02:10 (+01:00), version 0.3.0, branch `nexus-0.3` (released as `v0.3.0`). Details and evidence:
 `docs/V0_3_RELEASE_REPORT.md`. The 0.2.1, 0.2.0 and 0.1 sections below are the earlier records, unchanged.
 
 ## 0.3.0: automated (no Claude usage), final tree
@@ -9,10 +9,11 @@ Factual status as of 2026-10-04 22:15 (+01:00), version 0.3.0, branch `nexus-0.3
 |---|---|
 | `pnpm typecheck` | pass |
 | `pnpm lint` | pass |
-| `pnpm test` | 121 files, 2338 tests passed, 752 s (unit, integration, scenarios, and the policy, usage, Arena and overnight stresses at 1000 seeds each) |
-| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 5 files passed in one run, 5295 s; 1000 orchestrator seeds, no failure dump |
-| `pnpm test:e2e` | 16 Playwright tests passed, run after the version bump; 11 stored screenshots compared |
-| `pnpm package` | produced `release/NEXUS-Setup-0.3.0.exe` (207,152,853 bytes) |
+| `pnpm test` | 126 files, 2399 tests passed, 783 s (unit, integration, scenarios, and the policy, usage, Arena and overnight stresses at 1000 seeds each) |
+| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 6 files passed in one run, 7600 s on a shared machine; 1000 orchestrator seeds, no failure dump. Started on `e4253e5`; see the release report for the conditions |
+| `pnpm test:e2e` | 17 Playwright tests passed, 1 capture-only test skipped by design; 11 stored screenshots compared |
+| `pnpm package` | produced `release/NEXUS-Setup-0.3.0.exe` (207,250,922 bytes, SHA-256 `2d905b9e...38e650`) |
+| `node scripts/packaged-validation.mjs` on 0.1, 0.2.0 and 0.2.1 databases | 17 of 17 checks each, schema 5 |
 
 ## 0.3.0: manual
 
@@ -23,10 +24,12 @@ Factual status as of 2026-10-04 22:15 (+01:00), version 0.3.0, branch `nexus-0.3
 | Speculative task with real Claude | passed, 17 of 17 gates, first attempt |
 | Arena campaign with real Claude (3 cases, 2 strategies) | passed, 15 of 15 gates, on the second run; the first run (14 of 15) exposed a NEXUS defect, fixed |
 | ADAPTIVE mission with real Claude on the packaged 0.3.0 build | passed, 15 of 15 gates |
-| Packaged build on real 0.1, 0.2.0 and 0.2.1 databases | passed, 17 of 17 checks each: schema 4, no row lost, backup copy kept, redesigned pages render, built-in Arena cases found |
+| Packaged build on real 0.1, 0.2.0 and 0.2.1 databases (first 0.3.0 build, 2026-10-04) | passed, 17 of 17 checks each: schema 4, no row lost, backup copy kept, redesigned pages render, built-in Arena cases found |
 
 Not verified: a real Claude usage limit and the automatic resume after it; running the NSIS installer and
-uninstaller; real sleep, hibernate and a completed shutdown. Not implemented: Overnight Arena.
+uninstaller; real sleep, hibernate and a completed shutdown; Overnight Arena under a real shutdown timer (it
+is tested with the fake power controller). The real-Claude runs above were made on 2026-10-04 and were not
+repeated on the final tree.
 
 ## Intermittent failures (0.3.0)
 
