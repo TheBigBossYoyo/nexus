@@ -248,6 +248,8 @@ export class GitService {
   private readonly env: NodeJS.ProcessEnv
   /** An empty directory NEXUS owns: its git commands look for hooks there, so they run none. */
   private noHooksDir: string | null = null
+  /** Worktree pointer files that were verified, by what identified them then. */
+  private readonly verifiedPointers = new Map<string, string>()
 
   constructor(private readonly gitPath: string = 'git') {
     // Git needs none of the credentials NEXUS withholds from project commands, and a program that a
@@ -280,6 +282,10 @@ export class GitService {
       return // Not at the top of a working tree; git decides by itself what the directory is.
     }
     if (info.isDirectory()) return // The repository's own checkout.
+    // A pointer file that has not changed since it was last verified is not verified again: the check costs a
+    // process, and NEXUS runs many git commands. Any rewrite changes the file's identity, size or change time.
+    const stamp = `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`
+    if (this.verifiedPointers.get(cwd) === stamp) return
     const refuse = (why: string): never => {
       throw new NexusError('invalid_state', `The working tree at ${cwd} no longer points at its own Git directory (${why}). NEXUS will not write through it.`, { cwd })
     }
@@ -294,6 +300,7 @@ export class GitService {
       refuse('the Git directory it names is not a worktree directory')
     }
     if (!samePath(resolve(gitDir, back), dotGit)) refuse('the Git directory it names belongs to another working tree')
+    this.verifiedPointers.set(cwd, stamp)
   }
 
   /** Runs git; throws NexusError unless the exit code is in okCodes. */
