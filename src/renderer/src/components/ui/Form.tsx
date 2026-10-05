@@ -2,11 +2,11 @@ import { useEffect, useId, useState, type InputHTMLAttributes, type ReactNode, t
 import { cn } from '../../lib/cn'
 
 const CONTROL =
-  'w-full rounded-[3px] border border-border-strong bg-surface-2 px-2 text-fg placeholder:text-fg-faint ' +
-  'hover:border-fg-faint disabled:cursor-not-allowed disabled:opacity-50'
+  'w-full rounded-md border border-border-strong bg-surface px-2.5 text-text-primary placeholder:text-text-muted ' +
+  'hover:border-text-muted disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-60'
 
 export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(CONTROL, 'h-[var(--row-h)]', className)} {...rest} />
+  return <input className={cn(CONTROL, 'h-[var(--control-h)]', className)} {...rest} />
 }
 
 export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -43,11 +43,11 @@ export function Select<T extends string>({
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value as T)}
-      className={cn(CONTROL, 'h-[var(--row-h)] pr-1', className)}
+      className={cn(CONTROL, 'h-[var(--control-h)] pr-1', className)}
       {...rest}
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-surface-2" data-testid={o.testId}>
+        <option key={o.value} value={o.value} disabled={o.disabled} data-testid={o.testId}>
           {o.label}
         </option>
       ))}
@@ -55,6 +55,7 @@ export function Select<T extends string>({
   )
 }
 
+/** Switch. Semantics are role="switch" + aria-checked on a real button, so it is keyboard operable. */
 export function Toggle({
   checked,
   onChange,
@@ -74,7 +75,7 @@ export function Toggle({
   'aria-label'?: string
 }) {
   return (
-    <div className={cn('flex items-start gap-2', className)}>
+    <div className={cn('flex items-start gap-2.5', className)}>
       <button
         type="button"
         role="switch"
@@ -82,22 +83,24 @@ export function Toggle({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          'relative mt-0.5 h-4 w-7 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-          checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface-3',
+          'relative mt-px h-[18px] w-8 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+          checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface-hover',
         )}
         {...rest}
       >
         <span
+          aria-hidden="true"
           className={cn(
-            'absolute top-px size-3 rounded-full transition-all',
-            checked ? 'left-[13px] bg-accent-fg' : 'left-px bg-fg-muted',
+            'absolute top-px size-3.5 rounded-full transition-[left]',
+            checked ? 'bg-accent-fg' : 'bg-surface',
+            checked ? 'left-[15px]' : 'left-px border border-border-strong',
           )}
         />
       </button>
       {label || description ? (
         <div className="min-w-0">
           {label ? <div className="leading-5">{label}</div> : null}
-          {description ? <div className="text-[0.85rem] text-fg-muted">{description}</div> : null}
+          {description ? <div className="text-small text-text-muted">{description}</div> : null}
         </div>
       ) : null}
     </div>
@@ -137,7 +140,7 @@ export function NumberField({
       min={min}
       max={max}
       disabled={disabled}
-      className={cn('font-mono', className)}
+      className={cn('font-mono tnum', className)}
       onChange={(e) => {
         setText(e.target.value)
         const n = Number(e.target.value)
@@ -166,16 +169,16 @@ export function Field({
   const id = useId()
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <label htmlFor={id} className="text-[0.85rem] font-medium text-fg-muted">
+      <label htmlFor={id} className="text-small font-medium text-text-secondary">
         {label}
       </label>
       {children(id)}
       {error ? (
-        <div role="alert" className="text-[0.85rem] text-tone-danger">
+        <div role="alert" className="text-small text-danger">
           {error}
         </div>
       ) : hint ? (
-        <div className="text-[0.85rem] text-fg-faint">{hint}</div>
+        <div className="text-small text-text-muted">{hint}</div>
       ) : null}
     </div>
   )

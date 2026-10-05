@@ -1,0 +1,566 @@
+{
+  "kind": "adaptive-mission",
+  "startedAt": "2026-10-04T21:12:58.554Z",
+  "executable": "release/win-unpacked/NEXUS.exe",
+  "mission": "Fix a bug: `overlaps` in src/overlaps.js returns true for intervals that only touch at one end when either interval is marked half-open.\nSupport an optional `open: true` property on an interval, meaning its end point is excluded: `overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 })` must be false, while the same call without `open` stays true.\nKeep the existing behaviour for intervals without `open`, add regression tests next to the existing ones, and keep `npm test` passing.",
+  "app": {
+    "version": "0.3.0",
+    "isPackaged": true,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "plan": {
+    "summary": "`overlaps` in src/overlaps.js (line 3) compares both bounds inclusively (`a.start <= b.end && b.start <= a.end`) and ignores any `open` property, so half-open intervals that only touch at an end are reported as overlapping. The fix is to make each comparison against an interval's end strict when that interval has `open: true` (a's end is compared in `b.start <= a.end`, b's end in `a.start <= b.end`), leaving the inclusive comparison when `open` is absent. Regression tests are added to the existing test/overlaps.test.js. This is one small change across two files, so it is planned as a single worker task.",
+    "assumptions": [
+      "`open: true` excludes only the interval's end point; the start point stays included (half-open [start, end)).",
+      "`open` applies independently to each argument: touching is non-overlapping if the interval whose end is the touching point is open, regardless of argument order.",
+      "An interval whose `open` is absent, false or undefined behaves exactly as today (closed).",
+      "Degenerate open intervals with start === end (mathematically empty) are out of scope; no special handling is required by the request.",
+      "No input validation is added, since the current function has none.",
+      "README.md has no API documentation (one line only), so no doc update is needed beyond the JSDoc comment on the function."
+    ],
+    "acceptanceCriteria": [
+      "`overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 })` returns false.",
+      "`overlaps({ start: 1, end: 3 }, { start: 3, end: 5 })` still returns true.",
+      "`overlaps({ start: 3, end: 5 }, { start: 1, end: 3, open: true })` returns false (open interval as second argument).",
+      "The two existing tests in test/overlaps.test.js are unchanged and still pass.",
+      "New regression tests for `open` exist in test/overlaps.test.js and `npm test` exits 0."
+    ],
+    "tasks": [
+      {
+        "id": "fix-half-open-overlaps",
+        "title": "Honour `open: true` in overlaps and add regression tests",
+        "description": "Repository: small ESM JavaScript package (package.json has \"type\": \"module\", test script is `node --test`, no dependencies).\n\nBug: src/overlaps.js exports `overlaps(a, b)` implemented as `return a.start <= b.end && b.start <= a.end`. It ignores an optional `open` property, so intervals that only touch at one end are reported as overlapping even when an interval is marked half-open.\n\nChange src/overlaps.js: support an optional `open: true` property on either interval, meaning that interval's end point is excluded (half-open [start, end)). The comparison against an interval's end must be strict when that interval is open and inclusive otherwise: the `a.start <= b.end` check becomes strict (`<`) when `b.open` is true, and the `b.start <= a.end` check becomes strict when `a.open` is true. Intervals without `open` must behave exactly as before. Update the JSDoc comment above the function, which currently says only 'closed intervals', to mention the `open` option. Keep it minimal: no input validation, no new files, no new exports; src/index.js (re-exports `overlaps`) needs no change.\n\nAdd regression tests to test/overlaps.test.js, next to the two existing tests and in the same style (one-line `test(name, () => assert.equal(...))` using node:test and node:assert/strict, importing from '../src/index.js'). Do not modify or remove the existing two tests. Cover at least: (1) `overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 })` is false; (2) the open interval as the second argument, `overlaps({ start: 3, end: 5 }, { start: 1, end: 3, open: true })`, is false; (3) open on the interval whose end is not the touching point still overlaps, e.g. `overlaps({ start: 1, end: 3 }, { start: 3, end: 5, open: true })` is true; (4) open intervals that really intersect still overlap, e.g. `overlaps({ start: 1, end: 4, open: true }, { start: 3, end: 5 })` is true.\n\nRun `npm test` from the repository root and confirm it passes. Environment is native Windows with PowerShell.",
+        "role": "worker",
+        "dependencies": [],
+        "parallelizable": false,
+        "suggestedFiles": [
+          "src/overlaps.js",
+          "test/overlaps.test.js"
+        ],
+        "acceptanceCriteria": [
+          "`overlaps({ start: 1, end: 3, open: true }, { start: 3, end: 5 })` returns false.",
+          "`overlaps({ start: 3, end: 5 }, { start: 1, end: 3, open: true })` returns false.",
+          "`overlaps({ start: 1, end: 3 }, { start: 3, end: 5 })` returns true and `overlaps({ start: 1, end: 2 }, { start: 3, end: 5 })` returns false, as before.",
+          "`overlaps({ start: 1, end: 3 }, { start: 3, end: 5, open: true })` returns true.",
+          "The two original tests in test/overlaps.test.js are present and unmodified; new tests covering the `open` cases above are added in the same file.",
+          "`npm test` exits 0 with all tests passing.",
+          "Only src/overlaps.js and test/overlaps.test.js are modified."
+        ],
+        "complexity": "small",
+        "risk": "low",
+        "requiresApproval": false
+      }
+    ],
+    "risks": [
+      {
+        "description": "Applying the strict comparison to the wrong side (e.g. making both comparisons strict when either interval is open) would wrongly report false for a closed interval ending where an open interval starts.",
+        "mitigation": "The task requires a test that `overlaps({ start: 1, end: 3 }, { start: 3, end: 5, open: true })` stays true, plus tests with the open interval in each argument position."
+      },
+      {
+        "description": "Regression of existing closed-interval behaviour.",
+        "mitigation": "Existing tests must remain unmodified and pass; strictness is only applied when `open` is true."
+      },
+      {
+        "description": "Degenerate open intervals (start === end, mathematically empty) may still be reported as overlapping.",
+        "mitigation": "Recorded as an out-of-scope assumption; the request does not define this case, and it can be addressed separately if needed."
+      }
+    ]
+  },
+  "finishedAt": "2026-10-04T21:14:53.734Z",
+  "runId": "22c78c73-d979-4305-aab3-9c3fe92a988b",
+  "runState": "completed",
+  "runError": null,
+  "strategy": {
+    "requested": "ADAPTIVE",
+    "resolved": "BUILD",
+    "speculativeCandidates": 0,
+    "policyDecisionId": "5966cb3f-3a1a-41bb-8b98-362e79318b04",
+    "policySnapshotId": "9163167e-42f2-47c9-b1e2-a7a8a0c817a5",
+    "taskProfileId": "b74275c6-da5d-4ec6-b06f-e7b4b7be748a",
+    "arenaTrialId": null
+  },
+  "tasks": [
+    {
+      "key": "fix-half-open-overlaps",
+      "role": "worker",
+      "kind": "implement",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0
+    }
+  ],
+  "sessions": [
+    {
+      "agentId": "b3bf5740-7607-4430-b3b2-f278b07ae833",
+      "agent": "Planner",
+      "role": "planner",
+      "purpose": "plan",
+      "task": null,
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "fff0e627-7779-45ae-998e-bbd30b68acba",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T21:13:01.120Z",
+      "endedAt": "2026-10-04T21:13:30.765Z"
+    },
+    {
+      "agentId": "b0332de9-6ef4-4fb7-b98b-29de539eb8bd",
+      "agent": "Worker/fix-half-open-overlaps",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "fix-half-open-overlaps",
+      "model": "claude-sonnet-5-5",
+      "sdkSessionId": "746d6557-c27b-4540-8ee8-dab345115d88",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T21:13:35.096Z",
+      "endedAt": "2026-10-04T21:13:49.388Z"
+    },
+    {
+      "agentId": "b297bb03-0644-4ccd-a372-e3c21a7035ff",
+      "agent": "Reviewer/fix-half-open-overlaps",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "fix-half-open-overlaps",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "35b0de2f-5099-4328-9a2a-94a400330104",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T21:13:50.380Z",
+      "endedAt": "2026-10-04T21:14:02.053Z"
+    },
+    {
+      "agentId": "7d066dfd-c585-4c33-8fe0-4cdf1499ac10",
+      "agent": "Verifier/fix-half-open-overlaps",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "fix-half-open-overlaps",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "76a369b0-b3d9-435e-8381-0964dc0282d9",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T21:14:02.057Z",
+      "endedAt": "2026-10-04T21:14:28.660Z"
+    },
+    {
+      "agentId": "7cc6df4a-f697-453a-87c7-698e2fd90ab2",
+      "agent": "Verifier/mission",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": null,
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "6d7b57b7-95e3-4449-9a7a-9d7048c4d93b",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T21:14:29.834Z",
+      "endedAt": "2026-10-04T21:14:49.740Z"
+    }
+  ],
+  "resolvedModels": [
+    {
+      "role": "planner",
+      "purpose": "plan",
+      "task": null,
+      "requestedPolicy": "STRONGEST",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for planner asks for STRONGEST.",
+        "STRONGEST resolves to opus."
+      ]
+    },
+    {
+      "role": "worker",
+      "purpose": "implement",
+      "task": "fix-half-open-overlaps",
+      "requestedPolicy": "BALANCED",
+      "tier": "balanced",
+      "model": "sonnet",
+      "reasons": [
+        "Role policy for worker asks for BALANCED.",
+        "BALANCED resolves to sonnet."
+      ]
+    },
+    {
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "fix-half-open-overlaps",
+      "requestedPolicy": "STRONGEST",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for reviewer asks for STRONGEST.",
+        "STRONGEST resolves to opus."
+      ]
+    },
+    {
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "fix-half-open-overlaps",
+      "requestedPolicy": "STRONGEST",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for verifier asks for STRONGEST.",
+        "STRONGEST resolves to opus."
+      ]
+    },
+    {
+      "role": "verifier",
+      "purpose": "verify",
+      "task": null,
+      "requestedPolicy": "STRONGEST",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for verifier asks for STRONGEST.",
+        "STRONGEST resolves to opus."
+      ]
+    }
+  ],
+  "reviews": [
+    {
+      "task": "fix-half-open-overlaps",
+      "verdict": "approved",
+      "findings": 0,
+      "summary": "No defects found. `src/overlaps.js` implements exactly the specified rule: the `a.start`/`b.end` comparison is strict when `b.open` is set, the `b.start`/`a.end` comparison is strict when `a.open` is set, and intervals without `open` take the original `<=` path. The JSDoc now mentions the `open` opt"
+    }
+  ],
+  "verifications": [
+    {
+      "task": "fix-half-open-overlaps",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "fix-half-open-overlaps",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "All task and mission criteria pass. src/overlaps.js:6 uses a strict comparison against the end of whichever interval has `open: true` and the original `<=` otherwise; the JSDoc mentions `open`. My own `npm test` run passed 6 of 6, and the tests assert each required call directly with `assert.equal`,"
+    },
+    {
+      "task": "(mission)",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "(mission)",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "All five acceptance criteria pass. I read the integrated code, checked the diff against base 3c18bac, and ran `npm test` myself: 6 of 6 tests pass. The verifier role blocks direct `node` calls, so the three return-value criteria are confirmed by the tests that assert those exact calls plus a reading"
+    }
+  ],
+  "strategyEvents": [
+    {
+      "type": "policy.decided",
+      "at": "2026-10-04T21:13:01.014Z",
+      "payload": {
+        "decisionId": "5966cb3f-3a1a-41bb-8b98-362e79318b04",
+        "strategy": "BUILD",
+        "layer": "default",
+        "exploration": false,
+        "policyVersion": 1
+      }
+    },
+    {
+      "type": "strategy.selected",
+      "at": "2026-10-04T21:13:01.014Z",
+      "payload": {
+        "requested": "ADAPTIVE",
+        "resolved": "BUILD",
+        "reason": "No promoted preference applies to bugfix|medium|low; default policy gives BUILD: everything else uses the standard planned build."
+      }
+    },
+    {
+      "type": "outcome.recorded",
+      "at": "2026-10-04T21:14:49.743Z",
+      "payload": {
+        "outcomeId": "5849a653-e7cb-46f3-89e7-6462b5a7afc9",
+        "strategy": "BUILD",
+        "success": true
+      }
+    }
+  ],
+  "quotaEvents": [],
+  "approvals": [],
+  "independentTestRun": {
+    "lines": [
+      "# tests 6",
+      "# pass 6",
+      "# fail 0"
+    ],
+    "pass": 6,
+    "fail": 0
+  },
+  "observedUsage": {
+    "totals": {
+      "sessions": 5,
+      "turns": 32,
+      "inputTokens": 12185,
+      "outputTokens": 9729,
+      "cacheReadTokens": 185527,
+      "cacheCreationTokens": 75389,
+      "durationMs": 95317,
+      "limitEvents": 0
+    },
+    "byModel": [
+      {
+        "key": "claude-opus-5-5",
+        "label": "claude-opus-5-5",
+        "sessions": 4,
+        "turns": 26,
+        "inputTokens": 9909,
+        "outputTokens": 8315,
+        "cacheReadTokens": 135043,
+        "cacheCreationTokens": 57341,
+        "durationMs": 82603,
+        "limitEvents": 0
+      },
+      {
+        "key": "claude-sonnet-5-5",
+        "label": "claude-sonnet-5-5",
+        "sessions": 1,
+        "turns": 6,
+        "inputTokens": 2276,
+        "outputTokens": 1414,
+        "cacheReadTokens": 50484,
+        "cacheCreationTokens": 18048,
+        "durationMs": 12714,
+        "limitEvents": 0
+      }
+    ],
+    "byRole": [
+      {
+        "key": "verifier",
+        "label": "verifier",
+        "sessions": 2,
+        "turns": 14,
+        "inputTokens": 5802,
+        "outputTokens": 4532,
+        "cacheReadTokens": 75588,
+        "cacheCreationTokens": 24342,
+        "durationMs": 43995,
+        "limitEvents": 0
+      },
+      {
+        "key": "planner",
+        "label": "planner",
+        "sessions": 1,
+        "turns": 9,
+        "inputTokens": 1231,
+        "outputTokens": 3053,
+        "cacheReadTokens": 43489,
+        "cacheCreationTokens": 16045,
+        "durationMs": 28389,
+        "limitEvents": 0
+      },
+      {
+        "key": "worker",
+        "label": "worker",
+        "sessions": 1,
+        "turns": 6,
+        "inputTokens": 2276,
+        "outputTokens": 1414,
+        "cacheReadTokens": 50484,
+        "cacheCreationTokens": 18048,
+        "durationMs": 12714,
+        "limitEvents": 0
+      },
+      {
+        "key": "reviewer",
+        "label": "reviewer",
+        "sessions": 1,
+        "turns": 3,
+        "inputTokens": 2876,
+        "outputTokens": 730,
+        "cacheReadTokens": 15966,
+        "cacheCreationTokens": 16954,
+        "durationMs": 10219,
+        "limitEvents": 0
+      }
+    ],
+    "pauses": 0
+  },
+  "policy": {
+    "versionBefore": 1,
+    "versionAfter": 1,
+    "preview": {
+      "contextKey": "bugfix|medium|low",
+      "strategy": "BUILD",
+      "layer": "default",
+      "reason": "No promoted preference applies to bugfix|medium|low; default policy gives BUILD: everything else uses the standard planned build."
+    },
+    "taskProfile": {
+      "id": "b74275c6-da5d-4ec6-b06f-e7b4b7be748a",
+      "contextKey": "bugfix|medium|low",
+      "features": {
+        "category": {
+          "value": "bugfix",
+          "basis": "INFERRED"
+        },
+        "complexity": {
+          "value": "medium",
+          "basis": "INFERRED"
+        },
+        "risk": {
+          "value": "low",
+          "basis": "INFERRED"
+        },
+        "primaryLanguage": {
+          "value": "JavaScript",
+          "basis": "MEASURED"
+        },
+        "frameworks": {
+          "value": [],
+          "basis": "MEASURED"
+        },
+        "repoFileCount": {
+          "value": 5,
+          "basis": "MEASURED"
+        },
+        "moduleCount": {
+          "value": 2,
+          "basis": "MEASURED"
+        },
+        "testDensity": {
+          "value": 25,
+          "basis": "MEASURED"
+        },
+        "fileScope": {
+          "value": "single",
+          "basis": "INFERRED"
+        },
+        "ambiguity": {
+          "value": "low",
+          "basis": "INFERRED"
+        },
+        "securitySensitive": {
+          "value": false,
+          "basis": "INFERRED"
+        },
+        "parallelizability": {
+          "value": "medium",
+          "basis": "INFERRED"
+        }
+      },
+      "profilerVersion": "profiler-v1"
+    },
+    "decision": {
+      "id": "5966cb3f-3a1a-41bb-8b98-362e79318b04",
+      "runId": "22c78c73-d979-4305-aab3-9c3fe92a988b",
+      "projectId": "4404908c-00e9-4356-9f61-3ea769c5bdea",
+      "taskProfileId": "b74275c6-da5d-4ec6-b06f-e7b4b7be748a",
+      "snapshotId": "9163167e-42f2-47c9-b1e2-a7a8a0c817a5",
+      "policyVersion": 1,
+      "contextKey": "bugfix|medium|low",
+      "evidenceContextKey": null,
+      "strategy": "BUILD",
+      "planningMode": "single",
+      "workerCount": 4,
+      "reviewDepth": "auto",
+      "speculativeCandidates": 0,
+      "modelPolicies": {
+        "planner": "strongest",
+        "architect": "strongest",
+        "worker": "balanced",
+        "debugger": "strongest",
+        "reviewer": "strongest",
+        "verifier": "strongest",
+        "researcher": "balanced",
+        "security_reviewer": "strongest"
+      },
+      "layer": "default",
+      "exploration": false,
+      "seed": 2259985667,
+      "reason": "No promoted preference applies to bugfix|medium|low; default policy gives BUILD: everything else uses the standard planned build.",
+      "evidenceSummary": [],
+      "resourceNotes": [],
+      "usageStatus": "AVAILABLE",
+      "createdAt": "2026-10-04T21:13:01.013Z"
+    },
+    "snapshotId": "9163167e-42f2-47c9-b1e2-a7a8a0c817a5",
+    "outcome": {
+      "id": "5849a653-e7cb-46f3-89e7-6462b5a7afc9",
+      "runId": "22c78c73-d979-4305-aab3-9c3fe92a988b",
+      "projectId": "4404908c-00e9-4356-9f61-3ea769c5bdea",
+      "taskProfileId": "b74275c6-da5d-4ec6-b06f-e7b4b7be748a",
+      "contextKey": "bugfix|medium|low",
+      "strategy": "BUILD",
+      "requestedStrategy": "ADAPTIVE",
+      "planningMode": "single",
+      "reviewMode": "auto",
+      "policyDecisionId": "5966cb3f-3a1a-41bb-8b98-362e79318b04",
+      "policySnapshotId": "9163167e-42f2-47c9-b1e2-a7a8a0c817a5",
+      "models": {
+        "planner": "claude-opus-5-5",
+        "worker": "claude-sonnet-5-5",
+        "reviewer": "claude-opus-5-5",
+        "verifier": "claude-opus-5-5"
+      },
+      "agents": 5,
+      "sessions": 5,
+      "tasks": 1,
+      "tasksCompleted": 1,
+      "repairs": 0,
+      "reviews": 1,
+      "reviewRejections": 0,
+      "verificationPassed": true,
+      "elapsedMs": 76608,
+      "inputTokens": 12185,
+      "outputTokens": 9729,
+      "quotaPauses": 0,
+      "quotaWaitMs": 0,
+      "humanInterventions": 0,
+      "terminal": "completed",
+      "success": true,
+      "isArena": false,
+      "nexusVersion": "0.3.0",
+      "createdAt": "2026-10-04T21:14:49.742Z"
+    }
+  },
+  "speculative": {
+    "runs": [],
+    "candidates": [],
+    "decisions": []
+  },
+  "git": {
+    "userHeadUnchanged": true,
+    "userStatus": "",
+    "branches": [
+      "nexus/22c78c73/fix-half-open-overlaps",
+      "nexus/22c78c73/integration"
+    ],
+    "integrationLog": [
+      "8c52196 Merge fix-half-open-overlaps: Honour `open: true` in overlaps and add regression tests",
+      "84bc1ea Honour open: true in overlaps and add regression tests"
+    ]
+  },
+  "gates": {
+    "the run completed": true,
+    "commits exist on the integration branch": true,
+    "independent test run passes": true,
+    "observed usage was recorded for the run": true,
+    "the policy snapshot used is recorded on the run": true,
+    "a mission outcome was recorded": true,
+    "the active policy did not change": true,
+    "the user checkout is untouched": true,
+    "a task profile was recorded with measured and inferred features": true,
+    "a policy decision was recorded with its reason and layer": true,
+    "the run executed the strategy the policy chose": true,
+    "the decision names the snapshot the run recorded": true,
+    "resolved models were recorded for the sessions": true,
+    "the outcome records the executed strategy and observed tokens": true,
+    "task and mission gates ran": true
+  },
+  "result": "PASS"
+}

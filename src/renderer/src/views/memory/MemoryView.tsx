@@ -21,6 +21,7 @@ import {
   KeyValue,
   Loading,
   Markdown,
+  PageHeader,
   MemoryIcon,
   PlusIcon,
   SearchIcon,
@@ -59,15 +60,15 @@ function Provenance({ entry }: { entry: MemoryEntry }) {
   if (entry.agentId) rows.push({ label: 'Agent', value: shortId(entry.agentId), mono: true })
   if (entry.filePaths.length > 0) rows.push({ label: 'Files', value: entry.filePaths.join('\n'), mono: true })
   return (
-    <div className="flex flex-col gap-2 text-[0.92em]">
+    <div className="flex flex-col gap-2 text-code">
       <KeyValue rows={rows} labelWidth="5rem" />
       {entry.evidence ? (
         <div>
-          <div className="mb-1 text-fg-muted">Evidence</div>
+          <div className="mb-1 text-text-secondary">Evidence</div>
           <CodeBlock maxHeight={160}>{entry.evidence}</CodeBlock>
         </div>
       ) : (
-        <div className="text-fg-faint">No evidence recorded.</div>
+        <div className="text-text-muted">No evidence recorded.</div>
       )}
     </div>
   )
@@ -80,7 +81,7 @@ function MemoryRow({ entry, onDelete }: { entry: MemoryEntry; onDelete: () => vo
   return (
     <li
       data-testid={`memory-${entry.id}`}
-      className={cn('border-b border-l-2 px-3 py-2', entry.status === 'proposed' ? 'border-l-tone-review' : 'border-l-transparent')}
+      className={cn('border-b border-l-2 px-5 py-2.5', entry.status === 'proposed' ? 'border-l-tone-review' : 'border-l-transparent')}
     >
       <div className="flex items-center gap-2">
         <button type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
@@ -117,7 +118,7 @@ function MemoryRow({ entry, onDelete }: { entry: MemoryEntry; onDelete: () => vo
       {entry.tags.length > 0 ? (
         <div className="mt-1 flex flex-wrap gap-1">
           {entry.tags.map((t) => (
-            <span key={t} className="font-mono text-[0.8rem] text-fg-faint">
+            <span key={t} className="font-mono text-caption text-text-muted">
               #{t}
             </span>
           ))}
@@ -206,7 +207,7 @@ function AddMemoryDialog({ open, onClose }: { open: boolean; onClose: () => void
         <Field label="Tags" hint="Comma separated">
           {(id) => <Input id={id} value={tags} onChange={(e) => setTags(e.target.value)} />}
         </Field>
-        <p className="m-0 text-[0.85rem] text-fg-faint">Entries you add are recorded with source “user”.</p>
+        <p className="m-0 text-small text-text-muted">Entries you add are recorded with source “user”.</p>
       </div>
     </Dialog>
   )
@@ -237,10 +238,18 @@ export function MemoryView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="memory-view">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-surface-1 px-3 py-2">
-        <h1 className="m-0 mr-2 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">Memory</h1>
+      <PageHeader
+        title="Memory"
+        context="System"
+        actions={
+          <Button variant="primary" icon={<PlusIcon size={12} />} onClick={() => setAdding(true)} data-testid="memory-add">
+            Add entry
+          </Button>
+        }
+      />
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-surface px-5 py-2">
         <div className="relative w-64">
-          <SearchIcon size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-fg-faint" />
+          <SearchIcon size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
           <Input
             aria-label="Search memory"
             className="pl-6"
@@ -252,7 +261,7 @@ export function MemoryView() {
         </div>
         <Select
           aria-label="Scope"
-          className="w-32"
+          className="w-32!"
           value={scope}
           onChange={setScope}
           data-testid="memory-scope"
@@ -265,7 +274,7 @@ export function MemoryView() {
         />
         <Select
           aria-label="Status"
-          className="w-36"
+          className="w-36!"
           value={status}
           onChange={setStatus}
           data-testid="memory-status"
@@ -277,16 +286,13 @@ export function MemoryView() {
           ]}
         />
         <Toggle checked={currentOnly} onChange={setCurrentOnly} disabled={!project} label={project ? `Only ${project.name}` : 'Only current project'} />
-        <Button variant="primary" className="ml-auto" icon={<PlusIcon size={12} />} onClick={() => setAdding(true)} data-testid="memory-add">
-          Add entry
-        </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto bg-surface">
         {memory.isPending ? (
           <Loading label="Loading memory" />
         ) : memory.isError ? (
-          <ErrorNote error={memory.error} className="m-3" />
+          <ErrorNote error={memory.error} className="m-5" />
         ) : entries.length === 0 ? (
           <EmptyState title={query || scope !== 'all' || status !== 'all' ? 'No matching memory' : 'No memory yet'} icon={<MemoryIcon size={22} />}>
             Agents propose durable facts about a project while they work. Proposals wait here for your approval; add your own at any time.

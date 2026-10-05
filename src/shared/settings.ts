@@ -10,6 +10,7 @@ import {
   type RunConfig,
   type CheckCommands,
 } from './domain'
+import { DEFAULT_USAGE_SETTINGS, UsageSettingsSchema } from './v3'
 
 export const McpServerSettingSchema = z.object({
   name: z
@@ -84,6 +85,8 @@ export const SettingsSchema = z.object({
   advanced: z.object({
     debugSdk: z.boolean(),
   }),
+  /** v0.3. How NEXUS behaves around Claude usage limits. */
+  usage: UsageSettingsSchema,
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
@@ -126,8 +129,9 @@ export const DEFAULT_SETTINGS: Settings = {
   permissions: { allowNetworkTools: false, safeCommandPrefixes: [] },
   memory: { enabled: true, maxEntriesPerContext: 8, autoApproveVerifierMemory: false },
   mcp: { servers: [] },
-  appearance: { theme: 'dark', density: 'compact', fontSize: 13 },
+  appearance: { theme: 'light', density: 'compact', fontSize: 13 },
   advanced: { debugSdk: false },
+  usage: DEFAULT_USAGE_SETTINGS,
 }
 
 /** ECO routes everything except planning/verification one tier down and halves parallelism. */

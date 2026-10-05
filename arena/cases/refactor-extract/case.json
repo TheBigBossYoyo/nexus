@@ -1,0 +1,46 @@
+{
+  "id": "refactor-extract",
+  "version": 2,
+  "name": "Consolidate duplicated pricing logic",
+  "description": "Behaviour-preserving refactor: three modules each re-implement line pricing (discount, tax, rounding); extract one shared module with a documented rounding seam.",
+  "category": "refactor",
+  "complexity": "medium",
+  "risk": "medium",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "The invoice, quote and sales report code in this repo each compute a line's net, tax and total with their own copy of the same discount/tax/rounding arithmetic. Please consolidate that into one shared module without changing any public behaviour.\n\nCreate `src/pricing.js` exporting:\n- `computeLineTotal({ quantity, unitPrice, discountPct = 0, taxRate = 0 })` returning `{ net, tax, total }`, where net = round(quantity * unitPrice * (1 - discountPct / 100)), tax = round(net * taxRate) and total = round(net + tax).\n- `setRoundingFunction(fn)` and `resetRoundingFunction()`: `fn` takes a number and returns a number; every rounding of a line's net, tax and total (in `computeLineTotal` and therefore everywhere lines are priced) must go through the currently installed function, so that swapping it changes the result of `createInvoice`, `createQuote` and `salesReport` line amounts. The default is the current rounding to cents.\n\n`createInvoice`, `createQuote` and `salesReport` must then compute their line amounts by calling `computeLineTotal` (the quote volume discount rule and the report's use of the order line's own `taxRate` stay where they are). Exported names, return shapes and every number produced today must stay exactly the same, including the existing rounding quirks. Keep the existing tests passing.",
+  "visibleAcceptance": [
+    "src/pricing.js exports computeLineTotal, setRoundingFunction and resetRoundingFunction as described",
+    "createInvoice, createQuote and salesReport no longer contain their own line pricing arithmetic and use computeLineTotal",
+    "Installing a different rounding function changes the line amounts of all three public functions",
+    "All existing tests still pass and outputs are identical with the default rounding"
+  ],
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
+  "setup": [],
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/refactor-extract.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 20,
+    "maxAgentSessions": 20,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 60
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
+}

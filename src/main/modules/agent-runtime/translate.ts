@@ -11,7 +11,6 @@ const AUTH_ERRORS: readonly SDKAssistantMessageError[] = [
   'verification_required',
   'cloud_credential_error',
 ]
-const QUOTA_ERRORS: readonly SDKAssistantMessageError[] = ['rate_limit', 'billing_error']
 
 /** Mutable per-session translation state. One instance per SDK query. */
 export interface TranslatorState {
@@ -145,9 +144,15 @@ export function translateSdkMessage(msg: SDKMessage, state: TranslatorState): Ag
       const events: AgentEvent[] = []
       if (msg.error) {
         if (AUTH_ERRORS.includes(msg.error)) state.authError = true
-        if (QUOTA_ERRORS.includes(msg.error)) {
+        const errorText = msg.message.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join(' ')
+        // A usage limit is billing_error, or a rate_limit that this session's rate_limit_event rejected or whose
+        // text is one of the documented usage-limit messages. Any other 429 is a transient throttle.
+        const usageLimit = msg.error === 'billing_error' || (msg.error === 'rate_limit' && (state.quotaSignal || looksLikeUsageLimit(errorText)))
+        if (usageLimit) {
           state.quotaSignal = true
           events.push({ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null })
+        } else if (msg.error === 'rate_limit' || msg.error === 'overloaded' || msg.error === 'server_error') {
+          events.push({ type: 'throttle', kind: msg.error })
         }
       }
       for (const block of msg.message.content) {
@@ -202,6 +207,10 @@ export function translateSdkMessage(msg: SDKMessage, state: TranslatorState): Ag
           status: info.status,
           resetsAt: info.resetsAt ?? null,
           limitType: info.rateLimitType ?? null,
+          utilization: info.utilization ?? null,
+          overageStatus: info.overageStatus ?? null,
+          isUsingOverage: info.isUsingOverage ?? null,
+          surpassedThreshold: info.surpassedThreshold ?? null,
         },
       ]
     }

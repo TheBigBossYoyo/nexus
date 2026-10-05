@@ -11,7 +11,7 @@ export function AuthBanner() {
   if (!status) return null
 
   const open = (
-    <button type="button" className="ml-2 text-accent underline underline-offset-2" onClick={() => setView('auth')}>
+    <button type="button" className="ml-2 font-medium text-accent underline underline-offset-2" onClick={() => setView('auth')}>
       Open authentication
     </button>
   )
@@ -53,7 +53,7 @@ export function AuthBanner() {
 
   if (notices.length === 0) return null
   return (
-    <div className="flex shrink-0 flex-col gap-px">
+    <div className="flex shrink-0 flex-col gap-2 border-b bg-background px-5 py-2">
       {notices.map((n) => (
         <div key={n.key}>{n.node}</div>
       ))}

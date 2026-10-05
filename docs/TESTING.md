@@ -245,3 +245,101 @@ Rules:
 
 Real-runtime acceptance (consumes Claude usage): `pnpm accept:proposal` and `pnpm accept:rotation`; each prints
 its gates and writes evidence to `docs/acceptance/`.
+
+## 0.3: usage, quota recovery, strategies, policy and Arena
+
+Everything below uses the scripted runtime (`FakeAgentRuntime`) except where a row says "real runtime". Where a
+behaviour is covered only by simulation (a real usage limit, a real Arena campaign, a real speculative task and a
+real ADAPTIVE mission), the result of the real-runtime check is in V0_3_RELEASE_REPORT.md, not here.
+
+| Layer | Files | What it covers |
+|---|---|---|
+| Unit | `tests/unit/usage/classify.test.ts`, `machine.test.ts`, `service.test.ts` | Signal classification (quota, throttle, auth), the status machine and `planQuotaWait`, the usage service: events, aggregation, provenance |
+| Unit | `tests/unit/agent-runtime/translate.test.ts`, `claude-sdk-runtime.test.ts` | The rate-limit fields kept by the translation layer; `parseUsageReport` and the optional `getUsageReport` |
+| Unit | `tests/unit/strategy/tournament.test.ts` | `rankCandidates`: rule order, unmeasured values, confidence |
+| Unit | `tests/unit/policy/*.test.ts` | Profiler rules, default table, engine layers (evidence, exploration, suppression, resource), `stats.ts` (Wilson interval, labels, weights), learning and candidate rules, the simulator |
+| Unit | `tests/unit/arena/*.test.ts` | Case schema and loading, evaluator hashing, `score-v1` ranking and the convenience score, raw metrics |
+| Unit | `tests/unit/renderer/` (`measured`, `usage-model`, `usage-view-model`, `arena-model`, `policy-model`, `strategy`, `mission-model`, `palette-model`, `activity-home`) | Renderer logic, including the rule that a percentage cannot be shown without an EXACT value |
+| Integration | `tests/integration/persistence/v0-3.test.ts` | Migration 004 on populated 0.1, 0.2 and 0.2.1 databases, the 0.3 repositories |
+| Integration | `tests/integration/arena/provisioning.test.ts`, `campaign.test.ts`, `harness.ts` | Fixture provisioning and isolation, the hidden evaluator, campaign creation, budgets, control, quota pause, recovery after a restart |
+| Integration | `tests/integration/arena/builtin-cases.test.ts` | The built-in case self-test, see below |
+| Integration | `tests/integration/policy/service.test.ts` | Snapshots and pointer, learning, promotion, rollback, pin, `decideForRun`, mission outcomes |
+| Scenario | `tests/scenarios/usage-recovery.test.ts` (harness: `usage-harness.ts`) | Quota pause, dispatch gate, checkpoint, probe, resume, restart during a wait, idempotency, user actions, a limit during planning |
+| Scenario | `tests/scenarios/usage-overnight.test.ts` | Overnight quota waits with probing, including the deadline, END_RUN and `overnightWaitForReset` off |
+| Scenario | `tests/scenarios/approvals-quota.test.ts` | Quota pause with approvals pending |
+| Scenario | `tests/scenarios/v3-strategies.test.ts` | SINGLE, BUILD, SWARM, CONSENSUS, SPECULATIVE (winner, no passing candidate, pause during candidates, no result) |
+| Scenario | `tests/scenarios/v3-adaptive.test.ts` | ADAPTIVE: profile, decision, outcome; promotion and rollback change the decision; a user-chosen strategy is used as given |
+| Scenario | `tests/scenarios/v3-arena.test.ts` | The same case under SINGLE and BUILD on the real orchestrator; a campaign continued after a restart |
+| Stress | `tests/stress/usage-stress.test.ts`, `policy-stress.test.ts`, `arena-stress.test.ts` | Seeded histories, see below. They run under `pnpm stress` |
+| E2E | `tests/e2e/v3.spec.ts` (6 tests) | The built app on the scripted runtime: shell, navigation and first-launch pages; usage with a reported percentage and with no report; a usage limit with a known reset (banner, countdown, automatic resume, mission completes) and with no reset time (says so, probes, resumes); mission control and the inspector after a SINGLE mission with the why-this-strategy view for ADAPTIVE; an Arena campaign created in the dialog, with isolated trials, results and policy evidence |
+| Visual | `tests/e2e/__screenshots__/` (written by `toHaveScreenshot` in `v3.spec.ts`, `maxDiffPixelRatio` 0.01) | Stored screenshots of the empty, first-launch and settings pages |
+| Real runtime | `tests/manual/usage-report.smoke.ts` (`pnpm smoke:usage`) | Account information and the experimental usage report; no prompt is sent |
+
+### Stress variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEXUS_USAGE_STRESS_RUNS`, `NEXUS_USAGE_STRESS_START` | 1000, 1 | Seeded usage and quota histories against the status machine and the recovery invariants |
+| `NEXUS_POLICY_STRESS_RUNS` | 1000 | Seeded policy simulations |
+| `NEXUS_ARENA_STRESS_RUNS` | 1000 | Seeded campaign state histories |
+
+```powershell
+$env:NEXUS_POLICY_STRESS_RUNS = 200; pnpm exec vitest run -c vitest.stress.config.ts tests/stress/policy-stress.test.ts
+```
+
+### Arena built-in case self-test
+
+`tests/integration/arena/builtin-cases.test.ts` checks every directory under `arena/cases/` (twelve are expected):
+
+1. the shipped fixture's visible tests pass;
+2. the hidden evaluator fails on the unmodified fixture, with an assertion failure and not a timeout;
+3. the hidden evaluator passes on the reference solution, which lives outside the case directory in
+   `tests/fixtures/arena-solutions/<case id>/` and is overlaid on the fixture;
+4. the visible tests still pass on the solution.
+
+It also checks that baselines are identical across trials and that no evaluator file is inside the trial repository.
+A reference solution proves the case can be solved and the evaluator is fair to a correct solution. It does not
+show that a model can solve it.
+
+### Integrity checks
+
+| Guarantee | Where it is tested |
+|---|---|
+| The evaluator is never inside the trial repository (by name and by content) | `provisioning.test.ts`, `builtin-cases.test.ts` |
+| A changed evaluator is refused | `provisioning.test.ts`, `case-format.test.ts` |
+| Trials do not share memory, facts or outcomes | `campaign.test.ts` ("isolates trials") |
+| The evaluator does not run on an unfinished run | `campaign.test.ts`, `provisioning.test.ts` |
+| The tournament does not use the hidden evaluator | `v3-strategies.test.ts`, `tournament.test.ts` |
+| Policy snapshots are immutable | `policy/service.test.ts` |
+| A percentage needs EXACT provenance | `measured.test.ts`, `usage-view-model.test.ts` |
+
+### Acceptance scripts (real runtime, consume Claude usage)
+
+Not part of `pnpm test`, CI or `pnpm stress`. Each launches the app off-screen, drives it through the IPC bridge and
+writes evidence to `docs/acceptance/`.
+
+| Command | What it does |
+|---|---|
+| `pnpm smoke:usage` | No prompt. Account information and the usage report, with timing |
+| `pnpm accept:arena` (`scripts/arena-acceptance.mjs [exe\|-] [caseIds] [strategies]`) | A small Arena campaign: by default `bugfix-localized`, `feature-small`, `ui-state-bug` under SINGLE and BUILD, one repetition, ECO budget; records what NEXUS measured and any usage limit met |
+| `pnpm accept:speculative` (`scripts/strategy-acceptance.mjs speculative`) | One bounded task implemented by two candidates, then tournament, review, verification; checks the user's repository is untouched |
+| `pnpm accept:adaptive` (`scripts/strategy-acceptance.mjs adaptive`) | One mission under ADAPTIVE: profile, decision, reason, outcome with observed usage |
+
+### Visual tests
+
+The stored screenshots are machine-specific (font rendering, display scaling). On a different machine, or after a deliberate
+UI change, regenerate them with `pnpm test:e2e --update-snapshots` and review the diff. A mismatch above 1 percent of pixels fails
+the test.
+
+### Test-only environment variables (unpackaged builds only)
+
+| Variable | Effect |
+|---|---|
+| `NEXUS_FAKE_RUNTIME=1` | Selects the scripted runtime (`FakeAgentRuntime`) |
+| `NEXUS_FAKE_USAGE` | With the scripted runtime: `unknown` = the runtime reports no usage report; a number = the plan window percentage it reports |
+| `NEXUS_USAGE_TICK_MS` | Quota controller tick (accepted when 100 or more) |
+| `NEXUS_USAGE_RESUME_DELAY_S` | Overrides `resumeDelaySeconds` |
+| `NEXUS_USAGE_PROBE_S` | Overrides the first unknown-reset probe interval, in seconds |
+| `NEXUS_USAGE_DEMO_RESET_S` | The demo script's simulated reset delay (default 6) |
+
+`src/main/index.ts` ignores the timing variables and `NEXUS_FAKE_USAGE` in a packaged build. See QUOTA_RECOVERY.md.

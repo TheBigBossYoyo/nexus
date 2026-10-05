@@ -3,7 +3,7 @@
 .nexus-flow {
   --xy-background-color: var(--color-surface-0);
   --xy-background-pattern-color: var(--color-border);
-  --xy-node-border-radius: 3px;
+  --xy-node-border-radius: 6px;
   --xy-controls-button-background-color: var(--color-surface-2);
   --xy-controls-button-background-color-hover: var(--color-surface-3);
   --xy-controls-button-color: var(--color-fg-muted);

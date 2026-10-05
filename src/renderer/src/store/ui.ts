@@ -1,9 +1,16 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
+import { VIEWS, type View } from './views'
+
+export { VIEWS }
+export type { View }
 
 /** Ephemeral UI state only. Server data lives in the TanStack Query cache. */
-export type View = 'projects' | 'run' | 'agents' | 'memory' | 'settings' | 'performance' | 'intelligence' | 'auth'
-export const VIEWS: readonly View[] = ['projects', 'run', 'agents', 'memory', 'settings', 'performance', 'intelligence', 'auth']
+/** Pre-selects the mission composer when it opens (set by "Start Overnight" in the palette and the Overnight page). */
+export type ComposerIntent = 'overnight' | null
+
+/** Section of the Settings page to open (e.g. the Usage behavior section from the quota banner). */
+export type SettingsSection = string | null
 
 export type Drawer = 'approvals' | null
 export type PanelLayout = Record<string, number>
@@ -19,6 +26,12 @@ interface UiState {
   drawer: Drawer
   /** react-resizable-panels layouts keyed by group id; the only persisted slice. */
   panelLayouts: Record<string, PanelLayout>
+  /** Left navigation is collapsed to an icon rail. Persisted locally. */
+  navCollapsed: boolean
+  composerIntent: ComposerIntent
+  settingsSection: SettingsSection
+  /** An Arena campaign to open when the Arena view shows (set by Overnight surfaces that link to a campaign). */
+  arenaCampaignId: string | null
 
   setView: (view: View) => void
   selectProject: (projectId: string | null) => void
@@ -30,12 +43,19 @@ interface UiState {
   setPaletteOpen: (open: boolean) => void
   setDrawer: (drawer: Drawer) => void
   setPanelLayout: (groupId: string, layout: PanelLayout) => void
+  setNavCollapsed: (collapsed: boolean) => void
+  toggleNav: () => void
+  setComposerIntent: (intent: ComposerIntent) => void
+  /** Show the Settings page on a given section. */
+  openSettings: (section?: string) => void
+  /** Show the Arena view on a campaign page; null clears the request once the view has consumed it. */
+  openCampaign: (campaignId: string | null) => void
 }
 
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
-      view: 'projects',
+      view: 'home',
       projectId: null,
       runId: null,
       taskId: null,
@@ -44,6 +64,10 @@ export const useUiStore = create<UiState>()(
       paletteOpen: false,
       drawer: null,
       panelLayouts: {},
+      navCollapsed: false,
+      composerIntent: null,
+      settingsSection: null,
+      arenaCampaignId: null,
 
       setView: (view) => set({ view }),
       selectProject: (projectId) => set({ projectId }),
@@ -62,12 +86,18 @@ export const useUiStore = create<UiState>()(
       setDrawer: (drawer) => set({ drawer }),
       setPanelLayout: (groupId, layout) =>
         set((s) => ({ panelLayouts: { ...s.panelLayouts, [groupId]: layout } })),
+      setNavCollapsed: (navCollapsed) => set({ navCollapsed }),
+      toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
+      setComposerIntent: (composerIntent) => set({ composerIntent }),
+      openSettings: (section) => set({ view: 'settings', settingsSection: section ?? null }),
+      openCampaign: (arenaCampaignId) =>
+        set(arenaCampaignId ? { view: 'arena', arenaCampaignId } : { arenaCampaignId: null }),
     }),
     {
       name: 'nexus.ui',
       version: 1,
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ panelLayouts: s.panelLayouts }),
+      partialize: (s) => ({ panelLayouts: s.panelLayouts, navCollapsed: s.navCollapsed }),
     },
   ),
 )

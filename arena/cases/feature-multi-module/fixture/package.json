@@ -1,0 +1,10 @@
+{
+  "name": "todo-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Small todo list service with file storage, a text renderer and a command layer",
+  "scripts": {
+    "test": "node --test"
+  }
+}

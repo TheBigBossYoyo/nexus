@@ -190,7 +190,9 @@ describe('FakeAgentRuntime', () => {
     const events = await collect(rt.startSession(makeSpec()).events)
     expect(Date.now() - start).toBeGreaterThanOrEqual(25)
     expect(events[1]).toEqual({ type: 'rate_limit', status: 'rejected', resetsAt: 123, limitType: 'five_hour' })
-    expect(events[2]).toMatchObject({ result: { outcome: 'quota', errors: ['limited'] } })
+    // The real SDK follows the rate_limit_event with an error signal that carries no reset.
+    expect(events[2]).toEqual({ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null })
+    expect(events[3]).toMatchObject({ result: { outcome: 'quota', errors: ['limited'] } })
   })
 
   it('exposes nexus tools to scripts and composes scripts per role', async () => {

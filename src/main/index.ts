@@ -1,12 +1,14 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, safeStorage, shell } from 'electron'
 import type { PushMessage } from '@shared/events'
 import { IPC_INVOKE_CHANNEL, IPC_PUSH_CHANNEL, type AppInfo } from '@shared/ipc'
 import { errorMessage } from '@shared/result'
+import { ArenaService } from './modules/arena'
 import { ClaudeSdkRuntime } from './modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from './modules/agent-runtime/demo-script'
 import { FakeAgentRuntime } from './modules/agent-runtime/fake-runtime'
@@ -15,11 +17,15 @@ import type { AgentRuntime } from './modules/agent-runtime/types'
 import { EventBus } from './modules/events'
 import { GitService, WorktreeManager } from './modules/git'
 import { createIpcHandlers, dispatchIpc } from './modules/ipc/handlers'
+import { ProjectService } from './modules/ipc/services'
+import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { Orchestrator } from './modules/orchestrator'
-import { OvernightSupervisor } from './modules/overnight'
+import { ArenaCampaignWorkload, OvernightSupervisor } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
+import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from './modules/policy'
 import { FakePowerController, WindowsPowerController, type PowerController } from './modules/power'
+import { QuotaRecoveryController, RuntimeAvailabilityProbe, UsageIntelligenceService } from './modules/usage'
 import { OvernightTray } from './tray'
 
 const require = createRequire(import.meta.url)
@@ -54,7 +60,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     ...(offscreen ? { x: -32000, y: -32000, skipTaskbar: true, focusable: false } : {}),
-    backgroundColor: '#0b0d10',
+    backgroundColor: '#f6f7f9',
     title: 'NEXUS',
     autoHideMenuBar: true,
     webPreferences: {
@@ -164,14 +170,37 @@ async function bootstrap(): Promise<void> {
 
   // The scripted runtime exists for UI tests only and cannot be enabled in a packaged build.
   const useFake = !app.isPackaged && process.env['NEXUS_FAKE_RUNTIME'] === '1'
-  const runtime: AgentRuntime = useFake
-    ? new FakeAgentRuntime({ script: createDemoScript() })
-    : new ClaudeSdkRuntime({
+  const fakeRuntime = useFake ? new FakeAgentRuntime({ script: createDemoScript() }) : null
+  // UI tests choose what the scripted runtime says about usage: `unknown` = no usage report at all (what a
+  // runtime without that method looks like), a number = the plan window's reported percentage.
+  const fakeUsage = process.env['NEXUS_FAKE_USAGE']
+  if (fakeRuntime && fakeUsage === 'unknown') fakeRuntime.usage.set({ reportSupported: false })
+  else if (fakeRuntime && fakeUsage && Number.isFinite(Number(fakeUsage))) fakeRuntime.usage.set({ utilizationPercent: Number(fakeUsage) })
+  const runtime: AgentRuntime =
+    fakeRuntime ??
+    new ClaudeSdkRuntime({
         executablePath: settings.claude.executablePath || undefined,
         resolveExecutable: () => resolveClaudeExecutable({ resourcesPath: process.resourcesPath }),
         debug: settings.advanced.debugSdk,
         logger: settings.advanced.debugSdk ? (line) => console.error(`[claude] ${line}`) : undefined,
       })
+
+  const logger = (line: string): void => console.error(`[nexus] ${line}`)
+
+  // Usage intelligence observes what the runtime reports (limits, resets, per-session usage) and is the
+  // gate every new Claude session passes. It reads nothing but the Agent SDK's own events and calls.
+  const usage = new UsageIntelligenceService({ repos, bus, runtime, push, logger })
+  const probe = new RuntimeAvailabilityProbe({ runtime, settings: () => repos.settings.get() })
+  // The policy engine decides the strategy of ADAPTIVE runs from stored evidence and records every
+  // mission's outcome. It never changes the active policy by itself.
+  const policy = new PolicyService({
+    repos,
+    nexusVersion: app.getVersion(),
+    usage: { status: () => usage.status(), recentLimitWithin: (ms) => usage.recentLimitWithin(ms) },
+    push,
+  })
+  policy.ensureDefault()
+  attachOutcomeRecording(bus, policy)
 
   const orchestrator = new Orchestrator({
     repos,
@@ -180,10 +209,38 @@ async function bootstrap(): Promise<void> {
     git,
     worktrees: new WorktreeManager(git, worktreesDir),
     push,
-    logger: (line) => console.error(`[nexus] ${line}`),
+    logger,
+    strategies: policy,
   })
+  orchestrator.setDispatchGate(usage)
   // Runs that were active when the app last stopped are paused and offered for recovery in the UI.
   orchestrator.recoverOnStartup()
+
+  // Quota recovery: a run paused for a usage limit is checkpointed, waited on and resumed without anyone
+  // clicking. Timing overrides exist for automated tests only and cannot be set in a packaged build.
+  const testNumber = (name: string): number | undefined => {
+    const value = !app.isPackaged ? Number(process.env[name] ?? '') : NaN
+    return Number.isFinite(value) && value > 0 ? value : undefined
+  }
+  const usageTick = testNumber('NEXUS_USAGE_TICK_MS')
+  const resumeDelay = testNumber('NEXUS_USAGE_RESUME_DELAY_S')
+  const probeSeconds = testNumber('NEXUS_USAGE_PROBE_S')
+  const recovery = new QuotaRecoveryController({
+    repos,
+    bus,
+    usage,
+    probe,
+    orchestrator,
+    push,
+    isOvernightRun: (runId) => repos.overnight.getByRun(runId) !== null,
+    ...(usageTick !== undefined && usageTick >= 100 ? { tickIntervalMs: usageTick } : {}),
+    overrides: {
+      ...(resumeDelay !== undefined ? { resumeDelaySeconds: resumeDelay } : {}),
+      ...(probeSeconds !== undefined ? { probeSeconds } : {}),
+    },
+    logger,
+  })
+  recovery.recover()
 
   // Overnight Mode. The power controller is created here and handed to the supervisor only: no IPC
   // handler, agent tool or MCP server ever holds it. Tests (and any run on the scripted runtime) get
@@ -200,6 +257,9 @@ async function bootstrap(): Promise<void> {
   // Windows must not put the PC to sleep in the middle of an unattended mission.
   let awakeBlocker: number | null = null
   let keepAwake: () => void = () => undefined
+  let recoverOvernight: () => void = () => undefined
+  /** Pause and resume of the live overnight workload from the tray, when it is an Arena campaign. */
+  let campaignControl: { pause(id: string): unknown; resume(id: string): unknown } | null = null
   const overnight = power
     ? new OvernightSupervisor({
         repos,
@@ -215,6 +275,7 @@ async function bootstrap(): Promise<void> {
         flush: () => void db.pragma('wal_checkpoint(TRUNCATE)'),
         reportsDir: join(dataDir, 'reports'),
         sealer: createSealer(dataDir),
+        probe,
         ...(Number.isFinite(testTick) && testTick >= 100 ? { tickIntervalMs: testTick } : {}),
         logger: (line) => console.error(`[nexus] ${line}`),
       })
@@ -241,18 +302,26 @@ async function bootstrap(): Promise<void> {
       () => {
         const status = current()
         const run = status ? repos.runs.get(status.runId) : null
+        const campaign = status?.workloadType === 'arena_campaign' ? repos.arenaCampaigns.get(status.runId) : null
         return {
           overnight: status,
-          projectName: (run && repos.projects.get(run.projectId)?.name) || 'project',
-          runState: run?.state ?? null,
-          activeAgents: status ? repos.agents.listActive(status.runId).length : 0,
+          projectName: campaign ? campaign.name : (run && repos.projects.get(run.projectId)?.name) || 'project',
+          runState: campaign ? campaign.state : (run?.state ?? null),
+          activeAgents: campaign ? orchestrator.activeAgentCount() : status ? repos.agents.listActive(status.runId).length : 0,
           time: (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }
       },
       (action, runId) => {
         const report = (e: unknown): void => console.error(`[nexus] tray ${action}: ${errorMessage(e)}`)
         if (action === 'open') showWindow()
-        else if (action === 'pause') void orchestrator.pauseRun(runId).catch(report)
+        else if (repos.overnight.getByRun(runId)?.workloadType === 'arena_campaign' && (action === 'pause' || action === 'resume')) {
+          try {
+            if (action === 'pause') campaignControl?.pause(runId)
+            else campaignControl?.resume(runId)
+          } catch (e) {
+            report(e)
+          }
+        } else if (action === 'pause') void orchestrator.pauseRun(runId).catch(report)
         else if (action === 'resume') void orchestrator.resumeRun(runId).catch(report)
         else if (action === 'cancelPower') void supervisor.cancelPower(runId).catch(report)
         else void supervisor.cancelMission(runId).catch(report)
@@ -333,14 +402,59 @@ async function bootstrap(): Promise<void> {
       return true
     }
     // An overnight run that was active when NEXUS stopped resumes without anyone clicking; the Windows
-    // failsafe scheduled before the restart stays as it is.
-    void supervisor
-      .recover()
-      .then(() => overnightTray.refresh())
-      .catch((e: unknown) => console.error(`[nexus] overnight recovery: ${errorMessage(e)}`))
+    // failsafe scheduled before the restart stays as it is. Called once the Arena exists, because the
+    // workload that was live may be a campaign.
+    recoverOvernight = () =>
+      void supervisor
+        .recover()
+        .then(() => overnightTray.refresh())
+        .catch((e: unknown) => console.error(`[nexus] overnight recovery: ${errorMessage(e)}`))
   }
 
   const sdkVersion = readSdkVersion()
+
+  // Arena: controlled trials of the same task under different strategies. Each trial is an ordinary run
+  // on its own throwaway repository; the hidden evaluators stay in the cases directory, outside every
+  // path an agent may read. Built-in cases ship next to the app (extraResources) when packaged.
+  const arena = new ArenaService({
+    repos,
+    bus,
+    git,
+    dataDir,
+    casesDir: app.isPackaged ? join(process.resourcesPath, 'arena', 'cases') : join(app.getAppPath(), 'arena', 'cases'),
+    host: orchestrator,
+    projects: new ProjectService(repos, git, logger),
+    usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
+    policy: { activeSnapshotId: () => policy.active().id },
+    // A finished campaign refreshes the evidence and may leave a policy candidate; it never promotes one.
+    push: learnOnCampaignEnd(repos, policy, push, logger),
+    nexusVersion: app.getVersion(),
+    environment: async () => ({
+      platform: `${process.platform} ${process.arch}`,
+      osRelease: release(),
+      nodeVersion: process.versions.node,
+      sdkVersion,
+      gitVersion: await git.version().catch(() => null),
+      modelTiers: { ...repos.settings.get().models.tiers },
+    }),
+    logger,
+  })
+  try {
+    arena.syncBuiltinCases()
+  } catch (e) {
+    console.error(`[nexus] arena cases: ${errorMessage(e)}`)
+  }
+  campaignControl = arena
+  // An Arena campaign can be an overnight workload: the supervisor owns its deadline, failsafe and end action.
+  overnight?.registerWorkload(
+    'arena_campaign',
+    (id) => new ArenaCampaignWorkload(id, { repos, host: arena, quotaResetsAt: () => usage.machineState().resetAt, now: () => Date.now(), log: logger }),
+    arena,
+  )
+  void Promise.resolve()
+    .then(() => arena.recover())
+    .catch((e: unknown) => console.error(`[nexus] arena recovery: ${errorMessage(e)}`))
+    .finally(() => recoverOvernight())
   const appInfo = async (): Promise<AppInfo> => ({
     version: app.getVersion(),
     dataDir,
@@ -375,6 +489,27 @@ async function bootstrap(): Promise<void> {
     openDataDir: async () => {
       await shell.openPath(dataDir)
     },
+    v3: createV3Handlers({
+      repos,
+      usage,
+      recovery,
+      arena,
+      policy,
+      ...(overnight ? { overnight } : {}),
+      pickDirectory: async () => {
+        const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        const options = { title: 'Import Arena case', properties: ['openDirectory' as const] }
+        const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+        return result.canceled ? null : (result.filePaths[0] ?? null)
+      },
+      activeAgentCount: () => orchestrator.activeAgentCount(),
+      confirmTrust: async (message, detail) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        const options = { type: 'warning' as const, title: 'NEXUS Arena', message, detail, buttons: ['Trust and allow', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true }
+        const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+        return response === 0
+      },
+    }),
   })
 
   ipcMain.handle(IPC_INVOKE_CHANNEL, (event, channel: unknown, input: unknown) => {
@@ -415,7 +550,16 @@ async function bootstrap(): Promise<void> {
     void settled
       .then(() => {
         overnight?.dispose()
-        return orchestrator.shutdown()
+        // Nothing new may start: campaigns and quota recovery stop first. The usage service stays until the
+        // agent sessions have ended, so what they used is still recorded.
+        arena.dispose()
+        recovery.dispose()
+        // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.
+        return recovery.idle()
+      })
+      .then(() => orchestrator.shutdown())
+      .then(() => {
+        usage.dispose()
       })
       .catch((e: unknown) => console.error(`[nexus] shutdown: ${errorMessage(e)}`))
       .finally(() => {

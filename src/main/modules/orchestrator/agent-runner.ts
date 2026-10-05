@@ -90,12 +90,15 @@ export class SessionControl {
    * so the caller keeps the message undelivered for the next prompt.
    */
   send(text: string): boolean {
+    let delivered = false
+    // Usually one session does the work. Speculative candidates are several: every one of them gets the
+    // message, otherwise they would no longer be working from the same instructions.
     for (const [handle, entry] of this.registered) {
       if (!entry.open || NON_WORKER_PURPOSES.has(entry.purpose)) continue
       handle.send(text)
-      return true
+      delivered = true
     }
-    return false
+    return delivered
   }
 }
 
@@ -299,7 +302,8 @@ export class AgentRunner {
       last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId, turns: last.turns }
     }
 
-    const failed = last.outcome !== 'success' && last.outcome !== 'stopped'
+    // A usage limit or an authentication stop is not a failure of the agent: it ends 'stopped', reason recorded.
+    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth'
     const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
     this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
     return {
@@ -617,10 +621,26 @@ export class AgentRunner {
             bus.emit({
               ...ids,
               type: 'agent.rate_limited',
-              payload: { status: event.status, resetsAt: event.resetsAt, limitType: event.limitType },
+              payload: {
+                status: event.status,
+                resetsAt: event.resetsAt,
+                limitType: event.limitType,
+                utilization: event.utilization ?? null,
+                overageStatus: event.overageStatus ?? null,
+                isUsingOverage: event.isUsingOverage ?? null,
+                surpassedThreshold: event.surpassedThreshold ?? null,
+              },
             })
             break
           }
+          case 'throttle':
+            // Transient (overloaded / server error): recorded for the usage service, never a quota outcome.
+            bus.emit({
+              ...ids,
+              type: 'agent.rate_limited',
+              payload: { status: 'throttled', resetsAt: null, limitType: event.kind },
+            })
+            break
           case 'status':
             repos.agents.update(agentId, { activity: event.status })
             break
@@ -731,6 +751,9 @@ export class AgentRunner {
     const deltas: UsageInfo[] = []
     for (const u of result.usage) {
       const prev = before[u.model]
+      // A zeroed entry is the SDK reporting nothing for that model this time, not a counter restart: keep the
+      // baseline, or the next cumulative figure would be counted in full a second time.
+      if (prev && u.inputTokens === 0 && u.outputTokens === 0 && u.cacheReadTokens === 0 && u.cacheCreationTokens === 0 && u.costUsd === 0) continue
       const step = (cur: number, old: number | undefined): number => (old === undefined || cur < old ? cur : cur - old)
       deltas.push({
         model: u.model,
@@ -778,7 +801,25 @@ export class AgentRunner {
         taskId: input.task?.id ?? null,
         agentId,
         type: 'agent.usage',
-        payload: { inputTokens: metrics.inputTokens ?? 0, outputTokens: metrics.outputTokens ?? 0, costUsd: metrics.costUsd ?? 0 },
+        payload: {
+          inputTokens: metrics.inputTokens ?? 0,
+          outputTokens: metrics.outputTokens ?? 0,
+          costUsd: metrics.costUsd ?? 0,
+          turn: {
+            sdkSessionId: sessionKey === agentId ? null : sessionKey,
+            role: input.role,
+            turns: result.numTurns,
+            durationMs: result.durationMs,
+            models: deltas.map((u) => ({
+              model: u.model,
+              inputTokens: u.inputTokens,
+              outputTokens: u.outputTokens,
+              cacheReadTokens: u.cacheReadTokens,
+              cacheCreationTokens: u.cacheCreationTokens,
+              costUsd: u.costUsd,
+            })),
+          },
+        },
       })
     })
   }

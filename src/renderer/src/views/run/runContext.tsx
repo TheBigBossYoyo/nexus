@@ -8,6 +8,7 @@ import { mergeEvents } from './eventText'
 export type StageView = 'overview' | 'graph' | 'plan'
 
 export const BOTTOM_TABS = [
+  'agents',
   'timeline',
   'communications',
   'tools',
@@ -16,6 +17,7 @@ export const BOTTOM_TABS = [
   'verification',
   'decisions',
   'criteria',
+  'usage',
 ] as const
 export type BottomTab = (typeof BOTTOM_TABS)[number]
 
@@ -101,10 +103,16 @@ export function useNow(active: boolean, intervalMs = 1000): number {
 
 /** The most recently created agent that worked on a task. */
 export function latestAgentOf(agents: readonly Agent[], taskId: string): Agent | null {
+  // The implementing agent represents the task; reviewers and verifiers only count when nothing implemented it.
   let best: Agent | null = null
+  let bestImpl = false
   for (const a of agents) {
     if (a.taskId !== taskId) continue
-    if (!best || a.createdAt >= best.createdAt) best = a
+    const impl = a.purpose === 'implement'
+    if (!best || (impl && !bestImpl) || (impl === bestImpl && a.createdAt >= best.createdAt)) {
+      best = a
+      bestImpl = impl
+    }
   }
   return best
 }

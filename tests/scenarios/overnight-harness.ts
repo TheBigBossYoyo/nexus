@@ -6,6 +6,7 @@ import { OvernightSupervisor } from '@main/modules/overnight'
 import { FakePowerController } from '@main/modules/power'
 import type { PowerCommandResult } from '@shared/overnight'
 import type { ShutdownRequest } from '@main/modules/power'
+import type { AvailabilityProbe } from '@main/modules/usage'
 import type { Harness } from './harness'
 
 /** A FakePowerController that also records whether the final report existed when a final action was requested. */
@@ -50,6 +51,8 @@ export interface AttachOptions {
   power?: ObservedPower
   /** Start the supervisor's clock this far ahead of real time. */
   offsetMs?: number
+  /** v0.3: the availability probe the supervisor uses before resuming (built with the supervisor's clock). */
+  probe?: (now: () => number) => AvailabilityProbe
 }
 
 export function policyWith(overrides: Partial<OvernightPolicy> = {}): OvernightPolicy {
@@ -76,6 +79,7 @@ export function attachOvernight(h: Harness, options: AttachOptions = {}): Overni
     bootTime: options.bootTime ?? (() => 0),
     tickIntervalMs: 0,
     stopTimeoutMs: 20_000,
+    ...(options.probe ? { probe: options.probe(now) } : {}),
     // The same keyed signature the app uses, with a key only this "process" holds.
     sealer: { sign: (payload) => createHmac('sha256', 'scenario-key').update(payload).digest('base64') },
   })

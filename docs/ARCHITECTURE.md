@@ -24,7 +24,8 @@ Single package (no pnpm workspace) to keep electron-builder packaging simple.
 
 ```
 src/
-  shared/            pure TS shared by main and renderer: domain types, zod schemas, events, IPC contract
+  shared/            pure TS shared by main and renderer: domain types, zod schemas, events, IPC contract;
+                     v0.3: v3.ts (all 0.3 contracts: usage, Arena, policy, speculation; zod), v3-read.ts (read models)
   main/
     index.ts         Electron bootstrap, window, composition root
     modules/
@@ -51,11 +52,19 @@ src/
       intelligence/  v0.2: repository analysis (manifests, bounded walk, regex imports, Git history), fingerprints,
                      refresh/reconcile, fact selection for a task
       profile/       read-only project discovery (ProjectProfile)
-      ipc/           validated IPC handlers and read-model services
+      ipc/           validated IPC handlers and read-model services; v0.3: v3-handlers.ts (usage.*, arena.*, policy.*)
+      usage/         v0.3: classify.ts (pure), machine.ts (pure status machine, quota-wait planner), service.ts
+                     (UsageIntelligenceService, the dispatch gate), recovery.ts (QuotaRecoveryController), probe.ts
+      strategy/      v0.3: strategies.ts (five strategies as engine configuration), tournament.ts (pure ranking)
+      policy/        v0.3: profiler.ts, stats.ts, engine.ts, learning.ts (pure); service.ts, snapshots.ts, simulator.ts
+      arena/         v0.3: case-format.ts, fixtures.ts, evaluator.ts, scoring.ts, metrics.ts, campaign.ts (ArenaService)
+      overnight/     v0.2.1: supervisor, report, tray model; v0.3: AutonomousWorkload, MissionWorkload, ArenaCampaignWorkload
   preload/           narrow typed bridge (CJS, sandboxed)
   renderer/          React UI
 tests/
   unit/ integration/ scenarios/ stress/ smoke/   (Playwright E2E is run by `pnpm test:e2e`)
+arena/
+  cases/<id>/        v0.3: the twelve built-in Arena cases (case.json, fixture/, evaluator/, README.md)
 ```
 
 Dependency direction: `renderer → preload bridge → ipc → orchestrator/services → domain
@@ -111,7 +120,11 @@ Dependency direction: `renderer → preload bridge → ipc → orchestrator/serv
 
 9. **Quota is not failure.** `rate_limit_event` with `status: 'rejected'` or an assistant
    `error: 'rate_limit'` pauses the affected task and the run (`paused`, reason `quota`), keeps the
-   session id, and leaves the run resumable.
+   session id, and leaves the run resumable. Since 0.3 the run is also resumed automatically: the
+   `QuotaRecoveryController` records the pause in `quota_pauses`, closes the orchestrator's dispatch gate, waits
+   for the reset the runtime reported (or probes on a conservative schedule when none was reported), checks
+   availability, and resumes through the existing `resumeRun` path. A pause by the user is never resumed by
+   it. See QUOTA_RECOVERY.md.
 
 10. **Windows native.** All process spawning uses `spawn` with argument arrays and `windowsHide`.
     No shell interpolation, no WSL, no Git Bash requirement (the runtime uses its PowerShell tool
@@ -147,6 +160,85 @@ The v0.2 renderer additions are the Performance and Intelligence views, the Plan
 Run view, a Context tab in the task inspector, and a routing section in the Agent detail. v0.2 IPC channels:
 `graph.revisions`, `graph.proposals`, `planning.candidates`, `planning.recommend`, `routing.list`,
 `performance.summary`, `intelligence.list`, `intelligence.refresh`, `context.packs`. Design: V0_2_DESIGN.md.
+
+## v0.3 decisions
+
+18. **A strategy is configuration of the one engine.** `strategy/strategies.ts` maps a strategy to planning mode, review
+    mode, agent limit and candidate count. `SINGLE` and `SPECULATIVE` skip the planner and materialize one worker
+    task; the other three plan as before. There is no second scheduler. `ADAPTIVE` is resolved to one of the five when
+    the run is created and the choice is fixed for that run (`runs.config.strategy`). See ORCHESTRATION.md.
+19. **Pure modules decide, services persist.** `usage/classify`, `usage/machine`, `strategy/tournament`,
+    `policy/profiler`, `policy/stats`, `policy/engine`, `policy/learning` and `arena/scoring` import only `src/shared`.
+    Their services (`UsageIntelligenceService`, `PolicyService`, `ArenaService`) own the database access and the clock.
+20. **Every usage value carries its provenance.** A `Measured<T>` has a value, a source and a confidence. A percentage
+    exists only with confidence `EXACT`; NEXUS never invents a remaining-quota figure. See USAGE_INTELLIGENCE.md.
+21. **Claude availability is a gate, not a failure.** `Orchestrator.setDispatchGate` takes the usage service. While it
+    is closed no session starts and nothing is failed; checks and merges in flight finish. The durable state of a
+    wait is the `quota_pauses` row, so a restart during a wait loses nothing. See QUOTA_RECOVERY.md.
+22. **The usage report is optional.** `getUsageReport` on `AgentRuntime` wraps an SDK method declared experimental. It
+    returns null on any failure and callers treat null as UNKNOWN; recovery then falls back to a minimal session probe.
+23. **Arena trials are ordinary runs in isolated repositories.** Each trial has its own repository under
+    `<data>/arena/`, its own project row (found through `arena_trials.project_id`; `ProjectRepository.list()`
+    and the Home and Activity queries exclude it; Arena runs and events are filtered out in SQL) and its own memory, facts and outcomes. The hidden evaluator is copied in only after the run ends. See
+    ARENA.md and BENCHMARK_METHODOLOGY.md.
+24. **Ranking is lexicographic and versioned.** `score-v1` orders trials by correctness first; the convenience score
+    cannot hide a failed hidden evaluation. The version is stored with every result.
+25. **Evidence is labelled, never pooled.** Arena trials are controlled evidence; mission outcomes are observational
+    and weighted lower. Displayed counts keep them apart. Statistics use Wilson intervals and no p-values.
+26. **Policy changes only by explicit promotion.** `PolicyService` writes immutable snapshots; promotion, rollback and
+    pin move or add snapshots and are user actions. Learning proposes candidates and never edits NEXUS source code.
+    See ADAPTIVE_POLICY.md.
+27. **The speculative tournament uses objective checks only.** No model opinion and, in an Arena trial, no hidden
+    evaluator is an input. Candidates are separate clones of the repository (own refs and objects, no remote), not
+    worktrees, and a speculative run moves `running`, `decided`, `adopted`. See SPECULATIVE_EXECUTION.md.
+28. **Migration 004 is additive.** `004-v0-3.ts` creates tables and indexes only; no existing table is altered (the
+    design planned a `projects.kind` column; the code identifies Arena projects through `arena_trials.project_id`
+    instead). New tables: `usage_events`, `usage_windows`, `quota_pauses`, `quota_resumes`, `arena_cases`,
+    `arena_case_versions`, `arena_campaigns`, `arena_trials`, `arena_trial_metrics`, `arena_evaluations`,
+    `task_profiles`, `mission_outcomes`, `policy_snapshots`, `policy_decisions`, `policy_candidates`,
+    `policy_promotions`, `strategy_statistics`, `speculative_runs`, `candidate_results`, `tournament_decisions`. Columns added by the audit: `arena_trials.block_kind`,
+    `strategy_statistics.distinct_units`; index `idx_arena_trials_project`. Indexes
+    cover the aggregation keys (run, day, model, strategy, campaign, agent, task). `RunConfig` gains the optional
+    `strategy` object, stored in the existing `runs.config` JSON.
+
+29. **Commands NEXUS runs on project code carry no Claude credentials.** Dependency installs, check commands and every Arena
+    command use `projectCommandEnv()` (no `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+    `NODE_OPTIONS`, `NODE_PATH`); the Arena removes every `ANTHROPIC_*` variable as well.
+30. **Unattended Arena trials answer approvals by rule.** Tool requests are denied; plan, task and graph approvals are
+    granted unless a high-risk task would start. Every strategy gets the same rule.
+31. **A trial's outcome says what it measured.** `blockKind` (`infrastructure`, `run`, `timeout`) separates a harness
+    failure, which is excluded from statistics and policy evidence, from a failure of the strategy, which counts.
+32. **The previous database is kept.** Before a schema upgrade `openDatabase` copies `nexus.db` to `nexus.db.v<old>.bak`
+    (once per old version, never overwritten), because an upgraded database cannot be opened by the older NEXUS.
+33. **A finished Arena campaign triggers learning, never promotion.** `learnOnCampaignEnd` (`policy/wiring.ts`) calls
+    `PolicyService.learn()` once when a campaign completes.
+
+### Composition root order (`src/main/index.ts`, `bootstrap`)
+
+1. Database, repositories, event bus, `GitService`, push channel to the renderer.
+2. Runtime: `ClaudeSdkRuntime`, or `FakeAgentRuntime` in an unpackaged build with `NEXUS_FAKE_RUNTIME=1`.
+3. `UsageIntelligenceService` and `RuntimeAvailabilityProbe`.
+4. `PolicyService` (`ensureDefault()` creates the default snapshot; `attachOutcomeRecording` subscribes to run events).
+5. `Orchestrator` (with `strategies: policy`), then `setDispatchGate(usage)`, then `recoverOnStartup()`.
+6. `QuotaRecoveryController` (test timing overrides read only in an unpackaged build), then `recover()`. At shutdown the
+   controller is disposed and awaited (`idle()`) before the database closes.
+7. Power controller and `OvernightSupervisor` (receives the same `probe`).
+8. Window, tray and quit handling.
+9. `ArenaService` (its push is wrapped by `learnOnCampaignEnd`), then `syncBuiltinCases()`, then `recover()` in the background.
+10. IPC handlers, with the 0.3 handlers (`createV3Handlers`) built from the usage service, recovery controller, Arena and policy.
+
+### Provider abstraction
+
+What exists is the `AgentRuntime` interface (`agent-runtime/types.ts`) with two implementations: `ClaudeSdkRuntime`
+and `FakeAgentRuntime`. The interface has session start, resume, message, interrupt and stop, capabilities, account
+information, the optional `getUsageReport` and `shutdown`. No other provider is implemented and no provider registry
+or provider-selection setting exists. Everything that mentions Claude limits, plans or models is written for the
+Claude runtime. Adding a provider would need a new implementation of the interface and new classification rules in
+`usage/classify.ts`; neither exists.
+
+The v0.3 renderer replaces the 0.2 shell (navigation in three groups, a contextual page header, a Ctrl+K palette) and
+adds Home, Arena, Policy and Usage views. v0.3 IPC channels are in ARENA.md, ADAPTIVE_POLICY.md and
+USAGE_INTELLIGENCE.md. Design: V0_3_DESIGN.md.
 
 ## Data location
 

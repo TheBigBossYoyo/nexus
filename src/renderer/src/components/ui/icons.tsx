@@ -10,7 +10,7 @@ function Svg({ size = 14, children, ...rest }: IconProps & { children: ReactNode
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.4}
+      strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -167,5 +167,96 @@ export const IntelligenceIcon = (p: IconProps) => (
     <circle cx="3.5" cy="12" r="1.6" />
     <circle cx="12.5" cy="12" r="1.6" />
     <path d="M7.2 5l-3 5.6M8.8 5l3 5.6M5.1 12h5.8" />
+  </Svg>
+)
+
+// Added for the 0.3 shell. Same 16 px grid, 1.5 stroke.
+export const HomeIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 7.25 8 2.5l5.5 4.75M3.75 6.5v6.25a.75.75 0 0 0 .75.75h7a.75.75 0 0 0 .75-.75V6.5M6.5 13.5v-3.75h3v3.75" />
+  </Svg>
+)
+export const ArenaIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.5" />
+    <circle cx="8" cy="8" r="2.5" />
+    <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2" />
+  </Svg>
+)
+export const PolicyIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
+    <circle cx="10" cy="4.5" r="1.5" />
+    <circle cx="6" cy="11.5" r="1.5" />
+  </Svg>
+)
+export const UsageIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 13.5v-4M6.5 13.5v-8M10.5 13.5v-6M14 13.5H2" />
+  </Svg>
+)
+export const MoonIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M13 9.6A5.5 5.5 0 0 1 6.4 3 5.5 5.5 0 1 0 13 9.6z" />
+  </Svg>
+)
+export const SunIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="2.75" />
+    <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1" />
+  </Svg>
+)
+export const ActivityIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M1.5 8h2.75l1.75-4.5 3 9L10.75 8h3.75" />
+  </Svg>
+)
+export const SidebarIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+    <path d="M6 2.5v11" />
+  </Svg>
+)
+export const ClockIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="M8 4.75V8l2.25 1.5" />
+  </Svg>
+)
+export const ChevronLeftIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10 3.5 5.5 8l4.5 4.5" />
+  </Svg>
+)
+export const ChevronUpIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m3.5 10 4.5-4.5 4.5 4.5" />
+  </Svg>
+)
+export const SparkIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 2v3.5M8 10.5V14M2 8h3.5M10.5 8H14M4 4l2.25 2.25M9.75 9.75 12 12M12 4 9.75 6.25M6.25 9.75 4 12" />
+  </Svg>
+)
+export const CircleCheckIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="m5.5 8.25 1.75 1.75 3.25-3.5" />
+  </Svg>
+)
+export const ListIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" />
+  </Svg>
+)
+export const RowsIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="3" width="11" height="3.25" rx="1" />
+    <rect x="2.5" y="9.75" width="11" height="3.25" rx="1" />
+  </Svg>
+)
+export const ArrowRightIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 8h10M9 4l4 4-4 4" />
   </Svg>
 )

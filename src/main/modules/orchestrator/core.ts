@@ -12,7 +12,7 @@ import {
 import type { PauseCause } from '@shared/events'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage } from '@shared/result'
-import { runCommandLine } from '@main/modules/process'
+import { projectCommandEnv, runCommandLine } from '@main/modules/process'
 import { assertTransition, canPauseRun, canTransition } from '@main/modules/state'
 import { AgentRunner } from './agent-runner'
 import { ApprovalService } from './approvals'
@@ -254,7 +254,8 @@ export class Core {
     const timeoutMs = this.deps.repos.settings.get().execution.checkTimeoutMinutes * 60_000
     const started = Date.now()
     try {
-      const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES })
+      // Setup and check commands run code the agents wrote: they get no Claude credentials.
+      const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, env: projectCommandEnv() })
       return { name, command, cwd, exitCode: r.exitCode, timedOut: r.timedOut, durationMs: r.durationMs, output: r.output }
     } catch (e) {
       // Unresolvable executable or a command line NEXUS refuses to interpret: recorded as a failed check.

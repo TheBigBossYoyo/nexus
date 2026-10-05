@@ -1,8 +1,8 @@
 import { Graph, layout } from '@dagrejs/dagre'
 import type { Task, TaskDependency } from '@shared/domain'
 
-export const NODE_WIDTH = 232
-export const NODE_HEIGHT = 92
+export const NODE_WIDTH = 260
+export const NODE_HEIGHT = 84
 
 export interface GraphEdgeModel {
   id: string
@@ -47,7 +47,7 @@ export interface Position {
 /** Top-to-bottom dagre layout. Returns top-left positions (what React Flow expects). */
 export function layoutGraph(model: Pick<GraphModel, 'nodeIds' | 'edges'>): Record<string, Position> {
   const g = new Graph()
-  g.setGraph({ rankdir: 'TB', nodesep: 36, ranksep: 56, marginx: 16, marginy: 16 })
+  g.setGraph({ rankdir: 'TB', nodesep: 28, ranksep: 44, marginx: 16, marginy: 16 })
   g.setDefaultEdgeLabel(() => ({}))
   for (const id of model.nodeIds) g.setNode(id, { width: NODE_WIDTH, height: NODE_HEIGHT })
   for (const e of model.edges) g.setEdge(e.source, e.target)

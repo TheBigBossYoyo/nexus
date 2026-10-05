@@ -44,6 +44,7 @@ import type { Core } from './core'
 import { buildTaskEvidence } from './evidence'
 import { renderMessage } from './messaging'
 import { recordTaskOutcome } from './outcomes'
+import { SpeculativeStage } from './speculation'
 import { purposeFor } from './task-kind'
 
 export type Stage = 'implement' | 'checks' | 'review' | 'verification'
@@ -117,10 +118,19 @@ function diffStat(diff: DiffResult): string {
  * pause or an application restart.
  */
 export class TaskPipeline {
+  /** v0.3: the implement stage of a speculative run (several candidates, then a tournament). */
+  readonly speculation: SpeculativeStage
+
   constructor(
     private readonly core: Core,
     private readonly host: PipelineHost,
-  ) {}
+  ) {
+    this.speculation = new SpeculativeStage(core, host, {
+      halted: (runId, control) => this.halted(runId, control),
+      haltOutcome: (run, outcome, control) => this.haltOutcome(run, outcome, control),
+      leaseExpiry: (run) => this.leaseExpiry(run),
+    })
+  }
 
   async run(runId: string, taskId: string, startStage: Stage, control: SessionControl): Promise<void> {
     const { repos, bus } = this.core.deps
@@ -165,8 +175,16 @@ export class TaskPipeline {
       this.host.setStage(taskId, 'implement')
       // A task that yielded to a new prerequisite restarts here once the prerequisite has merged.
       const resume = await this.prepareResume(run, task, worktree)
-      const proceed = await this.implement(run, task, cwd, project.rootPath, control, resume)
-      if (!proceed) return
+      const candidates = worktree && !resume ? this.speculation.candidatesFor(run, task) : 0
+      const proceed =
+        candidates > 0 && worktree
+          ? await this.speculation.run(run, task, worktree, project.rootPath, control, candidates)
+          : await this.implement(run, task, cwd, project.rootPath, control, resume)
+      if (!proceed) {
+        // A speculative stage that ended without any result is a final failure of this attempt.
+        if (candidates > 0 && repos.tasks.require(taskId).state === 'failed') this.outcome(runId, taskId)
+        return
+      }
       task = repos.tasks.require(taskId)
       // Cancelled by its own graph proposal (a split): the task ends here, it must not be checked or merged.
       if (task.state === 'cancelled') return
@@ -1056,6 +1074,9 @@ export class TaskPipeline {
    */
   resumeStage(task: Pick<Task, 'id' | 'state'>): Stage {
     if (task.state !== 'running') return 'implement'
+    // Candidates still working, or a winner not yet adopted: the speculative stage has to finish first. One
+    // candidate's completed session says nothing about the task.
+    if (this.speculation.pending(task.id)) return 'implement'
     const agent = this.lastWorkerAgent(task.id)
     const session = agent ? this.core.deps.repos.sessions.latestForAgent(agent.id) : null
     return agent?.state === 'stopped' && session?.endReason === 'completed' ? 'checks' : 'implement'

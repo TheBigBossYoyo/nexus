@@ -28,6 +28,7 @@ function overnightRecord(runId: string, projectId: string, over: Partial<Overnig
   return {
     id: runId,
     runId,
+    workloadType: 'mission',
     projectId,
     state: 'RUNNING',
     policy: DEFAULT_OVERNIGHT_POLICY,
@@ -75,6 +76,8 @@ describe('migration 003 (overnight) on a 0.2.0 database', () => {
       { version: 1, name: 'initial' },
       { version: 2, name: 'v0-2' },
       { version: 3, name: 'overnight' },
+      { version: 4, name: 'v0-3' },
+      { version: 5, name: 'overnight-workloads' },
     ])
     const repos = createRepositories(db)
     expect(repos.runs.require(run.id)).toMatchObject({ prompt: 'A 0.2.0 mission', state: 'completed' })
@@ -94,14 +97,16 @@ describe('migration 003 (overnight) on a 0.2.0 database', () => {
     // Reopening changes nothing.
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 3 })
+    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 5 })
     expect(createRepositories(again).overnight.getByRun(run.id)?.state).toBe('RUNNING')
   })
 
   it('does not alter any table of the earlier schemas', () => {
     const before = new BetterSqlite3(':memory:')
     runMigrations(before, MIGRATIONS.filter((m) => m.version <= 2))
-    const after = openDatabase(':memory:')
+    // Schema 3 exactly: later migrations have their own tests.
+    const after = new BetterSqlite3(':memory:')
+    runMigrations(after, MIGRATIONS.filter((m) => m.version <= 3))
     open.push(before, after)
     const ddl = (db: Database): Map<string, string> =>
       new Map((db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'").all() as { name: string; sql: string }[]).map((r) => [r.name, r.sql]))
@@ -173,5 +178,48 @@ describe('overnight repositories', () => {
     repos.checkpoints.prune(runId, 5)
     expect(repos.checkpoints.listByRun(runId).map((c) => c.reason)).toEqual(['r7', 'r8', 'r9', 'r10', 'r11'])
     expect(repos.checkpoints.latest(runId)?.reason).toBe('r11')
+  })
+})
+
+describe('migration 005 (overnight workloads) on a 0.3-development database', () => {
+  it('rebuilds overnight_runs in place, keeps every row as a mission and accepts a campaign record', () => {
+    const path = tempDb()
+    // Schema 4, with an overnight record written the way 0.2.1 and the 0.3 development builds wrote it.
+    const old = new BetterSqlite3(path)
+    old.pragma('journal_mode = WAL')
+    old.pragma('foreign_keys = ON')
+    runMigrations(old, MIGRATIONS.filter((m) => m.version <= 4))
+    const seeded = createRepositories(old)
+    const project = seeded.projects.insert(makeProject())
+    const run = seeded.runs.insert(makeRun(project.id, { state: 'completed', prompt: 'An overnight mission' }))
+    const record = overnightRecord(run.id, project.id, { state: 'DONE', terminalReason: 'SUCCESS', finalReport: '# report' })
+    old
+      .prepare(
+        `INSERT INTO overnight_runs (id, run_id, project_id, state, policy, "authorization", started_at, deadline_at, terminal_reason, final_report, watchdog, amendments, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)`,
+      )
+      .run(record.id, record.runId, record.projectId, record.state, JSON.stringify(record.policy), JSON.stringify(record.authorization), record.startedAt, record.deadlineAt, record.terminalReason, record.finalReport, record.createdAt, record.updatedAt)
+    old.close()
+
+    const db = openDatabase(path)
+    open.push(db)
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 5 })
+    const repos = createRepositories(db)
+    expect(repos.overnight.listAll()).toHaveLength(1)
+    expect(repos.overnight.require(run.id)).toMatchObject({ runId: run.id, workloadType: 'mission', state: 'DONE', terminalReason: 'SUCCESS', finalReport: '# report', policy: record.policy, authorization: record.authorization })
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'overnight_runs_v5'").get()).toBeUndefined()
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    // A campaign is not a run: its record needs no row in `runs`.
+    const campaignId = newId()
+    repos.overnight.insert(overnightRecord(campaignId, 'arena', { workloadType: 'arena_campaign' }))
+    expect(repos.overnight.listLive().map((r) => [r.runId, r.workloadType])).toEqual([[campaignId, 'arena_campaign']])
+    // One record per workload.
+    expect(() => repos.overnight.insert({ ...overnightRecord(campaignId, 'arena'), id: newId() })).toThrow()
+
+    // Deleting the run still deletes its mission record, and only that.
+    repos.projects.delete(project.id)
+    expect(repos.overnight.getByRun(run.id)).toBeNull()
+    expect(repos.overnight.getByRun(campaignId)).not.toBeNull()
   })
 })

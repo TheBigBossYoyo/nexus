@@ -156,6 +156,21 @@ const RENDER: Renderers = {
   'overnight.amended': (p) => `Overnight policy changed by the user: ${trunc(p.change)}`,
   'overnight.approval': (p) => `Unattended ${p.kind} approval ${p.decision}`,
   'checkpoint.saved': (p) => `Checkpoint saved (${trunc(p.reason)})`,
+  'usage.quota_paused': (p) =>
+    `Paused for the Claude usage limit${p.resetAt ? `; reset reported for ${p.resetAt}` : '; reset time not reported'}${p.nextCheckAt ? `; next check ${p.nextCheckAt}` : ''}`,
+  'usage.probe': (p) => `Availability check (${p.method.replace(/_/g, ' ')}): ${p.result.replace(/_/g, ' ')}`,
+  'usage.quota_resumed': (p) => `Resumed automatically after the usage limit (waited ${Math.round(p.waitedMs / 60000)} min)`,
+  'usage.wait_ended': (p) => `Stopped waiting for the usage limit: ${trunc(p.reason)}`,
+  'strategy.selected': (p) =>
+    `Strategy ${p.resolved}${p.requested !== p.resolved ? ` (requested ${p.requested})` : ''}: ${trunc(p.reason)}`,
+  'policy.decided': (p) =>
+    `Policy v${p.policyVersion} chose ${p.strategy} (${p.exploration ? 'exploration' : p.layer})`,
+  'speculative.started': (p) => `Speculative candidates ${p.candidates.join(', ')} started from ${p.baseCommit.slice(0, 8)}`,
+  'speculative.candidate': (p) =>
+    `Candidate ${p.label}: ${p.implemented ? 'implemented' : 'no result'}${p.checksPassed === null ? '' : p.checksPassed ? ', checks passed' : ', checks failed'}`,
+  'speculative.decided': (p) =>
+    p.winner ? `Tournament: candidate ${p.winner} selected (${p.confidence}; ranking ${p.ranking.join(' > ')})` : 'Tournament: no candidate could be selected',
+  'outcome.recorded': (p) => `Mission outcome recorded (${p.strategy}, ${p.success ? 'success' : 'not successful'})`,
   'review.arbitrated': (p) => `Findings arbitrated: ${p.accepted} accepted, ${p.rejected} rejected`,
   'user.intervention': (p) => `User: ${p.action}${p.detail ? ` (${trunc(p.detail)})` : ''}`,
 }

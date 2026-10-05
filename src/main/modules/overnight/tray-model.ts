@@ -44,11 +44,12 @@ export function buildTrayModel(input: TrayInput): TrayModel {
   const paused = o.state === 'QUOTA_PAUSED' || input.runState === 'paused'
   const status: TrayStatus = pendingFinal ? 'SHUTDOWN SCHEDULED' : o.state === 'FINALIZING' || o.state === 'CANCELLING' ? 'FINALIZING' : paused ? 'PAUSED' : 'RUNNING'
 
+  const what = o.workloadType === 'arena_campaign' ? 'Arena campaign' : 'mission'
   const lines = ['NEXUS']
   if (status === 'SHUTDOWN SCHEDULED' && o.powerAction) {
-    lines.push('Overnight mission finished', `${ACTION_LABEL[o.powerAction.action] ?? o.powerAction.action} scheduled ${input.time(o.powerAction.executeAt)}`)
+    lines.push(`Overnight ${what} finished`, `${ACTION_LABEL[o.powerAction.action] ?? o.powerAction.action} scheduled ${input.time(o.powerAction.executeAt)}`)
   } else {
-    lines.push(status === 'PAUSED' ? (o.state === 'QUOTA_PAUSED' ? 'Overnight mission waiting for the usage limit' : 'Overnight mission paused') : status === 'FINALIZING' ? 'Overnight mission finalizing' : 'Overnight mission running')
+    lines.push(status === 'PAUSED' ? (o.state === 'QUOTA_PAUSED' ? `Overnight ${what} waiting for the usage limit` : `Overnight ${what} paused`) : status === 'FINALIZING' ? `Overnight ${what} finalizing` : `Overnight ${what} running`)
     lines.push(`${input.activeAgents} agent${input.activeAgents === 1 ? '' : 's'} active`)
     if (failsafeArmed && o.failsafe) lines.push(`Shutdown scheduled ${input.time(o.failsafe.deadline)}`)
     else if (o.policy.endAction === 'NONE') lines.push('No power action')
@@ -63,7 +64,7 @@ export function buildTrayModel(input: TrayInput): TrayModel {
       ? { action: 'resume', label: 'Resume', enabled: true }
       : { action: 'pause', label: 'Pause', enabled: o.state === 'RUNNING' && input.runState !== 'paused' },
     { action: 'cancelPower', label: 'Cancel shutdown', enabled: pendingFinal || (working && (failsafeArmed || o.policy.endAction !== 'NONE')) },
-    { action: 'cancelMission', label: 'Cancel mission', enabled: working },
+    { action: 'cancelMission', label: o.workloadType === 'arena_campaign' ? 'Cancel campaign' : 'Cancel mission', enabled: working },
   ]
   return { visible: true, runId: o.runId, status, tooltip, lines, items }
 }

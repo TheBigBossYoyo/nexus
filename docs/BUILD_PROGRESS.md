@@ -51,6 +51,23 @@ Open items for v0.2 are in `docs/OVERNIGHT_BLOCKERS.md` and `docs/OVERNIGHT_FINA
 
 The release record is `docs/V0_2_1_RELEASE_REPORT.md`.
 
+## v0.3.0 (2026-10-04)
+
+| Area | What exists |
+|---|---|
+| Usage intelligence | `UsageIntelligenceService`: usage events with provenance, plan windows from the runtime, status machine, aggregation; nothing is estimated as remaining capacity |
+| Quota recovery | `QuotaRecoveryController`: checkpoint, wait, availability check without a prompt where the runtime allows it, automatic resume, dispatch gate; Overnight checks before resuming and keeps waiting on an unknown reset until the deadline |
+| Strategies | SINGLE, BUILD, SWARM, CONSENSUS, SPECULATIVE and ADAPTIVE as configuration of the one engine |
+| Speculative execution | Candidates in separate clones, objective tournament, durable adoption, cleanup |
+| Arena | Case format with pinned definitions, 12 built-in cases with hidden evaluators, isolated trials, versioned scoring, campaigns with budgets, quota pause and restart recovery |
+| Adaptive policy | Task profiler, evidence aggregation, engine with seeded exploration, candidates, manual promotion, rollback, pin, mission outcomes, simulator |
+| UI | Light design system, new shell and navigation, Home, Mission Control, inspector, Agents, composer with strategy selector, Arena, Policy, Usage, Overnight, Activity, Settings |
+| Overnight workloads | `AutonomousWorkload` lifecycle under the overnight supervisor; missions and Arena campaigns (Overnight Arena) as workloads; migration 005 |
+| Persistence | Migration 004 (20 tables, additive); a copy of the database is kept before a schema upgrade |
+| Validation | 2399 tests, 17 E2E, 1000-seed stresses, three code audits and a UI review with fixes, real ADAPTIVE mission, real speculative task, real Arena campaign, packaged 0.3.0 verified against 0.1, 0.2.0 and 0.2.1 databases |
+
+Released as `v0.3.0` on 2026-10-05. The release record is `docs/V0_3_RELEASE_REPORT.md`; the log of the work is `docs/V0_3_PROGRESS.md`.
+
 ## Known failures and open items (v0.1 record)
 
 - One intermittent scenario failure has no established cause (TEST_STATUS.md, item 3).

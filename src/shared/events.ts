@@ -8,6 +8,7 @@ import type {
   TaskState,
 } from './domain'
 import type { OvernightStatus } from './overnight'
+import type { UsageOverview } from './v3'
 
 /**
  * Why a run paused, more precisely than PauseReason: 'user' is the person pausing it, 'intervention'
@@ -57,8 +58,36 @@ export interface EventPayloads {
   'agent.failed': { error: string }
   'agent.stopped': { reason: string }
   'agent.rotated': { fromSessionId: string | null; turns: number }
-  'agent.usage': { inputTokens: number; outputTokens: number; costUsd: number }
-  'agent.rate_limited': { status: string; resetsAt: number | null; limitType: string | null }
+  'agent.usage': {
+    inputTokens: number
+    outputTokens: number
+    costUsd: number
+    /** v0.3: this turn's own (delta) figures per model, for the usage service. Absent on older events. */
+    turn?: {
+      sdkSessionId: string | null
+      role: string
+      turns: number
+      durationMs: number
+      models: {
+        model: string
+        inputTokens: number
+        outputTokens: number
+        cacheReadTokens: number
+        cacheCreationTokens: number
+        costUsd: number
+      }[]
+    }
+  }
+  'agent.rate_limited': {
+    status: string
+    resetsAt: number | null
+    limitType: string | null
+    /** v0.3: the runtime's own figures, verbatim, when it sent them. */
+    utilization?: number | null
+    overageStatus?: string | null
+    isUsingOverage?: boolean | null
+    surpassedThreshold?: number | null
+  }
 
   'git.worktree.created': { path: string; branch: string }
   'git.worktree.removed': { path: string }
@@ -111,6 +140,19 @@ export interface EventPayloads {
   'overnight.amended': { change: string }
   'overnight.approval': { approvalId: string; kind: string; decision: 'approved' | 'denied' }
   'checkpoint.saved': { checkpointId: string; reason: string }
+
+  // v0.3: usage and quota recovery (run-scoped records of what the usage service did to this run).
+  'usage.quota_paused': { pauseId: string; resetAt: string | null; nextCheckAt: string | null; limitType: string | null }
+  'usage.probe': { pauseId: string; method: string; result: string }
+  'usage.quota_resumed': { pauseId: string; waitedMs: number; method: string }
+  'usage.wait_ended': { pauseId: string; reason: string }
+  // v0.3: strategy, policy, speculation
+  'strategy.selected': { requested: string; resolved: string; reason: string }
+  'policy.decided': { decisionId: string; strategy: string; layer: string; exploration: boolean; policyVersion: number }
+  'speculative.started': { speculativeRunId: string; candidates: string[]; baseCommit: string }
+  'speculative.candidate': { speculativeRunId: string; label: string; implemented: boolean; checksPassed: boolean | null }
+  'speculative.decided': { speculativeRunId: string; winner: string | null; ranking: string[]; confidence: string }
+  'outcome.recorded': { outcomeId: string; strategy: string; success: boolean }
 }
 
 export type EventType = keyof EventPayloads
@@ -146,3 +188,11 @@ export type PushMessage =
   | { kind: 'agent.delta'; agentId: string; runId: string; text: string }
   | { kind: 'auth.changed' }
   | { kind: 'overnight'; status: OvernightStatus }
+  /** v0.3. The usage status changed (limit, wait, probe, resume) or observed totals moved. */
+  | { kind: 'usage'; overview: UsageOverview }
+  /** v0.3. A notification worth one toast (limit reached, resumed). Never sent for transient throttles. */
+  | { kind: 'usage.notice'; notice: 'limit_reached' | 'resumed' | 'wait_ended'; title: string; detail: string }
+  /** v0.3. An Arena campaign or one of its trials changed. */
+  | { kind: 'arena'; campaignId: string }
+  /** v0.3. The policy pointer, candidates or statistics changed. */
+  | { kind: 'policy' }

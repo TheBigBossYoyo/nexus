@@ -1,0 +1,46 @@
+{
+  "id": "testing-gap",
+  "version": 2,
+  "name": "Cron library test gap",
+  "description": "A cron expression library with decent code but only a handful of shallow tests; the agent must write a regression suite strong enough to catch behavioural bugs in every module.",
+  "category": "testing",
+  "complexity": "medium",
+  "risk": "low",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "The `cronkit` library parses five-field cron expressions and computes upcoming run times, but its test suite (test/cron.test.js) only covers a few happy paths. We are about to hand this library to a new maintainer and want a regression suite that would catch any accidental behaviour change. Add tests under test/ (new files are fine, using node:test and node:assert) that thoroughly pin down the current behaviour of every module: field expansion, expression parsing and aliases, matching, next-run search and the upcoming list. Pay particular attention to boundaries, error handling and the documented rules in the README. Do not change anything under src/: the tests must pass against the current implementation, be deterministic (everything is UTC, no real clock) and run in under a few seconds with `node --test`.",
+  "visibleAcceptance": [
+    "All new tests pass against the unmodified implementation and run with `node --test`",
+    "Each exported function has tests for normal use, boundary values and invalid input",
+    "The documented day-of-month/day-of-week rule, name handling and aliases are covered",
+    "Tests are deterministic, use no real clock or network, and src/ is untouched"
+  ],
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
+  "setup": [],
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/testing-gap.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 25,
+    "maxAgentSessions": 30,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 60
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
+}

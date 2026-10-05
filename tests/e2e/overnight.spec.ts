@@ -201,7 +201,8 @@ test.describe('Overnight Mode', () => {
     const { app, page } = await launchApp(dataDir, repo)
     try {
       const projectId = await openProject(page)
-      const runId = await startOvernight(page, projectId, 'Build the modules. [demo:quota]', { forceCloseApplications: true })
+      // The policy says to end the run on a usage limit (the default, WAIT_AND_RETRY, keeps probing until the deadline).
+      const runId = await startOvernight(page, projectId, 'Build the modules. [demo:quota]', { forceCloseApplications: true, quotaPolicy: 'END_RUN' })
       const scheduled = await waitForOvernight(page, runId, ['POWER_ACTION_SCHEDULED'])
       expect(scheduled.terminalReason).toBe('QUOTA_EXHAUSTED')
       const detail = await invoke(page, 'runs.get', { runId })
@@ -304,6 +305,83 @@ test.describe('Overnight Mode', () => {
       await waitForOvernight(second.page, runId, ['DONE'])
     } finally {
       await closeApp(second.app)
+    }
+  })
+
+  test('Overnight Arena: run overnight from the dialog, failsafe before the first trial, report, final shutdown, cancel', async () => {
+    test.setTimeout(360_000)
+    const repo = createRepo()
+    const dataDir = tempDir('data')
+    dirs.push(repo, dataDir)
+    const { app, page } = await launchApp(dataDir, repo)
+    try {
+      await page.getByTestId('nav-arena').click()
+      await page.getByTestId('arena-new-campaign').click()
+      const dialog = page.getByTestId('arena-campaign-dialog')
+      await dialog.getByTestId('arena-campaign-name').fill('Overnight E2E campaign')
+      await dialog.getByTestId('arena-case-bugfix-localized').click()
+      for (const strategy of ['SINGLE', 'BUILD', 'SWARM', 'CONSENSUS', 'SPECULATIVE']) {
+        const box = dialog.getByTestId(`arena-strategy-${strategy}`)
+        if (strategy === 'SINGLE') await box.check()
+        else await box.uncheck()
+      }
+      await dialog.getByTestId('arena-repetitions').fill('1')
+      await dialog.getByTestId('arena-run-overnight').check()
+      await expect(dialog.getByTestId('arena-overnight-form')).toBeVisible()
+      // Nothing starts without the campaign-specific authorization.
+      await expect(dialog.getByTestId('arena-overnight-start')).toBeDisabled()
+      await expect(dialog.getByTestId('arena-overnight-authorize')).not.toBeChecked()
+      await dialog.getByTestId('overnight-force-close').check()
+      await dialog.getByTestId('arena-overnight-authorize').check()
+      await expect(dialog.getByTestId('arena-overnight-start')).toBeEnabled()
+      await screenshot(page, 'overnight-arena-1-dialog')
+      expect(powerLog(dataDir)).toEqual([])
+      expect((await invoke(page, 'arena.campaigns', {})).total).toBe(0)
+      await dialog.getByTestId('arena-overnight-start').click()
+
+      await expect(page.getByTestId('arena-overnight-panel')).toBeVisible({ timeout: 30_000 })
+      const campaignId = (await invoke(page, 'arena.campaigns', {})).campaigns[0]?.campaign.id ?? ''
+      const started = await invoke(page, 'overnight.get', { runId: campaignId })
+      expect(started).toMatchObject({ workloadType: 'arena_campaign', runId: campaignId, projectId: 'arena' })
+      expect(started?.authorization).toMatchObject({ runId: campaignId, confirmation: OVERNIGHT_CONFIRMATION_TEXT })
+      expect((await invoke(page, 'arena.campaign', { campaignId })).campaign.overnight).toBe(true)
+      // The failsafe was the first thing asked of Windows: 9 hours, forced.
+      expect(powerLog(dataDir)[0]).toMatchObject({ operation: 'scheduleShutdown', ok: true, request: { purpose: 'failsafe', delaySeconds: 32_400, force: true } })
+      await expect(page.getByTestId('arena-overnight-state')).toBeVisible()
+      await screenshot(page, 'overnight-arena-2-panel')
+      // Closing the window would keep the campaign alive in the tray.
+      expect((await trayModel(app))?.visible).toBe(true)
+      expect((await trayModel(app))?.tooltip).toContain('Overnight E2E campaign')
+
+      const scheduled = await waitForOvernight(page, campaignId, ['POWER_ACTION_SCHEDULED'], 300_000)
+      expect(scheduled.terminalReason).toBe('SUCCESS')
+      expect(scheduled.powerAction).toMatchObject({ action: 'SHUTDOWN', mechanism: 'os_timer', forced: true })
+      expect(summary(powerLog(dataDir))).toEqual(['scheduleShutdown:failsafe', 'cancelShutdown', 'scheduleShutdown:final'])
+      expect((await invoke(page, 'arena.campaign', { campaignId })).campaign.state).toBe('completed')
+      const report = await invoke(page, 'overnight.report', { runId: campaignId })
+      expect(report.text).toContain('# NEXUS Overnight Arena Campaign')
+      expect(existsSync(report.path ?? '')).toBe(true)
+      expect(Date.parse(scheduled.reportSavedAt ?? '')).toBeLessThanOrEqual(Date.parse(scheduled.powerAction?.scheduledAt ?? ''))
+      expect((await invoke(page, 'overnight.audit', { runId: campaignId })).map((a) => a.operation)).toEqual(['arm_failsafe', 'cancel_failsafe', 'schedule_final'])
+      expect((await trayModel(app))?.status).toBe('SHUTDOWN SCHEDULED')
+      await expect(page.getByTestId('arena-overnight-countdown')).toBeVisible()
+      await screenshot(page, 'overnight-arena-3-scheduled')
+
+      // While it is live, the Overnight page shows the campaign as a campaign, not as a mission, and links back to it.
+      await page.getByTestId('nav-overnight').click()
+      await expect(page.getByTestId(`overnight-card-${campaignId}`)).toContainText('Arena campaign: Overnight E2E campaign')
+      await screenshot(page, 'overnight-arena-4-overnight-page')
+      await page.getByTestId('overnight-open-campaign').click()
+      await expect(page.getByTestId('arena-overnight-panel')).toBeVisible()
+
+      // The person at the keyboard cancels the shutdown from the campaign page.
+      await page.getByTestId('arena-overnight-cancel-shutdown').click()
+      const done = await waitForOvernight(page, campaignId, ['DONE'])
+      expect(done.powerAction?.cancelledAt).not.toBeNull()
+      expect(summary(powerLog(dataDir)).at(-1)).toBe('cancelShutdown')
+      await expect(page.getByTestId('arena-overnight-report')).toBeVisible()
+    } finally {
+      await closeApp(app)
     }
   })
 

@@ -11,13 +11,13 @@ export interface StatusInfo {
 
 // Class names are spelled out in full so Tailwind can see them.
 export const TONE_CLASSES: Record<Tone, { dot: string; text: string; border: string; soft: string }> = {
-  neutral: { dot: 'bg-tone-neutral', text: 'text-tone-neutral', border: 'border-tone-neutral', soft: 'bg-tone-neutral/12' },
-  active: { dot: 'bg-tone-active', text: 'text-tone-active', border: 'border-tone-active', soft: 'bg-tone-active/12' },
-  waiting: { dot: 'bg-tone-waiting', text: 'text-tone-waiting', border: 'border-tone-waiting', soft: 'bg-tone-waiting/12' },
-  review: { dot: 'bg-tone-review', text: 'text-tone-review', border: 'border-tone-review', soft: 'bg-tone-review/12' },
-  success: { dot: 'bg-tone-success', text: 'text-tone-success', border: 'border-tone-success', soft: 'bg-tone-success/12' },
-  danger: { dot: 'bg-tone-danger', text: 'text-tone-danger', border: 'border-tone-danger', soft: 'bg-tone-danger/12' },
-  warning: { dot: 'bg-tone-warning', text: 'text-tone-warning', border: 'border-tone-warning', soft: 'bg-tone-warning/12' },
+  neutral: { dot: 'bg-tone-neutral', text: 'text-tone-neutral', border: 'border-tone-neutral', soft: 'bg-tone-neutral-subtle' },
+  active: { dot: 'bg-tone-active', text: 'text-tone-active', border: 'border-tone-active', soft: 'bg-tone-active-subtle' },
+  waiting: { dot: 'bg-tone-waiting', text: 'text-tone-waiting', border: 'border-tone-waiting', soft: 'bg-tone-waiting-subtle' },
+  review: { dot: 'bg-tone-review', text: 'text-tone-review', border: 'border-tone-review', soft: 'bg-tone-review-subtle' },
+  success: { dot: 'bg-tone-success', text: 'text-tone-success', border: 'border-tone-success', soft: 'bg-tone-success-subtle' },
+  danger: { dot: 'bg-tone-danger', text: 'text-tone-danger', border: 'border-tone-danger', soft: 'bg-tone-danger-subtle' },
+  warning: { dot: 'bg-tone-warning', text: 'text-tone-warning', border: 'border-tone-warning', soft: 'bg-tone-warning-subtle' },
 }
 
 export function taskStatus(state: TaskState): StatusInfo {

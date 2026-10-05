@@ -115,3 +115,46 @@ describe('messageDirection', () => {
     expect(messageDirection({ ...base, fromAgentId: 'other', fromTaskId: 't2' }, a)).toBe('received')
   })
 })
+
+import {
+  agentActivityLine,
+  agentGroupOf,
+  claudeModelLabel,
+  groupAgentsByState,
+  observedTokens,
+} from '../../../src/renderer/src/views/agents/agentLogic'
+
+describe('agent state grouping and labels', () => {
+  it('groups by working / waiting / done and omits empty groups', () => {
+    const list = [
+      agent({ id: 'a', state: 'stopped', createdAt: '2026-01-01T00:00:03.000Z' }),
+      agent({ id: 'b', state: 'working', createdAt: '2026-01-01T00:00:02.000Z' }),
+      agent({ id: 'c', state: 'blocked', createdAt: '2026-01-01T00:00:01.000Z' }),
+    ]
+    const groups = groupAgentsByState(list)
+    expect(groups.map((g) => [g.id, g.agents.map((a) => a.id)])).toEqual([
+      ['working', ['b']],
+      ['waiting', ['c']],
+      ['done', ['a']],
+    ])
+    expect(groupAgentsByState([agent({ state: 'failed' })]).map((g) => g.id)).toEqual(['done'])
+    expect(agentGroupOf({ state: 'starting' })).toBe('working')
+  })
+  it('labels Claude tiers without inventing', () => {
+    expect(claudeModelLabel('claude-sonnet-4-5')).toBe('Claude · Sonnet')
+    expect(claudeModelLabel('claude-opus-4')).toBe('Claude · Opus')
+    expect(claudeModelLabel('foo')).toBe('Claude · foo')
+    expect(claudeModelLabel(null)).toBe('Claude')
+  })
+  it('activity line falls back to a state phrase', () => {
+    expect(agentActivityLine({ state: 'working', activity: ' Editing ', error: null })).toBe('Editing')
+    expect(agentActivityLine({ state: 'failed', activity: null, error: 'boom' })).toBe('boom')
+    expect(agentActivityLine({ state: 'stopped', activity: null, error: null })).toBe('Finished')
+    expect(agentActivityLine({ state: 'waiting', activity: null, error: null })).toBe('Waiting')
+  })
+  it('observed tokens are null when nothing was reported', () => {
+    expect(observedTokens({ inputTokens: null, outputTokens: null })).toBeNull()
+    expect(observedTokens({ inputTokens: 10, outputTokens: null })).toBe(10)
+    expect(observedTokens({ inputTokens: 10, outputTokens: 5 })).toBe(15)
+  })
+})

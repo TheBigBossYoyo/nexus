@@ -11,11 +11,10 @@ import {
   Markdown,
   NumberField,
   Select,
-  StatusDot,
+  StatusBadge,
   type SelectOption,
 } from '../../components/ui'
 import { useRunControls } from '../../app/useRunControls'
-import { TONE_CLASSES } from '../../lib/status'
 import {
   useCancelOvernightMission,
   useCancelPower,
@@ -25,7 +24,10 @@ import {
   useOvernightReport,
 } from '../../lib/queries'
 import { END_ACTION_LABEL } from '../projects/overnight'
+import { overnightWord } from '../../lib/wording'
+import type { WorkloadNoun } from '../overnight/workloadModel'
 import { bannerModel } from './overnightModel'
+import { deadlineRowLabel } from '../overnight/workloadModel'
 import { useNow } from './runContext'
 
 const END_OPTIONS: SelectOption<EndAction>[] = END_ACTIONS.map((a) => ({
@@ -33,7 +35,7 @@ const END_OPTIONS: SelectOption<EndAction>[] = END_ACTIONS.map((a) => ({
   label: END_ACTION_LABEL[a],
 }))
 
-function ChangeEndActionDialog({
+export function ChangeEndActionDialog({
   status,
   open,
   onClose,
@@ -98,14 +100,16 @@ function ChangeEndActionDialog({
   )
 }
 
-function ExtendDialog({
+export function ExtendDialog({
   runId,
   open,
   onClose,
+  noun = 'mission',
 }: {
   runId: string
   open: boolean
   onClose: () => void
+  noun?: WorkloadNoun
 }) {
   const extend = useExtendMission()
   const [minutes, setMinutes] = useState(60)
@@ -114,7 +118,7 @@ function ExtendDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Extend mission"
+      title={`Extend ${noun}`}
       testId="overnight-extend-dialog"
       footer={
         <>
@@ -133,7 +137,7 @@ function ExtendDialog({
     >
       <Field
         label="Extra minutes"
-        hint="Moves the mission deadline and the failsafe by the same amount."
+        hint={`Moves the ${noun} deadline and the failsafe by the same amount.`}
         error={valid ? undefined : 'Enter 1 to 1440 minutes.'}
       >
         {(id) => (
@@ -151,14 +155,16 @@ function ExtendDialog({
   )
 }
 
-function ReportDialog({
+export function ReportDialog({
   runId,
   open,
   onClose,
+  noun = 'mission',
 }: {
   runId: string
   open: boolean
   onClose: () => void
+  noun?: WorkloadNoun
 }) {
   const report = useOvernightReport(runId, open)
   return (
@@ -175,18 +181,20 @@ function ReportDialog({
         <div className="flex flex-col gap-2">
           {report.data.path ? (
             <div
-              className="font-mono text-[0.9em] text-fg-muted"
+              className="font-mono text-small text-text-secondary"
               data-testid="overnight-report-path"
             >
               {report.data.path}
             </div>
           ) : (
-            <div className="text-fg-faint">Not saved into the project.</div>
+            <div className="text-text-muted">
+              {noun === 'campaign' ? 'Not saved to a file.' : 'Not saved into the project.'}
+            </div>
           )}
           {report.data.text ? (
             <Markdown>{report.data.text}</Markdown>
           ) : (
-            <div className="text-fg-faint">No report text.</div>
+            <div className="text-text-muted">No report text.</div>
           )}
         </div>
       ) : null}
@@ -220,22 +228,19 @@ export function OvernightBanner({ runId }: { runId: string }) {
           OVERNIGHT MODE
         </Badge>
         <span className="inline-flex items-center gap-1.5">
-          <StatusDot tone={m.tone} pulse={m.live} />
-          <span
-            className={`font-mono font-semibold ${TONE_CLASSES[m.tone].text}`}
-            data-testid="overnight-state"
-          >
+          <StatusBadge status={{ tone: m.tone, label: overnightWord(m.state) }} pulse={m.live} />
+          <span className="sr-only" aria-hidden="true" data-testid="overnight-state" data-state={m.state}>
             {m.state}
           </span>
         </span>
-        {m.detail ? <span className="text-fg-muted">{m.detail}</span> : null}
-        <span className="font-mono text-[0.9em] text-fg-muted">
-          Failsafe shutdown: <span data-testid="overnight-failsafe">{m.failsafe}</span>
+        {m.detail ? <span className="text-text-secondary">{m.detail}</span> : null}
+        <span className="font-mono text-small text-text-secondary">
+          Failsafe timer: <span data-testid="overnight-failsafe">{m.failsafe}</span>
         </span>
-        <span className="font-mono text-[0.9em] text-fg-muted">
-          Mission deadline: <span data-testid="overnight-deadline">{m.deadline}</span>
+        <span className="font-mono text-small text-text-secondary">
+          {deadlineRowLabel(status)}: <span data-testid="overnight-deadline">{m.deadline}</span>
         </span>
-        <span className="font-mono text-[0.9em] text-fg-muted">
+        <span className="font-mono text-small text-text-secondary">
           End action: <span data-testid="overnight-end-action-label">{m.endAction}</span>
         </span>
         {m.countdown ? (

@@ -1,0 +1,8 @@
+{
+  "name": "taskkit",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Small async coordination helpers: semaphore, job queue, async cache.",
+  "scripts": { "test": "node --test" }
+}

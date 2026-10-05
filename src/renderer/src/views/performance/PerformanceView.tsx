@@ -4,12 +4,12 @@ import { useCurrentProject } from '../../app/useCurrent'
 import { usePerformanceSummary } from '../../lib/queries'
 import { DASH, formatDateTime, formatDuration } from '../../lib/format'
 import { formatRate, insufficientLabel, performanceRowKey } from '../../lib/v2logic'
-import { Badge, DataTable, EmptyState, ErrorNote, Loading, PerformanceIcon, Select, type Column } from '../../components/ui'
+import { Badge, DataTable, EmptyState, ErrorNote, Loading, PageHeader, PerformanceIcon, Select, type Column } from '../../components/ui'
 
 type Scope = 'project' | 'all'
 
 function Recent({ stat }: { stat: PerformanceStat }) {
-  if (stat.recent.length === 0) return <span className="text-fg-faint">{DASH}</span>
+  if (stat.recent.length === 0) return <span className="text-text-muted">{DASH}</span>
   return (
     <span className="inline-flex items-center gap-0.5" data-testid="performance-recent">
       {stat.recent.map((r) => {
@@ -30,7 +30,7 @@ function Recent({ stat }: { stat: PerformanceStat }) {
 function columns(minSamples: number): Column<PerformanceStat>[] {
   const rate =
     (pick: (s: PerformanceStat) => number): Column<PerformanceStat>['render'] =>
-    (s) => <span className={s.sufficient ? '' : 'text-fg-muted'}>{formatRate(pick(s), s.samples)}</span>
+    (s) => <span className={s.sufficient ? '' : 'text-text-secondary'}>{formatRate(pick(s), s.samples)}</span>
   return [
     { key: 'role', header: 'Role', render: (s) => s.role },
     { key: 'model', header: 'Model', render: (s) => s.model, mono: true },
@@ -76,30 +76,34 @@ export function PerformanceView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="performance-view">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-surface-1 px-3 py-2">
-        <h1 className="m-0 mr-2 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">Performance</h1>
-        <Select
-          aria-label="Scope"
-          className="w-52"
-          value={scope}
-          onChange={setScope}
-          data-testid="performance-scope"
-          options={[
-            { value: 'project', label: project ? `Project: ${project.name}` : 'Current project', disabled: !project },
-            { value: 'all', label: 'All projects' },
-          ]}
-        />
-        {query.data ? (
-          <span className="ml-auto font-mono text-[0.88em] text-fg-faint" data-testid="performance-total">
-            {query.data.totalOutcomes} task outcomes · rows need at least {minSamples} samples to count as reliable
-          </span>
-        ) : null}
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <PageHeader
+        title="Performance"
+        context="Intelligence"
+        actions={
+          <Select
+            aria-label="Scope"
+            className="w-52!"
+            value={scope}
+            onChange={setScope}
+            data-testid="performance-scope"
+            options={[
+              { value: 'project', label: project ? `Project: ${project.name}` : 'Current project', disabled: !project },
+              { value: 'all', label: 'All projects' },
+            ]}
+          />
+        }
+      />
+      {query.data ? (
+        <div className="shrink-0 border-b bg-surface px-5 py-2 text-small text-text-muted" data-testid="performance-total">
+          <span className="tnum font-medium text-text-primary">{query.data.totalOutcomes}</span> task outcomes. Rows need at least{' '}
+          {minSamples} samples to count as reliable.
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-auto bg-surface">
         {query.isPending ? (
           <Loading label="Loading performance" />
         ) : query.isError ? (
-          <ErrorNote error={query.error} className="m-3" />
+          <ErrorNote error={query.error} className="m-5" />
         ) : stats.length === 0 ? (
           <EmptyState title="No performance data yet" icon={<PerformanceIcon size={22} />} className="h-full">
             Statistics accumulate from completed tasks. Each finished implementation task records its role, the model that ran it,
@@ -113,7 +117,7 @@ export function PerformanceView() {
               rowKey={performanceRowKey}
               rowTestId={(s) => `performance-row-${performanceRowKey(s)}`}
             />
-            <p className="m-0 px-3 py-2 text-[0.85rem] text-fg-faint">
+            <p className="m-0 px-5 py-3 text-small text-text-muted">
               Rates are fractions of the samples in that row, shown as whole percents with their sample count. Rows below {minSamples}{' '}
               samples are marked as insufficient. Recent outcomes: green passed first time, amber completed after rework, red not completed.
             </p>

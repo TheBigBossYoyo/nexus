@@ -144,22 +144,76 @@ describe('translateSdkMessage', () => {
     const events = run([
       msg<'rate_limit_event'>({
         type: 'rate_limit_event',
-        rate_limit_info: { status: 'allowed_warning', resetsAt: 1700000000, rateLimitType: 'five_hour' },
+        rate_limit_info: { status: 'allowed_warning', resetsAt: 1700000000, rateLimitType: 'five_hour', utilization: 0.91, overageStatus: 'allowed', isUsingOverage: false, surpassedThreshold: 0.9 },
       }),
       msg<'system'>({ type: 'system', subtype: 'status', status: 'compacting' } as never),
       msg<'system'>({ type: 'system', subtype: 'status', status: null } as never),
       msg<'system'>({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 1 } } as never),
     ])
     expect(events).toEqual([
-      { type: 'rate_limit', status: 'allowed_warning', resetsAt: 1700000000, limitType: 'five_hour' },
+      {
+        type: 'rate_limit',
+        status: 'allowed_warning',
+        resetsAt: 1700000000,
+        limitType: 'five_hour',
+        utilization: 0.91,
+        overageStatus: 'allowed',
+        isUsingOverage: false,
+        surpassedThreshold: 0.9,
+      },
       { type: 'status', status: 'compacting' },
       { type: 'status', status: 'compacted' },
     ])
   })
 
-  it('surfaces assistant rate_limit/billing errors as rate_limit and suppresses the synthetic text', () => {
-    const events = run([assistant([{ type: 'text', text: 'Limit reached' }], { error: 'rate_limit' })])
+  it('keeps absent rate-limit fields as null', () => {
+    const events = run([msg<'rate_limit_event'>({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } })])
+    expect(events).toEqual([
+      { type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null, utilization: null, overageStatus: null, isUsingOverage: null, surpassedThreshold: null },
+    ])
+  })
+
+  it('emits a throttle (not a rate_limit) for overloaded and server errors', () => {
+    expect(run([assistant([{ type: 'text', text: 'busy' }], { error: 'overloaded' })])).toEqual([{ type: 'throttle', kind: 'overloaded' }])
+    expect(run([assistant([{ type: 'text', text: 'oops' }], { error: 'server_error' })])).toEqual([{ type: 'throttle', kind: 'server_error' }])
+  })
+
+  it('billing_error is a usage limit and its synthetic text is suppressed', () => {
+    const events = run([assistant([{ type: 'text', text: 'Credit balance is too low' }], { error: 'billing_error' })])
     expect(events).toEqual([{ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null }])
+  })
+
+  it('an assistant rate_limit error after a rejected rate_limit_event is the same usage limit', () => {
+    const state = createTranslatorState({ expectStructuredOutput: false })
+    const events = run(
+      [
+        msg<'rate_limit_event'>({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1700000000, rateLimitType: 'five_hour' } }),
+        assistant([{ type: 'text', text: 'Limit reached' }], { error: 'rate_limit' }),
+      ],
+      state,
+    )
+    expect(events.map((e) => e.type)).toEqual(['rate_limit', 'rate_limit'])
+    expect(events[1]).toMatchObject({ status: 'rejected', resetsAt: null })
+    expect(state.quotaSignal).toBe(true)
+  })
+
+  it("an assistant rate_limit error whose text is a documented usage-limit message is a usage limit", () => {
+    const events = run([assistant([{ type: 'text', text: "You've hit your limit. Resets 3pm" }], { error: 'rate_limit' })])
+    expect(events).toEqual([{ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null }])
+  })
+
+  it('a bare 429 (rate_limit error with no usage-limit evidence) is a transient throttle, not a quota outcome', () => {
+    const state = createTranslatorState({ expectStructuredOutput: false })
+    const events = run(
+      [
+        assistant([{ type: 'text', text: 'API Error: 429 too many requests' }], { error: 'rate_limit' }),
+        result({ subtype: 'error_during_execution', errors: ['429'] }),
+      ],
+      state,
+    )
+    expect(events[0]).toEqual({ type: 'throttle', kind: 'rate_limit' })
+    expect(state.quotaSignal).toBe(false)
+    expect(turn(events).outcome).toBe('error')
   })
 });
 

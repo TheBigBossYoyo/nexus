@@ -9,22 +9,28 @@ export interface TabItem<T extends string> {
   testId?: string
 }
 
-/** Controlled tab strip; the caller renders the active panel. */
+/** Controlled underline tab strip; the caller renders the active panel. */
 export function Tabs<T extends string>({
   tabs,
   active,
   onChange,
   className,
+  label,
+  bare = false,
 }: {
   tabs: readonly TabItem<T>[]
   active: T
   onChange: (id: T) => void
   className?: string
+  label?: string
+  /** No bottom border, for tab strips that sit inside a bordered row. */
+  bare?: boolean
 }) {
   return (
     <div
       role="tablist"
-      className={cn('flex shrink-0 items-end gap-0.5 border-b', className)}
+      aria-label={label}
+      className={cn('flex shrink-0 items-end gap-1', !bare && 'border-b', className)}
       onKeyDown={(e) => {
         // Arrow keys / Home / End move between tabs.
         const idx = tabs.findIndex((t) => t.id === active)
@@ -50,8 +56,8 @@ export function Tabs<T extends string>({
             data-testid={t.testId}
             onClick={() => onChange(t.id)}
             className={cn(
-              '-mb-px inline-flex h-[var(--row-h)] items-center gap-1.5 border-b-2 px-2.5 transition-colors',
-              selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+              '-mb-px inline-flex h-[var(--row-h)] items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 font-medium transition-colors',
+              selected ? 'border-accent text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary',
             )}
           >
             {t.label}

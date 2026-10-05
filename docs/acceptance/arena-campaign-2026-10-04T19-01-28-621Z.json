@@ -1,0 +1,1105 @@
+{
+  "kind": "arena-campaign",
+  "startedAt": "2026-10-04T18:07:42.382Z",
+  "executable": "dev build",
+  "cases": [
+    "bugfix-localized",
+    "feature-small",
+    "ui-state-bug"
+  ],
+  "strategies": [
+    "SINGLE",
+    "BUILD"
+  ],
+  "app": {
+    "version": "0.2.1",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "usageBefore": {
+    "capturedAt": "2026-10-04T18:07:45.988Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "AVAILABLE",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 0,
+      "turns": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "durationMs": 0,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "fe827d06-c84b-4b07-a6c9-99895c3ca6e7",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 30,
+        "resetAt": "2026-10-04T22:10:00.425597+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-04T18:07:45.987Z",
+        "updatedAt": "2026-10-04T18:07:45.987Z",
+        "stale": false
+      },
+      {
+        "id": "472b5509-346c-44c9-a900-dbe48bb01d23",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-04T18:07:45.987Z",
+        "updatedAt": "2026-10-04T18:07:45.987Z",
+        "stale": false
+      },
+      {
+        "id": "826de9b4-65b8-4c4e-a014-c5f9a35b8a57",
+        "limitType": "seven_day",
+        "status": "allowed",
+        "utilizationPercent": 49,
+        "resetAt": "2026-10-10T04:00:00.425617+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-04T18:07:45.987Z",
+        "updatedAt": "2026-10-04T18:07:45.987Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 49,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-04T22:10:00.425597+00:00",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "finishedAt": "2026-10-04T19:01:25.687Z",
+  "campaign": {
+    "id": "b970c62b-b25f-4410-ad9f-9d251f48786f",
+    "name": "Acceptance 2026-10-04T18:07",
+    "state": "completed",
+    "pauseReason": null,
+    "caseVersionIds": [
+      "5374642c-c046-4cd2-b5ce-a7fe471160fa",
+      "9a20adf5-4543-4da3-a866-e3376316d7a6",
+      "00ce3c71-8fe2-4ecf-9671-c10903d832f6"
+    ],
+    "strategies": [
+      "SINGLE",
+      "BUILD"
+    ],
+    "repetitions": 1,
+    "modelPreset": "balanced",
+    "budgets": {
+      "preset": "eco",
+      "maxWallClockMinutes": 120,
+      "maxTrials": 12,
+      "maxConcurrentTrials": 1,
+      "maxAgentSessions": 120,
+      "maxAgentsPerTrial": 2
+    },
+    "overnight": false,
+    "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+    "nexusVersion": "0.2.1",
+    "environment": {
+      "platform": "win32 x64",
+      "osRelease": "10.0.26200",
+      "nodeVersion": "v24.14.0",
+      "sdkVersion": "0.3.288",
+      "gitVersion": "2.53.0.windows.2",
+      "modelTiers": {
+        "strongest": "opus",
+        "balanced": "sonnet",
+        "fast": "haiku"
+      }
+    },
+    "error": null,
+    "createdAt": "2026-10-04T18:07:46.097Z",
+    "startedAt": "2026-10-04T18:07:46.155Z",
+    "completedAt": "2026-10-04T19:01:25.332Z"
+  },
+  "counts": {
+    "queued": 0,
+    "provisioning": 0,
+    "running": 0,
+    "evaluating": 0,
+    "passed": 4,
+    "failed": 0,
+    "blocked": 2,
+    "cancelled": 0
+  },
+  "trials": [
+    {
+      "case": "bugfix-localized",
+      "strategy": "SINGLE",
+      "repetition": 1,
+      "state": "passed",
+      "detail": null,
+      "runId": "74e07499-d51b-4ac4-9736-ccf39eb12791",
+      "runState": "completed",
+      "requestedStrategy": "SINGLE",
+      "resolvedStrategy": "SINGLE",
+      "repoPath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-arena-data-kKiFqR\\arena\\b970c62b\\a9632171\\repo",
+      "repoExists": true,
+      "evaluatorInRepo": false,
+      "baselineCommit": "62078b5f2198abbfb92a0ed2fb646d468ba0eae7",
+      "resultCommit": "085963ccda6dc4707b55b883111e214ff4cf3165",
+      "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+      "models": {
+        "worker": "opus",
+        "reviewer": "opus",
+        "verifier": "opus"
+      },
+      "tasks": [
+        {
+          "key": "implement",
+          "role": "worker",
+          "state": "completed",
+          "attempt": 1,
+          "repairCycles": 0
+        }
+      ],
+      "metrics": {
+        "id": "c9d48b22-af01-4ac5-876f-5d128caebf28",
+        "trialId": "a9632171-816c-4be1-8454-f2c62b305eb9",
+        "buildPassed": null,
+        "typecheckPassed": null,
+        "testsPassed": true,
+        "hiddenPassed": true,
+        "acceptanceTotal": null,
+        "acceptancePassed": null,
+        "verifierPassed": null,
+        "criticalFindings": 0,
+        "highFindings": 0,
+        "mediumFindings": 0,
+        "repairs": 0,
+        "wallClockMs": 69118,
+        "sessions": 3,
+        "turns": 22,
+        "inputTokens": 6568,
+        "outputTokens": 5293,
+        "toolCalls": 19,
+        "humanInterventions": 0,
+        "approvals": 0,
+        "manualRetries": 0,
+        "blockers": 0,
+        "crashedAgents": 0,
+        "recoveredSessions": 0,
+        "schedulerFailures": 0,
+        "unfinishedTasks": 0,
+        "quotaPauses": 0,
+        "quotaWaitMs": 0,
+        "autoResumeSuccesses": 0,
+        "throttleEvents": 0,
+        "createdAt": "2026-10-04T18:08:56.249Z"
+      },
+      "evaluation": {
+        "passed": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 179,
+        "skippedReason": null,
+        "score": 100,
+        "scoreVersion": "score-v1",
+        "scoreBreakdown": {
+          "passBase": 60,
+          "findings": 15,
+          "verification": 10,
+          "repairs": 5,
+          "time": 5,
+          "usage": 5
+        },
+        "outputTail": "✔ a single item still needs a page (0.9248ms)\n✔ a final page holding exactly one item is not dropped (0.1451ms)\n✔ every item is reachable by walking the pages (0.359ms)\n✔ exact multiples and larger remainders keep working (0.0802ms)\n✔ requests past the end clamp onto a one-item last page (0.1086ms)\n✔ consumers of the page count agree on one-item last pages (0.1833ms)\nℹ tests 6\nℹ suites 0\nℹ pass 6\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 109.4858\n"
+      },
+      "contextKey": "bugfix|medium|low"
+    },
+    {
+      "case": "bugfix-localized",
+      "strategy": "BUILD",
+      "repetition": 1,
+      "state": "passed",
+      "detail": null,
+      "runId": "3ea1d017-57ee-4abd-b98b-b2d59ae62e12",
+      "runState": "completed",
+      "requestedStrategy": "BUILD",
+      "resolvedStrategy": "BUILD",
+      "repoPath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-arena-data-kKiFqR\\arena\\b970c62b\\1748e267\\repo",
+      "repoExists": true,
+      "evaluatorInRepo": false,
+      "baselineCommit": "62078b5f2198abbfb92a0ed2fb646d468ba0eae7",
+      "resultCommit": "9cc4998bf84dd4185ed8badb3f09c91bf89ad399",
+      "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+      "models": {
+        "planner": "opus",
+        "worker": "sonnet",
+        "reviewer": "opus",
+        "verifier": "opus"
+      },
+      "tasks": [
+        {
+          "key": "fix-page-count-remainder",
+          "role": "worker",
+          "state": "completed",
+          "attempt": 1,
+          "repairCycles": 0
+        }
+      ],
+      "metrics": {
+        "id": "da3cc63a-7feb-4d3e-90dd-7e07efee4b0a",
+        "trialId": "1748e267-2f7a-424d-8cec-0e1569bee06e",
+        "buildPassed": null,
+        "typecheckPassed": null,
+        "testsPassed": true,
+        "hiddenPassed": true,
+        "acceptanceTotal": 5,
+        "acceptancePassed": 5,
+        "verifierPassed": true,
+        "criticalFindings": 0,
+        "highFindings": 0,
+        "mediumFindings": 0,
+        "repairs": 0,
+        "wallClockMs": 96459,
+        "sessions": 5,
+        "turns": 32,
+        "inputTokens": 13179,
+        "outputTokens": 12251,
+        "toolCalls": 27,
+        "humanInterventions": 0,
+        "approvals": 0,
+        "manualRetries": 0,
+        "blockers": 0,
+        "crashedAgents": 0,
+        "recoveredSessions": 0,
+        "schedulerFailures": 0,
+        "unfinishedTasks": 0,
+        "quotaPauses": 0,
+        "quotaWaitMs": 0,
+        "autoResumeSuccesses": 0,
+        "throttleEvents": 0,
+        "createdAt": "2026-10-04T18:11:07.197Z"
+      },
+      "evaluation": {
+        "passed": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 173,
+        "skippedReason": null,
+        "score": 95.91,
+        "scoreVersion": "score-v1",
+        "scoreBreakdown": {
+          "passBase": 60,
+          "findings": 15,
+          "verification": 10,
+          "repairs": 5,
+          "time": 3.58,
+          "usage": 2.33
+        },
+        "outputTail": "✔ a single item still needs a page (0.8954ms)\n✔ a final page holding exactly one item is not dropped (0.1328ms)\n✔ every item is reachable by walking the pages (0.3391ms)\n✔ exact multiples and larger remainders keep working (0.0797ms)\n✔ requests past the end clamp onto a one-item last page (0.1198ms)\n✔ consumers of the page count agree on one-item last pages (0.1831ms)\nℹ tests 6\nℹ suites 0\nℹ pass 6\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 104.7807\n"
+      },
+      "contextKey": "bugfix|medium|low"
+    },
+    {
+      "case": "feature-small",
+      "strategy": "BUILD",
+      "repetition": 1,
+      "state": "blocked",
+      "detail": "Trial exceeded the case wall-clock budget (20 min)",
+      "runId": "5afea001-74ab-4e48-a303-d8d3806a2bfd",
+      "runState": "cancelled",
+      "requestedStrategy": "BUILD",
+      "resolvedStrategy": "BUILD",
+      "repoPath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-arena-data-kKiFqR\\arena\\b970c62b\\156df4f0\\repo",
+      "repoExists": true,
+      "evaluatorInRepo": false,
+      "baselineCommit": "1e9b3e2b8fdd255b5ddda18d7fb6bb07db4bff85",
+      "resultCommit": null,
+      "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+      "models": {
+        "planner": "opus",
+        "worker": "sonnet",
+        "reviewer": "opus",
+        "verifier": "opus",
+        "debugger": "opus"
+      },
+      "tasks": [
+        {
+          "key": "implement-group-summary",
+          "role": "worker",
+          "state": "completed",
+          "attempt": 1,
+          "repairCycles": 0
+        },
+        {
+          "key": "test-group-summary",
+          "role": "worker",
+          "state": "cancelled",
+          "attempt": 1,
+          "repairCycles": 1
+        },
+        {
+          "key": "test-group-summary-fix1",
+          "role": "debugger",
+          "state": "cancelled",
+          "attempt": 1,
+          "repairCycles": 0
+        }
+      ],
+      "metrics": {
+        "id": "2c8eb06c-0a08-40b3-8723-ca0dd15ef608",
+        "trialId": "156df4f0-ed3f-4178-9054-9f5154aa52d2",
+        "buildPassed": null,
+        "typecheckPassed": null,
+        "testsPassed": null,
+        "hiddenPassed": false,
+        "acceptanceTotal": 9,
+        "acceptancePassed": 0,
+        "verifierPassed": null,
+        "criticalFindings": 0,
+        "highFindings": 0,
+        "mediumFindings": 0,
+        "repairs": 1,
+        "wallClockMs": 1134247,
+        "sessions": 8,
+        "turns": 55,
+        "inputTokens": 25326,
+        "outputTokens": 31420,
+        "toolCalls": 53,
+        "humanInterventions": 0,
+        "approvals": 1,
+        "manualRetries": 0,
+        "blockers": 0,
+        "crashedAgents": 0,
+        "recoveredSessions": 0,
+        "schedulerFailures": 0,
+        "unfinishedTasks": 0,
+        "quotaPauses": 0,
+        "quotaWaitMs": 0,
+        "autoResumeSuccesses": 0,
+        "throttleEvents": 0,
+        "createdAt": "2026-10-04T18:31:10.531Z"
+      },
+      "evaluation": {
+        "passed": false,
+        "exitCode": null,
+        "timedOut": false,
+        "durationMs": 0,
+        "skippedReason": "Trial exceeded the case wall-clock budget (20 min)",
+        "score": 0,
+        "scoreVersion": "score-v1",
+        "scoreBreakdown": {
+          "passBase": 0,
+          "findings": 0,
+          "verification": 0,
+          "repairs": 0,
+          "time": 0,
+          "usage": 0
+        },
+        "outputTail": ""
+      },
+      "contextKey": "testing|large|low"
+    },
+    {
+      "case": "feature-small",
+      "strategy": "SINGLE",
+      "repetition": 1,
+      "state": "passed",
+      "detail": null,
+      "runId": "df9cbe9d-7ee9-4bd6-9823-2b782d53c57c",
+      "runState": "completed",
+      "requestedStrategy": "SINGLE",
+      "resolvedStrategy": "SINGLE",
+      "repoPath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-arena-data-kKiFqR\\arena\\b970c62b\\27147036\\repo",
+      "repoExists": true,
+      "evaluatorInRepo": false,
+      "baselineCommit": "1e9b3e2b8fdd255b5ddda18d7fb6bb07db4bff85",
+      "resultCommit": "cbd29b61adb1e1bd4270be3aa8e8b49f6cdb4614",
+      "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+      "models": {
+        "worker": "opus",
+        "reviewer": "opus",
+        "verifier": "opus"
+      },
+      "tasks": [
+        {
+          "key": "implement",
+          "role": "worker",
+          "state": "completed",
+          "attempt": 1,
+          "repairCycles": 0
+        }
+      ],
+      "metrics": {
+        "id": "1766cac4-c919-404a-9b5f-99b694fff450",
+        "trialId": "27147036-304f-458b-a1cf-54a5081a0675",
+        "buildPassed": null,
+        "typecheckPassed": null,
+        "testsPassed": true,
+        "hiddenPassed": true,
+        "acceptanceTotal": null,
+        "acceptancePassed": null,
+        "verifierPassed": null,
+        "criticalFindings": 0,
+        "highFindings": 0,
+        "mediumFindings": 0,
+        "repairs": 0,
+        "wallClockMs": 124722,
+        "sessions": 3,
+        "turns": 23,
+        "inputTokens": 11282,
+        "outputTokens": 11679,
+        "toolCalls": 20,
+        "humanInterventions": 0,
+        "approvals": 0,
+        "manualRetries": 0,
+        "blockers": 0,
+        "crashedAgents": 0,
+        "recoveredSessions": 0,
+        "schedulerFailures": 0,
+        "unfinishedTasks": 0,
+        "quotaPauses": 0,
+        "quotaWaitMs": 0,
+        "autoResumeSuccesses": 0,
+        "throttleEvents": 0,
+        "createdAt": "2026-10-04T18:33:17.322Z"
+      },
+      "evaluation": {
+        "passed": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 303,
+        "skippedReason": null,
+        "score": 100,
+        "scoreVersion": "score-v1",
+        "scoreBreakdown": {
+          "passBase": 60,
+          "findings": 15,
+          "verification": 10,
+          "repairs": 5,
+          "time": 5,
+          "usage": 5
+        },
+        "outputTail": "✔ groupSummary is exported (1.2264ms)\n✔ groups, counts and totals; default sort is by key ascending (1.1647ms)\n✔ non-numeric values count but add nothing to the total (0.237ms)\n✔ sort by total descending breaks ties by first appearance (0.4794ms)\n✔ sort by count with ties in first-seen order (0.4716ms)\n✔ limit applies after sorting (0.3182ms)\n✔ empty input yields an empty array (0.2236ms)\n✔ does not modify its input (0.5334ms)\n✔ invalid arguments throw TypeError (0.8741ms)\n✔ invalid sort, order or limit throw RangeError (0.5466ms)\n✔ existing exports are untouched (0.2661ms)\nℹ tests 11\nℹ suites 0\nℹ pass 11\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 191.6423\n"
+      },
+      "contextKey": "testing|large|low"
+    },
+    {
+      "case": "ui-state-bug",
+      "strategy": "SINGLE",
+      "repetition": 1,
+      "state": "passed",
+      "detail": null,
+      "runId": "bf5c5857-ee85-4f78-9432-b2d51639d971",
+      "runState": "completed",
+      "requestedStrategy": "SINGLE",
+      "resolvedStrategy": "SINGLE",
+      "repoPath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-arena-data-kKiFqR\\arena\\b970c62b\\a4a7ee58\\repo",
+      "repoExists": true,
+      "evaluatorInRepo": false,
+      "baselineCommit": "f5ef57cf26c4009dd3eceacfc7b5e0724b575356",
+      "resultCommit": "d1e2f042b7b2cc093e3b37960ce469bce1e08532",
+      "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+      "models": {
+        "worker": "opus",
+        "reviewer": "opus",
+        "verifier": "opus"
+      },
+      "tasks": [
+        {
+          "key": "implement",
+          "role": "worker",
+          "state": "completed",
+          "attempt": 1,
+          "repairCycles": 0
+        }
+      ],
+      "metrics": {
+        "id": "d20af6eb-078b-403e-b6b8-030d8f8a784e",
+        "trialId": "a4a7ee58-faf3-4f85-baa8-67bcc7be2266",
+        "buildPassed": null,
+        "typecheckPassed": null,
+        "testsPassed": true,
+        "hiddenPassed": true,
+        "acceptanceTotal": null,
+        "acceptancePassed": null,
+        "verifierPassed": null,
+        "criticalFindings": 0,
+        "highFindings": 0,
+        "mediumFindings": 0,
+        "repairs": 0,
+        "wallClockMs": 180589,
+        "sessions": 3,
+        "turns": 36,
+        "inputTokens": 10764,
+        "outputTokens": 16625,
+        "toolCalls": 33,
+        "humanInterventions": 0,
+        "approvals": 0,
+        "manualRetries": 0,
+        "blockers": 0,
+        "crashedAgents": 0,
+        "recoveredSessions": 0,
+        "schedulerFailures": 0,
+        "unfinishedTasks": 0,
+        "quotaPauses": 0,
+        "quotaWaitMs": 0,
+        "autoResumeSuccesses": 0,
+        "throttleEvents": 0,
+        "createdAt": "2026-10-04T18:36:20.637Z"
+      },
+      "evaluation": {
+        "passed": true,
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 408,
+        "skippedReason": null,
+        "score": 100,
+        "scoreVersion": "score-v1",
+        "scoreBreakdown": {
+          "passBase": 60,
+          "findings": 15,
+          "verification": 10,
+          "repairs": 5,
+          "time": 5,
+          "usage": 5
+        },
+        "outputTail": "✔ toggleSelect does not mutate the previous state and keeps untouched slices (2.1719ms)\n✔ toggleDone does not mutate and shares every untouched item, filter and selection (0.3837ms)\n✔ actions that change nothing return the very same state (0.5772ms)\n✔ removeItem and deleteSelected leave no stale ids in the selection (0.605ms)\n✔ changing the filter drops hidden items from the selection for good (0.356ms)\n✔ hideDone: finishing a selected item or marking the selection done removes it from the selection (1.3595ms)\n✔ selectAllVisible selects exactly the visible items (0.4287ms)\n✔ footer counts use the whole list while a filter is active (0.3295ms)\n✔ delete button, labels and select-all at the 0 / 1 / many boundaries (0.4902ms)\n✔ view model for filtered and empty lists (0.4044ms)\n✔ store notifies listeners only when the state object changed (0.3414ms)\n✔ random action sequences agree with an independent model, stay pure and keep identity (39.5064ms)\nℹ tests 12\nℹ suites 0\nℹ pass 12\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 298.7704\n"
+      },
+      "contextKey": "ui|large|medium"
+    },
+    {
+      "case": "ui-state-bug",
+      "strategy": "BUILD",
+      "repetition": 1,
+      "state": "blocked",
+      "detail": "Trial exceeded the case wall-clock budget (25 min)",
+      "runId": "8e353ad1-2915-4ea4-8e5d-2afb02c03372",
+      "runState": "cancelled",
+      "requestedStrategy": "BUILD",
+      "resolvedStrategy": "BUILD",
+      "repoPath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-arena-data-kKiFqR\\arena\\b970c62b\\262193f6\\repo",
+      "repoExists": true,
+      "evaluatorInRepo": false,
+      "baselineCommit": "f5ef57cf26c4009dd3eceacfc7b5e0724b575356",
+      "resultCommit": null,
+      "policySnapshotId": "2b492671-f51b-43f9-a0d0-b22833b72a18",
+      "models": {
+        "planner": "opus",
+        "worker": "sonnet",
+        "reviewer": "opus",
+        "verifier": "opus"
+      },
+      "tasks": [
+        {
+          "key": "fix-reducer",
+          "role": "worker",
+          "state": "cancelled",
+          "attempt": 1,
+          "repairCycles": 0
+        },
+        {
+          "key": "fix-selectors-viewmodel-store",
+          "role": "worker",
+          "state": "completed",
+          "attempt": 1,
+          "repairCycles": 0
+        },
+        {
+          "key": "verify-integration",
+          "role": "verifier",
+          "state": "cancelled",
+          "attempt": 0,
+          "repairCycles": 0
+        }
+      ],
+      "metrics": {
+        "id": "7abf0960-d7c9-4da6-81d4-ba12f2f2f53d",
+        "trialId": "262193f6-2170-4635-8bb7-5198f95221e6",
+        "buildPassed": null,
+        "typecheckPassed": null,
+        "testsPassed": null,
+        "hiddenPassed": false,
+        "acceptanceTotal": 6,
+        "acceptancePassed": 0,
+        "verifierPassed": null,
+        "criticalFindings": 0,
+        "highFindings": 0,
+        "mediumFindings": 0,
+        "repairs": 0,
+        "wallClockMs": 1408617,
+        "sessions": 5,
+        "turns": 29,
+        "inputTokens": 15017,
+        "outputTokens": 17647,
+        "toolCalls": 32,
+        "humanInterventions": 0,
+        "approvals": 1,
+        "manualRetries": 0,
+        "blockers": 0,
+        "crashedAgents": 0,
+        "recoveredSessions": 0,
+        "schedulerFailures": 0,
+        "unfinishedTasks": 0,
+        "quotaPauses": 0,
+        "quotaWaitMs": 0,
+        "autoResumeSuccesses": 0,
+        "throttleEvents": 0,
+        "createdAt": "2026-10-04T19:01:25.329Z"
+      },
+      "evaluation": {
+        "passed": false,
+        "exitCode": null,
+        "timedOut": false,
+        "durationMs": 0,
+        "skippedReason": "Trial exceeded the case wall-clock budget (25 min)",
+        "score": 0,
+        "scoreVersion": "score-v1",
+        "scoreBreakdown": {
+          "passBase": 0,
+          "findings": 0,
+          "verification": 0,
+          "repairs": 0,
+          "time": 0,
+          "usage": 0
+        },
+        "outputTail": ""
+      },
+      "contextKey": "ui|large|medium"
+    }
+  ],
+  "comparison": [
+    {
+      "strategy": "SINGLE",
+      "n": 3,
+      "cases": 3,
+      "excludedInfrastructure": 0,
+      "passed": 3,
+      "passRate": 1,
+      "passInterval": {
+        "low": 0.4385029682449546,
+        "high": 1
+      },
+      "medianWallClockMs": 124722,
+      "meanSessions": 3,
+      "meanObservedTokens": 20737,
+      "meanRepairs": 0,
+      "criticalHighFindings": 0,
+      "quotaPauses": 0,
+      "label": "INSUFFICIENT"
+    },
+    {
+      "strategy": "BUILD",
+      "n": 3,
+      "cases": 3,
+      "excludedInfrastructure": 0,
+      "passed": 1,
+      "passRate": 0.3333333333333333,
+      "passInterval": {
+        "low": 0.06149194472039621,
+        "high": 0.7923403991979522
+      },
+      "medianWallClockMs": 96459,
+      "meanSessions": 5,
+      "meanObservedTokens": 25430,
+      "meanRepairs": 0,
+      "criticalHighFindings": 0,
+      "quotaPauses": 0,
+      "label": "INSUFFICIENT"
+    }
+  ],
+  "results": {
+    "comparison": [
+      {
+        "strategy": "SINGLE",
+        "n": 3,
+        "cases": 3,
+        "excludedInfrastructure": 0,
+        "passed": 3,
+        "passRate": 1,
+        "passInterval": {
+          "low": 0.4385029682449546,
+          "high": 1
+        },
+        "medianWallClockMs": 124722,
+        "meanSessions": 3,
+        "meanObservedTokens": 20737,
+        "meanRepairs": 0,
+        "criticalHighFindings": 0,
+        "quotaPauses": 0,
+        "label": "INSUFFICIENT"
+      },
+      {
+        "strategy": "BUILD",
+        "n": 3,
+        "cases": 3,
+        "excludedInfrastructure": 0,
+        "passed": 1,
+        "passRate": 0.3333333333333333,
+        "passInterval": {
+          "low": 0.06149194472039621,
+          "high": 0.7923403991979522
+        },
+        "medianWallClockMs": 96459,
+        "meanSessions": 5,
+        "meanObservedTokens": 25430,
+        "meanRepairs": 0,
+        "criticalHighFindings": 0,
+        "quotaPauses": 0,
+        "label": "INSUFFICIENT"
+      }
+    ],
+    "byCase": [
+      {
+        "caseId": "bugfix-localized",
+        "caseName": "Pagination drops one-item last pages",
+        "rows": [
+          {
+            "strategy": "SINGLE",
+            "n": 1,
+            "cases": 1,
+            "excludedInfrastructure": 0,
+            "passed": 1,
+            "passRate": 1,
+            "passInterval": {
+              "low": 0.20654931437723745,
+              "high": 1
+            },
+            "medianWallClockMs": 69118,
+            "meanSessions": 3,
+            "meanObservedTokens": 11861,
+            "meanRepairs": 0,
+            "criticalHighFindings": 0,
+            "quotaPauses": 0,
+            "label": "INSUFFICIENT"
+          },
+          {
+            "strategy": "BUILD",
+            "n": 1,
+            "cases": 1,
+            "excludedInfrastructure": 0,
+            "passed": 1,
+            "passRate": 1,
+            "passInterval": {
+              "low": 0.20654931437723745,
+              "high": 1
+            },
+            "medianWallClockMs": 96459,
+            "meanSessions": 5,
+            "meanObservedTokens": 25430,
+            "meanRepairs": 0,
+            "criticalHighFindings": 0,
+            "quotaPauses": 0,
+            "label": "INSUFFICIENT"
+          }
+        ]
+      },
+      {
+        "caseId": "feature-small",
+        "caseName": "Add groupSummary to the report builder",
+        "rows": [
+          {
+            "strategy": "SINGLE",
+            "n": 1,
+            "cases": 1,
+            "excludedInfrastructure": 0,
+            "passed": 1,
+            "passRate": 1,
+            "passInterval": {
+              "low": 0.20654931437723745,
+              "high": 1
+            },
+            "medianWallClockMs": 124722,
+            "meanSessions": 3,
+            "meanObservedTokens": 22961,
+            "meanRepairs": 0,
+            "criticalHighFindings": 0,
+            "quotaPauses": 0,
+            "label": "INSUFFICIENT"
+          },
+          {
+            "strategy": "BUILD",
+            "n": 1,
+            "cases": 1,
+            "excludedInfrastructure": 0,
+            "passed": 0,
+            "passRate": 0,
+            "passInterval": {
+              "low": 0,
+              "high": 0.7934506856227626
+            },
+            "medianWallClockMs": null,
+            "meanSessions": null,
+            "meanObservedTokens": null,
+            "meanRepairs": null,
+            "criticalHighFindings": 0,
+            "quotaPauses": 0,
+            "label": "INSUFFICIENT"
+          }
+        ]
+      },
+      {
+        "caseId": "ui-state-bug",
+        "caseName": "To-do panel state defects",
+        "rows": [
+          {
+            "strategy": "SINGLE",
+            "n": 1,
+            "cases": 1,
+            "excludedInfrastructure": 0,
+            "passed": 1,
+            "passRate": 1,
+            "passInterval": {
+              "low": 0.20654931437723745,
+              "high": 1
+            },
+            "medianWallClockMs": 180589,
+            "meanSessions": 3,
+            "meanObservedTokens": 27389,
+            "meanRepairs": 0,
+            "criticalHighFindings": 0,
+            "quotaPauses": 0,
+            "label": "INSUFFICIENT"
+          },
+          {
+            "strategy": "BUILD",
+            "n": 1,
+            "cases": 1,
+            "excludedInfrastructure": 0,
+            "passed": 0,
+            "passRate": 0,
+            "passInterval": {
+              "low": 0,
+              "high": 0.7934506856227626
+            },
+            "medianWallClockMs": null,
+            "meanSessions": null,
+            "meanObservedTokens": null,
+            "meanRepairs": null,
+            "criticalHighFindings": 0,
+            "quotaPauses": 0,
+            "label": "INSUFFICIENT"
+          }
+        ]
+      }
+    ],
+    "notes": [
+      "n is below 5 for SINGLE (n=3), BUILD (n=3); nothing is concluded for them.",
+      "BUILD ran with at most 2 agents in this campaign; its usual limit is 4.",
+      "Time, sessions, tokens and repairs are summarised over passed trials only; blocked-by-run and timed-out trials count as failures."
+    ],
+    "regressions": []
+  },
+  "usage": {
+    "totals": {
+      "sessions": 25,
+      "turns": 197,
+      "inputTokens": 82136,
+      "outputTokens": 94915,
+      "cacheReadTokens": 1575721,
+      "cacheCreationTokens": 241727,
+      "durationMs": 927943,
+      "limitEvents": 0
+    },
+    "byStrategy": [
+      {
+        "key": "BUILD",
+        "label": "BUILD",
+        "sessions": 16,
+        "turns": 116,
+        "inputTokens": 53522,
+        "outputTokens": 61318,
+        "cacheReadTokens": 923412,
+        "cacheCreationTokens": 138197,
+        "durationMs": 584157,
+        "limitEvents": 0
+      },
+      {
+        "key": "SINGLE",
+        "label": "SINGLE",
+        "sessions": 9,
+        "turns": 81,
+        "inputTokens": 28614,
+        "outputTokens": 33597,
+        "cacheReadTokens": 652309,
+        "cacheCreationTokens": 103530,
+        "durationMs": 343786,
+        "limitEvents": 0
+      }
+    ],
+    "after": {
+      "capturedAt": "2026-10-04T19:01:28.615Z",
+      "provider": "claude",
+      "accountMode": {
+        "value": "subscription",
+        "source": "RUNTIME",
+        "confidence": "EXACT"
+      },
+      "subscriptionType": {
+        "value": "Claude subscription",
+        "source": "RUNTIME",
+        "confidence": "EXACT"
+      },
+      "status": "AVAILABLE",
+      "availability": "AVAILABLE",
+      "session": {
+        "sessions": 25,
+        "turns": 197,
+        "inputTokens": 82136,
+        "outputTokens": 94915,
+        "cacheReadTokens": 1575721,
+        "cacheCreationTokens": 241727,
+        "durationMs": 927943,
+        "limitEvents": 0
+      },
+      "windows": [
+        {
+          "id": "fe827d06-c84b-4b07-a6c9-99895c3ca6e7",
+          "limitType": "five_hour",
+          "status": "allowed",
+          "utilizationPercent": 36,
+          "resetAt": "2026-10-04T22:10:00.126594+00:00",
+          "source": "RUNTIME",
+          "confidence": "EXACT",
+          "observedAt": "2026-10-04T19:01:28.614Z",
+          "updatedAt": "2026-10-04T19:01:28.614Z",
+          "stale": false
+        },
+        {
+          "id": "472b5509-346c-44c9-a900-dbe48bb01d23",
+          "limitType": "iguana_necktie",
+          "status": "allowed",
+          "utilizationPercent": 0,
+          "resetAt": "2026-11-05T07:59:00+00:00",
+          "source": "RUNTIME",
+          "confidence": "EXACT",
+          "observedAt": "2026-10-04T19:01:28.614Z",
+          "updatedAt": "2026-10-04T19:01:28.614Z",
+          "stale": false
+        },
+        {
+          "id": "826de9b4-65b8-4c4e-a014-c5f9a35b8a57",
+          "limitType": "seven_day",
+          "status": "allowed",
+          "utilizationPercent": 49,
+          "resetAt": "2026-10-10T04:00:00.126619+00:00",
+          "source": "RUNTIME",
+          "confidence": "EXACT",
+          "observedAt": "2026-10-04T19:01:28.614Z",
+          "updatedAt": "2026-10-04T19:01:28.614Z",
+          "stale": false
+        }
+      ],
+      "subscriptionUtilizationPercent": {
+        "value": 49,
+        "source": "RUNTIME",
+        "confidence": "EXACT"
+      },
+      "nextResetAt": {
+        "value": "2026-10-04T22:10:00.000Z",
+        "source": "SDK_EVENT",
+        "confidence": "EXACT"
+      },
+      "retryAfterMs": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "lastLimitAt": null,
+      "autoResume": {
+        "enabled": true,
+        "pause": null,
+        "nextCheckAt": {
+          "value": null,
+          "source": "UNKNOWN",
+          "confidence": "UNKNOWN"
+        },
+        "pausedRuns": 0
+      },
+      "usageReportSupported": true
+    }
+  },
+  "quota": {
+    "observed": [],
+    "limitEvents": 0,
+    "pauses": []
+  },
+  "policy": {
+    "activeVersionBefore": 1,
+    "activeVersionAfter": 1,
+    "statistics": 14,
+    "candidates": [],
+    "notes": [
+      "bugfix|*|*: no candidate. SINGLE has 1 Arena trial; at least 5 are required.",
+      "bugfix|medium|low: no candidate. SINGLE has 1 Arena trial; at least 5 are required.",
+      "testing|*|*: no candidate. SINGLE has 1 Arena trial; at least 5 are required.",
+      "testing|large|low: no candidate. SINGLE has 1 Arena trial; at least 5 are required.",
+      "ui|*|*: no candidate. SINGLE has 1 Arena trial; at least 5 are required.",
+      "ui|large|medium: no candidate. SINGLE has 1 Arena trial; at least 5 are required."
+    ],
+    "evidenceCounted": {
+      "arenaTrials": 6,
+      "arenaCampaigns": 1,
+      "missions": 0,
+      "computedAt": "2026-10-04T19:01:25.671Z"
+    }
+  },
+  "gates": {
+    "the campaign completed": true,
+    "every (case, strategy) pair has a trial (6)": true,
+    "at least three cases produced an evaluated trial for two strategies each": false,
+    "every trial of a case started from the same baseline commit": true,
+    "every trial ran in its own repository": true,
+    "no trial repository contains the hidden evaluator": true,
+    "each run recorded the strategy the trial asked for": true,
+    "each evaluated trial recorded the models that were used": true,
+    "raw metrics exist for every evaluated trial": true,
+    "a hidden evaluation ran for every evaluated trial": true,
+    "trial state equals the hidden evaluation result": true,
+    "a failed hidden evaluation scores 0": true,
+    "usage was observed for the campaign": true,
+    "the policy engine consumed the trials as Arena evidence": true,
+    "the active policy was not changed by learning": true
+  },
+  "result": "FAIL"
+}

@@ -18,6 +18,7 @@ import {
   FORCED_SHUTDOWN_NOTE,
   NORMAL_SHUTDOWN_NOTE,
   TOOL_APPROVALS_NOTE,
+  authorizationScope,
   defaultFailsafeMinutes,
   effectiveFailsafeMinutes,
   joinMinutes,
@@ -69,7 +70,7 @@ export function Check({
       />
       <span className="min-w-0">
         <span className="leading-5">{label}</span>
-        {hint ? <span className="block text-[0.85rem] text-fg-muted">{hint}</span> : null}
+        {hint ? <span className="block text-small text-text-muted">{hint}</span> : null}
       </span>
     </label>
   )
@@ -86,14 +87,220 @@ function Group({
 }) {
   return (
     <fieldset
-      className="m-0 flex min-w-0 flex-col gap-2 border border-border-strong p-2.5"
+      className="m-0 flex min-w-0 flex-col gap-3 rounded-lg border bg-surface p-3"
       data-testid={testId}
     >
-      <legend className="px-1 text-[0.75rem] font-semibold uppercase tracking-wider text-fg-faint">
-        {title}
-      </legend>
+      <legend className="px-1 text-small font-semibold text-text-secondary">{title}</legend>
       {children}
     </fieldset>
+  )
+}
+
+type PolicyFieldsProps = {
+  form: OvernightForm
+  onChange: (patch: Partial<OvernightForm>) => void
+  errors: OvernightValidation['errors']
+}
+
+/** Max duration as hours and minutes. Rendered inside a two-column grid by the caller. */
+export function DurationFields({ form, onChange, errors }: PolicyFieldsProps) {
+  const duration = splitMinutes(form.maxDurationMinutes)
+  const setDuration = (hours: number, minutes: number) =>
+    onChange({ maxDurationMinutes: joinMinutes(hours, minutes) })
+  return (
+    <>
+      <Field label="Max duration (hours)" error={errors.duration}>
+        {(id) => (
+          <NumberField
+            id={id}
+            min={0}
+            max={24}
+            value={duration.hours}
+            onChange={(h) => setDuration(h, duration.minutes)}
+            data-testid="overnight-max-duration-hours"
+          />
+        )}
+      </Field>
+      <Field label="Max duration (minutes)">
+        {(id) => (
+          <NumberField
+            id={id}
+            min={0}
+            max={59}
+            value={duration.minutes}
+            onChange={(m) => setDuration(duration.hours, m)}
+            data-testid="overnight-max-duration-minutes"
+          />
+        )}
+      </Field>
+    </>
+  )
+}
+
+/** The end action and the conditions it applies to. Shared by the mission and Arena overnight forms. */
+export function EndOfRunGroup({ form, onChange }: PolicyFieldsProps) {
+  return (
+    <Group title="End of run">
+      <Field label="End action">
+        {(id) => (
+          <Select
+            id={id}
+            value={form.endAction}
+            onChange={(endAction) => onChange({ endAction })}
+            options={END_OPTIONS}
+            data-testid="overnight-end-action"
+          />
+        )}
+      </Field>
+      <div role="group" aria-label="Apply the end action when" className="flex flex-col gap-1">
+        <span className="text-small font-medium text-text-secondary">Apply the end action on</span>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+          {CONDITION_KEYS.map((k) => (
+            <Check
+              key={k}
+              checked={form.shutdownOn[k]}
+              disabled={form.endAction === 'NONE'}
+              onChange={(v) => onChange({ shutdownOn: { ...form.shutdownOn, [k]: v } })}
+              label={CONDITION_LABEL[k]}
+              testId={CONDITION_TESTID[k]}
+            />
+          ))}
+        </div>
+      </div>
+    </Group>
+  )
+}
+
+/** The Windows failsafe shutdown timer. */
+export function FailsafeGroup({ form, onChange, errors }: PolicyFieldsProps) {
+  const failsafe = effectiveFailsafeMinutes(form)
+  return (
+    <Group title="Failsafe">
+      <Check
+        checked={form.failsafeEnabled}
+        onChange={(failsafeEnabled) => onChange({ failsafeEnabled })}
+        label="Enabled"
+        hint={
+          form.endAction === 'NONE'
+            ? 'Not armed while the end action is None: no power action of any kind is taken.'
+            : 'A Windows shutdown timer armed at the start, so the PC still shuts down if NEXUS crashes.'
+        }
+        testId="overnight-failsafe-enabled"
+      />
+      <Field
+        label="After (minutes)"
+        hint={
+          form.failsafeAfterMinutes === null
+            ? `Follows the duration + ${failsafe - form.maxDurationMinutes} min`
+            : 'Edited by hand'
+        }
+        error={form.failsafeEnabled ? errors.failsafe : undefined}
+      >
+        {(id) => (
+          <div className="flex items-center gap-2">
+            <NumberField
+              id={id}
+              min={2}
+              max={2880}
+              value={failsafe}
+              disabled={!form.failsafeEnabled}
+              onChange={(n) => onChange({ failsafeAfterMinutes: n })}
+              data-testid="overnight-failsafe-minutes"
+            />
+            {form.failsafeAfterMinutes !== null ? (
+              <Button
+                size="sm"
+                onClick={() => onChange({ failsafeAfterMinutes: null })}
+                aria-label="Reset the failsafe to the duration plus 60 minutes"
+              >
+                Reset ({defaultFailsafeMinutes(form.maxDurationMinutes)})
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </Field>
+    </Group>
+  )
+}
+
+/** Final delay and force close. */
+export function ShutdownGroup({ form, onChange, errors }: PolicyFieldsProps) {
+  return (
+    <Group title="Shutdown">
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label="Delay (seconds)"
+          hint="Time to cancel before the action runs"
+          error={errors.finalDelay}
+        >
+          {(id) => (
+            <NumberField
+              id={id}
+              min={10}
+              max={3600}
+              value={form.finalDelaySeconds}
+              onChange={(n) => onChange({ finalDelaySeconds: n })}
+              data-testid="overnight-final-delay"
+            />
+          )}
+        </Field>
+      </div>
+      <Check
+        checked={form.forceCloseApplications}
+        onChange={(forceCloseApplications) => onChange({ forceCloseApplications })}
+        label="Force close apps"
+        hint={form.forceCloseApplications ? FORCED_SHUTDOWN_NOTE : NORMAL_SHUTDOWN_NOTE}
+        testId="overnight-force-close"
+      />
+      <div className="text-small text-text-muted" data-testid="overnight-failsafe-note">
+        {FAILSAFE_TIMER_NOTE}
+      </div>
+    </Group>
+  )
+}
+
+export function QuotaPolicyField({ form, onChange }: Pick<PolicyFieldsProps, 'form' | 'onChange'>) {
+  return (
+    <Field
+      label="When the Claude usage limit is reached"
+      hint={
+        form.quotaPolicy === 'WAIT_AND_RETRY'
+          ? 'NEXUS waits for the reset and resumes the run automatically. No work is lost.'
+          : 'The run ends at the limit and the report says what was left.'
+      }
+    >
+      {(id) => (
+        <Select
+          id={id}
+          value={form.quotaPolicy}
+          onChange={(quotaPolicy) => onChange({ quotaPolicy })}
+          options={QUOTA_OPTIONS}
+          data-testid="overnight-quota-policy"
+        />
+      )}
+    </Field>
+  )
+}
+
+/** The explicit authorization sentence. The caller decides the test id. */
+export function AuthorizeCheck({
+  form,
+  onChange,
+  testId = 'overnight-authorize',
+  noun = 'run',
+}: Pick<PolicyFieldsProps, 'form' | 'onChange'> & { testId?: string; noun?: 'run' | 'campaign' }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Check
+        checked={form.authorized}
+        onChange={(authorized) => onChange({ authorized })}
+        label={OVERNIGHT_CONFIRMATION_TEXT}
+        testId={testId}
+      />
+      <p className="m-0 pl-6 text-small text-text-secondary" data-testid={`${testId}-scope`}>
+        {authorizationScope(form, noun)}
+      </p>
+    </div>
   )
 }
 
@@ -111,10 +318,6 @@ export function OvernightPanel({
   recommendation: 'single' | 'consensus' | null
 }) {
   const { errors } = validation
-  const duration = splitMinutes(form.maxDurationMinutes)
-  const failsafe = effectiveFailsafeMinutes(form)
-  const setDuration = (hours: number, minutes: number) =>
-    onChange({ maxDurationMinutes: joinMinutes(hours, minutes) })
   const planningHint =
     form.planning === 'auto'
       ? `Auto picks ${resolvePlanning({ planning: 'auto', recommendedPlanning: recommendation }).toUpperCase()}${recommendation ? ' from the mission text' : ' (no recommendation yet)'}.`
@@ -128,30 +331,7 @@ export function OvernightPanel({
 
       <Group title="Autonomy">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Max duration (hours)" error={errors.duration}>
-            {(id) => (
-              <NumberField
-                id={id}
-                min={0}
-                max={24}
-                value={duration.hours}
-                onChange={(h) => setDuration(h, duration.minutes)}
-                data-testid="overnight-max-duration-hours"
-              />
-            )}
-          </Field>
-          <Field label="Max duration (minutes)">
-            {(id) => (
-              <NumberField
-                id={id}
-                min={0}
-                max={59}
-                value={duration.minutes}
-                onChange={(m) => setDuration(duration.hours, m)}
-                data-testid="overnight-max-duration-minutes"
-              />
-            )}
-          </Field>
+          <DurationFields form={form} onChange={onChange} errors={errors} />
           <Field
             label="Max agents in parallel"
             hint={form.maxAgents === null ? 'From the preset' : 'Overridden'}
@@ -201,124 +381,14 @@ export function OvernightPanel({
         />
       </Group>
 
-      <Group title="End of run">
-        <Field label="End action">
-          {(id) => (
-            <Select
-              id={id}
-              value={form.endAction}
-              onChange={(endAction) => onChange({ endAction })}
-              options={END_OPTIONS}
-              data-testid="overnight-end-action"
-            />
-          )}
-        </Field>
-        <div role="group" aria-label="Apply the end action when" className="flex flex-col gap-1">
-          <span className="text-[0.85rem] font-medium text-fg-muted">Apply the end action on</span>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-            {CONDITION_KEYS.map((k) => (
-              <Check
-                key={k}
-                checked={form.shutdownOn[k]}
-                disabled={form.endAction === 'NONE'}
-                onChange={(v) => onChange({ shutdownOn: { ...form.shutdownOn, [k]: v } })}
-                label={CONDITION_LABEL[k]}
-                testId={CONDITION_TESTID[k]}
-              />
-            ))}
-          </div>
-        </div>
-      </Group>
+      <EndOfRunGroup form={form} onChange={onChange} errors={errors} />
 
-      <Group title="Failsafe">
-        <Check
-          checked={form.failsafeEnabled}
-          onChange={(failsafeEnabled) => onChange({ failsafeEnabled })}
-          label="Enabled"
-          hint={
-            form.endAction === 'NONE'
-              ? 'Not armed while the end action is None: no power action of any kind is taken.'
-              : 'A Windows shutdown timer armed at the start, so the PC still shuts down if NEXUS crashes.'
-          }
-          testId="overnight-failsafe-enabled"
-        />
-        <Field
-          label="After (minutes)"
-          hint={
-            form.failsafeAfterMinutes === null
-              ? `Follows the duration + ${failsafe - form.maxDurationMinutes} min`
-              : 'Edited by hand'
-          }
-          error={form.failsafeEnabled ? errors.failsafe : undefined}
-        >
-          {(id) => (
-            <div className="flex items-center gap-2">
-              <NumberField
-                id={id}
-                min={2}
-                max={2880}
-                value={failsafe}
-                disabled={!form.failsafeEnabled}
-                onChange={(n) => onChange({ failsafeAfterMinutes: n })}
-                data-testid="overnight-failsafe-minutes"
-              />
-              {form.failsafeAfterMinutes !== null ? (
-                <Button
-                  size="sm"
-                  onClick={() => onChange({ failsafeAfterMinutes: null })}
-                  aria-label="Reset the failsafe to the duration plus 60 minutes"
-                >
-                  Reset ({defaultFailsafeMinutes(form.maxDurationMinutes)})
-                </Button>
-              ) : null}
-            </div>
-          )}
-        </Field>
-      </Group>
+      <FailsafeGroup form={form} onChange={onChange} errors={errors} />
 
-      <Group title="Shutdown">
-        <div className="grid grid-cols-2 gap-3">
-          <Field
-            label="Delay (seconds)"
-            hint="Time to cancel before the action runs"
-            error={errors.finalDelay}
-          >
-            {(id) => (
-              <NumberField
-                id={id}
-                min={10}
-                max={3600}
-                value={form.finalDelaySeconds}
-                onChange={(n) => onChange({ finalDelaySeconds: n })}
-                data-testid="overnight-final-delay"
-              />
-            )}
-          </Field>
-        </div>
-        <Check
-          checked={form.forceCloseApplications}
-          onChange={(forceCloseApplications) => onChange({ forceCloseApplications })}
-          label="Force close apps"
-          hint={form.forceCloseApplications ? FORCED_SHUTDOWN_NOTE : NORMAL_SHUTDOWN_NOTE}
-          testId="overnight-force-close"
-        />
-        <div className="text-[0.85rem] text-fg-muted" data-testid="overnight-failsafe-note">
-          {FAILSAFE_TIMER_NOTE}
-        </div>
-      </Group>
+      <ShutdownGroup form={form} onChange={onChange} errors={errors} />
 
       <Group title="Run policy">
-        <Field label="Quota policy">
-          {(id) => (
-            <Select
-              id={id}
-              value={form.quotaPolicy}
-              onChange={(quotaPolicy) => onChange({ quotaPolicy })}
-              options={QUOTA_OPTIONS}
-              data-testid="overnight-quota-policy"
-            />
-          )}
-        </Field>
+        <QuotaPolicyField form={form} onChange={onChange} />
         <Check
           checked={form.saveFinalReport}
           onChange={(saveFinalReport) => onChange({ saveFinalReport })}
@@ -333,12 +403,7 @@ export function OvernightPanel({
         />
       </Group>
 
-      <Check
-        checked={form.authorized}
-        onChange={(authorized) => onChange({ authorized })}
-        label={OVERNIGHT_CONFIRMATION_TEXT}
-        testId="overnight-authorize"
-      />
+      <AuthorizeCheck form={form} onChange={onChange} />
     </div>
   )
 }

@@ -1,0 +1,8 @@
+{
+  "name": "billing-kit",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Small invoicing, quoting and sales reporting helpers.",
+  "scripts": { "test": "node --test" }
+}

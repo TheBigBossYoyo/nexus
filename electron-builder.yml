@@ -10,6 +10,10 @@ files:
   - "!**/node_modules/@anthropic-ai/claude-agent-sdk-{darwin,linux}*/**"
   - "!**/*.map"
   - "!**/better-sqlite3/{deps,src}/**"
+# The built-in Arena cases (fixtures and hidden evaluators) are plain files NEXUS copies and executes.
+extraResources:
+  - from: arena/cases
+    to: arena/cases
 asar: true
 # claude.exe must be a real file on disk to be spawned, and the SQLite binding must be loadable.
 asarUnpack:

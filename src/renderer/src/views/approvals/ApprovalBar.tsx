@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { usePendingApprovals } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
+import { Button, CheckIcon } from '../../components/ui'
 
-/** Persistent amber strip across the top of the content area while anything awaits a human decision. */
+/** Persistent strip under the header while anything awaits a human decision. Dark text on a pale amber tint (AA). */
 export function ApprovalBar() {
   const pending = usePendingApprovals().data ?? []
   const setDrawer = useUiStore((s) => s.setDrawer)
@@ -12,23 +13,19 @@ export function ApprovalBar() {
     <div
       data-testid="approval-bar"
       role="status"
-      className="flex h-8 shrink-0 items-center gap-3 border-b border-tone-waiting bg-tone-waiting px-3 text-accent-fg"
+      className="flex min-h-8 shrink-0 items-center gap-3 border-b bg-surface-muted px-5 py-0.5 text-small"
     >
-      <span className="font-semibold">
+      <CheckIcon size={13} className="shrink-0 text-text-secondary" />
+      <span className="font-semibold text-text-primary">
         {pending.length} approval{pending.length === 1 ? '' : 's'} pending
       </span>
-      <span className="min-w-0 flex-1 truncate opacity-80">
+      <span className="min-w-0 flex-1 truncate text-text-secondary">
         {first.action}
         {first.command ? `: ${first.command}` : ''}
       </span>
-      <button
-        type="button"
-        data-testid="approval-bar-review"
-        onClick={() => setDrawer('approvals')}
-        className="h-6 rounded-[3px] border border-accent-fg/50 bg-accent-fg/10 px-2 font-medium hover:bg-accent-fg/20"
-      >
+      <Button size="sm" variant="ghost" onClick={() => setDrawer('approvals')} data-testid="approval-bar-review">
         Review
-      </button>
+      </Button>
     </div>
   )
 }

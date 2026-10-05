@@ -119,6 +119,22 @@ export class EventRepository {
     return row.n
   }
 
+  /**
+   * The newest events across the user's runs, newest first, for the Activity feed. Streaming bookkeeping
+   * (usage counters, state echoes) and the runs of Arena trials are left out in SQL, before the limit, so a
+   * campaign cannot crowd the user's own missions out of the feed. `beforeSeq` pages backwards.
+   */
+  listRecent(limit = 200, beforeSeq?: number): RunEvent[] {
+    const rows = prepare(
+      this.db,
+      `SELECT ${EVENT_COLUMNS} FROM run_events
+       WHERE seq < ? AND type NOT IN ('agent.usage', 'agent.state_changed', 'task.state_changed', 'run.state_changed', 'context.composed')
+         AND run_id NOT IN (SELECT run_id FROM arena_trials WHERE run_id IS NOT NULL)
+       ORDER BY seq DESC LIMIT ?`,
+    ).all(beforeSeq ?? Number.MAX_SAFE_INTEGER, Math.min(Math.max(1, limit), 500)) as Row[]
+    return rows.map((r) => decode(eventCodec, r))
+  }
+
   /** Events with seq > afterSeq in ascending order. */
   listByRun(runId: string, afterSeq = 0, limit = 1000): RunEvent[] {
     const rows = prepare(

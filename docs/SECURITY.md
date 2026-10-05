@@ -257,6 +257,33 @@ check output in plain text under `%APPDATA%\NEXUS`. It is not encrypted. If an a
 contains a secret, fragments may be stored there; secret-looking paths require approval to read.
 Hidden reasoning is not stored. Claude's own transcripts are stored by the runtime under `~/.claude/projects`.
 
+## 0.3: Arena, candidates and command environment
+
+| Area | What NEXUS does | Where |
+|---|---|---|
+| Arena case trust | Built-in cases are trusted on registration. An imported case is untrusted and executes nothing at import. `arena.trustCase` shows a native Windows confirmation that lists every setup, check and evaluation command; a script in the renderer cannot click it. `createCampaign` refuses untrusted cases | `ipc/v3-handlers.ts`, `arena/case-format.ts` |
+| Case pinning | The evaluator hash covers the evaluator files, command, timeout and the whole `case.json`. The stored definition is what runs; a changed case under the same version is refused, and every provisioning and evaluation re-hashes | `hashCaseEvaluator`, `loadVerifiedCase` |
+| Case content | A `.git` entry in a fixture or evaluator is refused; symbolic links are refused; a case is capped at 5000 files and 50 MB | `listFilesRecursive` |
+| Hook-free Git on case content | Every Git command the Arena runs on a trial repository uses `core.hooksPath` set to an empty directory, `core.fsmonitor=false`, no system or global Git configuration, `--template=` on init and clone, and `--no-verify` on the baseline commit | `arena/fixtures.ts` (`gitGuard`) |
+| Evaluator isolation | The evaluator lives outside every trial and worktree and is copied into a throw-away export only after the agents are done. A result commit that already contains a top-level evaluator path fails the trial as tampering and nothing runs. The copy never overwrites and never follows a link; the export is cloned with `core.symlinks=false` | `arena/evaluator.ts` |
+| Credential-free command environment | Dependency installs and check commands run by NEXUS (`runOne` in `orchestrator/core.ts`) and every Arena command (setup, evaluator, Node preflight) run with `projectCommandEnv()`: no `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `NODE_OPTIONS` or `NODE_PATH`. Arena commands also lose every `ANTHROPIC_*` variable and `NODE_TEST_CONTEXT` (`arena/env.ts`) | `process/run-process.ts` |
+| Candidate isolation | Each speculative candidate works in its own clone (own object store and refs, no remote), so no Git command in one candidate can show another's commits; its path boundary is its own clone | `orchestrator/speculation.ts`, SPECULATIVE_EXECUTION.md |
+| Unattended trials | The Arena answers approval requests with the unattended rule: tool requests denied, plan, task and graph approvals granted, a high-risk task start denied. Nobody is asked | `ArenaService.answerApproval` |
+| Usage probes | No scraping, no private endpoint, no credential read. The usage report query and the minimal probe session use no tools | USAGE_INTELLIGENCE.md |
+| Power isolation | Unchanged: only the overnight supervisor holds the power controller; no 0.3 module imports it | OVERNIGHT_MODE.md |
+| Database copy before an upgrade | `openDatabase` keeps `nexus.db.v<old>.bak` once per old schema version before migrating | `persistence/database.ts` |
+
+Limits of these measures:
+
+- Arena cases run `node`, which must be on `PATH` (version 20 or newer). NEXUS ships none and resolves `node` the way `runCommandLine`
+  does; a hostile `node` earlier on `PATH` would run with your user's permissions.
+- The agent shell policy is still a lexical filter. A worker can run code it wrote, in its own clone or worktree or elsewhere
+  your user can write. Trial isolation holds for NEXUS's own mechanisms (paths, projects, prompts, Git), not against a
+  program an agent writes and runs.
+- Case commands run with your user's permissions and without an operating-system sandbox; the trust confirmation is the
+  control for imported cases.
+- The environment filter removes the variables named above. Other secrets in the process environment are passed on.
+
 ## Known gaps
 
 - **No OS sandbox.** Native Windows has none for this design. Agents and everything they launch run as
@@ -270,7 +297,8 @@ Hidden reasoning is not stored. Claude's own transcripts are stored by the runti
   shell commands rely on the classifier's path checks.
 - **NEXUS-run commands skip the policy engine.** The dependency install in new worktrees and the project's
   check commands are executed by NEXUS itself (`runCommandLine`, no shell, with a timeout and output cap).
-  They come from the project's lockfile and scripts, but install scripts and tests are project code.
+  They come from the project's lockfile and scripts, but install scripts and tests are project code. Since 0.3 they run
+  without Claude credentials and without `NODE_OPTIONS` or `NODE_PATH` (see "0.3" above).
 - **Commits skip Git hooks** (`--no-verify`) and signing.
 - **Agent-written text is not evidence.** Message subjects, decision text and proposal reasons come from agents. NEXUS marks them as such where it shows them to other agents, but a verifier or reviewer model can still be influenced by them.
 - **Prompt rules are not enforcement.** Instructions such as "never push" are in the role prompts; only

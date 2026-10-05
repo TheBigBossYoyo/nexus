@@ -1,4 +1,4 @@
-# Overnight Mode (0.2.1)
+# Overnight Mode (0.2.1, workloads since 0.3)
 
 An overnight run is a MISSION run that works without anyone present and ends with a power action the
 user approved for that run: shut down, sleep, hibernate, or nothing.
@@ -89,7 +89,7 @@ Token or cost thresholds are not implemented (subscription sessions report no re
 | SUCCESS | run completed |
 | FAILED | run failed |
 | BLOCKED | NEXUS paused the run for intervention, authentication was lost, the watchdog or a budget fired |
-| QUOTA_EXHAUSTED | usage limit with no reset time, a reset after the deadline, END_RUN, or six waits |
+| QUOTA_EXHAUSTED | a usage limit whose reset or next probe falls at or after the deadline, END_RUN, `usage.overnightWaitForReset` off, `usage.maxQuotaWaitMinutes` exceeded, or six waits (in 0.2.1 also any limit with no reset time) |
 | TIME_LIMIT | the wall-clock deadline |
 | USER_CANCELLED | the run was cancelled |
 
@@ -124,8 +124,30 @@ was replaced, and CANCEL SHUTDOWN still works.
   **PAUSE MISSION**, **CANCEL MISSION**.
 - **Approvals**: tool approvals are denied (the agent continues another way); the plan is not held for
   approval; task-start and graph approvals follow `autoApprovePlanChanges`.
-- **Quota**: `QUOTA_PAUSED` is not a failure. When Claude reports when the limit resets and that is inside
-  the mission time, the run resumes 90 seconds after the reset.
+- **Quota** (0.3): `QUOTA_PAUSED` is not a failure. The supervisor owns an overnight run's wait (the
+  ordinary quota controller skips these runs) and uses the shared `planQuotaWait` and the availability
+  probe. The deadline and the failsafe are never moved by a wait. Details in QUOTA_RECOVERY.md; the rules:
+
+  | Situation | Behaviour |
+  |---|---|
+  | Reset known; reset plus `usage.resumeDelaySeconds` (default 60) is before the deadline | Wait, probe at that time, resume if Claude is available |
+  | Reset known; that time is at or after the deadline | Ends `QUOTA_EXHAUSTED` |
+  | Reset unknown | Probe at 5, 10, 20, 30, 30 ... minutes (`usage.unknownResetProbeMinutes`, `usage.unknownResetProbeMaxMinutes`) while the next probe is before the deadline; then `QUOTA_EXHAUSTED` |
+  | Probe finds the limit still on | Re-plan from the new reset time or the next backoff interval |
+  | `quotaPolicy` `END_RUN` | Ends `QUOTA_EXHAUSTED` |
+  | Setting `usage.overnightWaitForReset` off | Ends `QUOTA_EXHAUSTED` |
+  | Six waits already (`MAX_QUOTA_WAITS`) | Ends `QUOTA_EXHAUSTED` |
+  | `usage.maxQuotaWaitMinutes` (0 = none) exceeded | Ends `QUOTA_EXHAUSTED` |
+  | Deadline reached during the wait | `TIME_LIMIT`, wait row closed |
+
+  The probe asks the runtime's usage report first (no prompt) and falls back to one minimal session; it is
+  given the rejected window's type, so a window at 100 percent whose reset has passed is not read as a limit,
+  and a rejection with no window type is checked with the minimal session. Each
+  wait is a `quota_pauses` row of scope `overnight` (with the limit type), with `quota_resumes` rows for the probes and the
+  resume. Every exit from the wait (resume, deadline, cancel, a person's resume) releases the dispatch gate: the usage
+  service reacts to `overnight.state_changed` from `QUOTA_PAUSED`, and a closed gate that no `quota_pauses` row and no
+  overnight wait owns for `ORPHAN_QUOTA_MS` (30 s) reopens by itself. Without a probe object (not the case in the application) the 0.2.1 rule applies: wait only for a
+  known reset, resume 90 seconds after it.
 - **Watchdog**: no orchestration event for `stallMinutes` → diagnostic snapshot → scheduler reconciliation →
   if still silent after `graceMinutes` → BLOCKED. Check commands that are still running extend the
   allowance by their timeout. Diagnostics are in the report.
@@ -166,6 +188,78 @@ What Windows holds is never inferred from clocks alone: whenever the record cann
 
 A person starts NEXUS, so a launch never powers the machine off for a run that lapsed.
 
+## Workloads: missions and Arena campaigns (0.3)
+
+The supervisor supervises a workload. There is one supervisor and one implementation of arming, the
+deadline, finalization, the power decision, the countdown, the user actions and restart recovery; a workload
+only knows how to run, stop and describe its own work.
+
+`AutonomousWorkload` (`src/main/modules/overnight/workload.ts`):
+
+| Member | Meaning |
+|---|---|
+| `id`, `type`, `state` | The workload id (run id or campaign id), `mission` or `arena_campaign`, and its phase: `working`, `paused`, `quota_wait`, `completed`, `failed`, `cancelled`, `missing` |
+| `start()` | Begin the work. Called once, after the failsafe is armed |
+| `pause(detail)` | Stop working and stay resumable. Resolves when nothing of the workload is running |
+| `resume()`, `cancel()` | Continue; end for good |
+| `checkpoint(reason)` | Write a durable checkpoint |
+| `isTerminal()` | The work ended by itself |
+| `summarize(input)` | The end-of-workload report, from persisted state only |
+| `getDeadlineState(now)` | Phase, the terminal reason when it ended by itself, and the reset time of a usage limit |
+| `getFinalizationState()` | After the stop: preserve unfinished work and capture what there is to report |
+
+A workload never holds the power controller and takes no part in the power decision. The overnight record
+stores `workloadType`; its `runId` is the workload id. One overnight workload at a time, of either type:
+Windows has one shutdown timer.
+
+| | `MissionWorkload` | `ArenaCampaignWorkload` |
+|---|---|---|
+| Work | One run of the orchestrator | One Arena campaign (many trial runs) |
+| Stop at finalization | The run is paused | No new trial starts, trials in flight are cancelled, queued trials stay queued; the campaign is `paused` (user) and can be resumed by hand |
+| Ends by itself as | `SUCCESS`, `FAILED`, `USER_CANCELLED` from the run state | `SUCCESS` when the campaign completed with at least one evaluated trial; `FAILED` when no trial produced a result; `BLOCKED` when a campaign budget ran out; `USER_CANCELLED` when cancelled |
+| Usage limit | The supervisor waits, probes and resumes the run (see above) | The Arena pauses and resumes the campaign through the usage gate; the supervisor only decides whether waiting fits before the deadline |
+| Checkpoint | A row in `run_checkpoints` | Campaign and trial states are written on every change; a marker records where the campaign stood |
+| Report | `overnight-<start>.md`, also in the project | `overnight-arena-<start>.md` in the NEXUS data directory |
+| Watchdog, run budgets, unattended approvals | Supervisor | Not used: a trial has its own time budget and its own approval rule (ARENA.md) |
+
+### Overnight Arena
+
+Arena, New campaign, Run overnight. The dialog shows the same policy and the same authorization sentence as
+an overnight mission, and the main process asks for the native confirmation. Order of events:
+
+1. Node.js preflight. A campaign that cannot run arms nothing.
+2. The campaign is created as a draft with `overnight: true`.
+3. The overnight record, the authorization and the failsafe. If Windows refuses the failsafe the campaign is
+   cancelled and nothing starts.
+4. The campaign starts.
+
+Usage limit during a campaign:
+
+| Situation | What happens |
+|---|---|
+| Reset reported, before the deadline | `QUOTA_PAUSED`. The campaign continues by itself when the limit clears; the record returns to `RUNNING` |
+| Reset reported, after the deadline | No wait. Finalized as `QUOTA_EXHAUSTED`; the policy for that reason applies |
+| Reset not reported | `QUOTA_PAUSED` until the limit clears or the deadline, whichever comes first. The deadline finalizes as `TIME_LIMIT` |
+| Policy `END_RUN`, or more than six waits | Finalized as `QUOTA_EXHAUSTED` |
+
+A usage limit never moves the deadline or the failsafe.
+
+The power events of a campaign are in the power audit under the campaign id. A campaign is not a run, so
+the supervisor writes no run events for it; the window follows it through the `overnight` push.
+
+A finished campaign refreshes the policy evidence and may leave a policy candidate, as any campaign does.
+The report lists the candidates proposed since the campaign started. Nothing is promoted without a person.
+
+After a restart of NEXUS the Arena re-attaches the campaign's trials and the supervisor restores the record
+(same deadline, same failsafe, same quota wait). After a restart of Windows or an absence of more than ten
+minutes the power authorization lapses, the campaign is stopped and nothing powers the machine off.
+
+Tests: `tests/integration/arena/overnight-arena.test.ts` (success, failure policy, budget blocker, reset
+before and after the deadline, unknown reset, timeout with trials in flight, restart during a quota pause,
+restart while active, restart of Windows, double finalization, agent content and a tampered row),
+`tests/stress/overnight-workload-stress.test.ts` (1000 seeded histories), and migration 005 in
+`tests/integration/persistence/overnight.test.ts`.
+
 ## Verifying on your machine
 
 - `pnpm smoke:power`: schedules a real shutdown one hour away with the real controller and aborts it at
@@ -189,3 +283,14 @@ A person starts NEXUS, so a launch never powers the machine off for a run that l
 Real sleep and hibernate were not executed (they would suspend the development machine), and no real
 shutdown was allowed to complete. Their command lines are pinned by tests; the shutdown timer was exercised
 for real by the smoke test only.
+
+Overnight Arena was exercised with the Arena integration rig (real ArenaService, Git and evaluator, a
+stand-in for the orchestrator), the fake power controller and a manual clock. A real campaign under the
+supervisor with a real power action has not been run.
+
+The 0.3 quota wait (probe before resume, probing on an unknown reset until the deadline) was exercised with
+the scripted runtime and a manual clock only (`tests/scenarios/usage-overnight.test.ts`). A real usage
+limit during an overnight run has not been observed; see V0_3_RELEASE_REPORT.md. The usage report the probe
+prefers is an SDK method declared experimental; NEXUS treats it as optional and falls back to one minimal
+session. Quota reset behaviour depends on what the runtime reports, and NEXUS never fabricates remaining
+quota. See QUOTA_RECOVERY.md.

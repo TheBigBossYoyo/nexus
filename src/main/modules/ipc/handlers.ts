@@ -21,6 +21,7 @@ import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
 import { aggregatePerformance } from '@main/modules/routing'
 import { ProjectService, QueryService } from './services'
+import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -43,6 +44,8 @@ export interface IpcContext {
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
   push: (message: PushMessage) => void
+  /** v0.3 channels (usage, arena, policy, speculative, home, activity). Absent: they answer `runtime_unavailable`. */
+  v3?: V3Handlers
 }
 
 type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
@@ -137,9 +140,17 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       worktrees: repos.worktrees.listByRun(runId),
       pendingApprovals: repos.approvals.listPending(runId),
     }),
-    'runs.create': ({ projectId, mode, preset, prompt, ...overrides }) => {
+    'runs.create': ({ projectId, mode, preset, prompt, strategy, speculativeCandidates, ...overrides }) => {
       const defined = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined))
-      return orchestrator.createRun({ projectId, mode, preset, prompt, overrides: defined })
+      return orchestrator.createRun({
+        projectId,
+        mode,
+        preset,
+        prompt,
+        overrides: defined,
+        ...(strategy ? { strategy } : {}),
+        ...(speculativeCandidates !== undefined ? { speculativeCandidates } : {}),
+      })
     },
     'runs.approvePlan': ({ runId }) => orchestrator.approvePlan(runId),
     'runs.replan': ({ runId, feedback }) => orchestrator.replan(runId, feedback),
@@ -278,6 +289,25 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       }
       return supervisor.start({ ...defined, confirmed, confirmation })
     },
+    'overnight.startArena': async ({ campaign, policy: p, confirmed, confirmation }) => {
+      const supervisor = overnight()
+      if (ctx.confirmPower) {
+        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const detail = [
+          `Arena campaign: ${campaign.name}`,
+          `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
+          `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the campaign ends`,
+          `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
+          p.endAction !== 'NONE' && p.failsafeEnabled
+            ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
+            : 'Failsafe: none',
+        ].join('\n')
+        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Start an unattended overnight Arena campaign?' : 'Authorize NEXUS to control Windows power state for this campaign?', detail)
+        if (!ok) throw new NexusError('invalid_state', 'The overnight campaign was not authorized.')
+      }
+      const defined = Object.fromEntries(Object.entries(campaign).filter(([, v]) => v !== undefined)) as typeof campaign
+      return supervisor.startArena({ campaign: defined, policy: p, confirmed, confirmation })
+    },
     'overnight.get': ({ runId }) => ctx.overnight?.status(runId) ?? null,
     'overnight.active': () => ctx.overnight?.active() ?? [],
     'overnight.cancelPower': ({ runId }) => overnight().cancelPower(runId),
@@ -302,6 +332,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'overnight.report': ({ runId }) => overnight().report(runId),
     'overnight.audit': ({ runId }) => repos.powerAudit.listByRun(runId),
     'overnight.checkpoints': ({ runId }) => repos.checkpoints.listByRun(runId).slice(-50),
+
+    ...(ctx.v3 ?? unavailableV3Handlers()),
   }
 }
 

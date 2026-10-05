@@ -1,0 +1,47 @@
+{
+  "id": "ui-state-bug",
+  "version": 2,
+  "name": "To-do panel state defects",
+  "description": "The framework-free state layer of a filterable, selectable to-do panel mutates state, leaves stale selections behind and derives counts and button states from the wrong data.",
+  "category": "ui",
+  "complexity": "medium",
+  "risk": "low",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "QA reported several bugs in the to-do panel state layer (reducer, selectors, view model and store in src/): after filtering or deleting items the toolbar still talks about items that are no longer there, the 'select all' checkbox selects things you cannot see, the footer counts are off while a filter is active, the 'Delete' button is disabled when exactly one item is selected, the 'Mark as done' button label shows the wrong number, and our React wrapper re-renders everything on every click and sometimes shows old data because reducers modify the previous state in place. Find and fix the root causes. Follow the rules documented in the README (pure reducers, unchanged slices keep their identity, no-op actions return the same state, the selection only contains existing, visible items, store listeners only fire on real changes) and the formats documented in src/viewModel.js. Keep all exported names and signatures; do not add dependencies.",
+  "visibleAcceptance": [
+    "Reducers never modify the previous state, and untouched items, filter and selection keep their object identity",
+    "The selection never contains removed or filtered-out items, whichever action caused it",
+    "Counts, labels and button states in the view model follow the documented rules, including at boundaries (0, 1 and several selected; empty or fully filtered lists)",
+    "Actions that change nothing return the same state and store listeners are not notified for them",
+    "The existing tests still pass"
+  ],
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
+  "setup": [],
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/ui-state-bug.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 25,
+    "maxAgentSessions": 30,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 60
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
+}

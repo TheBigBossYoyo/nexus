@@ -1,0 +1,5 @@
+export { loadStore, saveStore } from './store.js'
+export { addContact, search, listByTag, displayName } from './contacts.js'
+export { formatContactLine } from './format.js'
+export { CURRENT_VERSION } from './schema.js'
+export { StoreError } from './errors.js'

@@ -35,8 +35,21 @@ export class ProjectRepository extends Table<Project> {
     return this.one('WHERE root_path = ?', [rootPath])
   }
 
+  /** The user's projects. The hidden projects of Arena trials are not listed. */
   list(): Project[] {
-    return this.query('ORDER BY last_opened_at DESC, rowid DESC')
+    return this.query(
+      'WHERE id NOT IN (SELECT project_id FROM arena_trials WHERE project_id IS NOT NULL) ORDER BY last_opened_at DESC, rowid DESC',
+    )
+  }
+
+  isArena(projectId: string): boolean {
+    return prepare(this.db, 'SELECT 1 FROM arena_trials WHERE project_id = ? LIMIT 1').get(projectId) !== undefined
+  }
+
+  listArena(): Project[] {
+    return this.query(
+      'WHERE id IN (SELECT project_id FROM arena_trials WHERE project_id IS NOT NULL) ORDER BY created_at, rowid',
+    )
   }
 }
 
@@ -71,6 +84,20 @@ export class RunRepository extends Table<Run> {
   /** Newest first. */
   listByProject(projectId: string): Run[] {
     return this.query('WHERE project_id = ? ORDER BY created_at DESC, rowid DESC', [projectId])
+  }
+
+  /** The newest runs of every project, newest first. */
+  listRecent(limit = 50): Run[] {
+    return this.query('ORDER BY created_at DESC, rowid DESC LIMIT ?', [Math.min(Math.max(1, limit), 500)])
+  }
+
+  /** The newest runs of the user's own projects (runs of Arena trials are left out in SQL, before the limit). */
+  listRecentUser(limit = 50): Run[] {
+    return this.query(
+      `WHERE id NOT IN (SELECT run_id FROM arena_trials WHERE run_id IS NOT NULL)
+       ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      [Math.min(Math.max(1, limit), 500)],
+    )
   }
 
   /** Runs in any non-terminal state (including paused), oldest first. */

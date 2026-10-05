@@ -1,0 +1,557 @@
+{
+  "kind": "speculative-mission",
+  "startedAt": "2026-10-04T18:05:56.058Z",
+  "executable": "dev build",
+  "mission": "Add `mergeIntervals(intervals)` to this library in src/merge.js, exported from src/index.js, with node:test tests in test/merge.test.js.\nIt takes an array of closed intervals `{ start, end }` (numbers, start <= end) in any order and returns a new array, sorted by start, in which overlapping or touching intervals are merged into one. The input array and its objects must not be modified.\nIt throws TypeError when the argument is not an array or an element is not an object with numeric `start` and `end`, and RangeError when an interval has start > end.\nAn empty array returns an empty array. `npm test` must pass.",
+  "app": {
+    "version": "0.2.1",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "finishedAt": "2026-10-04T18:07:22.665Z",
+  "runId": "a97e5c8b-ed3c-46c1-87d8-5738c06cedf2",
+  "runState": "completed",
+  "runError": null,
+  "strategy": {
+    "requested": "SPECULATIVE",
+    "resolved": "SPECULATIVE",
+    "speculativeCandidates": 2,
+    "policyDecisionId": null,
+    "policySnapshotId": "3c92cea4-07c2-4635-b836-390a1c402cab",
+    "taskProfileId": "cf40f73a-5931-4f71-94ca-2afa3214352f",
+    "arenaTrialId": null
+  },
+  "tasks": [
+    {
+      "key": "implement",
+      "role": "worker",
+      "kind": "implement",
+      "state": "completed",
+      "attempt": 1,
+      "repairCycles": 0
+    }
+  ],
+  "sessions": [
+    {
+      "agentId": "78a10fd8-63e0-4ebf-9ed8-c783ac6b0ac6",
+      "agent": "Worker/implement · candidate A",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "ee661988-8487-4a06-af3a-260972b2964b",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T18:06:01.477Z",
+      "endedAt": "2026-10-04T18:06:31.561Z"
+    },
+    {
+      "agentId": "6a0ca772-6c6f-4915-9278-5aac1e917b1a",
+      "agent": "Worker/implement · candidate B",
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "9bee2a7b-0e31-4c04-888a-dd13393fbc59",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T18:06:01.489Z",
+      "endedAt": "2026-10-04T18:06:30.045Z"
+    },
+    {
+      "agentId": "d4907ebd-0030-4758-a4e7-a5ec5e9917d2",
+      "agent": "Reviewer/implement",
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "implement",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "71f12a0a-50d2-480b-8baa-572ddc7e0e15",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T18:06:33.768Z",
+      "endedAt": "2026-10-04T18:06:47.125Z"
+    },
+    {
+      "agentId": "9bed9a80-53e5-47ce-9267-26f38eafb0c0",
+      "agent": "Verifier/implement",
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "implement",
+      "model": "claude-opus-5-5",
+      "sdkSessionId": "302e34e9-9c05-44ab-8a46-b724b8479095",
+      "state": "ended",
+      "endReason": "completed",
+      "startedAt": "2026-10-04T18:06:47.128Z",
+      "endedAt": "2026-10-04T18:07:17.407Z"
+    }
+  ],
+  "resolvedModels": [
+    {
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement",
+      "requestedPolicy": "BALANCED",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for worker asks for BALANCED.",
+        "Large task with a writing role: BALANCED -> STRONGEST.",
+        "Task escalated to STRONGEST; already STRONGEST, no change.",
+        "STRONGEST resolves to opus."
+      ]
+    },
+    {
+      "role": "worker",
+      "purpose": "implement",
+      "task": "implement",
+      "requestedPolicy": "BALANCED",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for worker asks for BALANCED.",
+        "Large task with a writing role: BALANCED -> STRONGEST.",
+        "Task escalated to STRONGEST; already STRONGEST, no change.",
+        "STRONGEST resolves to opus."
+      ]
+    },
+    {
+      "role": "reviewer",
+      "purpose": "review",
+      "task": "implement",
+      "requestedPolicy": "STRONGEST",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for reviewer asks for STRONGEST.",
+        "STRONGEST resolves to opus."
+      ]
+    },
+    {
+      "role": "verifier",
+      "purpose": "verify",
+      "task": "implement",
+      "requestedPolicy": "STRONGEST",
+      "tier": "strongest",
+      "model": "opus",
+      "reasons": [
+        "Role policy for verifier asks for STRONGEST.",
+        "STRONGEST resolves to opus."
+      ]
+    }
+  ],
+  "reviews": [
+    {
+      "task": "implement",
+      "verdict": "approved",
+      "findings": 0,
+      "summary": "No concrete defects found. I read src/merge.js, src/index.js, src/overlaps.js and package.json in the worktree; I did not re-run `npm test` and relied on the supplied passing output (13/13).\n\nThe implementation meets every requirement:\n- **Location and export:** `mergeIntervals` lives in src/merge.j"
+    }
+  ],
+  "verifications": [
+    {
+      "task": "implement",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "implement",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "implement",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    },
+    {
+      "task": "implement",
+      "kind": "verifier",
+      "passed": true,
+      "summary": "The work passes: `mergeIntervals` is implemented in src/merge.js, exported from src/index.js, tested in test/merge.test.js, and my own `npm test` run passed 13 of 13. My ad-hoc edge-case script was blocked by the verifier hook (`node` not permitted), so behaviour beyond the tests is confirmed by rea"
+    },
+    {
+      "task": "(mission)",
+      "kind": "checks",
+      "passed": true,
+      "summary": "1 check command(s) passed."
+    }
+  ],
+  "strategyEvents": [
+    {
+      "type": "strategy.selected",
+      "at": "2026-10-04T18:05:58.026Z",
+      "payload": {
+        "requested": "SPECULATIVE",
+        "resolved": "SPECULATIVE",
+        "reason": "No planner; 2 independent candidates, then a tournament"
+      }
+    },
+    {
+      "type": "speculative.started",
+      "at": "2026-10-04T18:06:01.471Z",
+      "payload": {
+        "speculativeRunId": "f4b6d6a5-b779-4db0-b7cf-70986e64cdd9",
+        "candidates": [
+          "a",
+          "b"
+        ],
+        "baseCommit": "5cdcb4caf7cc386aca92890b782755f45a8ad217"
+      }
+    },
+    {
+      "type": "speculative.candidate",
+      "at": "2026-10-04T18:06:30.717Z",
+      "payload": {
+        "speculativeRunId": "f4b6d6a5-b779-4db0-b7cf-70986e64cdd9",
+        "label": "b",
+        "implemented": true,
+        "checksPassed": true
+      }
+    },
+    {
+      "type": "speculative.candidate",
+      "at": "2026-10-04T18:06:32.262Z",
+      "payload": {
+        "speculativeRunId": "f4b6d6a5-b779-4db0-b7cf-70986e64cdd9",
+        "label": "a",
+        "implemented": true,
+        "checksPassed": true
+      }
+    },
+    {
+      "type": "speculative.decided",
+      "at": "2026-10-04T18:06:32.263Z",
+      "payload": {
+        "speculativeRunId": "f4b6d6a5-b779-4db0-b7cf-70986e64cdd9",
+        "winner": "b",
+        "ranking": [
+          "b",
+          "a"
+        ],
+        "confidence": "marginal"
+      }
+    },
+    {
+      "type": "outcome.recorded",
+      "at": "2026-10-04T18:07:18.420Z",
+      "payload": {
+        "outcomeId": "f9e5fb05-2af7-477a-b365-4b20f6adea22",
+        "strategy": "SPECULATIVE",
+        "success": true
+      }
+    }
+  ],
+  "quotaEvents": [],
+  "approvals": [],
+  "independentTestRun": {
+    "lines": [
+      "# tests 13",
+      "# pass 13",
+      "# fail 0"
+    ],
+    "pass": 13,
+    "fail": 0
+  },
+  "observedUsage": {
+    "totals": {
+      "sessions": 4,
+      "turns": 26,
+      "inputTokens": 9191,
+      "outputTokens": 10084,
+      "cacheReadTokens": 137694,
+      "cacheCreationTokens": 51950,
+      "durationMs": 96411,
+      "limitEvents": 0
+    },
+    "byModel": [
+      {
+        "key": "claude-opus-5-5",
+        "label": "claude-opus-5-5",
+        "sessions": 4,
+        "turns": 26,
+        "inputTokens": 9191,
+        "outputTokens": 10084,
+        "cacheReadTokens": 137694,
+        "cacheCreationTokens": 51950,
+        "durationMs": 96411,
+        "limitEvents": 0
+      }
+    ],
+    "byRole": [
+      {
+        "key": "worker",
+        "label": "worker",
+        "sessions": 2,
+        "turns": 12,
+        "inputTokens": 3020,
+        "outputTokens": 6047,
+        "cacheReadTokens": 64373,
+        "cacheCreationTokens": 38958,
+        "durationMs": 55848,
+        "limitEvents": 0
+      },
+      {
+        "key": "verifier",
+        "label": "verifier",
+        "sessions": 1,
+        "turns": 11,
+        "inputTokens": 2863,
+        "outputTokens": 3099,
+        "cacheReadTokens": 44405,
+        "cacheCreationTokens": 8011,
+        "durationMs": 28605,
+        "limitEvents": 0
+      },
+      {
+        "key": "reviewer",
+        "label": "reviewer",
+        "sessions": 1,
+        "turns": 3,
+        "inputTokens": 3308,
+        "outputTokens": 938,
+        "cacheReadTokens": 28916,
+        "cacheCreationTokens": 4981,
+        "durationMs": 11958,
+        "limitEvents": 0
+      }
+    ],
+    "pauses": 0
+  },
+  "policy": {
+    "versionBefore": 1,
+    "versionAfter": 1,
+    "preview": null,
+    "taskProfile": {
+      "id": "cf40f73a-5931-4f71-94ca-2afa3214352f",
+      "contextKey": "feature|large|low",
+      "features": {
+        "category": {
+          "value": "feature",
+          "basis": "INFERRED"
+        },
+        "complexity": {
+          "value": "large",
+          "basis": "INFERRED"
+        },
+        "risk": {
+          "value": "low",
+          "basis": "INFERRED"
+        },
+        "primaryLanguage": {
+          "value": "JavaScript",
+          "basis": "MEASURED"
+        },
+        "frameworks": {
+          "value": [],
+          "basis": "MEASURED"
+        },
+        "repoFileCount": {
+          "value": 5,
+          "basis": "MEASURED"
+        },
+        "moduleCount": {
+          "value": 2,
+          "basis": "MEASURED"
+        },
+        "testDensity": {
+          "value": 25,
+          "basis": "MEASURED"
+        },
+        "fileScope": {
+          "value": "few",
+          "basis": "INFERRED"
+        },
+        "ambiguity": {
+          "value": "low",
+          "basis": "INFERRED"
+        },
+        "securitySensitive": {
+          "value": false,
+          "basis": "INFERRED"
+        },
+        "parallelizability": {
+          "value": "medium",
+          "basis": "INFERRED"
+        }
+      },
+      "profilerVersion": "profiler-v1"
+    },
+    "decision": null,
+    "snapshotId": "3c92cea4-07c2-4635-b836-390a1c402cab",
+    "outcome": {
+      "id": "f9e5fb05-2af7-477a-b365-4b20f6adea22",
+      "runId": "a97e5c8b-ed3c-46c1-87d8-5738c06cedf2",
+      "projectId": "f2f2949f-3164-4d72-bb7a-de5e69ca9c0b",
+      "taskProfileId": "cf40f73a-5931-4f71-94ca-2afa3214352f",
+      "contextKey": "feature|large|low",
+      "strategy": "SPECULATIVE",
+      "requestedStrategy": "SPECULATIVE",
+      "planningMode": "none",
+      "reviewMode": "auto",
+      "policyDecisionId": null,
+      "policySnapshotId": "3c92cea4-07c2-4635-b836-390a1c402cab",
+      "models": {
+        "worker": "claude-opus-5-5",
+        "reviewer": "claude-opus-5-5",
+        "verifier": "claude-opus-5-5"
+      },
+      "agents": 4,
+      "sessions": 4,
+      "tasks": 1,
+      "tasksCompleted": 1,
+      "repairs": 0,
+      "reviews": 1,
+      "reviewRejections": 0,
+      "verificationPassed": null,
+      "elapsedMs": 80320,
+      "inputTokens": 9191,
+      "outputTokens": 10084,
+      "quotaPauses": 0,
+      "quotaWaitMs": 0,
+      "humanInterventions": 0,
+      "terminal": "completed",
+      "success": true,
+      "isArena": false,
+      "nexusVersion": "0.2.1",
+      "createdAt": "2026-10-04T18:07:18.418Z"
+    }
+  },
+  "speculative": {
+    "runs": [
+      {
+        "id": "f4b6d6a5-b779-4db0-b7cf-70986e64cdd9",
+        "runId": "a97e5c8b-ed3c-46c1-87d8-5738c06cedf2",
+        "taskId": "7bcf166a-1145-46d0-9d7a-83edf0e9e688",
+        "baseCommit": "5cdcb4caf7cc386aca92890b782755f45a8ad217",
+        "candidateCount": 2,
+        "state": "adopted",
+        "winnerCandidateId": "e82053c3-c757-49a0-9fea-99ae5aabc2a2",
+        "createdAt": "2026-10-04T18:05:59.885Z",
+        "finishedAt": "2026-10-04T18:06:32.884Z"
+      }
+    ],
+    "candidates": [
+      {
+        "label": "a",
+        "agentId": "78a10fd8-63e0-4ebf-9ed8-c783ac6b0ac6",
+        "sdkSessionId": "ee661988-8487-4a06-af3a-260972b2964b",
+        "branch": "nexus/a97e5c8b/implement-cand-a",
+        "worktreePath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-speculative-data-09Lpst\\worktrees\\a97e5c8b\\implement-cand-a",
+        "headCommit": "9206367fc2a5027cdc6dadad747ed3e416d09d2a",
+        "evidence": {
+          "implemented": true,
+          "checksPassed": true,
+          "checksFailedCount": 0,
+          "acceptancePassed": null,
+          "criticalFindings": null,
+          "highFindings": null,
+          "filesChanged": 3,
+          "linesChanged": 105,
+          "durationMs": 30165,
+          "inputTokens": 1510,
+          "outputTokens": 3061
+        },
+        "rank": 2,
+        "outcome": "rejected",
+        "cleanedAt": "2026-10-04T18:06:32.894Z",
+        "storedDiffChars": 4370,
+        "worktreeStillExists": false,
+        "worktreeWasSeen": true
+      },
+      {
+        "label": "b",
+        "agentId": "6a0ca772-6c6f-4915-9278-5aac1e917b1a",
+        "sdkSessionId": "9bee2a7b-0e31-4c04-888a-dd13393fbc59",
+        "branch": "nexus/a97e5c8b/implement-cand-b",
+        "worktreePath": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-speculative-data-09Lpst\\worktrees\\a97e5c8b\\implement-cand-b",
+        "headCommit": "595a447a34026589a219be72014b4d47f6626426",
+        "evidence": {
+          "implemented": true,
+          "checksPassed": true,
+          "checksFailedCount": 0,
+          "acceptancePassed": null,
+          "criticalFindings": null,
+          "highFindings": null,
+          "filesChanged": 3,
+          "linesChanged": 87,
+          "durationMs": 28629,
+          "inputTokens": 1510,
+          "outputTokens": 2986
+        },
+        "rank": 1,
+        "outcome": "winner",
+        "cleanedAt": "2026-10-04T18:06:32.904Z",
+        "storedDiffChars": 4343,
+        "worktreeStillExists": false,
+        "worktreeWasSeen": true
+      }
+    ],
+    "decisions": [
+      {
+        "id": "0283899a-5ee6-43f9-84e0-c3d73d82df3c",
+        "speculativeRunId": "f4b6d6a5-b779-4db0-b7cf-70986e64cdd9",
+        "runId": "a97e5c8b-ed3c-46c1-87d8-5738c06cedf2",
+        "taskId": "7bcf166a-1145-46d0-9d7a-83edf0e9e688",
+        "winnerLabel": "b",
+        "ranking": [
+          "b",
+          "a"
+        ],
+        "comparisons": [
+          {
+            "criterion": "smaller change (lines)",
+            "better": "b",
+            "worse": "a",
+            "detail": "b: 87; a: 105"
+          }
+        ],
+        "confidence": "marginal",
+        "reason": "Candidate b selected on \"smaller change (lines)\" (b: 87; a: 105).",
+        "createdAt": "2026-10-04T18:06:32.263Z"
+      }
+    ]
+  },
+  "git": {
+    "userHeadUnchanged": true,
+    "userStatus": "",
+    "branches": [
+      "nexus/a97e5c8b/implement",
+      "nexus/a97e5c8b/integration"
+    ],
+    "integrationLog": [
+      "9c2591f Merge implement: Add `mergeIntervals(intervals)` to this library in src/merge.js, exported from src/index.js, with node:test tests in tes",
+      "595a447 Add mergeIntervals"
+    ]
+  },
+  "gates": {
+    "the run completed": true,
+    "commits exist on the integration branch": true,
+    "independent test run passes": true,
+    "observed usage was recorded for the run": true,
+    "the policy snapshot used is recorded on the run": true,
+    "a mission outcome was recorded": true,
+    "the active policy did not change": true,
+    "the user checkout is untouched": true,
+    "two candidates ran": true,
+    "the candidates used different real SDK sessions": true,
+    "the candidates used different worktrees and branches": true,
+    "both candidate worktrees existed during the run": true,
+    "the candidates started from the same baseline commit": true,
+    "the tournament chose a winner from objective evidence": true,
+    "the winner was reviewed and verified": true,
+    "loser evidence was stored": true,
+    "candidate worktrees and branches were removed afterwards": true
+  },
+  "result": "PASS"
+}

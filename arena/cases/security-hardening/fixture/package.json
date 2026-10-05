@@ -1,0 +1,8 @@
+{
+  "name": "sitekit",
+  "version": "0.7.2",
+  "private": true,
+  "type": "module",
+  "description": "Static file serving, uploads, config loading and templating helpers for the internal docs portal.",
+  "scripts": { "test": "node --test" }
+}

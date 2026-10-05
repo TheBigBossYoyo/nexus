@@ -72,7 +72,7 @@ export function DiffView({
 
   if (rows.length === 0 && diff.patch.trim() === '') {
     return (
-      <div className="p-3 text-fg-muted" data-testid={`${testId}-empty`}>
+      <div className="p-3 text-text-secondary" data-testid={`${testId}-empty`}>
         No changes{diff.base && diff.head ? ` between ${diff.base} and ${diff.head}` : ''}.
       </div>
     )
@@ -87,8 +87,8 @@ export function DiffView({
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      <div className="flex flex-wrap items-center gap-2 text-fg-muted">
-        <span className="font-mono text-[0.9em]">
+      <div className="flex flex-wrap items-center gap-2 text-text-secondary">
+        <span className="font-mono text-small">
           {diff.base ?? '?'} → {diff.head ?? '?'}
         </span>
         <span>
@@ -143,24 +143,24 @@ function FileSection({
   const counts = row.file ?? (row.parsed ? countParsed(row.parsed) : { additions: 0, deletions: 0 })
   const status = row.file?.status ?? 'modified'
   return (
-    <li className="border bg-surface-1" data-testid={`diff-file-${normalizePath(row.path)}`}>
+    <li className="rounded-md border bg-surface" data-testid={`diff-file-${normalizePath(row.path)}`}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 bg-surface-2/60 px-2 py-1 text-left hover:bg-surface-2"
+        className="flex w-full items-center gap-2 bg-surface-muted px-2 py-1 text-left hover:bg-surface-muted"
       >
         {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         <span className="min-w-0 flex-1 truncate font-mono text-[0.92em]">{row.path}</span>
         {owners.length > 0 ? (
-          <span className="shrink-0 text-[0.85em] text-fg-muted" title="Changed by">
+          <span className="shrink-0 text-small text-text-secondary" title="Changed by">
             {owners.join(', ')}
           </span>
         ) : null}
         {findings.length > 0 ? <Badge tone="review">{findings.length} finding{findings.length === 1 ? '' : 's'}</Badge> : null}
         <Badge tone={STATUS_TONE[status]}>{status}</Badge>
-        <span className="shrink-0 font-mono text-[0.9em] text-tone-success">+{counts.additions}</span>
-        <span className="shrink-0 font-mono text-[0.9em] text-tone-danger">−{counts.deletions}</span>
+        <span className="shrink-0 font-mono text-small text-tone-success">+{counts.additions}</span>
+        <span className="shrink-0 font-mono text-small text-tone-danger">−{counts.deletions}</span>
       </button>
       {expanded ? <FileBody row={row} findings={findings} truncatedPatch={truncatedPatch} /> : null}
     </li>
@@ -188,14 +188,14 @@ function FileBody({ row, findings, truncatedPatch }: { row: Row; findings: Revie
   let body: ReactNode
   if (!parsed) {
     body = (
-      <div className="p-2 text-fg-muted">
+      <div className="p-2 text-text-secondary">
         {truncatedPatch ? 'Not included in the truncated patch.' : 'No patch available for this file.'}
       </div>
     )
   } else if (parsed.isBinary) {
-    body = <div className="p-2 text-fg-muted">Binary file; contents are not shown.</div>
+    body = <div className="p-2 text-text-secondary">Binary file; contents are not shown.</div>
   } else if (parsed.hunks.length === 0) {
-    body = <div className="p-2 text-fg-muted">No textual changes (mode change, rename or empty file).</div>
+    body = <div className="p-2 text-text-secondary">No textual changes (mode change, rename or empty file).</div>
   } else {
     body = (
       <div className={cn('nexus-diff overflow-x-auto')}>
@@ -210,7 +210,7 @@ function FileBody({ row, findings, truncatedPatch }: { row: Row; findings: Revie
       {body}
       {annotations && annotations.unanchored.length > 0 ? (
         <div className="flex flex-col gap-1 border-t p-2">
-          <div className="text-[0.8rem] uppercase tracking-wider text-fg-faint">Findings without a line in this diff</div>
+          <div className="text-[0.8rem] text-text-muted">Findings without a line in this diff</div>
           {annotations.unanchored.map((f, i) => (
             <FindingCard key={`${f.title}-${i}`} finding={f} compact />
           ))}

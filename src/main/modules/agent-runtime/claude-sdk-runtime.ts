@@ -28,6 +28,7 @@ import type {
   AgentSessionHandle,
   NexusToolHandlers,
   RuntimeCapabilities,
+  RuntimeUsageReport,
   SessionSpec,
   ToolDecision,
   ToolRequest,
@@ -48,6 +49,28 @@ const NEXUS_TOOL_PREFIX = 'mcp__nexus__'
 /** The runtime delivers `outputFormat` results through this internal tool; it has no side effects. */
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput'
 const INIT_TIMEOUT_MS = 20_000
+const USAGE_REPORT_TIMEOUT_MS = 20_000
+
+const UsageWindowShape = z.object({ utilization: z.number().nullable(), resets_at: z.string().nullable() })
+/** Only the fields NEXUS reads; everything else in the experimental response is ignored. */
+const UsageReportSchema = z.object({
+  subscription_type: z.string().nullable(),
+  rate_limits_available: z.boolean(),
+  rate_limits: z.record(z.string(), z.unknown()).nullable(),
+})
+
+/** Validates the experimental usage response. Returns null for anything that does not match. */
+export function parseUsageReport(raw: unknown): RuntimeUsageReport | null {
+  const parsed = UsageReportSchema.safeParse(raw)
+  if (!parsed.success) return null
+  const windows: RuntimeUsageReport['windows'] = []
+  for (const [limitType, value] of Object.entries(parsed.data.rate_limits ?? {})) {
+    const w = UsageWindowShape.safeParse(value)
+    if (!w.success) continue
+    windows.push({ limitType, utilizationPercent: w.data.utilization, resetsAt: w.data.resets_at })
+  }
+  return { rateLimitsAvailable: parsed.data.rate_limits_available, subscriptionType: parsed.data.subscription_type, windows }
+}
 
 /**
  * The SDK REPLACES the child environment, so this copies everything. Windows env names are
@@ -677,6 +700,44 @@ export class ClaudeSdkRuntime implements AgentRuntime {
       input.close()
       try {
         q.close()
+      } catch {
+        // already closed
+      }
+    }
+  }
+
+  /**
+   * The experimental no-prompt usage report. Same pattern as initialize(): a streaming query whose prompt
+   * never arrives. Null on any error, timeout or a missing method.
+   */
+  async getUsageReport(options: { subscriptionMode: boolean }): Promise<RuntimeUsageReport | null> {
+    const input = new AsyncQueue<SDKUserMessage>()
+    let q: Query | null = null
+    let timer: NodeJS.Timeout | undefined
+    try {
+      q = query({
+        prompt: input,
+        options: {
+          ...this.baseOptions(buildAgentEnv(this.processEnv, { subscriptionMode: options.subscriptionMode })),
+          settingSources: [],
+          permissionMode: 'default',
+          persistSession: false,
+        },
+      })
+      const method = (q as unknown as Record<string, unknown>)['usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET']
+      if (typeof method !== 'function') return null
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Timed out waiting for the usage report')), USAGE_REPORT_TIMEOUT_MS)
+      })
+      const call = Promise.resolve((method as (o: { skipBehaviors: boolean }) => Promise<unknown>).call(q, { skipBehaviors: true }))
+      return parseUsageReport(await Promise.race([call, timeout]))
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timer)
+      input.close()
+      try {
+        q?.close()
       } catch {
         // already closed
       }

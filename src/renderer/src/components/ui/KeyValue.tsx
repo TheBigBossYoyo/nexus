@@ -18,11 +18,11 @@ export function KeyValue({
   labelWidth?: string
 }) {
   return (
-    <dl className={cn('grid gap-x-3 gap-y-1', className)} style={{ gridTemplateColumns: `${labelWidth} minmax(0,1fr)` }}>
+    <dl className={cn('m-0 grid gap-x-4 gap-y-1.5', className)} style={{ gridTemplateColumns: `${labelWidth} minmax(0,1fr)` }}>
       {rows.map((r) => (
         <div key={r.label} className="contents">
-          <dt className="text-fg-muted">{r.label}</dt>
-          <dd className={cn('m-0 min-w-0 break-words', r.mono && 'font-mono text-[0.92em]')}>{r.value}</dd>
+          <dt className="text-text-muted">{r.label}</dt>
+          <dd className={cn('m-0 min-w-0 break-words', r.mono && 'font-mono text-code tnum')}>{r.value}</dd>
         </div>
       ))}
     </dl>

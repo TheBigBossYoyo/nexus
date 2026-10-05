@@ -36,6 +36,40 @@ import type {
 } from './v2'
 import { SettingsSchema, type Settings } from './settings'
 import {
+  ArenaBudgetPresetSchema,
+  ConcreteStrategySchema,
+  ExplorationModeSchema,
+  SpeculationPolicySchema,
+  StrategySchema,
+  USAGE_GROUPINGS,
+  type ArenaCampaign,
+  type ArenaCaseVersion,
+  type PolicyDecision,
+  type PolicySnapshot,
+  type UsageBreakdownRow,
+  type UsageOverview,
+  type UsageTotals,
+} from './v3'
+import type {
+  ArenaCampaignDetail,
+  ArenaCampaignSummary,
+  ArenaCaseSummary,
+  ArenaResults,
+  ArenaStatus,
+  ArenaTrialDetail,
+  ArenaTrialRow,
+  HomeSummary,
+  LearnResult,
+  PolicyDiff,
+  PolicyOverview,
+  PolicyPreview,
+  RunPolicyInfo,
+  RunUsage,
+  SpeculativeDetail,
+  UsageEfficiency,
+  UsageLimitHistory,
+} from './v3-read'
+import {
   EndActionSchema,
   EndConditionsSchema,
   OVERNIGHT_CONFIRMATION_TEXT,
@@ -157,6 +191,9 @@ export const ipcInputs = {
       reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
       /** Rotate agent sessions after this many turns (0 disables). Lets an acceptance run exercise rotation cheaply. */
       sessionRotationTurns: z.number().int().min(0).max(1000).optional(),
+      /** v0.3. Absent: the run behaves as before 0.3 (the mode decides). */
+      strategy: StrategySchema.optional(),
+      speculativeCandidates: z.number().int().min(2).max(3).optional(),
     })
     .strict(),
   'runs.approvePlan': z.object({ runId: Id }).strict(),
@@ -257,6 +294,31 @@ export const ipcInputs = {
       maxIterations: z.number().int().min(1).max(50).optional(),
       planningMode: z.enum(['single', 'consensus']).optional(),
       reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
+      /** v0.3. Absent: BUILD, which configures the run exactly as before 0.3 and lets its outcome be recorded. */
+      strategy: StrategySchema.optional(),
+    })
+    .strict(),
+  /**
+   * v0.3: an Arena campaign under the overnight supervisor. The same campaign fields as `arena.createCampaign`
+   * and the same power policy and authorization as `overnight.start`; nothing else is accepted.
+   */
+  'overnight.startArena': z
+    .object({
+      campaign: z
+        .object({
+          name: z.string().min(1).max(120),
+          caseIds: z.array(Id).min(1).max(50),
+          strategies: z.array(ConcreteStrategySchema).min(1).max(5),
+          repetitions: z.number().int().min(1).max(20),
+          modelPreset: PresetSchema,
+          budgetPreset: ArenaBudgetPresetSchema,
+          maxConcurrentTrials: z.number().int().min(1).max(4).optional(),
+          maxWallClockMinutes: z.number().int().min(1).max(1440).optional(),
+        })
+        .strict(),
+      policy: OvernightPolicySchema,
+      confirmed: z.literal(true),
+      confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT),
     })
     .strict(),
   'overnight.get': z.object({ runId: Id }).strict(),
@@ -276,6 +338,83 @@ export const ipcInputs = {
   'overnight.report': z.object({ runId: Id }).strict(),
   'overnight.audit': z.object({ runId: Id }).strict(),
   'overnight.checkpoints': z.object({ runId: Id }).strict(),
+
+  // v0.3: usage intelligence
+  'usage.overview': Empty,
+  'usage.totals': z
+    .object({ runId: Id.optional(), projectId: Id.optional(), campaignId: Id.optional(), sinceDays: z.number().int().min(1).max(365).optional() })
+    .strict(),
+  'usage.breakdown': z
+    .object({
+      by: z.enum(USAGE_GROUPINGS),
+      runId: Id.optional(),
+      campaignId: Id.optional(),
+      sinceDays: z.number().int().min(1).max(365).optional(),
+      limit: z.number().int().min(1).max(400).optional(),
+    })
+    .strict(),
+  'usage.limitHistory': z.object({ limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'usage.run': z.object({ runId: Id }).strict(),
+  'usage.efficiency': Empty,
+  /** Ask the runtime now (no prompt is sent when the runtime supports its usage report). */
+  'usage.refresh': Empty,
+  /** Probe now and resume the waiting runs if Claude is available. */
+  'usage.resumeNow': Empty,
+  /** Stop waiting: the runs stay paused for a manual resume. */
+  'usage.endWait': z.object({ runId: Id.optional() }).strict(),
+
+  // v0.3: arena
+  'arena.cases': Empty,
+  'arena.status': Empty,
+  /** Removes the trial repositories of a finished campaign from disk. Database rows are kept. */
+  'arena.cleanup': z.object({ campaignId: Id }).strict(),
+  /** Opens the native folder picker; returns null when cancelled. The case is registered untrusted. */
+  'arena.importCase': Empty,
+  'arena.trustCase': z.object({ caseVersionId: Id }).strict(),
+  'arena.campaigns': z.object({ limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'arena.createCampaign': z
+    .object({
+      name: z.string().min(1).max(120),
+      caseIds: z.array(Id).min(1).max(50),
+      strategies: z.array(ConcreteStrategySchema).min(1).max(5),
+      repetitions: z.number().int().min(1).max(20),
+      modelPreset: PresetSchema,
+      budgetPreset: ArenaBudgetPresetSchema,
+      maxConcurrentTrials: z.number().int().min(1).max(4).optional(),
+      maxWallClockMinutes: z.number().int().min(1).max(1440).optional(),
+      start: z.boolean().optional(),
+    })
+    .strict(),
+  'arena.campaign': z.object({ campaignId: Id }).strict(),
+  'arena.trials': z
+    .object({ campaignId: Id, limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() })
+    .strict(),
+  'arena.trial': z.object({ trialId: Id }).strict(),
+  'arena.start': z.object({ campaignId: Id }).strict(),
+  'arena.pause': z.object({ campaignId: Id }).strict(),
+  'arena.resume': z.object({ campaignId: Id }).strict(),
+  'arena.cancel': z.object({ campaignId: Id }).strict(),
+  'arena.results': z.object({ campaignId: Id.optional(), sinceDays: z.number().int().min(1).max(730).optional() }).strict(),
+
+  // v0.3: adaptive policy
+  'policy.overview': Empty,
+  'policy.snapshot': z.object({ snapshotId: Id }).strict(),
+  'policy.compare': z.object({ a: Id, b: Id }).strict(),
+  'policy.learn': Empty,
+  'policy.promote': z.object({ candidateId: Id }).strict(),
+  'policy.reject': z.object({ candidateId: Id }).strict(),
+  'policy.rollback': Empty,
+  'policy.pin': z.object({ snapshotId: Id.nullable() }).strict(),
+  'policy.setConfig': z.object({ exploration: ExplorationModeSchema.optional(), speculation: SpeculationPolicySchema.optional() }).strict(),
+  'policy.decisions': z.object({ limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  /** What ADAPTIVE would choose for this mission, and why. Nothing is stored. */
+  'policy.preview': z.object({ projectId: Id, prompt: z.string().min(1).max(20_000) }).strict(),
+  'policy.run': z.object({ runId: Id }).strict(),
+
+  // v0.3: speculative execution, home, activity
+  'speculative.list': z.object({ runId: Id }).strict(),
+  'home.summary': Empty,
+  'activity.recent': z.object({ limit: z.number().int().min(1).max(500).optional(), beforeSeq: z.number().int().min(1).optional() }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -343,6 +482,7 @@ export interface IpcOutputs {
   'intelligence.refresh': { facts: number; stale: number }
   'context.packs': ContextPack[]
   'overnight.start': { run: Run; overnight: OvernightStatus }
+  'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]
@@ -353,6 +493,49 @@ export interface IpcOutputs {
   'overnight.report': { text: string | null; path: string | null }
   'overnight.audit': PowerAuditEntry[]
   'overnight.checkpoints': RunCheckpoint[]
+
+  'usage.overview': UsageOverview
+  'usage.totals': UsageTotals
+  'usage.breakdown': UsageBreakdownRow[]
+  'usage.limitHistory': UsageLimitHistory
+  'usage.run': RunUsage
+  'usage.efficiency': UsageEfficiency
+  'usage.refresh': UsageOverview
+  'usage.resumeNow': UsageOverview
+  'usage.endWait': UsageOverview
+
+  'arena.cases': ArenaCaseSummary[]
+  'arena.status': ArenaStatus
+  'arena.cleanup': { removed: number }
+  'arena.importCase': { summary: ArenaCaseSummary; commands: string[] } | null
+  'arena.trustCase': ArenaCaseVersion
+  'arena.campaigns': { campaigns: ArenaCampaignSummary[]; total: number }
+  'arena.createCampaign': ArenaCampaign
+  'arena.campaign': ArenaCampaignDetail
+  'arena.trials': { trials: ArenaTrialRow[]; total: number }
+  'arena.trial': ArenaTrialDetail
+  'arena.start': ArenaCampaign
+  'arena.pause': ArenaCampaign
+  'arena.resume': ArenaCampaign
+  'arena.cancel': ArenaCampaign
+  'arena.results': ArenaResults
+
+  'policy.overview': PolicyOverview
+  'policy.snapshot': PolicySnapshot
+  'policy.compare': PolicyDiff
+  'policy.learn': LearnResult
+  'policy.promote': PolicyOverview
+  'policy.reject': PolicyOverview
+  'policy.rollback': PolicyOverview
+  'policy.pin': PolicyOverview
+  'policy.setConfig': PolicyOverview
+  'policy.decisions': PolicyDecision[]
+  'policy.preview': PolicyPreview
+  'policy.run': RunPolicyInfo
+
+  'speculative.list': SpeculativeDetail
+  'home.summary': HomeSummary
+  'activity.recent': RunEvent[]
 }
 
 export type IpcResult<T> =

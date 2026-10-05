@@ -104,3 +104,68 @@ export function messageDirection(message: Message, agent: Pick<Agent, 'id' | 'ta
   if (agent.taskId && message.fromTaskId === agent.taskId) return 'sent'
   return 'received'
 }
+
+export type AgentGroupId = 'working' | 'waiting' | 'done'
+
+export interface AgentGroup {
+  id: AgentGroupId
+  label: string
+  agents: Agent[]
+}
+
+/** Group an agent by what a person cares about: doing work, waiting on something, or finished. */
+export function agentGroupOf(agent: Pick<Agent, 'state'>): AgentGroupId {
+  switch (agent.state) {
+    case 'starting':
+    case 'working':
+      return 'working'
+    case 'waiting':
+    case 'blocked':
+    case 'idle':
+      return 'waiting'
+    default:
+      return 'done'
+  }
+}
+
+/** Working, Waiting, Done (empty groups omitted); each group oldest first so rows do not jump. */
+export function groupAgentsByState(agents: readonly Agent[]): AgentGroup[] {
+  const sorted = [...agents].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+  const defs: { id: AgentGroupId; label: string }[] = [
+    { id: 'working', label: 'Working' },
+    { id: 'waiting', label: 'Waiting' },
+    { id: 'done', label: 'Done' },
+  ]
+  return defs
+    .map((d) => ({ ...d, agents: sorted.filter((a) => agentGroupOf(a) === d.id) }))
+    .filter((g) => g.agents.length > 0)
+}
+
+/** "Claude · Sonnet" from a model id; the id itself when the tier is not recognisable; "Claude" without a model. */
+export function claudeModelLabel(model: string | null | undefined): string {
+  if (!model) return 'Claude'
+  const m = /(opus|sonnet|haiku)/i.exec(model)
+  if (!m?.[1]) return `Claude · ${model}`
+  const tier = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()
+  return `Claude · ${tier}`
+}
+
+/** One calm line: the live activity, else the error, else a state phrase. Never empty. */
+export function agentActivityLine(agent: Pick<Agent, 'state' | 'activity' | 'error'>): string {
+  if (agent.activity && agent.activity.trim() !== '') return agent.activity.trim()
+  if (agent.error) return agent.error
+  switch (agentGroupOf(agent)) {
+    case 'working':
+      return 'Working'
+    case 'waiting':
+      return 'Waiting'
+    default:
+      return agent.state === 'failed' ? 'Failed' : 'Finished'
+  }
+}
+
+/** Observed token total (input + output), or null when neither was reported. */
+export function observedTokens(metrics: Pick<Agent['metrics'], 'inputTokens' | 'outputTokens'>): number | null {
+  if (metrics.inputTokens === null && metrics.outputTokens === null) return null
+  return (metrics.inputTokens ?? 0) + (metrics.outputTokens ?? 0)
+}

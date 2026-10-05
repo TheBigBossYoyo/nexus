@@ -1,0 +1,46 @@
+{
+  "id": "performance-optimization",
+  "version": 2,
+  "name": "Log analytics hot spots",
+  "description": "A log analytics toolkit that is correct but collapses on realistic log sizes; the agent must remove the algorithmic hot spots without changing any result.",
+  "category": "performance",
+  "complexity": "medium",
+  "risk": "low",
+  "languages": [
+    "JavaScript"
+  ],
+  "frameworks": [
+    "node:test"
+  ],
+  "taskPrompt": "Our `logstat` toolkit produces correct reports, but running `buildReport` on a production log with a few tens of thousands of lines takes minutes and pins a CPU core. Profile the pipeline (parsing, de-duplication, the rolling error rate, the per-service table and the latency summary), find the algorithmic problems and fix them so the work scales roughly linearly (or n log n) with the number of events. Results must stay exactly identical for every input, including the existing options (`levels`, `keyOf`, `windowMs`, `percentiles`), tie handling for equal timestamps, ordering of output rows, and the order in which events are kept. Do not change any exported function name or signature, and do not add dependencies.",
+  "visibleAcceptance": [
+    "buildReport on a log of 20,000+ lines completes in well under a second instead of minutes",
+    "Every exported function returns exactly the same output as before for the same input",
+    "Custom parse levels, a custom keyOf and custom percentiles keep working",
+    "The existing tests pass and no new dependencies are added"
+  ],
+  "checks": {
+    "build": null,
+    "test": "node --test",
+    "lint": null,
+    "typecheck": null
+  },
+  "setup": [],
+  "hiddenEvaluation": {
+    "command": "node --test hidden-tests/performance-optimization.test.mjs",
+    "timeoutSeconds": 120
+  },
+  "budgets": {
+    "maxWallClockMinutes": 25,
+    "maxAgentSessions": 30,
+    "maxAgentsPerTrial": 8,
+    "maxTurnsPerAgent": 60
+  },
+  "allowedStrategies": [
+    "SINGLE",
+    "BUILD",
+    "SWARM",
+    "CONSENSUS",
+    "SPECULATIVE"
+  ]
+}

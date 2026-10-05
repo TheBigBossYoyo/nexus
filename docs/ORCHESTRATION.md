@@ -211,7 +211,7 @@ this step. If the verifier cannot produce valid output the run is paused, not fa
 | Cause | Result |
 |---|---|
 | `pauseRun` by the user | Run `paused`, `pauseReason: user`, `resumeState` = state before. All agent sessions are stopped (`SessionControl.stop('paused')`) and the call waits for pipelines to unwind. |
-| Quota (`quota` outcome from an agent) | `pauseRun(runId, 'quota', ...)`; the interrupted tasks keep their state and session ids. `agent.rate_limited` events record the SDK's `resetsAt`. Resuming is manual. |
+| Quota (`quota` outcome from an agent) | `pauseRun(runId, 'quota', ...)`; the interrupted tasks keep their state and session ids; no attempt is consumed. `agent.rate_limited` events record the SDK's `resetsAt`. Since 0.3 the usage controller closes the dispatch gate, waits, probes and resumes the run through `resumeRun`; a quota pause can still be resumed by hand. See [QUOTA_RECOVERY](QUOTA_RECOVERY.md). |
 | Authentication required | Paused with reason `user`. |
 | Duration limit | Paused with reason `user`. |
 | Stuck (failed or blocked tasks, nothing runnable) | Paused with reason `user` and an `Intervention required` message. |
@@ -221,6 +221,94 @@ this step. If the verifier cannot produce valid output the run is paused, not fa
 marks vanished worktrees `orphaned`; done on every resume, including after recovery `inspect`), restores
 `resumeState` (`resumeTarget`), clears the pause, and then: `planning` re-plans, `awaiting_approval` re-creates the plan approval if none is
 pending, anything else requests a tick (which restarts orphaned pipelines).
+
+## Strategies (v0.3)
+
+A strategy is configuration of this engine. There is no second scheduler. `strategy/strategies.ts` holds
+five pure objects (`STRATEGY_REGISTRY`). `ADAPTIVE` is not one of them: it resolves to one of the five.
+
+### Resolution in `createRun`
+
+`CreateRunInput.strategy` is optional. When it is absent, or the mode is read-only (`ask`, `audit`), no
+strategy is applied and the run behaves as in 0.2.1. Otherwise `Orchestrator.applyStrategy` runs after the
+run row exists and after `prepare` (so Overnight's failsafe is armed first) and before any agent starts:
+
+1. With a policy service (`deps.strategies.decideForRun`): the task is profiled and a `task_profiles` row is
+   stored. `ADAPTIVE` calls the decision engine and stores a `policy_decisions` row; the plan then uses the
+   chosen strategy and `decision.workerCount` as its agent limit. A concrete strategy is configured as asked.
+   See [ADAPTIVE_POLICY](ADAPTIVE_POLICY.md).
+2. Without a policy service (a process that has none, such as older scenario tests): a concrete strategy is
+   configured directly and `ADAPTIVE` becomes `BUILD`.
+3. The result is written to `runs.config.strategy` (`RunStrategyInfo`: `requested`, `resolved`,
+   `speculativeCandidates`, `policyDecisionId`, `policySnapshotId`, `taskProfileId`, `arenaTrialId`). The
+   decision is fixed for the run.
+4. `planOverrides(plan)` supplies `maxParallelAgents`, `planningMode` and `reviewMode`. The caller's explicit
+   `overrides` are applied after them and win.
+5. `SWARM` also sets the run mode to `swarm`. Every other strategy keeps the mode the caller chose.
+6. Events: `policy.decided` (ADAPTIVE only) and `strategy.selected` (`requested`, `resolved`, reason).
+
+### What each strategy sets
+
+| Strategy | Planning | Review mode | Parallel agents | Candidates | Single-worker tier |
+|---|---|---|---|---|---|
+| `SINGLE` | none | `auto` | 1 | 0 | `balanced` in ECO, else `strongest` |
+| `BUILD` | single planner | `auto` | `presetMaxAgents(preset)` | 0 | not used |
+| `SWARM` | single planner, swarm guidance | `auto` | `presetMaxAgents('eco')` in ECO, else `presetMaxAgents('maximum')` | 0 | not used |
+| `CONSENSUS` | consensus (three planners, critic, synthesizer) | `dual` | `presetMaxAgents(preset)` | 0 | not used |
+| `SPECULATIVE` | none | `auto` | N, the candidate count | N: 2 by default, 2 to 3 (`MAX_SPECULATIVE_CANDIDATES`) | as `SINGLE` |
+
+### Single-task path (SINGLE and SPECULATIVE)
+
+When `plan.planning === 'none'`, `createRun` runs no planner session. It builds a plan with one task and
+materializes it:
+
+| Field | Value |
+|---|---|
+| Task key, role | `implement`, `worker` |
+| Title | the mission prompt with whitespace collapsed, cut to 120 characters |
+| Description | the full prompt |
+| Criteria | `CreateRunInput.acceptanceCriteria` when given, else one criterion quoting the first 300 characters of the prompt |
+| Complexity, risk | from the task profile when there is one, else `medium` |
+| Dependencies, approval | none, `requiresApproval: false` |
+| Plan-level criteria | empty: there is no separate mission-level criterion; the task's own checks, review and verification judge it |
+| Model tier | `modelTierOverride: 'strongest'` when `singleWorkerTier` is `strongest` |
+
+Then the repository facts are refreshed and `startExecution` runs without a plan approval.
+
+### Arena cap rule
+
+In an Arena trial (`arenaTrialId` set) a caller's `overrides.maxParallelAgents` is a cap: the run uses
+`min(plan.maxParallelAgents, cap)`. Otherwise the override would replace every strategy's own parallelism and
+erase the difference the Arena measures. Outside the Arena an explicit override replaces the strategy's value.
+
+## Speculative implement stage (v0.3)
+
+For a run whose `speculativeCandidates` is at least 2, the implement stage of the mission's own worker task
+(no parent task, first attempt) runs 2 or 3 candidate sessions, each in its own clone of the repository made at the same commit (own refs and objects, no remote), and
+a deterministic tournament picks one. The winner continues through the normal checks, review, verification
+and merge. Code: `orchestrator/speculation.ts` (`SpeculativeStage`), `strategy/tournament.ts`. Rules, edge
+cases and records are in [SPECULATIVE_EXECUTION](SPECULATIVE_EXECUTION.md).
+
+## Dispatch gate (v0.3)
+
+`Orchestrator.setDispatchGate(gate)` installs a `DispatchGate` (`canDispatch()`, `limit(normal)`, optional
+`onChange(listener)`). The usage service implements it; see [QUOTA_RECOVERY](QUOTA_RECOVERY.md). Without a
+gate the orchestrator behaves as in 0.2.1.
+
+While `canDispatch()` is false, a scheduler tick does this:
+
+| Part of the tick | Behaviour |
+|---|---|
+| Duration limit, expired leases, dependency-failure cascade | Still run |
+| `restartOrphans` | Skipped. When the gate is open, orphan restarts are limited to the free slots under `gate.limit(...)`, so the ramp applies to them as well |
+| `selectRunnable` | Called with `paused: true`: no task starts. Deferral announcements still happen |
+| Finalization, mission verification, "stuck" detection | Skipped. The mission verifier is a session, and nothing is declared stuck because the gate is closed |
+| Planning | No planner session starts; the run is paused with reason `quota` |
+| Tasks already running | Not stopped by the gate. Their sessions end through their own outcomes (a limited session ends as `quota`) |
+| Checks and merges in flight | Finish: they are local and deterministic |
+
+When the gate is open, the limit passed to `selectRunnable` is `gate.limit(run.config.maxParallelAgents)`,
+which a ramp after a resume lowers (it also bounds how many orphaned tasks restart at once). When the gate reopens (`onChange`), every active run is ticked.
 
 ## Human interventions
 

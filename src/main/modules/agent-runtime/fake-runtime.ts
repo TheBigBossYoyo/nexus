@@ -11,9 +11,11 @@ import type {
   RuntimeCapabilities,
   SessionSpec,
   ToolDecision,
+  RuntimeUsageReport,
   TurnOutcome,
   UsageInfo,
 } from './types'
+import { USAGE_PROBE_PROMPT } from './types'
 
 export interface FakeSessionContext {
   readonly spec: SessionSpec
@@ -31,7 +33,17 @@ export interface FakeSessionContext {
   nextMessage(): Promise<string | null>
   /** Simulates a crash: the session ends with reason 'crashed'. Always throws. */
   fail(error: Error | string): never
-  rateLimit(info?: { status?: 'allowed' | 'allowed_warning' | 'rejected'; resetsAt?: number | null; limitType?: string | null }): Promise<void>
+  rateLimit(info?: {
+    status?: 'allowed' | 'allowed_warning' | 'rejected'
+    /** Epoch seconds, as the SDK reports it. */
+    resetsAt?: number | null
+    limitType?: string | null
+    utilization?: number | null
+    /** Emit only the one event. By default a rejection reproduces the real SDK: the event with the reset, then an error signal without one. */
+    single?: boolean
+  }): Promise<void>
+  /** The runtime's simulated account availability (shared by every session of this runtime). */
+  readonly usage: FakeUsageSim
   /** Waits `ms`, or until the signal aborts. */
   sleep(ms: number): Promise<void>
 }
@@ -44,6 +56,8 @@ export interface FakeRuntimeOptions {
   delayMs?: number
   authStatus?: AuthStatus | ((options: { subscriptionMode: boolean }) => AuthStatus)
   models?: ModelOption[]
+  /** Shared with scripts through `ctx.usage`; created when omitted. */
+  usage?: FakeUsageSim
 }
 
 export function defaultFakeAuthStatus(): AuthStatus {
@@ -93,6 +107,123 @@ export function completeWith(result: { text: string; structuredOutput?: unknown;
 
 class FakeCrash extends Error {}
 
+export interface FakeUsageState {
+  /** False: sessions end with a rate-limit rejection and a quota outcome. */
+  available: boolean
+  /** ISO reset time of the limit; null = the runtime gives none. When it passes the account becomes available. */
+  resetAt: string | null
+  /** False: getUsageReport answers null (probes then fall back to one minimal session). */
+  reportSupported: boolean
+  authFailure: boolean
+  runtimeFailure: boolean
+  /** Reported by the usage report while available. Null = the report carries no percentage. */
+  utilizationPercent: number | null
+}
+
+/**
+ * Controllable account state of the fake runtime (the brief's "FakeUsageRuntime"): available, quota
+ * exhausted with an exact or unknown reset, a reset that arrives, probes that fail, auth and runtime
+ * failure. Every availability check (usage report or probe session) is counted in `probes`.
+ */
+export class FakeUsageSim {
+  state: FakeUsageState = {
+    available: true,
+    resetAt: null,
+    reportSupported: true,
+    authFailure: false,
+    runtimeFailure: false,
+    utilizationPercent: null,
+  }
+  /** Clock used for resetAt. Tests with a manual clock replace it. */
+  now: () => number = () => Date.now()
+  /** The next N availability checks answer "still limited" even if the reset time has passed. */
+  probeFailures = 0
+  probes = 0
+  /** Availability checks that answered available. */
+  probeSuccesses = 0
+
+  set(patch: Partial<FakeUsageState>): void {
+    this.state = { ...this.state, ...patch }
+  }
+
+  /** Exhaust the quota. `resetAt` as ISO, epoch ms, or null/undefined for an unknown reset. */
+  limit(resetAt?: string | number | null): void {
+    const iso = resetAt === null || resetAt === undefined ? null : typeof resetAt === 'number' ? new Date(resetAt).toISOString() : resetAt
+    this.state = { ...this.state, available: false, resetAt: iso }
+  }
+
+  restore(): void {
+    this.state = { ...this.state, available: true, resetAt: null }
+  }
+
+  /** True when the account would serve a request now. A passed reset time restores it (unless probes are set to fail). */
+  isAvailable(): boolean {
+    const s = this.state
+    if (s.authFailure || s.runtimeFailure) return false
+    if (!s.available && s.resetAt && this.now() >= Date.parse(s.resetAt) && this.probeFailures === 0) this.restore()
+    return this.state.available
+  }
+
+  resetAtSeconds(): number | null {
+    return this.state.resetAt ? Math.floor(Date.parse(this.state.resetAt) / 1000) : null
+  }
+
+  /** One availability check (usage report or probe session). */
+  checkAvailable(): boolean {
+    this.probes += 1
+    if (this.probeFailures > 0 && !this.state.available) {
+      this.probeFailures -= 1
+      return false
+    }
+    const ok = this.isAvailable()
+    if (ok) this.probeSuccesses += 1
+    return ok
+  }
+
+  report(): RuntimeUsageReport | null {
+    const s = this.state
+    if (!s.reportSupported || s.authFailure || s.runtimeFailure) return null
+    const ok = this.checkAvailable()
+    return {
+      rateLimitsAvailable: true,
+      subscriptionType: 'max',
+      windows: [
+        {
+          limitType: 'five_hour',
+          utilizationPercent: ok ? (this.state.utilizationPercent ?? 0) : 100,
+          // A window that is still limited has a reset ahead (or none); a reset in the past would be stale.
+          resetsAt: ok || !this.state.resetAt || Date.parse(this.state.resetAt) <= this.now() ? null : this.state.resetAt,
+        },
+      ],
+    }
+  }
+}
+
+/** Wraps a script with the simulated account: runtime failure, auth failure, quota rejection, probe sessions. */
+function withUsage(script: FakeScript): FakeScript {
+  return async (spec, ctx) => {
+    const sim = ctx.usage
+    if (sim.state.runtimeFailure) ctx.fail('Claude runtime unavailable (simulated)')
+    const isProbe = spec.prompt === USAGE_PROBE_PROMPT
+    if (sim.state.authFailure) {
+      await ctx.completeTurn({ text: 'Authentication required.', outcome: 'auth' })
+      return
+    }
+    const ok = isProbe ? sim.checkAvailable() : sim.isAvailable()
+    if (!ok) {
+      await ctx.rateLimit({ status: 'rejected', resetsAt: sim.resetAtSeconds(), limitType: 'five_hour' })
+      await ctx.completeTurn({ text: 'Usage limit reached.', outcome: 'quota' })
+      return
+    }
+    if (isProbe) {
+      await ctx.emitText('OK')
+      await ctx.completeTurn({ text: 'OK' })
+      return
+    }
+    await script(spec, ctx)
+  }
+}
+
 /** Cumulative usage of one SDK session. Like the real SDK, a resumed session continues the totals. */
 interface SessionTotals {
   costUsd: number
@@ -116,6 +247,7 @@ class FakeHandle implements AgentSessionHandle {
     private readonly totals: SessionTotals,
     script: FakeScript,
     private readonly delayMs: number,
+    private readonly usage: FakeUsageSim,
     private readonly onFinished: (h: FakeHandle) => void,
   ) {
     this.agentId = spec.agentId
@@ -233,13 +365,19 @@ class FakeHandle implements AgentSessionHandle {
       fail: (error) => {
         throw new FakeCrash(typeof error === 'string' ? error : error.message)
       },
-      rateLimit: (info = {}) =>
-        this.emit({
+      usage: this.usage,
+      rateLimit: async (info = {}) => {
+        await this.emit({
           type: 'rate_limit',
           status: info.status ?? 'rejected',
           resetsAt: info.resetsAt ?? null,
           limitType: info.limitType ?? null,
-        }),
+          ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
+        })
+        if ((info.status ?? 'rejected') === 'rejected' && info.single !== true) {
+          await this.emit({ type: 'rate_limit', status: 'rejected', resetsAt: null, limitType: null })
+        }
+      },
       useTool: async (toolName, input, run) => {
         const toolUseId = newId()
         await this.emit({ type: 'tool.started', toolUseId, toolName, input })
@@ -317,6 +455,7 @@ export class FakeAgentRuntime implements AgentRuntime {
   delayMs: number
   authStatus: NonNullable<FakeRuntimeOptions['authStatus']>
   models: ModelOption[]
+  readonly usage: FakeUsageSim
   private readonly live = new Set<FakeHandle>()
   private readonly totals = new Map<string, SessionTotals>()
   private counter = 0
@@ -324,6 +463,7 @@ export class FakeAgentRuntime implements AgentRuntime {
   constructor(options: FakeRuntimeOptions) {
     this.script = options.script
     this.delayMs = options.delayMs ?? 0
+    this.usage = options.usage ?? new FakeUsageSim()
     this.authStatus = options.authStatus ?? defaultFakeAuthStatus()
     this.models = options.models ?? [
       { value: 'fake-model', displayName: 'Fake Model', description: 'Scripted test model', supportsEffort: true },
@@ -339,7 +479,7 @@ export class FakeAgentRuntime implements AgentRuntime {
       totals = { costUsd: 0, byModel: new Map() }
       this.totals.set(id, totals)
     }
-    const handle = new FakeHandle(spec, id, totals, this.script, this.delayMs, (h) => this.live.delete(h))
+    const handle = new FakeHandle(spec, id, totals, withUsage(this.script), this.delayMs, this.usage, (h) => this.live.delete(h))
     if (!handle.isFinished) this.live.add(handle)
     this.handles.push(handle)
     return handle
@@ -374,6 +514,10 @@ export class FakeAgentRuntime implements AgentRuntime {
   getAccountInfo(options: { subscriptionMode: boolean }): Promise<AuthStatus> {
     const s = typeof this.authStatus === 'function' ? this.authStatus(options) : this.authStatus
     return Promise.resolve({ ...s, checkedAt: nowIso() })
+  }
+
+  getUsageReport(): Promise<RuntimeUsageReport | null> {
+    return Promise.resolve(this.usage.report())
   }
 
   async shutdown(): Promise<void> {

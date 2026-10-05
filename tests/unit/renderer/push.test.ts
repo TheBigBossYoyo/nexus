@@ -45,6 +45,19 @@ describe('keysForEvent', () => {
     expect(keysForEvent(event('git.commit.created'))).toContainEqual(qk.runDiff('run1'))
   })
 
+  it('maps the 0.3 event families to their query roots', () => {
+    expect(keysForEvent(event('usage.quota_paused'))).toEqual(expect.arrayContaining([qk.usageRoot(), qk.homeRoot(), qk.run('run1')]))
+    expect(keysForEvent(event('strategy.selected'))).toContainEqual(qk.policyRoot())
+    expect(keysForEvent(event('policy.decided'))).toEqual(expect.arrayContaining([qk.policyRoot(), qk.homeRoot()]))
+    expect(keysForEvent(event('speculative.decided'))).toContainEqual(qk.speculative('run1'))
+    expect(keysForEvent(event('outcome.recorded'))).toEqual(expect.arrayContaining([qk.policyRoot(), qk.usageRoot(), qk.arenaRoot()]))
+  })
+
+  it('refreshes the cross-run activity feed for every event', () => {
+    expect(keysForEvent(event('task.completed'))).toContainEqual(qk.activityRoot())
+    expect(keysForEvent(event('usage.probe'))).toContainEqual(qk.activityRoot())
+  })
+
   it('falls back to refreshing the run for other families', () => {
     expect(keysForEvent(event('criterion.updated'))).toContainEqual(qk.run('run1'))
   })
@@ -122,6 +135,35 @@ describe('push handler', () => {
     h.handle({ kind: 'auth.changed' })
     vi.advanceTimersByTime(10)
     expect(spy.mock.calls.map(([f]) => f?.queryKey)).toContainEqual(qk.auth())
+    h.dispose()
+  })
+
+  it('writes a usage push into the overview cache and refreshes Home', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
+    const h = createPushHandler(qc, { debounceMs: 10, live: live() })
+    const overview = { status: 'QUOTA_PAUSED' } as never
+    h.handle({ kind: 'usage', overview })
+    expect(qc.getQueryData(qk.usageOverview())).toBe(overview)
+    vi.advanceTimersByTime(10)
+    expect(spy.mock.calls.map(([f]) => f?.queryKey)).toContainEqual(qk.homeRoot())
+    h.dispose()
+  })
+
+  it('shows one notice per usage.notice push and invalidates arena and policy queries', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
+    const notify = vi.fn()
+    const h = createPushHandler(qc, { debounceMs: 10, live: live(), notify })
+    h.handle({ kind: 'usage.notice', notice: 'limit_reached', title: 'Claude usage limit reached', detail: 'Paused 2 runs' })
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenCalledWith('Claude usage limit reached', 'Paused 2 runs', 'limit_reached')
+    h.handle({ kind: 'arena', campaignId: 'c1' })
+    h.handle({ kind: 'policy' })
+    vi.advanceTimersByTime(10)
+    const keys = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(keys).toContain(JSON.stringify(qk.arenaCampaign('c1')))
+    expect(keys).toContain(JSON.stringify(qk.policyRoot()))
     h.dispose()
   })
 })

@@ -1,0 +1,10 @@
+{
+  "name": "kvlog",
+  "version": "1.2.0",
+  "description": "Embedded durable key/value store: append-only journal plus snapshots",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  }
+}

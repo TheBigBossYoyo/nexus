@@ -1,105 +1,46 @@
-import type { Agent, AgentSession, Handoff } from '@shared/domain'
-import { useAgentDetail } from '../../lib/queries'
-import { DASH, formatCost, formatCount, formatDateTime, formatTokens } from '../../lib/format'
-import { Badge, ErrorNote, KeyValue, Loading } from '../../components/ui'
-import { agentElapsed } from './agentLogic'
-import { RoutingSection } from './RoutingSection'
-import { useNow } from './useNow'
+import type { Agent } from '@shared/domain'
+import { DASH, formatCost, formatCount, formatTokens } from '../../lib/format'
+import { useNow } from '../../lib/useNow'
+import { SourceLabel, Stat } from '../../components/ui'
+import { agentElapsed, claudeModelLabel, observedTokens } from './agentLogic'
 
-const HANDOFF_SECTIONS: { key: keyof Handoff; label: string }[] = [
-  { key: 'completedWork', label: 'Completed work' },
-  { key: 'commits', label: 'Commits' },
-  { key: 'filesChanged', label: 'Files changed' },
-  { key: 'unresolvedIssues', label: 'Unresolved issues' },
-  { key: 'importantFindings', label: 'Important findings' },
-  { key: 'nextSteps', label: 'Next steps' },
-]
-
-function HandoffView({ handoff }: { handoff: Handoff }) {
-  return (
-    <div className="mt-1 flex flex-col gap-1.5 border-l-2 border-tone-review pl-3" data-testid="session-handoff">
-      <div className="text-[0.75rem] font-semibold uppercase tracking-wider text-tone-review">Handoff</div>
-      {HANDOFF_SECTIONS.map(({ key, label }) => {
-        const items = handoff[key]
-        if (items.length === 0) return null
-        return (
-          <div key={key}>
-            <div className="text-[0.85rem] text-fg-muted">{label}</div>
-            <ul className="m-0 list-disc pl-5">
-              {items.map((item, i) => (
-                <li key={`${i}:${item}`} className="break-words">
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function SessionRow({ session }: { session: AgentSession }) {
-  return (
-    <li className="flex flex-col gap-1 border-b py-2" data-testid="agent-session">
-      <div className="flex items-center gap-2">
-        <Badge tone={session.state === 'active' ? 'active' : session.state === 'failed' ? 'danger' : 'neutral'}>{session.state}</Badge>
-        <span className="font-mono text-[0.92em]">{session.model ?? DASH}</span>
-        <span className="ml-auto font-mono text-[0.85rem] text-fg-faint">{formatDateTime(session.startedAt)}</span>
-      </div>
-      <KeyValue
-        labelWidth="7rem"
-        rows={[
-          { label: 'Session id', value: session.sdkSessionId ?? DASH, mono: true },
-          { label: 'Ended', value: formatDateTime(session.endedAt) },
-          { label: 'End reason', value: session.endReason ?? DASH },
-        ]}
-      />
-      {session.handoff ? <HandoffView handoff={session.handoff} /> : null}
-    </li>
-  )
-}
-
+/** Observed figures for one agent. Nothing here is a bill or a share of a subscription. */
 export function UsageTab({ agent }: { agent: Agent }) {
-  const query = useAgentDetail(agent.id)
   const now = useNow(agent.stoppedAt === null && agent.startedAt !== null)
   const m = agent.metrics
-  const sessions = query.data?.sessions ?? []
+  const observed = { confidence: 'OBSERVED' as const, source: 'SDK_EVENT' as const }
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3" data-testid="agent-usage">
-      <KeyValue
-        rows={[
-          { label: 'Model', value: agent.model ?? DASH, mono: true },
-          { label: 'Started', value: formatDateTime(agent.startedAt) },
-          { label: 'Elapsed', value: agentElapsed(agent, now), mono: true },
-          { label: 'Turns', value: formatCount(m.turns), mono: true },
-          { label: 'Tool calls', value: formatCount(m.toolCalls), mono: true },
-          { label: 'Commands', value: formatCount(m.commands), mono: true },
-          { label: 'Files read', value: formatCount(m.filesRead), mono: true },
-          { label: 'Files changed', value: formatCount(m.filesChanged), mono: true },
-          { label: 'Input tokens', value: formatTokens(m.inputTokens), mono: true },
-          { label: 'Output tokens', value: formatTokens(m.outputTokens), mono: true },
-          { label: 'Cache-read tokens', value: formatTokens(m.cacheReadTokens), mono: true },
-          { label: 'Est. cost (runtime)', value: formatCost(m.costUsd), mono: true },
-          { label: 'Context window', value: formatTokens(m.contextWindow), mono: true },
-        ]}
-      />
-      <p className="m-0 text-[0.85rem] text-fg-faint">
-        {DASH} means the runtime has not reported that value. Token counts are the latest report from the runtime. Cost is
-        the runtime's own list-price estimate, not an invoice: with a Claude subscription it is not what you are charged.
+    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-5" data-testid="agent-usage">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-4">
+        <Stat label="Input tokens" value={formatTokens(m.inputTokens)} source={observed} />
+        <Stat label="Output tokens" value={formatTokens(m.outputTokens)} source={observed} />
+        <Stat label="Cache-read tokens" value={formatTokens(m.cacheReadTokens)} source={observed} />
+        <Stat label="Total (in + out)" value={formatTokens(observedTokens(m))} source={observed} />
+        <Stat label="Turns" value={formatCount(m.turns)} source={observed} />
+        <Stat label="Tool calls" value={formatCount(m.toolCalls)} source={observed} />
+        <Stat label="Files read / changed" value={`${formatCount(m.filesRead)} / ${formatCount(m.filesChanged)}`} />
+        <Stat label="Elapsed" value={agentElapsed(agent, now)} />
+      </div>
+      <dl className="m-0 grid max-w-xl grid-cols-[10rem_1fr] gap-y-1.5 text-body">
+        <dt className="text-text-muted">Model</dt>
+        <dd className="m-0">
+          {claudeModelLabel(agent.model)}
+          {agent.model ? <span className="font-mono text-code text-text-muted"> {agent.model}</span> : null}
+        </dd>
+        <dt className="text-text-muted">Context window</dt>
+        <dd className="tnum m-0">
+          {formatTokens(m.contextWindow)} <SourceLabel confidence={m.contextWindow === null ? 'UNKNOWN' : 'OBSERVED'} />
+        </dd>
+        <dt className="text-text-muted">Runtime list-price estimate</dt>
+        <dd className="tnum m-0">
+          {formatCost(m.costUsd)} <SourceLabel confidence={m.costUsd === null ? 'UNKNOWN' : 'ESTIMATED'} />
+        </dd>
+      </dl>
+      <p className="m-0 max-w-xl text-small text-text-muted">
+        Observed means reported by the Claude runtime during this session. {DASH} means it was not reported. The list-price
+        estimate is the runtime's own figure, not an invoice: with a Claude subscription it is not what you are charged, and
+        NEXUS does not turn token counts into a share of your plan.
       </p>
-      <RoutingSection agent={agent} />
-      <section>
-        <h3 className="m-0 mb-1 text-[0.8rem] font-semibold uppercase tracking-wider text-fg-muted">Sessions · {sessions.length}</h3>
-        {query.isError ? <ErrorNote error={query.error} /> : null}
-        {query.isPending ? <Loading label="Loading sessions" /> : null}
-        {query.isSuccess && sessions.length === 0 ? <div className="text-fg-faint">No sessions recorded.</div> : null}
-        <ul className="m-0 list-none p-0">
-          {sessions.map((s) => (
-            <SessionRow key={s.id} session={s} />
-          ))}
-        </ul>
-      </section>
     </div>
   )
 }

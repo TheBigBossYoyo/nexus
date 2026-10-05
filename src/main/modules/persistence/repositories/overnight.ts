@@ -7,6 +7,7 @@ const overnightCodec: Codec<OvernightRun> = {
   fields: {
     id: 'text',
     runId: 'text',
+    workloadType: 'text',
     projectId: 'text',
     state: 'text',
     policy: 'json',

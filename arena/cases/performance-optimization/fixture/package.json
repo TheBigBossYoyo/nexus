@@ -1,0 +1,10 @@
+{
+  "name": "logstat",
+  "version": "1.4.0",
+  "description": "Small log analytics toolkit: parse, de-duplicate, aggregate and report on service logs",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  }
+}

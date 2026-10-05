@@ -10,7 +10,7 @@ import {
   InlineCode,
   KeyValue,
   Notice,
-  Panel,
+  Card,
   RefreshIcon,
   Toggle,
   TrashIcon,
@@ -33,7 +33,7 @@ function Chips({ items }: { items: readonly string[] }) {
 function Commands({ commands }: { commands: CheckCommands }) {
   const rows = (['build', 'test', 'lint', 'typecheck'] as const).map((k) => ({ key: k, cmd: commands[k] }))
   if (rows.every((r) => r.cmd === null)) {
-    return <span className="text-fg-faint">None detected: NEXUS cannot run automatic checks</span>
+    return <span className="text-text-muted">None detected: NEXUS cannot run automatic checks</span>
   }
   return (
     <span className="flex flex-col gap-0.5">
@@ -86,7 +86,7 @@ export function ProjectDetail({ project }: { project: Project }) {
     : []
 
   return (
-    <Panel
+    <Card
       title="Project"
       data-testid="project-detail"
       actions={
@@ -107,13 +107,13 @@ export function ProjectDetail({ project }: { project: Project }) {
       }
     >
       <div className="flex flex-col gap-3">
-        <div>
-          <div className="text-[1.15rem] font-semibold">{project.name}</div>
-          <div className="break-all font-mono text-[0.88em] text-fg-muted">{project.rootPath}</div>
+        <div className="min-w-0">
+          <div className="truncate text-heading font-semibold">{project.name}</div>
+          <div className="break-all font-mono text-code text-text-muted">{project.rootPath}</div>
         </div>
 
         {p ? (
-          <KeyValue rows={rows} />
+          <KeyValue rows={rows} className="items-baseline" />
         ) : (
           <Notice tone="neutral" title="Not profiled yet">
             Reprofile to detect the branch, languages, frameworks and check commands.
@@ -153,6 +153,6 @@ export function ProjectDetail({ project }: { project: Project }) {
       >
         The project is removed from NEXUS. Files in your repository are not deleted.
       </ConfirmDialog>
-    </Panel>
+    </Card>
   )
 }

@@ -1,11 +1,15 @@
+import { planningWords, strategyWord } from '../../lib/wording'
 import { useEffect, useState } from 'react'
 import { PRESETS, RUN_MODES, type Preset, type Project, type RunMode } from '@shared/domain'
 import { presetMaxAgents } from '@shared/settings'
 import type { PlanningMode, ReviewMode } from '@shared/v2'
+import type { Strategy } from '@shared/v3'
 import { useCreateRun, usePlanningRecommendation, useSettings, useStartOvernight } from '../../lib/queries'
+import { usePolicyPreview } from '../../lib/queries-run'
 import { useDebounced } from '../../lib/useDebounced'
 import { useUiStore } from '../../store/ui'
-import { Button, Field, NumberField, Notice, Panel, Select, Textarea, Toggle, type SelectOption } from '../../components/ui'
+import { Button, Card, Field, NumberField, Notice, Select, Textarea, Toggle, type SelectOption } from '../../components/ui'
+import { cn } from '../../lib/cn'
 import {
   buildCreateRunInput,
   DIRTY_REPO_WARNING,
@@ -17,6 +21,15 @@ import {
   validateMission,
   type MissionDraft,
 } from './mission'
+import {
+  DEFAULT_STRATEGY,
+  SPECULATIVE_USAGE_NOTE,
+  STRATEGY_BY_VALUE,
+  STRATEGY_OPTIONS,
+  previewText,
+  strategyApplies,
+  strategyFields,
+} from './strategy'
 import { OvernightConfirmDialog, OvernightPanel } from './OvernightPanel'
 import {
   OVERNIGHT_MODE,
@@ -30,7 +43,7 @@ import {
 
 type ComposerMode = RunMode | typeof OVERNIGHT_MODE
 const MODE_OPTIONS: SelectOption<ComposerMode>[] = [
-  ...RUN_MODES.map((m) => ({ value: m as ComposerMode, label: m.toUpperCase() })),
+  ...RUN_MODES.map((m) => ({ value: m as ComposerMode, label: strategyWord(m) })),
   { value: OVERNIGHT_MODE, label: 'OVERNIGHT', testId: 'mode-overnight' },
 ]
 const PLANNING_OPTIONS: { value: PlanningMode; label: string }[] = [
@@ -42,7 +55,12 @@ const REVIEW_OPTIONS: { value: ReviewMode; label: string }[] = [
   { value: 'standard', label: 'STANDARD' },
   { value: 'dual', label: 'DUAL' },
 ]
-const PRESET_OPTIONS = PRESETS.map((p) => ({ value: p, label: p.toUpperCase() }))
+const STRATEGY_SELECT_OPTIONS: SelectOption<Strategy>[] = STRATEGY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
+const CANDIDATE_OPTIONS: SelectOption<'2' | '3'>[] = [
+  { value: '2', label: '2 candidates' },
+  { value: '3', label: '3 candidates' },
+]
+const PRESET_OPTIONS = PRESETS.map((p) => ({ value: p, label: strategyWord(p) }))
 
 export function MissionComposer({ project }: { project: Project }) {
   const settings = useSettings().data
@@ -65,6 +83,15 @@ export function MissionComposer({ project }: { project: Project }) {
     setConfirmOpen(false)
     setOvernightError(null)
   }
+  // "Start Overnight" in the palette and on the Overnight page opens the composer already in Overnight mode.
+  const composerIntent = useUiStore((s) => s.composerIntent)
+  const setComposerIntent = useUiStore((s) => s.setComposerIntent)
+  useEffect(() => {
+    if (composerIntent !== 'overnight') return
+    setMode(OVERNIGHT_MODE)
+    setComposerIntent(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerIntent])
   const [presetChoice, setPresetChoice] = useState<Preset | null>(null)
   const [maxAgentsChoice, setMaxAgentsChoice] = useState<number | null>(null)
   const [approvalChoice, setApprovalChoice] = useState<boolean | null>(null)
@@ -72,7 +99,13 @@ export function MissionComposer({ project }: { project: Project }) {
   const [planningMode, setPlanningMode] = useState<PlanningMode>('single')
   const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
   const [submitted, setSubmitted] = useState(false)
+  const [strategy, setStrategy] = useState<Strategy>(DEFAULT_STRATEGY)
+  const [candidates, setCandidates] = useState<2 | 3>(2)
+  const [advancedOpen, setAdvancedOpen] = useState(true)
+  const showStrategy = !overnightMode && strategyApplies(mode)
   const debouncedPrompt = useDebounced(prompt.trim(), 600)
+  const debouncedStrategyPrompt = useDebounced(prompt.trim(), 500)
+  const preview = usePolicyPreview(project.id, showStrategy && strategy === 'ADAPTIVE' ? debouncedStrategyPrompt : '')
   const recommendation = usePlanningRecommendation(project.id, mode === 'ask' ? '' : debouncedPrompt)
 
   const preset = presetChoice ?? settings?.execution.defaultPreset ?? 'balanced'
@@ -109,9 +142,12 @@ export function MissionComposer({ project }: { project: Project }) {
     maxIterations,
     planningMode,
     reviewMode,
+    ...(showStrategy ? strategyFields(mode, strategy, candidates) : {}),
   }
   const problem = validateMission(draft)
   const dirty = project.profile?.dirty === true
+  const noChecks =
+    project.profile !== null && Object.values(project.profile.commands).every((c) => c === null || c === '')
 
   const submit = async () => {
     setSubmitted(true)
@@ -127,9 +163,13 @@ export function MissionComposer({ project }: { project: Project }) {
     }
   }
 
+
+  const previewView = previewText(preview.data)
+  const strategyInfo = STRATEGY_BY_VALUE[strategy]
+
   return (
-    <Panel title="New mission" data-testid="mission-composer">
-      <div className="flex flex-col gap-3">
+    <Card title="New mission" data-testid="mission-composer">
+      <div className="flex flex-col gap-4">
         {project.profile && !project.profile.isGitRepo ? (
           <Notice tone="danger" title="Not a Git repository">
             NEXUS needs a Git repository to create isolated worktrees. Creating a run is likely to fail.
@@ -160,17 +200,57 @@ export function MissionComposer({ project }: { project: Project }) {
             />
           )}
         </Field>
+        {noChecks && mode !== 'ask' ? (
+          <p className="m-0 -mt-2 text-small text-text-muted" data-testid="no-check-commands">
+            No check commands configured for this project (build, test, lint, typecheck). Missions run without
+            automatic checks; set them up in the project's scripts and reprofile.
+          </p>
+        ) : null}
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className={cn('grid gap-3', showStrategy ? 'grid-cols-3' : 'grid-cols-2')}>
           <Field label="Mode" hint={overnightMode ? OVERNIGHT_MODE_INFO : MODE_INFO[mode]}>
             {(id) => <Select id={id} value={composerMode} onChange={setMode} options={MODE_OPTIONS} data-testid="mode-select" />}
           </Field>
+          {showStrategy ? (
+            <Field label="Strategy" hint={strategyInfo.description}>
+              {(id) => (
+                <Select
+                  id={id}
+                  value={strategy}
+                  onChange={setStrategy}
+                  options={STRATEGY_SELECT_OPTIONS}
+                  data-testid="strategy-select"
+                />
+              )}
+            </Field>
+          ) : null}
           <Field label="Preset" hint={PRESET_INFO[preset]}>
             {(id) => (
               <Select id={id} value={preset} onChange={setPresetChoice} options={PRESET_OPTIONS} data-testid="preset-select" />
             )}
           </Field>
         </div>
+
+        {showStrategy && strategy === 'ADAPTIVE' ? (
+          <div className="rounded-md border bg-surface-muted px-3 py-2 text-small" data-testid="strategy-preview" role="status">
+            <div className="font-medium text-text-primary">{previewView.headline}</div>
+            {previewView.reason ? <div className="text-text-secondary">{previewView.reason}</div> : null}
+            {previewView.evidence ? <div className="text-text-muted">{previewView.evidence}</div> : null}
+          </div>
+        ) : null}
+        {showStrategy && strategy === 'SPECULATIVE' ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-md border bg-surface-muted px-3 py-2 text-small" data-testid="speculative-options">
+            <Select
+              aria-label="Speculative candidates"
+              value={String(candidates) as '2' | '3'}
+              onChange={(v) => setCandidates(v === '3' ? 3 : 2)}
+              options={CANDIDATE_OPTIONS}
+              className="w-40"
+              data-testid="speculative-candidates"
+            />
+            <span className="text-text-secondary">{SPECULATIVE_USAGE_NOTE}</span>
+          </div>
+        ) : null}
 
         {overnightMode ? (
           <OvernightPanel
@@ -180,49 +260,7 @@ export function MissionComposer({ project }: { project: Project }) {
             presetAgents={presetAgents}
             recommendation={recommendation.data?.mode ?? null}
           />
-        ) : (
-          <>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Planning" hint={PLANNING_MODE_INFO[planningMode]}>
-            {(id) => (
-              <Select id={id} value={planningMode} onChange={setPlanningMode} options={PLANNING_OPTIONS} data-testid="planning-mode-select" />
-            )}
-          </Field>
-          <Field label="Review" hint={REVIEW_MODE_INFO[reviewMode]}>
-            {(id) => <Select id={id} value={reviewMode} onChange={setReviewMode} options={REVIEW_OPTIONS} data-testid="review-mode-select" />}
-          </Field>
-        </div>
-
-        {recommendation.data ? (
-          <div className="flex flex-col gap-0.5 border-l-2 border-accent bg-surface-2 px-2.5 py-1.5" data-testid="planning-recommendation">
-            <div className="flex items-center gap-2">
-              <span className="text-fg-muted">Recommended planning mode:</span>
-              <span className="font-mono">{recommendation.data.mode.toUpperCase()}</span>
-              {recommendation.data.mode !== planningMode ? (
-                <button
-                  type="button"
-                  className="text-accent hover:underline"
-                  onClick={() => setPlanningMode(recommendation.data.mode)}
-                  data-testid="planning-use-recommended"
-                >
-                  Use it
-                </button>
-              ) : (
-                <span className="text-fg-faint">selected</span>
-              )}
-            </div>
-            {recommendation.data.reasons.length > 0 ? (
-              <ul className="m-0 list-disc pl-5 text-fg-muted">
-                {recommendation.data.reasons.map((r, i) => (
-                  <li key={i}>{r}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
         ) : null}
-
-          </>
-        )}
 
         {preset === 'maximum' ? (
           <Notice tone="warning" title="Subscription usage" data-testid="maximum-warning">
@@ -231,43 +269,94 @@ export function MissionComposer({ project }: { project: Project }) {
         ) : null}
 
         {!overnightMode ? (
-          <>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Max agents in parallel" hint={maxAgentsChoice === null ? 'From the preset' : 'Overridden'}>
-            {(id) => (
-              <NumberField
-                id={id}
-                min={1}
-                max={16}
-                value={maxAgents ?? 1}
-                disabled={!settings}
-                onChange={setMaxAgentsChoice}
-                data-testid="max-agents"
-              />
-            )}
-          </Field>
-          {mode === 'loop' ? (
-            <Field label="Max loop iterations" hint="Upper bound on implement/check/repair cycles">
-              {(id) => (
-                <NumberField id={id} min={1} max={50} value={maxIterations} onChange={setIterationsChoice} data-testid="max-iterations" />
-              )}
-            </Field>
-          ) : null}
-        </div>
+          <div className="flex flex-col gap-3 border-t pt-3">
+            <button
+              type="button"
+              className="inline-flex w-fit items-center gap-1.5 text-small font-medium text-text-secondary hover:text-text-primary"
+              aria-expanded={advancedOpen}
+              aria-controls="composer-advanced"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              data-testid="advanced-toggle"
+            >
+              <span aria-hidden="true" className="inline-block w-3 text-center">
+                {advancedOpen ? '▾' : '▸'}
+              </span>
+              Advanced
+              <span className="font-normal text-text-muted">planning, review and limits</span>
+            </button>
+            <div id="composer-advanced" hidden={!advancedOpen} className="flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Planning" hint={PLANNING_MODE_INFO[planningMode]}>
+                  {(id) => (
+                    <Select id={id} value={planningMode} onChange={setPlanningMode} options={PLANNING_OPTIONS} data-testid="planning-mode-select" />
+                  )}
+                </Field>
+                <Field label="Review" hint={REVIEW_MODE_INFO[reviewMode]}>
+                  {(id) => <Select id={id} value={reviewMode} onChange={setReviewMode} options={REVIEW_OPTIONS} data-testid="review-mode-select" />}
+                </Field>
+              </div>
 
-        <Toggle
-          checked={requirePlanApproval}
-          onChange={setApprovalChoice}
-          label="Require plan approval"
-          description="Pause after planning so you can review the task graph before any agent edits files."
-          data-testid="plan-approval-toggle"
-        />
-          </>
+              {recommendation.data ? (
+                <div className="flex flex-col gap-0.5 rounded-md border-l-2 border-accent bg-surface-muted px-3 py-2 text-small" data-testid="planning-recommendation">
+                  <div className="flex items-center gap-2">
+                    <span className="text-text-secondary">Recommended planning mode:</span>
+                    <span className="font-medium">{strategyWord(recommendation.data.mode)}</span>
+                    {recommendation.data.mode !== planningMode ? (
+                      <button
+                        type="button"
+                        className="text-accent hover:underline"
+                        onClick={() => setPlanningMode(recommendation.data.mode)}
+                        data-testid="planning-use-recommended"
+                      >
+                        Use it
+                      </button>
+                    ) : (
+                      <span className="text-text-muted">selected</span>
+                    )}
+                  </div>
+                  <div className="text-text-secondary" title={recommendation.data.reasons.join(' ')}>
+                    {planningWords(recommendation.data.mode)}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Max agents in parallel" hint={maxAgentsChoice === null ? 'From the preset' : 'Overridden'}>
+                  {(id) => (
+                    <NumberField
+                      id={id}
+                      min={1}
+                      max={16}
+                      value={maxAgents ?? 1}
+                      disabled={!settings}
+                      onChange={setMaxAgentsChoice}
+                      data-testid="max-agents"
+                    />
+                  )}
+                </Field>
+                {mode === 'loop' ? (
+                  <Field label="Max loop iterations" hint="Upper bound on implement/check/repair cycles">
+                    {(id) => (
+                      <NumberField id={id} min={1} max={50} value={maxIterations} onChange={setIterationsChoice} data-testid="max-iterations" />
+                    )}
+                  </Field>
+                ) : null}
+              </div>
+
+              <Toggle
+                checked={requirePlanApproval}
+                onChange={setApprovalChoice}
+                label="Require plan approval"
+                description="Pause after planning so you can review the task graph before any agent edits files."
+                data-testid="plan-approval-toggle"
+              />
+            </div>
+          </div>
         ) : null}
 
         {overnightMode ? (
           <div className="flex items-center justify-between gap-3 border-t pt-3">
-            <span className="text-[0.85rem] text-fg-faint" role="status">
+            <span className="text-small text-text-muted" role="status">
               {overnightValidation.canStart ? 'Ready. You will be asked to confirm.' : (overnightValidation.errors.authorization ?? Object.values(overnightValidation.errors)[0])}
             </span>
             <Button
@@ -283,18 +372,18 @@ export function MissionComposer({ project }: { project: Project }) {
             </Button>
           </div>
         ) : (
-        <div className="flex items-center justify-between gap-3 border-t pt-3">
-          <span className="text-[0.85rem] text-fg-faint">Ctrl+Enter to start</span>
-          <Button
-            variant="primary"
-            loading={create.isPending}
-            disabled={!settings || (submitted && !!problem)}
-            onClick={() => void submit()}
-            data-testid="create-run"
-          >
-            Start {mode.toUpperCase()} run
-          </Button>
-        </div>
+          <div className="flex items-center justify-between gap-3 border-t pt-3">
+            <span className="text-small text-text-muted">Ctrl+Enter to start</span>
+            <Button
+              variant="primary"
+              loading={create.isPending}
+              disabled={!settings || (submitted && !!problem)}
+              onClick={() => void submit()}
+              data-testid="create-run"
+            >
+              Start mission
+            </Button>
+          </div>
         )}
         <OvernightConfirmDialog
           open={confirmOpen && overnightMode}
@@ -305,6 +394,6 @@ export function MissionComposer({ project }: { project: Project }) {
           error={overnightError}
         />
       </div>
-    </Panel>
+    </Card>
   )
 }

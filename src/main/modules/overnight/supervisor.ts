@@ -2,11 +2,12 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFil
 import { uptime } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { TERMINAL_RUN_STATES, type ApprovalRequest, type Preset, type Run, type RunConfig } from '@shared/domain'
-import type { PauseCause, PushMessage, RunEvent } from '@shared/events'
+import type { EventType, NewEvent, PauseCause, PushMessage, RunEvent } from '@shared/events'
 import { newId } from '@shared/ids'
 import {
   decidePowerAction,
   decideQuota,
+  MAX_QUOTA_WAITS,
   EndActionSchema,
   EndConditionsSchema,
   normalizeEpochMs,
@@ -15,6 +16,7 @@ import {
   toStatus,
   type EndAction,
   type EndConditions,
+  type QuotaDecision,
   type OvernightPolicy,
   type OvernightRun,
   type OvernightState,
@@ -22,15 +24,23 @@ import {
   type PowerAction,
   type PowerAuditEntry,
   type PowerCommandResult,
+  QUOTA_RESUME_MARGIN_SECONDS,
   type TerminalReason,
   type WatchdogDiagnostic,
+  type WorkloadType,
 } from '@shared/overnight'
 import { errorMessage, NexusError } from '@shared/result'
+import type { Strategy } from '@shared/v3'
 import type { EventBus } from '@main/modules/events'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
 import { isEffectivelyForced, type PowerController } from '@main/modules/power'
-import { buildCheckpoint, buildOvernightReport, powerAddendum, type GitStateCapture } from './report'
+import { planQuotaWait } from '@main/modules/usage/machine'
+import type { AvailabilityProbe } from '@main/modules/usage/probe'
+import type { CreateCampaignInput } from '@main/modules/arena'
+import { MissionWorkload } from './mission-workload'
+import { powerAddendum } from './report'
+import type { AutonomousWorkload, WorkloadFactory } from './workload'
 
 /** The orchestrator surface the supervisor drives. It never reaches into scheduling internals. */
 export interface OvernightOrchestrator {
@@ -41,6 +51,7 @@ export interface OvernightOrchestrator {
     prompt: string
     overrides?: Partial<RunConfig>
     prepare?: (run: Run) => Promise<void>
+    strategy?: Strategy
   }): Promise<Run>
   pauseRun(runId: string, reason?: 'user' | 'quota' | 'recovery', detail?: string, cause?: PauseCause): Promise<Run>
   resumeRun(runId: string): Promise<Run>
@@ -67,6 +78,12 @@ export interface OvernightDeps {
   bootTime?: () => number
   /** Milliseconds between supervisor passes; 0 disables the timer (tests call tick()). */
   tickIntervalMs?: number
+  /**
+   * v0.3. With a probe, a usage-limit wait follows the shared plan (`planQuotaWait`): it probes before
+   * resuming, and an unknown reset probes on the backoff schedule while the next probe is before the
+   * deadline. Without one the supervisor behaves as in 0.2.1.
+   */
+  probe?: AvailabilityProbe
   /** Longest wait for agent sessions to stop during finalization. */
   stopTimeoutMs?: number
   /** Longest time finalization spends on Git (checkpoint commits and state capture). */
@@ -91,6 +108,23 @@ export interface OvernightStartInput {
   maxIterations?: number
   planningMode?: 'single' | 'consensus'
   reviewMode?: 'standard' | 'dual' | 'auto'
+  /** v0.3. Absent: BUILD. */
+  strategy?: Strategy
+}
+
+/** An Arena campaign started under the supervisor: the campaign as the Arena dialog describes it, plus the power policy. */
+export interface OvernightArenaStartInput {
+  campaign: Omit<CreateCampaignInput, 'start' | 'overnight'>
+  policy: OvernightPolicy
+  confirmed: boolean
+  confirmation: string
+}
+
+/** What the supervisor needs to create a campaign before it arms the failsafe. */
+export interface OvernightArenaHost {
+  createCampaign(input: CreateCampaignInput): Promise<{ id: string }>
+  cancel(campaignId: string): unknown
+  arenaStatus(): Promise<{ ok: boolean; message: string }>
 }
 
 export interface OvernightAmendment {
@@ -102,7 +136,6 @@ export interface OvernightAmendment {
 
 const RUN_WORKING_STATES: readonly Run['state'][] = ['planning', 'executing', 'testing', 'reviewing', 'verifying', 'repairing']
 const MAX_WATCHDOG_ENTRIES = 50
-const MAX_CHECKPOINTS = 200
 /** An app-timer power action that is this late was missed (the app was not running); it is not executed. */
 const MISSED_ACTION_GRACE_MS = 5 * 60_000
 /** After a Windows shutdown timer elapsed, NEXUS should no longer be running. */
@@ -162,8 +195,14 @@ export class OvernightSupervisor {
   private readonly unsubscribe: () => void
   private timer: ReturnType<typeof setInterval> | null = null
   private disposed = false
+  private readonly factories = new Map<WorkloadType, WorkloadFactory>()
+  private arenaHost: OvernightArenaHost | null = null
 
   constructor(private readonly deps: OvernightDeps) {
+    this.factories.set(
+      'mission',
+      (id) => new MissionWorkload(id, { repos: deps.repos, bus: deps.bus, git: deps.git, orchestrator: deps.orchestrator, now: () => this.now(), log: (line) => this.log(line) }),
+    )
     for (const record of deps.repos.overnight.listLive()) this.live.add(record.runId)
     this.unsubscribe = deps.bus.subscribe((event) => this.onEvent(event))
     const interval = deps.tickIntervalMs ?? 5000
@@ -182,6 +221,26 @@ export class OvernightSupervisor {
 
   private now(): number {
     return this.deps.now ? this.deps.now() : Date.now()
+  }
+
+  /** Makes a workload type other than a mission available. Called once at startup, before `recover()`. */
+  registerWorkload(type: Exclude<WorkloadType, 'mission'>, factory: WorkloadFactory, host: OvernightArenaHost): void {
+    this.factories.set(type, factory)
+    this.arenaHost = host
+  }
+
+  private workloadOf(record: Pick<OvernightRun, 'runId' | 'workloadType'>): AutonomousWorkload {
+    const factory = this.factories.get(record.workloadType)
+    if (!factory) throw new NexusError('runtime_unavailable', `No ${record.workloadType} workload is available in this process`)
+    return factory(record.runId)
+  }
+
+  /**
+   * Run events belong to a run. A campaign is not a run, so its supervisor events are not written to a
+   * run's event log; the renderer follows a campaign through the `overnight` push and the power audit.
+   */
+  private emit<T extends EventType>(event: NewEvent<T>): void {
+    if (this.deps.repos.runs.get(event.runId)) this.deps.bus.emit(event)
   }
 
   private log(line: string): void {
@@ -255,6 +314,8 @@ export class OvernightSupervisor {
       mode: 'mission',
       preset: input.preset,
       prompt: input.prompt,
+      // A strategy makes the mission's outcome usable as evidence. BUILD sets what the preset already set.
+      strategy: input.strategy ?? 'BUILD',
       overrides: {
         // Nobody is there to approve a plan; starting the run is the approval.
         requirePlanApproval: false,
@@ -264,19 +325,60 @@ export class OvernightSupervisor {
         ...(input.planningMode ? { planningMode: input.planningMode } : {}),
         ...(input.reviewMode ? { reviewMode: input.reviewMode } : {}),
       },
-      prepare: (created) => this.arm(created, policy),
+      prepare: (created) => this.arm({ id: created.id, projectId: created.projectId, type: 'mission' }, policy),
     })
     const record = repos.overnight.getByRun(run.id)
     if (!record) throw new NexusError('internal', 'The overnight record was not created')
     return { run: repos.runs.require(run.id), overnight: toStatus(record) }
   }
 
-  private async arm(run: Run, policy: OvernightPolicy): Promise<void> {
-    const { repos, bus, power } = this.deps
+  /**
+   * Start an Arena campaign as an overnight workload. The campaign is created as a draft, the authorization
+   * and the failsafe exist before the first trial is provisioned, and only then does the campaign start.
+   */
+  async startArena(input: OvernightArenaStartInput): Promise<{ campaignId: string; overnight: OvernightStatus }> {
+    if (input.confirmed !== true || input.confirmation !== OVERNIGHT_CONFIRMATION_TEXT) {
+      throw new NexusError('invalid_input', 'Overnight Mode needs the explicit power authorization for this campaign.')
+    }
+    const policy = OvernightPolicySchema.parse(input.policy)
+    const host = this.arenaHost
+    if (!host || !this.factories.has('arena_campaign')) throw new NexusError('runtime_unavailable', 'The Arena is not available in this process')
+    if (this.live.size > 0 || this.starting) {
+      throw new NexusError('invalid_state', 'An overnight run is already active. Windows holds a single shutdown timer; finish or cancel that run first.')
+    }
+    this.starting = true
+    try {
+      // Checked before anything is armed: a campaign that cannot run must not leave a shutdown timer behind.
+      const status = await host.arenaStatus()
+      if (!status.ok) throw new NexusError('runtime_unavailable', status.message)
+      const campaign = await host.createCampaign({ ...input.campaign, overnight: true, start: false })
+      try {
+        await this.arm({ id: campaign.id, projectId: 'arena', type: 'arena_campaign' }, policy)
+      } catch (e) {
+        host.cancel(campaign.id)
+        throw e
+      }
+      const record = this.deps.repos.overnight.require(campaign.id)
+      try {
+        await this.workloadOf(record).start()
+      } catch (e) {
+        // The failsafe is armed and the campaign cannot run: end it through the ordinary finalization.
+        host.cancel(campaign.id)
+        await this.finalize(campaign.id, 'FAILED', `The campaign could not be started: ${errorMessage(e)}`)
+      }
+      return { campaignId: campaign.id, overnight: toStatus(this.deps.repos.overnight.require(campaign.id)) }
+    } finally {
+      this.starting = false
+    }
+  }
+
+  private async arm(run: { id: string; projectId: string; type: WorkloadType }, policy: OvernightPolicy): Promise<void> {
+    const { repos, power } = this.deps
     const now = this.now()
     let record = repos.overnight.insert({
       id: run.id,
       runId: run.id,
+      workloadType: run.type,
       projectId: run.projectId,
       state: 'ARMING',
       policy,
@@ -307,7 +409,7 @@ export class OvernightSupervisor {
         const result = await power.scheduleShutdown({ delaySeconds, force: policy.forceCloseApplications, purpose: 'failsafe' })
         this.writeAudit(run.id, 'arm_failsafe', 'SHUTDOWN', `Failsafe after ${policy.failsafeAfterMinutes} minutes`, result)
         if (!result.ok) {
-          bus.emit({ runId: run.id, type: 'overnight.failsafe', payload: { action: 'failed', deadline: null, ok: false } })
+          this.emit({ runId: run.id, type: 'overnight.failsafe', payload: { action: 'failed', deadline: null, ok: false } })
           const why =
             result.exitCode === 1190
               ? 'Windows already has a shutdown scheduled. Cancel it (shutdown /a) and start again.'
@@ -317,13 +419,13 @@ export class OvernightSupervisor {
         timerScheduled = true
         const deadline = iso(Date.parse(result.at) + delaySeconds * 1000)
         record = this.update(record.id, { failsafe: { scheduledAt: result.at, deadline, result, cancelledAt: null, cancelResult: null, lostAt: null } })
-        bus.emit({ runId: run.id, type: 'overnight.failsafe', payload: { action: 'armed', deadline, ok: true } })
+        this.emit({ runId: run.id, type: 'overnight.failsafe', payload: { action: 'armed', deadline, ok: true } })
       }
       // A cancel that arrived while Windows was being asked has already moved the record on.
       const current = repos.overnight.require(record.id)
       if (current.state === 'ARMING') this.setState(current, 'RUNNING')
       this.heartbeat(run.id, this.now())
-      bus.emit({
+      this.emit({
         runId: run.id,
         type: 'overnight.started',
         payload: { deadlineAt: record.deadlineAt, endAction: policy.endAction, failsafeDeadline: record.failsafe?.deadline ?? null },
@@ -408,7 +510,10 @@ export class OvernightSupervisor {
       case 'run.resumed':
         void this.serial(runId, async () => {
           const record = this.deps.repos.overnight.getByRun(runId)
-          if (record?.state === 'QUOTA_PAUSED') this.setState(record, 'RUNNING', 'the run was resumed')
+          if (record?.state === 'QUOTA_PAUSED') {
+            this.closeQuotaRow(runId, 'cancelled', 'The run was resumed by the user')
+            this.setState(record, 'RUNNING', 'the run was resumed')
+          }
         })
         break
       case 'approval.requested':
@@ -424,7 +529,7 @@ export class OvernightSupervisor {
 
   /** Unattended approvals: tool requests are denied; plan, task-start and graph changes follow the policy. */
   private answerApproval(runId: string, approvalId: string): void {
-    const { repos, bus, orchestrator } = this.deps
+    const { repos, orchestrator } = this.deps
     try {
       const record = repos.overnight.getByRun(runId)
       if (!record || (record.state !== 'RUNNING' && record.state !== 'QUOTA_PAUSED')) return
@@ -435,7 +540,7 @@ export class OvernightSupervisor {
       const tooRisky = approval.kind === 'task' && approval.risk === 'high'
       const approve = planChange && !tooRisky && (approval.kind === 'plan' || record.policy.autoApprovePlanChanges)
       orchestrator.resolveApproval(approvalId, approve, `Overnight Mode (unattended): ${approve ? 'approved by run policy' : 'denied, nobody is present to approve it'}`)
-      bus.emit({ runId, type: 'overnight.approval', payload: { approvalId, kind: approval.kind, decision: approve ? 'approved' : 'denied' } })
+      this.emit({ runId, type: 'overnight.approval', payload: { approvalId, kind: approval.kind, decision: approve ? 'approved' : 'denied' } })
     } catch (e) {
       this.log(`approval ${approvalId}: ${errorMessage(e)}`)
     }
@@ -468,6 +573,7 @@ export class OvernightSupervisor {
     switch (record.state) {
       case 'RUNNING':
       case 'QUOTA_PAUSED': {
+        if (record.workloadType !== 'mission') return this.tickWorkload(record, now)
         if (!run) return this.doFinalize(runId, 'FAILED', 'The run no longer exists.')
         // A terminal state whose event was missed (for example across a restart).
         if (run.state === 'completed') return this.doFinalize(runId, 'SUCCESS')
@@ -513,6 +619,50 @@ export class OvernightSupervisor {
       default:
         return
     }
+  }
+
+  /**
+   * One pass over a workload that is not a mission (an Arena campaign). The workload pauses and resumes
+   * itself around a usage limit; the supervisor decides whether waiting still fits before the deadline.
+   */
+  private async tickWorkload(record: OvernightRun, now: number): Promise<void> {
+    const id = record.runId
+    let workload: AutonomousWorkload
+    try {
+      workload = this.workloadOf(record)
+    } catch (e) {
+      this.log(`${id}: ${errorMessage(e)}`)
+      return
+    }
+    const state = workload.getDeadlineState(now)
+    if (state.outcome) return this.doFinalize(id, state.outcome.reason, state.outcome.detail)
+    const deadline = Date.parse(record.deadlineAt)
+    if (now >= deadline) return this.doFinalize(id, 'TIME_LIMIT', `The overnight deadline of ${record.policy.maxDurationMinutes} minutes was reached.`)
+    if (state.phase === 'quota_wait') {
+      const resetsAt = state.quotaResetsAt
+      const waits = record.quota?.waits ?? 0
+      const entering = record.state === 'RUNNING'
+      const end = (why: string): Promise<void> => {
+        this.update(record.id, { quota: { pausedAt: record.quota && !entering ? record.quota.pausedAt : iso(now), resetsAt: resetsAt !== null ? iso(resetsAt) : null, resumeAt: null, waits } })
+        return this.doFinalize(id, 'QUOTA_EXHAUSTED', why)
+      }
+      if (record.policy.quotaPolicy === 'END_RUN') return end('The policy ends the run on a usage limit.')
+      if (entering && waits >= MAX_QUOTA_WAITS) return end(`The campaign already waited for a usage limit ${waits} times.`)
+      const resumeAt = resetsAt !== null ? Math.max(resetsAt, now) + QUOTA_RESUME_MARGIN_SECONDS * 1000 : null
+      // An unknown reset is waited on until the deadline; a known one only when it falls before the deadline.
+      if (resumeAt !== null && resumeAt >= deadline) return end('The usage limit resets after the overnight deadline.')
+      if (entering) {
+        workload.checkpoint('quota')
+        const next = this.update(record.id, { quota: { pausedAt: iso(now), resetsAt: resetsAt !== null ? iso(resetsAt) : null, resumeAt: resumeAt !== null ? iso(resumeAt) : null, waits: waits + 1 } })
+        this.setState(next, 'QUOTA_PAUSED', resumeAt !== null ? `Claude usage limit; resuming at ${iso(resumeAt)}` : 'Claude usage limit; reset time not reported')
+      } else if (record.quota && (record.quota.resetsAt ?? null) !== (resetsAt !== null ? iso(resetsAt) : null)) {
+        this.update(record.id, { quota: { ...record.quota, resetsAt: resetsAt !== null ? iso(resetsAt) : null, resumeAt: resumeAt !== null ? iso(resumeAt) : null } })
+      }
+      return
+    }
+    if (record.state === 'QUOTA_PAUSED') this.setState(record, 'RUNNING', 'usage limit reset')
+    const last = this.lastCheckpoint.get(id) ?? Date.parse(record.startedAt)
+    if (now - last >= record.policy.checkpointIntervalMinutes * 60_000) this.checkpoint(id, 'interval')
   }
 
   /** Proof that NEXUS was alive, so a later launch can tell a short restart from a long absence. */
@@ -578,7 +728,7 @@ export class OvernightSupervisor {
   }
 
   private diagnose(record: OvernightRun, stage: WatchdogDiagnostic['stage'], detail: string): void {
-    const { repos, bus } = this.deps
+    const { repos } = this.deps
     const run = repos.runs.get(record.runId)
     const tasks: Record<string, number> = {}
     for (const task of repos.tasks.listByRun(record.runId)) tasks[task.state] = (tasks[task.state] ?? 0) + 1
@@ -594,18 +744,13 @@ export class OvernightSupervisor {
     }
     const current = repos.overnight.require(record.id)
     this.update(record.id, { watchdog: [...current.watchdog, entry].slice(-MAX_WATCHDOG_ENTRIES) })
-    bus.emit({ runId: record.runId, type: 'overnight.watchdog', payload: { stage, detail } })
+    this.emit({ runId: record.runId, type: 'overnight.watchdog', payload: { stage, detail } })
   }
 
   private checkpoint(runId: string, reason: string): void {
-    const { repos, bus } = this.deps
     try {
-      const run = repos.runs.get(runId)
-      if (!run) return
-      const row = repos.checkpoints.insert({ id: newId(), runId, reason, snapshot: buildCheckpoint(repos, run), createdAt: iso(this.now()) })
-      this.lastCheckpoint.set(runId, this.now())
-      if (repos.checkpoints.count(runId) > MAX_CHECKPOINTS) repos.checkpoints.prune(runId, MAX_CHECKPOINTS)
-      bus.emit({ runId, type: 'checkpoint.saved', payload: { checkpointId: row.id, reason } })
+      const record = this.deps.repos.overnight.getByRun(runId)
+      if (record && this.workloadOf(record).checkpoint(reason)) this.lastCheckpoint.set(runId, this.now())
     } catch (e) {
       this.log(`checkpoint ${runId}: ${errorMessage(e)}`)
     }
@@ -614,42 +759,185 @@ export class OvernightSupervisor {
   // ───────────────────────────── usage limit ─────────────────────────────
 
   private async onQuota(runId: string): Promise<void> {
-    const { repos, bus } = this.deps
+    const { repos } = this.deps
     const record = repos.overnight.getByRun(runId)
     if (!record || record.state !== 'RUNNING') return
     const now = this.now()
     // The runtime can report the limit twice (a rate-limit event with the reset time, then an error
     // without one): take the newest rejection since the run last resumed that says when it resets.
     const since = repos.events.latestOfType(runId, 'run.resumed')?.seq ?? 0
-    const limited = repos.events
-      .recentOfType(runId, 'agent.rate_limited', 20)
-      .find((e) => e.seq > since && e.payload.status === 'rejected' && normalizeEpochMs(e.payload.resetsAt) !== null)
+    const rejections = repos.events.recentOfType(runId, 'agent.rate_limited', 20).filter((e) => e.seq > since && e.payload.status === 'rejected')
+    const limited = rejections.find((e) => normalizeEpochMs(e.payload.resetsAt) !== null)
+    const limitType = limited?.payload.limitType ?? rejections.find((e) => e.payload.limitType)?.payload.limitType ?? null
     const resetsAt = limited ? normalizeEpochMs(limited.payload.resetsAt) : null
     const waits = record.quota?.waits ?? 0
-    const decision = decideQuota({ policy: record.policy.quotaPolicy, now, deadline: Date.parse(record.deadlineAt), resetsAt, waits })
+    const deadline = Date.parse(record.deadlineAt)
+    let decision: QuotaDecision
+    if (this.deps.probe && record.policy.quotaPolicy === 'WAIT_AND_RETRY' && waits < MAX_QUOTA_WAITS) {
+      const settings = repos.settings.get().usage
+      if (!settings.overnightWaitForReset) {
+        decision = { action: 'end', why: 'Waiting for the usage limit to reset is switched off in the settings.' }
+      } else {
+        const plan = planQuotaWait({ now, resetAt: resetsAt, probes: 0, settings, deadline, pausedAt: now })
+        decision = plan.action === 'wait' ? { action: 'wait', resumeAt: plan.checkAt } : { action: 'end', why: plan.why }
+      }
+    } else {
+      decision = decideQuota({ policy: record.policy.quotaPolicy, now, deadline, resetsAt, waits })
+    }
     if (decision.action === 'end') {
       this.update(record.id, { quota: { pausedAt: iso(now), resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: null, waits } })
-      bus.emit({ runId, type: 'overnight.quota', payload: { action: 'exhausted', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: null } })
+      this.emit({ runId, type: 'overnight.quota', payload: { action: 'exhausted', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: null } })
       return this.doFinalize(runId, 'QUOTA_EXHAUSTED', decision.why)
     }
     const next = this.update(record.id, { quota: { pausedAt: iso(now), resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt), waits: waits + 1 } })
+    if (this.deps.probe) this.openQuotaRow(runId, now, resetsAt, decision.resumeAt, limitType)
     this.setState(next, 'QUOTA_PAUSED', `Claude usage limit; resuming at ${iso(decision.resumeAt)}`)
-    bus.emit({ runId, type: 'overnight.quota', payload: { action: 'waiting', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt) } })
+    this.emit({ runId, type: 'overnight.quota', payload: { action: 'waiting', resetsAt: resetsAt ? iso(resetsAt) : null, resumeAt: iso(decision.resumeAt) } })
+  }
+
+  /** The same quota_pauses row the controller writes for ordinary runs, so history is uniform (scope 'overnight'). */
+  private openQuotaRow(runId: string, now: number, resetsAt: number | null, checkAt: number, limitType: string | null = null): void {
+    const { repos } = this.deps
+    try {
+      if (repos.quotaPauses.liveForRun(runId)) return
+      this.checkpoint(runId, 'quota')
+      repos.quotaPauses.insert({
+        id: newId(),
+        runId,
+        scope: 'overnight',
+        state: 'waiting',
+        pausedAt: iso(now),
+        limitType,
+        resetAt: resetsAt !== null ? iso(resetsAt) : null,
+        resetConfidence: resetsAt !== null ? 'EXACT' : 'UNKNOWN',
+        nextCheckAt: iso(checkAt),
+        probes: 0,
+        checkpointId: repos.checkpoints.latest(runId)?.id ?? null,
+        resumeState: null,
+        endedAt: null,
+        endReason: null,
+        createdAt: iso(now),
+        updatedAt: iso(now),
+      })
+    } catch (e) {
+      this.log(`quota row ${runId}: ${errorMessage(e)}`)
+    }
+  }
+
+  private closeQuotaRow(runId: string, state: 'resumed' | 'ended' | 'cancelled', reason: string | null): void {
+    const { repos } = this.deps
+    try {
+      const row = repos.quotaPauses.liveForRun(runId)
+      if (row?.scope === 'overnight') repos.quotaPauses.close(row.id, state, iso(this.now()), reason)
+    } catch (e) {
+      this.log(`quota row ${runId}: ${errorMessage(e)}`)
+    }
+  }
+
+  /** Record the successful resume of an overnight wait and close its row. */
+  private recordQuotaResumed(runId: string): void {
+    const { repos } = this.deps
+    try {
+      const row = repos.quotaPauses.liveForRun(runId)
+      if (!row || row.scope !== 'overnight') return
+      const at = this.now()
+      if (!repos.quotaPauses.close(row.id, 'resumed', iso(at), null)) return
+      repos.quotaResumes.insert({
+        id: newId(),
+        pauseId: row.id,
+        runId,
+        attemptedAt: iso(at),
+        kind: 'resume',
+        result: 'resumed',
+        method: 'none',
+        detail: null,
+        waitedMs: Math.max(0, at - Date.parse(row.pausedAt)),
+        createdAt: iso(at),
+      })
+    } catch (e) {
+      this.log(`quota row ${runId}: ${errorMessage(e)}`)
+    }
+  }
+
+  /**
+   * Probe before resuming. True: Claude is available, resume. False: still limited (re-planned) or the
+   * wait ended (the run was finalized as QUOTA_EXHAUSTED).
+   */
+  private async probeBeforeResume(record: OvernightRun, probe: AvailabilityProbe): Promise<boolean> {
+    const { repos } = this.deps
+    const runId = record.runId
+    const now = this.now()
+    const quota = record.quota
+    if (!quota) return true
+    const resetMs = quota.resetsAt ? Date.parse(quota.resetsAt) : null
+    let row = repos.quotaPauses.liveForRun(runId)
+    if (!row || row.scope !== 'overnight') {
+      this.openQuotaRow(runId, Date.parse(quota.pausedAt), resetMs, now)
+      row = repos.quotaPauses.liveForRun(runId)
+    }
+    if (!row) return true
+    repos.quotaPauses.update(row.id, { state: 'probing', updatedAt: iso(now) })
+    let result: Awaited<ReturnType<AvailabilityProbe['probe']>>
+    try {
+      result = await probe.probe({ limitType: row.limitType })
+    } catch (e) {
+      result = { available: false, method: 'none', resetAt: null, detail: errorMessage(e), outcome: 'runtime' }
+    }
+    const at = this.now()
+    repos.quotaResumes.insert({
+      id: newId(),
+      pauseId: row.id,
+      runId,
+      attemptedAt: iso(at),
+      kind: 'probe',
+      result: result.available ? 'available' : result.outcome === 'limited' ? 'still_limited' : 'failed',
+      method: result.method,
+      detail: result.detail,
+      waitedMs: Math.max(0, at - Date.parse(quota.pausedAt)),
+      createdAt: iso(at),
+    })
+    this.emit({ runId, type: 'usage.probe', payload: { pauseId: row.id, method: result.method, result: result.available ? 'available' : result.outcome } })
+    if (result.available) return true
+
+    const probes = row.probes + 1
+    const newReset = result.resetAt ? Date.parse(result.resetAt) : Number.NaN
+    const knownReset = Number.isFinite(newReset) ? newReset : resetMs
+    const plan = planQuotaWait({ now: at, resetAt: knownReset, probes, settings: repos.settings.get().usage, deadline: Date.parse(record.deadlineAt), pausedAt: Date.parse(quota.pausedAt) })
+    if (plan.action === 'end') {
+      this.update(record.id, { quota: { ...quota, resumeAt: null } })
+      repos.quotaPauses.close(row.id, 'ended', iso(at), plan.why)
+      this.emit({ runId, type: 'overnight.quota', payload: { action: 'exhausted', resetsAt: quota.resetsAt, resumeAt: null } })
+      await this.doFinalize(runId, 'QUOTA_EXHAUSTED', plan.why)
+      return false
+    }
+    repos.quotaPauses.update(row.id, {
+      state: 'waiting',
+      probes,
+      resetAt: knownReset !== null ? iso(knownReset) : null,
+      resetConfidence: knownReset !== null ? 'EXACT' : 'UNKNOWN',
+      nextCheckAt: iso(plan.checkAt),
+      updatedAt: iso(at),
+    })
+    this.update(record.id, { quota: { ...quota, resetsAt: knownReset !== null ? iso(knownReset) : null, resumeAt: iso(plan.checkAt) } })
+    return false
   }
 
   private async resumeFromQuota(record: OvernightRun): Promise<void> {
-    const { repos, bus, orchestrator } = this.deps
+    const { repos, orchestrator } = this.deps
+    if (this.deps.probe && !(await this.probeBeforeResume(record, this.deps.probe))) return
     const run = repos.runs.get(record.runId)
     if (run?.state === 'paused' && run.pauseReason === 'quota') {
       try {
         await orchestrator.resumeRun(record.runId)
       } catch (e) {
+        this.closeQuotaRow(record.runId, 'ended', 'The run could not be resumed')
         return this.doFinalize(record.runId, 'BLOCKED', `The run could not be resumed after the usage limit: ${errorMessage(e)}`)
       }
     }
+    this.recordQuotaResumed(record.runId)
     const current = repos.overnight.require(record.id)
     if (current.state === 'QUOTA_PAUSED') this.setState(current, 'RUNNING', 'usage limit reset')
-    bus.emit({ runId: record.runId, type: 'overnight.quota', payload: { action: 'resumed', resetsAt: record.quota?.resetsAt ?? null, resumeAt: record.quota?.resumeAt ?? null } })
+    this.emit({ runId: record.runId, type: 'overnight.quota', payload: { action: 'resumed', resetsAt: record.quota?.resetsAt ?? null, resumeAt: record.quota?.resumeAt ?? null } })
   }
 
   // ───────────────────────────── finalization ─────────────────────────────
@@ -660,10 +948,12 @@ export class OvernightSupervisor {
   }
 
   private async doFinalize(runId: string, reason: TerminalReason, detail?: string, options: { suppressPower?: string } = {}): Promise<void> {
-    const { repos, bus } = this.deps
+    const { repos } = this.deps
     let record = repos.overnight.getByRun(runId)
     if (!record) return
     if (record.state !== 'RUNNING' && record.state !== 'QUOTA_PAUSED' && record.state !== 'ARMING' && record.state !== 'FINALIZING') return
+    // A quota wait still open when the run ends is closed with the run.
+    this.closeQuotaRow(runId, 'ended', `The run ended: ${reason}`)
     // The first terminal reason wins, also across a restart in the middle of finalization.
     const terminalReason = record.terminalReason ?? reason
     const terminalDetail = record.terminalDetail ?? detail ?? null
@@ -673,10 +963,10 @@ export class OvernightSupervisor {
 
     try {
       // 1. No new work, then stop what is running. Pausing keeps a failed or unfinished run resumable.
-      await this.stopRun(runId, terminalReason)
-      // 2. Preserve unfinished work and capture what Git looks like now.
-      const run = repos.runs.require(runId)
-      const git = await within(this.captureGit(run, record.policy.commitCompletedWork), this.deps.gitTimeoutMs ?? 180_000, null)
+      const workload = this.workloadOf(record)
+      await this.stopWorkload(workload, terminalReason)
+      // 2. Preserve unfinished work and capture what there is to report (for a mission: what Git looks like now).
+      const finalization = await within(workload.getFinalizationState({ commitWork: record.policy.commitCompletedWork }), this.deps.gitTimeoutMs ?? 180_000, null)
       // 3. Everything so far reaches the database file.
       this.flushSafe()
       // 4. The report, saved before any power step.
@@ -690,15 +980,15 @@ export class OvernightSupervisor {
       const finishedAt = iso(this.now())
       let text: string
       try {
-        text = buildOvernightReport({ repos, record: repos.overnight.require(record.id), run, reason: terminalReason, detail: terminalDetail, finishedAt, git, powerPlan })
+        text = workload.summarize({ record: repos.overnight.require(record.id), reason: terminalReason, detail: terminalDetail, finishedAt, finalization, powerPlan })
       } catch (e) {
         // A report must exist even if a section cannot be built.
-        text = `# NEXUS Overnight Run\n\n- Run ID: ${runId}\n- Finished: ${finishedAt}\n- Outcome: ${terminalReason}\n\nThe full report could not be built: ${errorMessage(e)}\n\n## Power action\n\n${powerPlan}\n`
+        text = `# NEXUS Overnight ${record.workloadType === 'mission' ? 'Run' : 'Arena Campaign'}\n\n- ${record.workloadType === 'mission' ? 'Run' : 'Campaign'} ID: ${runId}\n- Finished: ${finishedAt}\n- Outcome: ${terminalReason}\n\nThe full report could not be built: ${errorMessage(e)}\n\n## Power action\n\n${powerPlan}\n`
       }
       record = this.update(record.id, { finalReport: text, reportSavedAt: iso(this.now()), finishedAt })
-      const path = this.writeReportFiles(record, run, text)
+      const path = this.writeReportFiles(record, text)
       if (path) record = this.update(record.id, { reportPath: path })
-      bus.emit({ runId, type: 'overnight.report', payload: { path, chars: text.length } })
+      this.emit({ runId, type: 'overnight.report', payload: { path, chars: text.length } })
       this.flushSafe()
       // 5. Power.
       await this.applyPower(record, decision)
@@ -708,11 +998,9 @@ export class OvernightSupervisor {
     }
   }
 
-  private async stopRun(runId: string, reason: TerminalReason): Promise<void> {
-    const { repos, orchestrator } = this.deps
-    const run = repos.runs.get(runId)
-    if (!run || TERMINAL_RUN_STATES.includes(run.state) || run.state === 'paused') return
-    const stop = orchestrator.pauseRun(runId, 'user', `Overnight Mode ended the run (${reason}).`, 'user').catch((e: unknown) => this.log(`stop ${runId}: ${errorMessage(e)}`))
+  private async stopWorkload(workload: AutonomousWorkload, reason: TerminalReason): Promise<void> {
+    const what = workload.type === 'mission' ? 'run' : 'campaign'
+    const stop = workload.pause(`Overnight Mode ended the ${what} (${reason}).`).catch((e: unknown) => this.log(`stop ${workload.id}: ${errorMessage(e)}`))
     const timeout = this.deps.stopTimeoutMs ?? 120_000
     let timer: ReturnType<typeof setTimeout> | undefined
     await Promise.race([stop, new Promise<void>((resolve) => (timer = setTimeout(resolve, timeout)))])
@@ -727,70 +1015,9 @@ export class OvernightSupervisor {
     }
   }
 
-  private async captureGit(run: Run, commitWork: boolean): Promise<GitStateCapture | null> {
-    const { repos, git } = this.deps
-    const project = repos.projects.get(run.projectId)
-    if (!project) return null
-    const capture: GitStateCapture = {
-      projectRoot: project.rootPath,
-      branch: null,
-      status: null,
-      integrationBranch: run.integrationBranch,
-      integrationHead: null,
-      commits: [],
-      filesChanged: [],
-      checkpointCommits: [],
-      error: null,
-    }
-    const problems: string[] = []
-    const attempt = async (what: string, fn: () => Promise<void>): Promise<void> => {
-      try {
-        await fn()
-      } catch (e) {
-        problems.push(`${what}: ${errorMessage(e)}`)
-      }
-    }
-    if (commitWork) {
-      const settings = repos.settings.get().git
-      const author = { name: settings.commitAuthorName, email: settings.commitAuthorEmail }
-      for (const worktree of repos.worktrees.listActive(run.id)) {
-        if (worktree.taskId === null || !existsSync(worktree.path)) continue
-        const task = repos.tasks.get(worktree.taskId)
-        if (!task || task.state === 'completed' || task.state === 'cancelled') continue
-        await attempt(`checkpoint commit ${task.key}`, async () => {
-          // A half-finished merge would be committed with its conflict markers.
-          if (await git.isMergeInProgress(worktree.path)) throw new Error('a merge is in progress; nothing was committed')
-          const commit = await git.commitAll(worktree.path, `nexus: overnight checkpoint of unfinished work (${task.key})`, author)
-          if (commit) capture.checkpointCommits.push({ task: task.key, branch: worktree.branch, commit })
-        })
-      }
-    }
-    await attempt('branch', async () => {
-      capture.branch = await git.currentBranch(project.rootPath)
-    })
-    await attempt('status', async () => {
-      capture.status = await git.status(project.rootPath)
-    })
-    if (run.baseCommit && run.integrationBranch) {
-      const base = run.baseCommit
-      const branch = run.integrationBranch
-      await attempt('integration head', async () => {
-        capture.integrationHead = await git.resolveCommit(project.rootPath, branch)
-      })
-      await attempt('commits', async () => {
-        capture.commits = await git.log(project.rootPath, `${base}..${branch}`, 200)
-      })
-      await attempt('changed files', async () => {
-        capture.filesChanged = await git.changedFiles(project.rootPath, base, branch)
-      })
-    }
-    capture.error = problems.length > 0 ? problems.join('; ') : null
-    return capture
-  }
-
   /** Writes the report under the NEXUS data directory and, when the policy says so, into the project. */
-  private writeReportFiles(record: OvernightRun, run: Run, text: string): string | null {
-    const name = `overnight-${record.startedAt.slice(0, 19).replace(/:/g, '')}.md`
+  private writeReportFiles(record: OvernightRun, text: string): string | null {
+    const name = `overnight-${record.workloadType === 'mission' ? '' : 'arena-'}${record.startedAt.slice(0, 19).replace(/:/g, '')}.md`
     let saved: string | null = null
     try {
       mkdirSync(this.deps.reportsDir, { recursive: true })
@@ -801,18 +1028,26 @@ export class OvernightSupervisor {
       this.log(`report (data dir): ${errorMessage(e)}`)
     }
     if (!record.policy.saveFinalReport) return saved
-    const project = this.deps.repos.projects.get(run.projectId)
-    if (!project || !existsSync(project.rootPath)) return saved
+    const root = this.projectRootOf(record)
+    if (root === null) return saved
     try {
-      const dir = join(project.rootPath, '.nexus', 'reports')
+      const dir = join(root, '.nexus', 'reports')
       mkdirSync(dir, { recursive: true })
       const path = join(dir, name)
       writeFileSync(path, text)
-      this.excludeFromGit(project.rootPath)
+      this.excludeFromGit(root)
       return path
     } catch (e) {
       this.log(`report (project): ${errorMessage(e)}`)
       return saved
+    }
+  }
+
+  private projectRootOf(record: OvernightRun): string | null {
+    try {
+      return this.workloadOf(record).projectRoot()
+    } catch {
+      return null
     }
   }
 
@@ -853,16 +1088,16 @@ export class OvernightSupervisor {
   }
 
   private writeAudit(runId: string | null, operation: PowerAuditEntry['operation'], action: EndAction, detail: string, result: PowerCommandResult | null): void {
-    const { repos, bus } = this.deps
+    const { repos } = this.deps
     repos.powerAudit.insert({ id: newId(), runId, operation, action, detail, result, createdAt: iso(this.now()) })
     if (runId && repos.runs.get(runId)) {
-      bus.emit({ runId, type: 'overnight.power', payload: { action, operation, ok: result ? result.ok : operation !== 'denied', executeAt: null, detail } })
+      this.emit({ runId, type: 'overnight.power', payload: { action, operation, ok: result ? result.ok : operation !== 'denied', executeAt: null, detail } })
     }
   }
 
   /** Abort the failsafe timer. True when no failsafe is pending afterwards. */
   private async cancelFailsafe(record: OvernightRun, why: string): Promise<boolean> {
-    const { bus, power } = this.deps
+    const { power } = this.deps
     if (!record.failsafe || !this.failsafeArmed(record)) return true
     const result = await power.cancelShutdown()
     this.writeAudit(record.runId, 'cancel_failsafe', 'SHUTDOWN', why, result)
@@ -870,21 +1105,21 @@ export class OvernightSupervisor {
     const gone = result.ok || result.exitCode === 1116
     if (gone) {
       this.update(record.id, { failsafe: { ...record.failsafe, cancelledAt: result.at, cancelResult: result } })
-      bus.emit({ runId: record.runId, type: 'overnight.failsafe', payload: { action: 'cancelled', deadline: record.failsafe.deadline, ok: true } })
+      this.emit({ runId: record.runId, type: 'overnight.failsafe', payload: { action: 'cancelled', deadline: record.failsafe.deadline, ok: true } })
     }
     return gone
   }
 
   /** Arm (again) the failsafe so it fires at `deadlineMs`. */
   private async rearmFailsafe(record: OvernightRun, deadlineMs: number, why: string): Promise<boolean> {
-    const { bus, power } = this.deps
+    const { power } = this.deps
     const delaySeconds = Math.max(60, Math.round((deadlineMs - this.now()) / 1000))
     const result = await power.scheduleShutdown({ delaySeconds, force: record.policy.forceCloseApplications, purpose: 'failsafe' })
     this.writeAudit(record.runId, 'rearm_failsafe', 'SHUTDOWN', why, result)
     if (result.ok) {
       const deadline = iso(Date.parse(result.at) + delaySeconds * 1000)
       this.update(record.id, { failsafe: { scheduledAt: result.at, deadline, result, cancelledAt: null, cancelResult: null, lostAt: null } })
-      bus.emit({ runId: record.runId, type: 'overnight.failsafe', payload: { action: 'rearmed', deadline, ok: true } })
+      this.emit({ runId: record.runId, type: 'overnight.failsafe', payload: { action: 'rearmed', deadline, ok: true } })
     }
     return result.ok
   }
@@ -1007,8 +1242,7 @@ export class OvernightSupervisor {
     const base = record.finalReport.includes(marker) ? record.finalReport.slice(0, record.finalReport.indexOf(marker)) : record.finalReport
     const text = `${base.trimEnd()}\n${powerAddendum(record)}`
     const updated = this.update(record.id, { finalReport: text })
-    const run = this.deps.repos.runs.get(record.runId)
-    if (run) this.writeReportFiles(updated, run, text)
+    this.writeReportFiles(updated, text)
     this.flushSafe()
   }
 
@@ -1140,21 +1374,19 @@ export class OvernightSupervisor {
         }
         record = repos.overnight.require(record.id)
       }
-      const run = repos.runs.require(runId)
-      repos.runs.update(runId, { config: { ...run.config, maxDurationMinutes: Math.min(24 * 60, run.config.maxDurationMinutes + minutes) } })
+      this.workloadOf(record).extend(minutes)
       record = this.update(record.id, {
         deadlineAt,
         amendments: [...record.amendments, { at: iso(this.now()), by: 'user', change: `Mission extended by ${minutes} minutes (deadline ${deadlineAt})` }],
       })
-      this.deps.bus.emit({ runId, type: 'overnight.amended', payload: { change: `extended by ${minutes} minutes` } })
+      this.emit({ runId, type: 'overnight.amended', payload: { change: `extended by ${minutes} minutes` } })
       return toStatus(record)
     })
   }
 
   /** Cancel the mission. The end action applies only if the policy covers cancellation. */
   async cancelMission(runId: string): Promise<OvernightStatus> {
-    this.requireRecord(runId)
-    await this.deps.orchestrator.cancelRun(runId)
+    await this.workloadOf(this.requireRecord(runId)).cancel()
     await this.finalize(runId, 'USER_CANCELLED')
     return toStatus(this.requireRecord(runId))
   }
@@ -1170,7 +1402,7 @@ export class OvernightSupervisor {
       authorization: this.sealed(authorization, policy),
       amendments: [...record.amendments, { at: iso(this.now()), by: 'user', change: description }],
     })
-    this.deps.bus.emit({ runId: record.runId, type: 'overnight.amended', payload: { change: description } })
+    this.emit({ runId: record.runId, type: 'overnight.amended', payload: { change: description } })
     return updated
   }
 
@@ -1208,7 +1440,7 @@ export class OvernightSupervisor {
   }
 
   private async recoverOne(runId: string): Promise<void> {
-    const { repos, bus, orchestrator, power } = this.deps
+    const { repos, power } = this.deps
     let record = this.requireRecord(runId)
     const now = this.now()
     const lastAlive = repos.settings.getValue<string>(heartbeatKey(runId)) ?? record.updatedAt
@@ -1223,8 +1455,10 @@ export class OvernightSupervisor {
       : gapMs > CONTINUITY_GAP_MS
         ? `NEXUS was not running for ${Math.round(gapMs / 60_000)} minutes; the power authorization lapsed.`
         : null
-    const run = repos.runs.get(runId)
-    bus.emit({ runId, type: 'overnight.state_changed', payload: { from: record.state, to: record.state, detail: 'RECOVERING OVERNIGHT RUN' } })
+    const mission = record.workloadType === 'mission'
+    const missing = this.factories.has(record.workloadType) ? this.workloadOf(record).state === 'missing' : false
+    const what = mission ? 'run' : 'campaign'
+    this.emit({ runId, type: 'overnight.state_changed', payload: { from: record.state, to: record.state, detail: 'RECOVERING OVERNIGHT RUN' } })
 
     // Whether a timer still exists is never inferred from clocks: when the session lapsed, or the record
     // cannot say what was scheduled, Windows is asked to drop whatever shutdown is pending.
@@ -1238,7 +1472,7 @@ export class OvernightSupervisor {
         const powerAction = current.powerAction && !current.powerAction.cancelledAt && !current.powerAction.executedAt ? { ...current.powerAction, cancelledAt: at } : current.powerAction
         record = this.update(record.id, { failsafe, powerAction })
         if (failsafe !== current.failsafe && failsafe) {
-          bus.emit({ runId, type: 'overnight.failsafe', payload: { action: rebooted ? 'lost' : 'cancelled', deadline: failsafe.deadline, ok: true } })
+          this.emit({ runId, type: 'overnight.failsafe', payload: { action: rebooted ? 'lost' : 'cancelled', deadline: failsafe.deadline, ok: true } })
         }
       }
       return aborted
@@ -1285,20 +1519,17 @@ export class OvernightSupervisor {
     if (lapsed && !(await dropTimers(lapsed))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
     const suppress = lapsed ? { suppressPower: lapsed } : {}
     if (record.state === 'FINALIZING') return this.doFinalize(runId, record.terminalReason ?? 'FAILED', record.terminalDetail ?? undefined, suppress)
-    if (!run) return this.doFinalize(runId, 'FAILED', 'The run no longer exists.', suppress)
-    if (lapsed) return this.doFinalize(runId, 'BLOCKED', `${lapsed} The run is paused and can be resumed by hand.`, suppress)
-    if (now >= Date.parse(record.deadlineAt)) return this.doFinalize(runId, 'TIME_LIMIT', 'The mission deadline passed during a restart of NEXUS.')
+    if (missing) return this.doFinalize(runId, 'FAILED', `The ${what} no longer exists.`, suppress)
+    if (lapsed) return this.doFinalize(runId, 'BLOCKED', `${lapsed} The ${what} is paused and can be resumed by hand.`, suppress)
+    if (now >= Date.parse(record.deadlineAt)) return this.doFinalize(runId, 'TIME_LIMIT', `The ${mission ? 'mission' : 'overnight'} deadline passed during a restart of NEXUS.`)
     this.heartbeat(runId, now)
-    if (run.state === 'paused' && run.pauseReason === 'recovery') {
-      try {
-        await orchestrator.recover(runId, 'resume')
-      } catch (e) {
-        return this.doFinalize(runId, 'BLOCKED', `The run could not be resumed after a restart of NEXUS: ${errorMessage(e)}`)
-      }
-      this.checkpoint(runId, 'recovery')
+    try {
+      await this.workloadOf(record).recoverAfterRestart()
+    } catch (e) {
+      return this.doFinalize(runId, 'BLOCKED', `The ${what} could not be resumed after a restart of NEXUS: ${errorMessage(e)}`)
     }
     // Requests raised just before the restart have no listener any more: answer them now.
-    for (const approval of repos.approvals.listPending(runId)) this.answerApproval(runId, approval.id)
+    if (mission) for (const approval of repos.approvals.listPending(runId)) this.answerApproval(runId, approval.id)
   }
 
   // ───────────────────────────── plumbing ─────────────────────────────
@@ -1333,7 +1564,7 @@ export class OvernightSupervisor {
   private setState(record: OvernightRun, to: OvernightState, detail?: string): OvernightRun {
     if (record.state === to) return record
     const updated = this.update(record.id, { state: to })
-    this.deps.bus.emit({ runId: record.runId, type: 'overnight.state_changed', payload: { from: record.state, to, ...(detail ? { detail } : {}) } })
+    this.emit({ runId: record.runId, type: 'overnight.state_changed', payload: { from: record.state, to, ...(detail ? { detail } : {}) } })
     return updated
   }
 }
