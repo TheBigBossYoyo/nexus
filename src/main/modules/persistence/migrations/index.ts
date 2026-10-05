@@ -5,6 +5,7 @@ import { v03Schema } from './004-v0-3'
 import { workloadSchema } from './005-overnight-workloads'
 import { programsSchema } from './006-programs'
 import { workspacesSchema } from './007-workspaces'
+import { providersSchema } from './008-providers'
 
 export interface Migration {
   version: number
@@ -21,4 +22,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 5, name: 'overnight-workloads', sql: workloadSchema },
   { version: 6, name: 'programs', sql: programsSchema },
   { version: 7, name: 'workspaces', sql: workspacesSchema },
+  { version: 8, name: 'providers', sql: providersSchema },
 ]

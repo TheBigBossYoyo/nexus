@@ -1,3 +1,4 @@
+import { DEFAULT_PROVIDER_POLICY } from '@shared/provider'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipcInputs, type AppInfo, type IpcChannel, type IpcInput } from '@shared/ipc'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT } from '@shared/overnight'
@@ -81,6 +82,11 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'workspace.prepareRelease': { missionId: 'm1' },
   'workspace.publishRelease': { trainId: 't1' },
   'workspace.cancelRelease': { trainId: 't1' },
+  'providers.overview': {},
+  'providers.refresh': {},
+  'providers.setPolicy': { policy: DEFAULT_PROVIDER_POLICY },
+  'providers.probe': { provider: 'codex' },
+  'providers.sessions': { runId: 'r1' },
   'overnight.startWorkspaceMission': { missionId: 'm1', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT },
   'overnight.get': { runId: 'r1' },
   'overnight.active': {},

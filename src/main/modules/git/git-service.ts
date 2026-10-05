@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -320,6 +321,24 @@ export class GitService {
 
   async headCommit(repo: string): Promise<string> {
     return this.resolveCommit(repo, 'HEAD')
+  }
+
+  /**
+   * A fingerprint of a working directory: HEAD, the status of every path and the content of every change to a
+   * tracked file. Two equal fingerprints mean nothing was committed, staged, edited, added or removed in
+   * between (an edit inside a file that was already untracked is the one thing it cannot see). Null when the
+   * directory is not a Git working tree.
+   */
+  async workingState(cwd: string): Promise<string | null> {
+    try {
+      const head = await this.run(cwd, ['rev-parse', '--verify', '-q', 'HEAD'], { okCodes: [0, 1, 128] })
+      const status = await this.run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '-z', '--untracked-files=all'], { okCodes: [0, 128] })
+      if (status.exitCode !== 0) return null
+      const diff = await this.run(cwd, ['--no-optional-locks', 'diff', '--no-ext-diff', '--binary', 'HEAD'], { okCodes: [0, 1, 128], maxOutputBytes: 64 * 1024 * 1024 })
+      return createHash('sha256').update(head.stdout).update('\0').update(status.stdout).update('\0').update(diff.stdout).digest('hex')
+    } catch {
+      return null
+    }
   }
 
   async status(repo: string): Promise<GitStatus> {
