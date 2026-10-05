@@ -24,6 +24,7 @@ import type { AgentRuntimeProvider } from './types'
 const POLICY_KEY = 'provider-policy'
 /** After this many failed sessions in a row an optional provider is treated as unavailable until it is checked again. */
 export const FAILURES_UNTIL_UNAVAILABLE = 3
+const PROBE_COOLDOWN_MS = 30_000
 
 export interface ProviderSessionStore {
   insert(session: ProviderSession): ProviderSession
@@ -62,6 +63,8 @@ export class ProviderService {
   private statuses = new Map<ProviderId, ProviderStatus>()
   private readonly failures = new Map<ProviderId, { count: number; last: string }>()
   private refreshing: Promise<ProviderStatus[]> | null = null
+  private readonly probing = new Map<ProviderId, Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }>>()
+  private readonly probedAt = new Map<ProviderId, { at: number; result: { ok: boolean; detail: string } }>()
   readonly router: AgentRuntime
 
   constructor(private readonly deps: ProviderServiceDeps) {
@@ -155,12 +158,25 @@ export class ProviderService {
   // ───────────────────────────── health ─────────────────────────────
 
   /** One minimal real session with the provider. Explicit: it uses that provider's quota. */
-  async probe(id: ProviderId): Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }> {
+  probe(id: ProviderId): Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }> {
+    // One test at a time per provider, and not more often than every half minute: a test is a real session.
+    const running = this.probing.get(id)
+    if (running) return running
+    const last = this.probedAt.get(id)
+    const now = this.deps.now?.() ?? Date.now()
+    if (last && now - last.at < PROBE_COOLDOWN_MS) return Promise.resolve({ ...last.result, detail: `${last.result.detail} (tested a moment ago; not repeated)`, status: this.list().find((s) => s.id === id) ?? null })
+    const next = this.runProbe(id).finally(() => this.probing.delete(id))
+    this.probing.set(id, next)
+    return next
+  }
+
+  private async runProbe(id: ProviderId): Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }> {
     const provider = this.byId.get(id)
     if (!provider) throw new NexusError('not_found', `Unknown provider ${id}`)
     const status = this.statuses.get(id)
     if (!status || status.installed !== 'installed' || !status.supported) return { ok: false, detail: status?.supportDetail ?? `${PROVIDER_NAMES[id]} is not installed.`, status: status ?? null }
     const result = await provider.probe().catch((e: unknown) => ({ ok: false, detail: e instanceof Error ? e.message : String(e) }))
+    this.probedAt.set(id, { at: this.deps.now?.() ?? Date.now(), result })
     if (result.ok) this.failures.delete(id)
     else if (id !== PRIMARY_PROVIDER) this.failures.set(id, { count: FAILURES_UNTIL_UNAVAILABLE, last: result.detail.slice(0, 300) })
     const current = this.statuses.get(id)
@@ -222,7 +238,7 @@ export class ProviderService {
       const runtime = provider?.runtime() ?? null
       const status = chosen ? this.statuses.get(chosen) : undefined
       const model = chosen === PRIMARY_PROVIDER ? (spec.model ?? null) : chosen ? ((chosen === 'codex' ? policy.models.codex : chosen === 'gemini' ? policy.models.gemini : null) ?? provider?.defaultModel() ?? null) : null
-      const record = this.deps.sessions.insert({
+      const record = this.safeInsert({
         id: newId(),
         runId: this.deps.runOfAgent(spec.agentId),
         agentId: spec.agentId,
@@ -253,7 +269,7 @@ export class ProviderService {
         inner = runtime.startSession(routed)
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
-        this.deps.sessions.update(record.id, { outcome: 'failed', error: message.slice(0, 600), endedAt: this.iso() })
+        this.safeUpdate(record.id, { outcome: 'failed', error: message.slice(0, 600), endedAt: this.iso() })
         this.noteOutcome(chosen, false, message)
         return refusedHandle(spec.agentId, message)
       }
@@ -275,9 +291,26 @@ export class ProviderService {
     }
   }
 
+  private safeInsert(session: ProviderSession): ProviderSession {
+    try {
+      return this.deps.sessions.insert(session)
+    } catch (e) {
+      this.deps.logger?.(`provider: the session record could not be written: ${e instanceof Error ? e.message : String(e)}`)
+      return session
+    }
+  }
+
+  private safeUpdate(id: string, patch: Partial<ProviderSession>): void {
+    try {
+      this.deps.sessions.update(id, patch)
+    } catch (e) {
+      this.deps.logger?.(`provider: the session record could not be updated: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   /** Passes a session's events through and keeps its record: session id, tokens, how it ended. */
   private observe(inner: AgentSessionHandle, record: ProviderSession, provider: ProviderId): AgentSessionHandle {
-    const sessions = this.deps.sessions
+    const sessions = { update: (id: string, patch: Partial<ProviderSession>): void => this.safeUpdate(id, patch) }
     const note = (ok: boolean, detail: string): void => this.noteOutcome(provider, ok, detail)
     const iso = (): string => this.iso()
     let input = 0

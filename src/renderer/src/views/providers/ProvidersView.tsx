@@ -28,8 +28,10 @@ import {
 } from '../../components/ui'
 import {
   capabilityRows,
+  enableConsent,
   enableSwitch,
   providerHeadline,
+  safetyLine,
   sessionOutcome,
   sessionProviderLabel,
   usageLine,
@@ -56,8 +58,12 @@ function ProviderCard({
   const sw = enableSwitch(status, policy)
   const performance = overview.performance.find((p) => p.provider === status.id)
   const usage = overview.usage.find((u) => u.provider === status.id)
+  // A test is a real session with that provider: it is offered only for a provider you have enabled.
   const canProbe =
-    status.installed === 'installed' && status.supported && status.auth !== 'auth_required'
+    status.installed === 'installed' &&
+    status.supported &&
+    status.auth !== 'auth_required' &&
+    (status.required || enabled)
   return (
     <Card
       title={status.displayName}
@@ -110,6 +116,17 @@ function ProviderCard({
           </Notice>
         ) : null}
         {probe.error ? <ErrorNote error={probe.error} /> : null}
+        {canProbe ? (
+          <p
+            className="m-0 text-small text-text-muted"
+            data-testid={`provider-probe-note-${status.id}`}
+          >
+            Test runs one minimal session with {status.displayName} and uses a little of its quota.
+          </p>
+        ) : null}
+        <p className="m-0 text-small font-medium" data-testid={`provider-safety-${status.id}`}>
+          {safetyLine(status)}
+        </p>
         <KeyValue
           rows={[
             { label: 'Version', value: status.version ?? '—', mono: true },
@@ -129,7 +146,7 @@ function ProviderCard({
             },
             ...capabilityRows(status.capabilities).map((r) => ({ label: r.label, value: r.value })),
           ]}
-          labelWidth="10.5rem"
+          labelWidth="8.5rem"
         />
         <div
           className="rounded-md border bg-surface px-3 py-2 text-small"
@@ -158,7 +175,7 @@ function ProviderCard({
                 onPolicy(withEnabled(policy, status.id as Exclude<ProviderId, 'claude'>, on))
               }
               label={`Allow NEXUS to use ${status.displayName}`}
-              description="Off: nothing is ever sent to this provider. On: it is used only for the uses enabled under Routing."
+              description={enableConsent(status)}
               data-testid={`provider-enable-${status.id}`}
             />
             {sw.disabledReason ? (
@@ -216,7 +233,7 @@ function RoutingCard({
               onPolicy({ ...policy, crossModelReview: { ...policy.crossModelReview, enabled: on } })
             }
             label="Cross-model review"
-            description="Claude implements, another provider reviews independently, Claude verifies. A reviewer's finding is a claim to check against tests and source, never the verdict."
+            description="Claude implements, another provider reviews, Claude verifies. The diff and the files the reviewer reads are sent to that provider. A reviewer's finding is a claim to check against tests and source, never the verdict. If that provider cannot be used, Claude reviews instead when Fall back to Claude is on, and the mission shows it."
             data-testid="routing-review"
           />
           <div className="flex items-center gap-2 pl-[42px]">
@@ -367,16 +384,26 @@ export function ProvidersView() {
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-6 py-5">
-          {overview.error ? <ErrorNote error={overview.error} /> : null}
+          {overview.error ? (
+            <div className="flex flex-col items-start gap-2" data-testid="providers-error">
+              <ErrorNote error={overview.error} />
+              <Button size="sm" onClick={() => void overview.refetch()}>
+                Try again
+              </Button>
+            </div>
+          ) : null}
+          {refresh.error ? <ErrorNote error={refresh.error} /> : null}
           {save.error ? (
             <div data-testid="providers-policy-error">
               <ErrorNote error={save.error} />
             </div>
           ) : null}
           {!o ? (
-            <p className="m-0 text-text-muted" role="status" data-testid="providers-loading">
-              Detecting providers…
-            </p>
+            overview.error ? null : (
+              <p className="m-0 text-text-muted" role="status" data-testid="providers-loading">
+                Detecting providers…
+              </p>
+            )
           ) : (
             <>
               <p className="m-0 text-small text-text-secondary" data-testid="providers-intro">
@@ -385,7 +412,7 @@ export function ProvidersView() {
                 {PROVIDER_NAMES.claude} is always used; nothing is sent to another provider unless
                 you enable it here.
               </p>
-              <div className="grid gap-4 lg:grid-cols-3" data-testid="providers-list">
+              <div className="grid gap-4 xl:grid-cols-3" data-testid="providers-list">
                 {o.statuses.map((s) => (
                   <ProviderCard
                     key={s.id}

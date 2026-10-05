@@ -22,10 +22,18 @@ At startup, and when you press "Detect again", NEXUS asks each provider's own to
 its sign-in state. For Codex that is `codex --version` and `codex login status`.
 
 - No credential file is opened, no token is read, no login is started. If a provider is not signed in, the page
-  says so and tells you to sign in with that provider's tool.
-- No prompt is sent. A provider that is installed and signed in is therefore shown as "Signed in, not yet
-  used", not as "Connected", until a session has worked. "Test" runs one minimal session ("Reply with the
-  single word OK") and uses a little of that provider's quota; it runs only when you press it.
+  says so and tells you to sign in with that provider's tool. Of what the tool prints about its login NEXUS keeps
+  only the kind ("ChatGPT login", "API key", "Signed in"); the line itself is not stored, because it could name
+  an account.
+- The tool is found on PATH and nowhere else, and is started by its absolute path. The directory a session works
+  in is never searched, PATH entries inside it and relative PATH entries are ignored, and a tool found inside it
+  is refused: a file named `codex.cmd` in a repository does not run. On Windows the shim is run by the system's
+  `cmd.exe`, addressed by its absolute path.
+- No prompt is sent. An optional provider that is installed and signed in is therefore shown as "Signed in, not
+  yet used", not as "Connected", until a session has worked. Claude is shown as connected when its runtime
+  reports an authenticated account. "Test" runs one minimal session ("Reply with the single word OK") and uses a
+  little of that provider's quota. It is offered only for a provider you have enabled, runs only when you press
+  it, and is not repeated within half a minute.
 - A provider whose tool does not answer is a status ("Not installed", "Detection failed"), never an error of
   NEXUS. One provider failing detection does not affect the others.
 - A Codex tool older than 0.124.0 is reported as detected and not supported.
@@ -66,7 +74,8 @@ Every agent session passes through one router (`ProviderService.router`), which 
 orchestrator, the Arena, programs and workspaces start sessions exactly as before; they do not know about
 providers. The decision is a pure function, `routeSession(request, policy, statuses)`:
 
-1. A resumed session goes back to the provider that owns its session id.
+1. A resumed session goes back to the provider that owns its session id. A session of another provider is
+   resumed only while that provider is still enabled and usable; otherwise it is refused, never sent elsewhere.
 2. Otherwise Claude is asked for, unless a use that is switched on names another provider for this role
    (cross-model review) or this agent (candidate B of a speculative task).
 3. The named provider is used if it is enabled, installed, supported, signed in, not unavailable, and allowed
@@ -94,10 +103,20 @@ anything. Tests, source and the acceptance criteria decide.
 ## What a Codex session is, and is not
 
 - **Read-only.** NEXUS starts Codex with its read-only sandbox (`-s read-only`, and
-  `sandbox_mode=read-only` for a resumed session) and refuses to start it for a role that changes files. NEXUS
-  does not rely on that alone: it fingerprints the working directory before and after (HEAD, the status of every
-  path, the content of every change to a tracked file), and a session that changed anything is ended as an
-  error and its result discarded. The fingerprint cannot see an edit inside a file that was already untracked.
+  `sandbox_mode=read-only` for a resumed session) and refuses to start it for a role that changes files. The
+  sandbox is Codex's and is what keeps the agent from writing. NEXUS adds one check of its own: it fingerprints
+  the working directory before and after (HEAD, the status of every path, the content of every change to a
+  tracked file). The check fails closed: if the fingerprint cannot be taken (not a Git working tree, Git failed)
+  the session does not start; if it differs or cannot be taken afterwards, the session is ended as an error, its
+  result is discarded, and no further Codex session runs in that directory, so a second attempt cannot pass on
+  the changed state. NEXUS does not undo the change.
+  What the fingerprint cannot see: an edit inside a file that was already untracked, files ignored by Git,
+  anything outside the working directory, and Git's own metadata other than HEAD.
+- **It can read what you can read.** A read-only sandbox does not limit reading. A Codex agent can read files
+  outside the repository, and what it reads can reach its provider. Content of a reviewed repository could ask
+  it to. Enable Codex only for repositories whose content you would let it act on.
+- **Its environment.** The tool runs with NEXUS's environment without the Claude credentials and Node options
+  that NEXUS withholds from every project command.
 - **Not under the NEXUS permission policy.** Tool calls of a Codex agent are not authorized one by one by
   NEXUS. The Codex sandbox confines it. The Providers page states this as "Confinement".
 - **No NEXUS agent tools.** A Codex agent cannot send messages to other agents, report blockers or propose
@@ -109,8 +128,12 @@ anything. Tests, source and the acceptance criteria decide.
   NEXUS starts. Its events are read when it ends.
 - **Its own failures.** An error from Codex, including its own usage limit, is an error of that session. It is
   never reported as a Claude usage limit, never pauses a run for quota and never closes the dispatch gate.
-- **Command line safety.** The tool is started with a fixed argument list. Every argument is checked against a
-  strict character set, and the prompt goes through stdin, never through the command line.
+- **Command line safety.** The tool is started by its absolute path with a fixed argument list. Every argument
+  is checked against a strict character set, a session id that could look like an option is refused, and the
+  prompt goes through stdin, never through the command line.
+- **A failing provider costs a review before Claude takes over.** Fallback is decided when a session starts. A
+  Codex session that fails in the middle fails that review; after three failures in a row Codex is treated as
+  unavailable and Claude does the next ones.
 
 ## Usage
 
@@ -126,7 +149,8 @@ Quota systems differ and NEXUS does not convert them into one scale.
 ## Policy evidence and the Arena
 
 A mission outcome and an Arena trial record which model ran each role. An agent another provider ran is recorded
-as `<provider>:<model>` (for example `reviewer: codex:gpt-5.5`). Evidence from missions with another provider's
+as `<provider>:<model>` (for example `reviewer: codex:gpt-5.5`); in an Arena trial this replaces the Claude model
+of the routing decision for that role. Evidence from missions with another provider's
 reviewer is therefore never pooled with Claude-only evidence under a bare model name, and the existing
 model-drift weighting treats a change of provider like a change of model. The sample thresholds of the adaptive
 policy are unchanged: nothing is concluded from a few sessions. NEXUS 0.6 does not choose a provider by itself;

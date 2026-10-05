@@ -17,7 +17,10 @@ export interface Check<F extends string> {
   errors: Partial<Record<F, string>>
 }
 
-function finish<F extends string>(errors: Partial<Record<F, string>>, order: readonly F[]): Check<F> {
+function finish<F extends string>(
+  errors: Partial<Record<F, string>>,
+  order: readonly F[],
+): Check<F> {
   const first = order.find((f) => errors[f])
   return { ok: first === undefined, reason: first ? (errors[first] ?? null) : null, errors }
 }
@@ -49,8 +52,10 @@ export function validateWorkspaceForm(f: WorkspaceForm): Check<WorkspaceField> {
   const errors: Partial<Record<WorkspaceField, string>> = {}
   const name = f.name.trim()
   if (name.length === 0) errors.name = 'Give the workspace a name.'
-  else if (name.length > LIMITS.workspaceName) errors.name = `At most ${LIMITS.workspaceName} characters.`
-  if (f.description.trim().length > LIMITS.workspaceDescription) errors.description = `At most ${LIMITS.workspaceDescription} characters.`
+  else if (name.length > LIMITS.workspaceName)
+    errors.name = `At most ${LIMITS.workspaceName} characters.`
+  if (f.description.trim().length > LIMITS.workspaceDescription)
+    errors.description = `At most ${LIMITS.workspaceDescription} characters.`
   return finish(errors, ['name', 'description'])
 }
 
@@ -76,15 +81,24 @@ export interface DependencyForm {
   kind: DependencyKind
   detail: string
 }
-export const emptyDependencyForm = (): DependencyForm => ({ from: '', to: '', kind: 'package_dependency', detail: '' })
+export const emptyDependencyForm = (): DependencyForm => ({
+  from: '',
+  to: '',
+  kind: 'package_dependency',
+  detail: '',
+})
 export type DependencyField = 'from' | 'to' | 'detail'
 
-export function validateDependencyForm(f: DependencyForm, existing: readonly { from: string; to: string }[] = []): Check<DependencyField> {
+export function validateDependencyForm(
+  f: DependencyForm,
+  existing: readonly { from: string; to: string }[] = [],
+): Check<DependencyField> {
   const errors: Partial<Record<DependencyField, string>> = {}
   if (!f.from) errors.from = 'Choose the repository that depends on another.'
   if (!f.to) errors.to = 'Choose the repository it depends on.'
   else if (f.from && f.from === f.to) errors.to = 'A repository cannot depend on itself.'
-  else if (f.from && existing.some((e) => e.from === f.from && e.to === f.to)) errors.to = 'This dependency is already recorded.'
+  else if (f.from && existing.some((e) => e.from === f.from && e.to === f.to))
+    errors.to = 'This dependency is already recorded.'
   const detail = f.detail.trim()
   if (detail.length === 0) errors.detail = 'Say why: every dependency needs a reason.'
   else if (detail.length > LIMITS.detail) errors.detail = `At most ${LIMITS.detail} characters.`
@@ -95,7 +109,8 @@ export function buildDependencyInput(workspaceId: string, f: DependencyForm) {
   return { workspaceId, from: f.from, to: f.to, kind: f.kind, detail: f.detail.trim() }
 }
 
-export const isDependencyKind = (v: string): v is DependencyKind => (DEPENDENCY_KINDS as readonly string[]).includes(v)
+export const isDependencyKind = (v: string): v is DependencyKind =>
+  (DEPENDENCY_KINDS as readonly string[]).includes(v)
 
 // ───────────────────────────── contract ─────────────────────────────
 
@@ -106,16 +121,28 @@ export interface ContractForm {
   provider: string
   path: string
 }
-export const emptyContractForm = (): ContractForm => ({ key: '', name: '', kind: 'openapi', provider: '', path: '' })
+export const emptyContractForm = (): ContractForm => ({
+  key: '',
+  name: '',
+  kind: 'openapi',
+  provider: '',
+  path: '',
+})
 export type ContractField = 'key' | 'name' | 'provider' | 'path'
 
-export function validateContractForm(f: ContractForm, existingKeys: readonly string[] = []): Check<ContractField> {
+export function validateContractForm(
+  f: ContractForm,
+  existingKeys: readonly string[] = [],
+): Check<ContractField> {
   const errors: Partial<Record<ContractField, string>> = {}
-  if (!KEY_PATTERN.test(f.key.trim())) errors.key = 'Use lower-case letters, digits and dashes (at most 40).'
-  else if (existingKeys.includes(f.key.trim())) errors.key = 'A contract with this key already exists.'
+  if (!KEY_PATTERN.test(f.key.trim()))
+    errors.key = 'Use lower-case letters, digits and dashes (at most 40).'
+  else if (existingKeys.includes(f.key.trim()))
+    errors.key = 'A contract with this key already exists.'
   const name = f.name.trim()
   if (name.length === 0) errors.name = 'Give the contract a name.'
-  else if (name.length > LIMITS.contractName) errors.name = `At most ${LIMITS.contractName} characters.`
+  else if (name.length > LIMITS.contractName)
+    errors.name = `At most ${LIMITS.contractName} characters.`
   if (!f.provider) errors.provider = 'Choose the repository that owns the contract.'
   const path = f.path.trim()
   if (path.length === 0) errors.path = 'Give the path of the contract file inside the provider.'
@@ -124,10 +151,18 @@ export function validateContractForm(f: ContractForm, existingKeys: readonly str
 }
 
 export function buildContractInput(workspaceId: string, f: ContractForm) {
-  return { workspaceId, key: f.key.trim(), name: f.name.trim(), kind: f.kind, provider: f.provider, path: f.path.trim() }
+  return {
+    workspaceId,
+    key: f.key.trim(),
+    name: f.name.trim(),
+    kind: f.kind,
+    provider: f.provider,
+    path: f.path.trim(),
+  }
 }
 
-export const isContractKind = (v: string): v is ContractKind => (CONTRACT_KINDS as readonly string[]).includes(v)
+export const isContractKind = (v: string): v is ContractKind =>
+  (CONTRACT_KINDS as readonly string[]).includes(v)
 
 export interface ConsumerForm {
   repository: string
@@ -135,10 +170,14 @@ export interface ConsumerForm {
 }
 export type ConsumerField = 'repository' | 'copyPath'
 
-export function validateConsumerForm(f: ConsumerForm, taken: readonly string[] = []): Check<ConsumerField> {
+export function validateConsumerForm(
+  f: ConsumerForm,
+  taken: readonly string[] = [],
+): Check<ConsumerField> {
   const errors: Partial<Record<ConsumerField, string>> = {}
   if (!f.repository) errors.repository = 'Choose a repository.'
-  else if (taken.includes(f.repository)) errors.repository = 'This repository is already a consumer (or owns the contract).'
+  else if (taken.includes(f.repository))
+    errors.repository = 'This repository is already a consumer (or owns the contract).'
   if (f.copyPath.trim().length > LIMITS.path) errors.copyPath = `At most ${LIMITS.path} characters.`
   return finish(errors, ['repository', 'copyPath'])
 }
@@ -160,8 +199,10 @@ export function validateServiceForm(f: ServiceForm): Check<ServiceField> {
   const errors: Partial<Record<ServiceField, string>> = {}
   const name = f.name.trim()
   if (name.length === 0) errors.name = 'Name the service.'
-  else if (name.length > LIMITS.serviceName) errors.name = `At most ${LIMITS.serviceName} characters.`
-  if (f.description.trim().length > LIMITS.serviceDescription) errors.description = `At most ${LIMITS.serviceDescription} characters.`
+  else if (name.length > LIMITS.serviceName)
+    errors.name = `At most ${LIMITS.serviceName} characters.`
+  if (f.description.trim().length > LIMITS.serviceDescription)
+    errors.description = `At most ${LIMITS.serviceDescription} characters.`
   return finish(errors, ['name', 'description'])
 }
 
@@ -178,31 +219,52 @@ export interface MemoryForm {
   evidence: string
   repositories: string[]
 }
-export const emptyMemoryForm = (): MemoryForm => ({ kind: 'architecture', title: '', content: '', evidence: '', repositories: [] })
+export const emptyMemoryForm = (): MemoryForm => ({
+  kind: 'architecture',
+  title: '',
+  content: '',
+  evidence: '',
+  repositories: [],
+})
 export type MemoryField = 'title' | 'content' | 'evidence' | 'repositories'
 
-export const MEMORY_REPOSITORIES_HINT = 'Workspace memory is for facts that span repositories. A fact about one repository belongs to that repository’s own memory, so choose at least two.'
+export const MEMORY_REPOSITORIES_HINT =
+  'Workspace memory is for facts that span repositories. A fact about one repository belongs to that repository’s own memory, so choose at least two.'
 
 export function validateMemoryForm(f: MemoryForm): Check<MemoryField> {
   const errors: Partial<Record<MemoryField, string>> = {}
   const title = f.title.trim()
   if (title.length === 0) errors.title = 'Give the entry a title.'
-  else if (title.length > LIMITS.memoryTitle) errors.title = `At most ${LIMITS.memoryTitle} characters.`
+  else if (title.length > LIMITS.memoryTitle)
+    errors.title = `At most ${LIMITS.memoryTitle} characters.`
   const content = f.content.trim()
   if (content.length === 0) errors.content = 'Say what is true.'
-  else if (content.length > LIMITS.memoryText) errors.content = `At most ${LIMITS.memoryText} characters.`
+  else if (content.length > LIMITS.memoryText)
+    errors.content = `At most ${LIMITS.memoryText} characters.`
   const evidence = f.evidence.trim()
-  if (evidence.length === 0) errors.evidence = 'Say how you know (a file, a commit, a verification).'
-  else if (evidence.length > LIMITS.memoryText) errors.evidence = `At most ${LIMITS.memoryText} characters.`
-  if (f.repositories.length < 2) errors.repositories = 'Choose at least two repositories: a fact about one repository belongs to that repository.'
+  if (evidence.length === 0)
+    errors.evidence = 'Say how you know (a file, a commit, a verification).'
+  else if (evidence.length > LIMITS.memoryText)
+    errors.evidence = `At most ${LIMITS.memoryText} characters.`
+  if (f.repositories.length < 2)
+    errors.repositories =
+      'Choose at least two repositories: a fact about one repository belongs to that repository.'
   return finish(errors, ['title', 'content', 'evidence', 'repositories'])
 }
 
 export function buildMemoryInput(workspaceId: string, f: MemoryForm) {
-  return { workspaceId, kind: f.kind, title: f.title.trim(), content: f.content.trim(), evidence: f.evidence.trim(), repositories: [...f.repositories].sort() }
+  return {
+    workspaceId,
+    kind: f.kind,
+    title: f.title.trim(),
+    content: f.content.trim(),
+    evidence: f.evidence.trim(),
+    repositories: [...f.repositories].sort(),
+  }
 }
 
-export const isMemoryKind = (v: string): v is WorkspaceMemoryKind => (WORKSPACE_MEMORY_KINDS as readonly string[]).includes(v)
+export const isMemoryKind = (v: string): v is WorkspaceMemoryKind =>
+  (WORKSPACE_MEMORY_KINDS as readonly string[]).includes(v)
 
 // ───────────────────────────── policy ─────────────────────────────
 
@@ -218,7 +280,11 @@ export interface PolicyForm {
   missionPreset: WorkspacePolicy['missionPreset']
   requireConsumerUpdateOnBreakingChange: boolean
 }
-export type PolicyField = 'protectedBranches' | 'maxRepositoriesPerMission' | 'maxTasksPerMission' | 'maxParallelRepositories'
+export type PolicyField =
+  | 'protectedBranches'
+  | 'maxRepositoriesPerMission'
+  | 'maxTasksPerMission'
+  | 'maxParallelRepositories'
 
 export function policyToForm(p: WorkspacePolicy): PolicyForm {
   return {
@@ -254,11 +320,20 @@ export function validatePolicyForm(f: PolicyForm): Check<PolicyField> {
   const errors: Partial<Record<PolicyField, string>> = {}
   const branches = splitBranches(f.protectedBranches)
   if (branches.length > 20) errors.protectedBranches = 'At most 20 protected branches.'
-  else if (branches.some((b) => b.length > 120)) errors.protectedBranches = 'A branch name is at most 120 characters.'
-  if (intIn(f.maxRepositoriesPerMission, 1, 20) === null) errors.maxRepositoriesPerMission = 'A whole number from 1 to 20.'
-  if (intIn(f.maxTasksPerMission, 1, 40) === null) errors.maxTasksPerMission = 'A whole number from 1 to 40.'
-  if (intIn(f.maxParallelRepositories, 1, 4) === null) errors.maxParallelRepositories = 'A whole number from 1 to 4.'
-  return finish(errors, ['protectedBranches', 'maxRepositoriesPerMission', 'maxTasksPerMission', 'maxParallelRepositories'])
+  else if (branches.some((b) => b.length > 120))
+    errors.protectedBranches = 'A branch name is at most 120 characters.'
+  if (intIn(f.maxRepositoriesPerMission, 1, 20) === null)
+    errors.maxRepositoriesPerMission = 'A whole number from 1 to 20.'
+  if (intIn(f.maxTasksPerMission, 1, 40) === null)
+    errors.maxTasksPerMission = 'A whole number from 1 to 40.'
+  if (intIn(f.maxParallelRepositories, 1, 4) === null)
+    errors.maxParallelRepositories = 'A whole number from 1 to 4.'
+  return finish(errors, [
+    'protectedBranches',
+    'maxRepositoriesPerMission',
+    'maxTasksPerMission',
+    'maxParallelRepositories',
+  ])
 }
 
 /** Null when the form is invalid. Publishing is always 'never'. */
@@ -279,6 +354,11 @@ export function buildPolicy(f: PolicyForm): WorkspacePolicy | null {
 }
 
 export function policyEquals(a: WorkspacePolicy, b: WorkspacePolicy): boolean {
-  const norm = (p: WorkspacePolicy) => JSON.stringify(Object.entries({ ...p, allowedRepositories: [...p.allowedRepositories].sort() }).sort(([x], [y]) => (x < y ? -1 : 1)))
+  const norm = (p: WorkspacePolicy) =>
+    JSON.stringify(
+      Object.entries({ ...p, allowedRepositories: [...p.allowedRepositories].sort() }).sort(
+        ([x], [y]) => (x < y ? -1 : 1),
+      ),
+    )
   return norm(a) === norm(b)
 }

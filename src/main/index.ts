@@ -24,7 +24,7 @@ import { createV5Handlers } from './modules/ipc/v5-handlers'
 import { createV6Handlers } from './modules/ipc/v6-handlers'
 import { createV7Handlers } from './modules/ipc/v7-handlers'
 import { activeAgentsOf, ControlPlane, createWorkloadAdapters, unownedActiveWorkloads } from './modules/control-plane'
-import { ClaudeAgentRuntimeProvider, CodexRuntimeProvider, FakeRuntimeProvider, GeminiRuntimeProvider, ProviderService } from './modules/providers'
+import { ClaudeAgentRuntimeProvider, CODEX_CAPABILITIES, CodexRuntimeProvider, FakeRuntimeProvider, GeminiRuntimeProvider, ProviderService } from './modules/providers'
 import { Orchestrator } from './modules/orchestrator'
 import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload, WorkspaceMissionWorkload } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
@@ -204,7 +204,7 @@ async function bootstrap(): Promise<void> {
     providers: fakeRuntime
       ? [
           new FakeRuntimeProvider('claude', fakeRuntime, { authDetail: 'Scripted runtime', health: 'healthy' }),
-          new FakeRuntimeProvider('codex', new FakeAgentRuntime({ script: createDemoScript() }), process.env['NEXUS_FAKE_CODEX'] === 'auth' ? { auth: 'auth_required', health: 'unavailable' } : {}, 'scripted-codex'),
+          new FakeRuntimeProvider('codex', new FakeAgentRuntime({ script: createDemoScript() }), { capabilities: CODEX_CAPABILITIES, ...(process.env['NEXUS_FAKE_CODEX'] === 'auth' ? { auth: 'auth_required' as const, health: 'unavailable' as const } : {}) }, 'scripted-codex'),
           new FakeRuntimeProvider('gemini', null, { installed: 'not_installed', version: null, auth: 'unknown', authDetail: null, supportDetail: 'The Gemini command line tool was not found on PATH.', health: 'unavailable' }),
         ]
       : [

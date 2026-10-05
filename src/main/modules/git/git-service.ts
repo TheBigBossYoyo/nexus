@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { NexusError } from '@shared/result'
-import { runProcess } from '../process/run-process'
+import { projectCommandEnv, runProcess } from '../process/run-process'
 import type { ProcessResult } from '../process/run-process'
 
 export interface GitAuthor {
@@ -233,11 +234,27 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
  * NEXUS only ever creates branches/worktrees, commits, merges with abort, and removes worktrees. The one
  * hard reset (resetClean) is for NEXUS-owned worktrees only.
  */
+/** Subcommands of NEXUS's own that change a working tree, an index or a branch. */
+const MUTATING = new Set(['add', 'commit', 'merge', 'reset', 'clean', 'checkout', 'switch', 'restore', 'cherry-pick', 'rebase', 'revert', 'stash', 'rm', 'mv', 'apply', 'am'])
+const samePath = (a: string, b: string): boolean => {
+  const norm = (p: string): string => {
+    const r = resolve(p).replace(/\\/g, '/').replace(/\/+$/, '')
+    return process.platform === 'win32' ? r.toLowerCase() : r
+  }
+  return norm(a) === norm(b)
+}
+
 export class GitService {
   private readonly env: NodeJS.ProcessEnv
+  /** An empty directory NEXUS owns: its git commands look for hooks there, so they run none. */
+  private noHooksDir: string | null = null
+  /** Worktree pointer files that were verified, by what identified them then. */
+  private readonly verifiedPointers = new Map<string, string>()
 
   constructor(private readonly gitPath: string = 'git') {
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GIT_MERGE_AUTOEDIT: 'no' }
+    // Git needs none of the credentials NEXUS withholds from project commands, and a program that a
+    // repository's configuration makes git run must not find them in its environment.
+    const env: NodeJS.ProcessEnv = { ...projectCommandEnv(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GIT_MERGE_AUTOEDIT: 'no' }
     // Inherited repo-scoping variables (e.g. when launched from a git hook) would redirect every call.
     for (const key of Object.keys(env)) {
       if (['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX'].includes(key.toUpperCase())) {
@@ -249,9 +266,51 @@ export class GitService {
 
   // ---- plumbing ----
 
+  /**
+   * A linked worktree finds its repository through a one-line `.git` file. An agent that rewrites that file
+   * could point the directory at another repository or another worktree, and NEXUS's next commit, reset or
+   * clean there would act on that one. Before any command that changes something, the pointer is checked
+   * against Git's own back-pointer (`<gitdir>/gitdir` names the worktree's `.git` file), which lives in the
+   * repository where no agent writes.
+   */
+  private async assertOwnGitDir(cwd: string): Promise<void> {
+    const dotGit = join(cwd, '.git')
+    let info
+    try {
+      info = await lstat(dotGit)
+    } catch {
+      return // Not at the top of a working tree; git decides by itself what the directory is.
+    }
+    if (info.isDirectory()) return // The repository's own checkout.
+    // A pointer file that has not changed since it was last verified is not verified again: the check costs a
+    // process, and NEXUS runs many git commands. Any rewrite changes the file's identity, size or change time.
+    const stamp = `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`
+    if (this.verifiedPointers.get(cwd) === stamp) return
+    const refuse = (why: string): never => {
+      throw new NexusError('invalid_state', `The working tree at ${cwd} no longer points at its own Git directory (${why}). NEXUS will not write through it.`, { cwd })
+    }
+    if (!info.isFile()) refuse('its .git is neither a file nor a directory')
+    const shown = await runProcess(this.gitPath, ['rev-parse', '--absolute-git-dir'], { cwd, env: this.env, timeoutMs: 15_000 })
+    const gitDir = shown.stdout.trim()
+    if (shown.exitCode !== 0 || gitDir === '') refuse('git cannot resolve it')
+    let back = ''
+    try {
+      back = (await readFile(join(gitDir, 'gitdir'), 'utf8')).trim()
+    } catch {
+      refuse('the Git directory it names is not a worktree directory')
+    }
+    if (!samePath(resolve(gitDir, back), dotGit)) refuse('the Git directory it names belongs to another working tree')
+    this.verifiedPointers.set(cwd, stamp)
+  }
+
   /** Runs git; throws NexusError unless the exit code is in okCodes. */
   async run(cwd: string, args: readonly string[], opts: RunGitOptions = {}): Promise<ProcessResult> {
-    const fullArgs = ['-c', 'core.longpaths=true', '-c', 'core.quotepath=false', ...args]
+    // NEXUS's own git commands do not run what a repository's configuration could make git run: no file
+    // system monitor, no hooks, no pager, no `ext::` transport. Agents work in these repositories; a
+    // configuration key or a hook one of them left behind must not execute in NEXUS's process context.
+    this.noHooksDir ??= mkdtempSync(join(tmpdir(), 'nexus-no-hooks-'))
+    const fullArgs = ['-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...args]
+    if (MUTATING.has(args[0] ?? '')) await this.assertOwnGitDir(cwd)
     const result = await runProcess(this.gitPath, fullArgs, {
       cwd,
       env: opts.env ? { ...this.env, ...opts.env } : this.env,

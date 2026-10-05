@@ -1,9 +1,23 @@
 import { useState } from 'react'
 import { useCreateWorkspace } from '../../lib/queries-v5'
 import { Button, Dialog, ErrorNote, Field, Input, Textarea } from '../../components/ui'
-import { buildWorkspaceInput, emptyWorkspaceForm, LIMITS, validateWorkspaceForm, type WorkspaceField } from './workspaceForm'
+import {
+  buildWorkspaceInput,
+  emptyWorkspaceForm,
+  LIMITS,
+  validateWorkspaceForm,
+  type WorkspaceField,
+} from './workspaceForm'
 
-export function NewWorkspaceDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (workspaceId: string) => void }) {
+export function NewWorkspaceDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (workspaceId: string) => void
+}) {
   const create = useCreateWorkspace()
   const [form, setForm] = useState(emptyWorkspaceForm)
   const [touched, setTouched] = useState<ReadonlySet<WorkspaceField>>(new Set())
@@ -34,10 +48,18 @@ export function NewWorkspaceDialog({ open, onClose, onCreated }: { open: boolean
       footer={
         <>
           <div className="mr-auto flex min-w-0 items-center" role="status">
-            {check.reason && touched.size > 0 ? <span className="text-small text-warning">{check.reason}</span> : null}
+            {check.reason && touched.size > 0 ? (
+              <span className="text-small text-warning">{check.reason}</span>
+            ) : null}
           </div>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!check.ok} loading={create.isPending} onClick={submit} data-testid="workspace-create">
+          <Button
+            variant="primary"
+            disabled={!check.ok}
+            loading={create.isPending}
+            onClick={submit}
+            data-testid="workspace-create"
+          >
             Create
           </Button>
         </>
@@ -50,7 +72,10 @@ export function NewWorkspaceDialog({ open, onClose, onCreated }: { open: boolean
           submit()
         }}
       >
-        <p className="m-0 text-small text-text-secondary">A workspace groups the repositories that one goal can change together. You enroll the repositories after creating it.</p>
+        <p className="m-0 text-small text-text-secondary">
+          A workspace groups the repositories that one goal can change together. You enroll the
+          repositories after creating it.
+        </p>
         <Field label="Name" error={err('name')}>
           {(id) => (
             <Input
@@ -65,8 +90,21 @@ export function NewWorkspaceDialog({ open, onClose, onCreated }: { open: boolean
             />
           )}
         </Field>
-        <Field label="Description" hint="Optional. What these repositories make together." error={err('description')}>
-          {(id) => <Textarea id={id} rows={3} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} onBlur={() => touch('description')} data-testid="workspace-description" />}
+        <Field
+          label="Description"
+          hint="Optional. What these repositories make together."
+          error={err('description')}
+        >
+          {(id) => (
+            <Textarea
+              id={id}
+              rows={3}
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              onBlur={() => touch('description')}
+              data-testid="workspace-description"
+            />
+          )}
         </Field>
         {create.isError ? <ErrorNote error={create.error} /> : null}
       </form>

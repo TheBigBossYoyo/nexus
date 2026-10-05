@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -43,6 +43,9 @@ it('detects providers and, where Codex is available, completes a real read-only 
     sh(repo, 'add', '-A')
     sh(repo, 'commit', '-q', '-m', 'sum')
     writeFileSync(join(repo, 'average.js'), "import { sum } from './sum.js'\n\n// The average of a list of numbers; 0 for an empty list.\nexport function average(values) {\n  return sum(values) / values.length\n}\n")
+    // A file named like the tool, in the repository. cmd.exe would run it before the real one if NEXUS started the tool by name.
+    writeFileSync(join(repo, 'codex.cmd'), ['@echo planted> planted-ran.txt', ''].join(String.fromCharCode(13, 10)))
+    writeFileSync(join(repo, 'codex.bat'), ['@echo planted> planted-ran.txt', ''].join(String.fromCharCode(13, 10)))
     sh(repo, 'add', '-A')
     sh(repo, 'commit', '-q', '-m', 'average')
     const before = await git.workingState(repo)
@@ -80,6 +83,7 @@ it('detects providers and, where Codex is available, completes a real read-only 
       durationMs: turn?.durationMs ?? null,
       commandsRun: events.filter((e) => e.type === 'tool.started').length,
       workingDirectoryUnchanged: before !== null && before === after,
+      plantedToolRan: existsSync(join(repo, 'planted-ran.txt')),
     }
     save()
     expect(turn?.outcome, JSON.stringify(turn?.errors)).toBe('success')
@@ -92,6 +96,7 @@ it('detects providers and, where Codex is available, completes a real read-only 
     expect(before).not.toBeNull()
     expect(after).toBe(before)
     expect(handle.sessionId()).toMatch(/^[A-Za-z0-9-]{8,64}$/)
+    expect(existsSync(join(repo, 'planted-ran.txt'))).toBe(false)
   } finally {
     rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }

@@ -76,6 +76,8 @@ export class FakeProgramHost implements ProgramRunHost {
   /** The strategy a mission run reports having resolved to. */
   resolved: (index: number, input: CreateInput) => string = (_i, input) => (input.strategy === 'ADAPTIVE' || !input.strategy ? 'BUILD' : input.strategy)
   delayMs = 0
+  /** Whether the project of a run has a check command that ran. Default: yes. */
+  checksRan: (run: Run) => boolean = () => true
   /** The files a completing mission writes (path to content), given the repository it runs in. Default: one marker file. */
   files: ((run: Run, repoPath: string) => Record<string, string>) | null = null
   private missions = 0
@@ -188,7 +190,7 @@ export class FakeProgramHost implements ProgramRunHost {
       sh(root, 'worktree', 'remove', '--force', dir)
     }
     this.repos.tasks.insert(makeTask(runId, 'work', { state: 'completed', resultSummary: 'Implemented the milestone.' }))
-    this.repos.verifications.insert({ id: newId(), runId, taskId: null, agentId: null, attempt: 1, kind: 'checks', passed: behavior !== 'checks_fail', summary: behavior === 'checks_fail' ? '1 of 2 commands failed' : 'All commands passed', criteria: [], commands: [], failures: [], createdAt: nowIso() })
+    this.repos.verifications.insert({ id: newId(), runId, taskId: null, agentId: null, attempt: 1, kind: 'checks', passed: behavior !== 'checks_fail', summary: behavior === 'checks_fail' ? '1 of 2 commands failed' : 'All commands passed', criteria: [], commands: this.checksRan(run) ? [{ name: 'test', command: 'npm test', cwd: root, exitCode: behavior === 'checks_fail' ? 1 : 0, timedOut: false, durationMs: 1, output: '' }] : [], failures: [], createdAt: nowIso() })
     this.repos.runs.update(runId, { state: 'completed', integrationBranch: branch, finishedAt: nowIso() })
     this.bus.emit({ runId, type: 'run.completed', payload: { summary: 'done' } })
   }

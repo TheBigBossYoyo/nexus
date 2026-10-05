@@ -86,6 +86,29 @@ export function capabilityRows(c: ProviderCapabilities): { label: string; value:
   ]
 }
 
+/** What switching a provider on means, in the words shown under the switch: what is sent, and what it may do. */
+export function enableConsent(
+  status: Pick<ProviderStatus, 'displayName' | 'capabilities'>,
+): string {
+  const name = status.displayName
+  const does = status.capabilities.writes
+    ? `${name} may change files in the worktrees NEXUS gives it.`
+    : `${name} never changes files: it reviews, researches and criticises.`
+  return `Off: nothing is ever sent to ${name}. On: for the uses enabled under Routing, prompts with code and diffs from your repositories are sent to ${name}, under your ${name} sign-in and quota. ${does}`
+}
+
+/** The one safety fact of a provider, shown under its state. */
+export function safetyLine(
+  status: Pick<ProviderStatus, 'displayName' | 'required' | 'capabilities'>,
+): string {
+  if (!status.capabilities.sessions) return 'NEXUS cannot run sessions with this provider.'
+  if (status.capabilities.writes)
+    return status.required
+      ? 'Plans, writes and verifies under the NEXUS permission policy.'
+      : 'May change files, in worktrees only.'
+  return 'Read-only: reviews and research, never edits files. Its tool calls are confined by its own sandbox, not by the NEXUS permission policy.'
+}
+
 /** Why the enable switch is disabled, or null. Claude is always on and has no switch. */
 export function enableSwitch(
   status: ProviderStatus,

@@ -304,3 +304,45 @@ describe("NEXUS's own data is off limits to every role", () => {
     expect(cls('git commit -am "docs: overnight.key rotation"', 'bash').level).toBe('write')
   })
 })
+
+describe('readiness review: git config behind a value option, and Git\'s own files', () => {
+  it('finds a dangerous key wherever it stands on the command line', async () => {
+    const commands = [
+      'git config --type bool core.fsmonitor evil',
+      'git config --type=path core.hooksPath hooks',
+      'git config --default x core.sshCommand evil',
+      'git config --comment note alias.x "!evil"',
+      'git config set --type bool core.fsmonitor evil',
+      'git config --file .git/config core.pager evil',
+      'git config --local --type bool filter.a.clean evil',
+    ]
+    for (const command of commands) {
+      for (const shell of ['bash', 'powershell'] as const) {
+        expect(cls(command, shell).level, `${shell}: ${command}`).not.toBe('safe')
+        expect(cls(command, shell).reasons.join(' '), `${shell}: ${command}`).toMatch(/can make git run arbitrary programs|Git's own files/)
+        for (const role of WRITING) expect((await decide(role, shell, command)).behavior, `${role} ${shell}: ${command}`).not.toBe('allow')
+      }
+    }
+    // Harmless keys and reads stay as they were.
+    for (const command of ['git config user.email x@y.z', 'git config --type bool core.autocrlf true', 'git config --get core.fsmonitor', 'git config --list']) {
+      expect(cls(command, 'bash').reasons.join(' '), command).not.toMatch(/arbitrary programs/)
+    }
+  })
+
+  it("asks before any command but git touches Git's own files: the worktree pointer, the configuration, the hooks", async () => {
+    const bash = ['echo "gitdir: C:/Users/u/repo/.git" > .git', 'printf x >> .git/config', 'cp evil.sh .git/hooks/pre-commit', 'tee .git/config < x', "node -e \"require('fs').writeFileSync('.git', 'x')\" .git", 'cat .git/HEAD', 'sed -i s/a/b/ .git/config']
+    const powershell = ['Set-Content -Path .git -Value "gitdir: C:/x"', "'x' | Out-File .git\\config", 'Copy-Item evil.cmd .git\\hooks\\pre-commit.cmd', 'Add-Content .git/config "[core]"']
+    for (const [shell, commands] of [['bash', bash], ['powershell', powershell]] as const) {
+      for (const command of commands) {
+        // The interpreter-argument form is only caught when the path is a word of the command; see SECURITY.md.
+        const result = cls(command, shell)
+        expect(result.reasons.join(' '), `${shell}: ${command}`).toMatch(/Git's own files|\.git directory/)
+        for (const role of WRITING) expect((await decide(role, shell, command)).behavior, `${role} ${shell}: ${command}`).not.toBe('allow')
+      }
+    }
+    // Files that only start with ".git" are ordinary files, and git itself may name its directory.
+    for (const command of ['echo node_modules >> .gitignore', 'cat .gitattributes', 'git --git-dir=.git status', 'ls .github/workflows']) {
+      expect(cls(command, 'bash').reasons.join(' '), command).not.toMatch(/Git's own files/)
+    }
+  })
+})

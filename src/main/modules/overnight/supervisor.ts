@@ -1502,7 +1502,9 @@ export class OvernightSupervisor {
     // timer is gone, and the record must say so.
     const boot = this.bootTime()
     for (const record of repos.overnight.listAll(50)) {
-      if (this.failsafeArmed(record) && !this.live.has(record.runId) && record.failsafe && boot > Date.parse(record.failsafe.scheduledAt) + 60_000) {
+      // The margin is the one recoverOne uses for the same question. (It was a minute: a restart of Windows within
+      // a minute of arming left the record saying "armed" for good. Found by the 5000-history stress.)
+      if (this.failsafeArmed(record) && !this.live.has(record.runId) && record.failsafe && boot > Date.parse(record.failsafe.scheduledAt) + 2000) {
         this.update(record.id, { failsafe: { ...record.failsafe, lostAt: iso(this.now()) } })
       }
     }

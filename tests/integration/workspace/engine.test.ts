@@ -15,6 +15,7 @@ import { OvernightSupervisor, WorkspaceMissionWorkload, type OvernightOrchestrat
 import { FakePowerController } from '@main/modules/power'
 import { isReasoningRun, WORKSPACE_PLANNER_MARKER } from '@shared/program'
 import { WorkspaceEngine } from '@main/modules/workspace'
+import { extractSurface, stripBlockComments } from '@main/modules/workspace/contracts'
 import { makeProject } from '../persistence/fixtures'
 import { FakeProgramHost, sleep } from '../program/harness'
 
@@ -637,6 +638,50 @@ describe('workspace engine: audit regressions', () => {
     expect(rig.repos.workspaceTasks.getByRun(recorded.runId!)).toMatchObject({ state: 'RUNNING' })
     // In ordinary operation the marker never outlives the start of a run.
     expect(rig.host.created.filter((c) => c.kind === 'mission').length).toBeGreaterThan(0)
+  })
+
+  it('checks that did not run are not passed checks: a repository without a check command fails verification, a documentation repository is excused', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    // The backend's run completes and its checks "pass", but no command ran there.
+    rig.host.checksRan = (run) => rig.repos.projects.require(run.projectId).rootPath !== rig.paths.backend
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    const ended = await rig.untilState(mission.id, ['COMPLETED', 'BLOCKED'])
+    expect(ended.state).toBe('BLOCKED')
+    const check = ended.verification!.checks.find((c) => c.name === 'checks of api')!
+    expect(check).toMatchObject({ passed: false, repository: 'backend' })
+    expect(check.detail).toContain('No build or test command ran')
+    expect(ended.verification!.checks.find((c) => c.name === 'checks of sdk')).toMatchObject({ passed: true })
+    // Nothing is recorded or prepared for work that did not verify.
+    expect(rig.engine.detail(ws.id).releaseTrains).toEqual([])
+    // A documentation repository has nothing to build or test, and says so.
+    const docsRepo = rig.repos.enrolledRepositories.listByWorkspace(ws.id).find((r) => r.rootPath === rig.paths.docs) ?? (await rig.engine.enroll(ws.id, { path: rig.paths.docs, key: 'docs' }))
+    rig.engine.setRole(docsRepo.id, 'documentation')
+    rig.host.answers.plan = [planJson([task('docs', docsRepo.key)])]
+    rig.host.checksRan = () => false
+    rig.host.files = () => ({ 'guide.md': '# Guide\n' })
+    const second = await rig.engine.createMission(ws.id, { goal: 'Write the guide.', start: true })
+    await rig.untilState(second.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(second.id, true)
+    const done = await rig.untilState(second.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+    expect(done.verification!.checks.find((c) => c.name === 'checks of docs')?.detail).toContain('a documentation repository')
+  })
+
+  it('a contract that could not be read before the mission is unknown, not new; a hostile contract file is read in linear time', async () => {
+    const big = `${'/* '.repeat(120_000)}export const x: number`
+    const started = Date.now()
+    expect(extractSurface('typescript_api', big).surface.map((e) => e.path)).toEqual([])
+    expect(extractSurface('typescript_api', `${'/* open '.repeat(40_000)}`).parseError).not.toBeNull()
+    expect(extractSurface('database_schema', 'create table t ('.repeat(30_000)).parseError).not.toBeNull()
+    expect(extractSurface('protobuf', `message M { int32 a = 1; } ${'x'.repeat(600_000)}`).parseError).toContain('larger than 512 KB')
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(stripBlockComments('a /* b */ c /* d')).toBe('a  c ')
+    expect(stripBlockComments('no comments')).toBe('no comments')
   })
 
   it('the planner session is an internal run: lists of missions leave it out', async () => {

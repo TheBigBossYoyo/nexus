@@ -51,7 +51,7 @@ Statements that hold for the 0.6 feature set:
 ## What's new in 0.5
 
 The 0.5 feature set goes from "change one repository" to "change several related repositories for one goal".
-This section describes the feature set; it does not announce a release.
+Released as 0.5.0.
 
 | Feature | What it does | Where to read more |
 |---|---|---|

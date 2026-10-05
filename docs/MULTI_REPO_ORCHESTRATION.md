@@ -172,7 +172,7 @@ Through three channels, all in the task's prompt or base:
 3. The content of each contract the task names. If the task's repository provides the contract, the prompt
    says so, names the contract file and its consumers, and says to change the contract file itself. If the
    repository consumes it, the prompt includes the contract file as the provider left it, in a quoted block
-   (up to 12000 characters), read from the provider's newest result commit in this mission; when the mission did
+   (up to 12000 characters when the consumer keeps no copy), read from the provider's newest result commit in this mission; when the mission did
    not change the provider, from the result an earlier milestone of the same workspace program left there, and
    otherwise from the provider's `HEAD`. If the consumer keeps its own copy, the
    prompt says where it is and to make that file exactly equal to the content shown and to adapt the code and
@@ -253,6 +253,13 @@ The engine does not run its own quota recovery. It observes the usage dispatch g
 
 `workspace.resumeMission` does not accept `WAITING_FOR_QUOTA`; Pause does. The UI offers no Resume in that
 state: the mission continues by itself.
+
+### A consumer that keeps a copy
+
+A consumer with a copy path must make its copy equal to the contract, so it is given the contract whole and
+verbatim (up to 200 KB; a larger contract blocks the mission with that reason), between two lines that carry a
+random token. Content of a repository cannot end that block, because it cannot know the token. The prompt says
+the block is data, not instructions.
 
 ## Recovery after a restart
 
@@ -383,7 +390,7 @@ final shutdown replacing the failsafe.
 | A task's run fails or is cancelled | The task is `FAILED`; the mission is `BLOCKED` with `Task <key> (<repository>) failed: ... Nothing that depends on it was started.` Tasks that were already running keep running |
 | A task's run is paused for a reason other than a usage limit or recovery | `BLOCKED`: the run needs attention |
 | Every task completed but verification fails | `BLOCKED` with the failed checks; verification stays stored |
-| A repository has no build or test command | Its `checks of <key>` fails, so the mission cannot pass verification |
+| A repository has no build or test command, or none ran | Its `checks of <key>` fails, so the mission cannot pass verification: checks that did not run are not passed checks. A repository whose role is `documentation` is excused and the check says so |
 | A contract the mission touched cannot be read as its kind after the mission | `contract <key> is readable` fails |
 | The engine throws an unexpected error in a pass | `BLOCKED` with the error text |
 | A usage limit | `WAITING_FOR_QUOTA`, then back by itself |

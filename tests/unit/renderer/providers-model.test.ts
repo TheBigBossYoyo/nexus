@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PROVIDER_POLICY, NO_CAPABILITIES, type ProviderCapabilities, type ProviderPolicy, type ProviderSession, type ProviderStatus } from '@shared/provider'
-import { agentProvider, capabilityRows, enableSwitch, providerHeadline, sessionOutcome, sessionProviderLabel, usageLine, useAvailability, withEnabled } from '../../../src/renderer/src/views/providers/providersModel'
+import { agentProvider, capabilityRows, enableConsent, enableSwitch, safetyLine, providerHeadline, sessionOutcome, sessionProviderLabel, usageLine, useAvailability, withEnabled } from '../../../src/renderer/src/views/providers/providersModel'
 
 const READ_ONLY: ProviderCapabilities = { sessions: true, resume: true, structuredOutput: 'prompted', toolAuthorization: false, nexusTools: false, mcp: false, usageReport: false, confinement: 'provider_sandbox', writes: false }
 const status = (over: Partial<ProviderStatus> = {}): ProviderStatus => ({ id: 'codex', displayName: 'Codex', required: false, installed: 'installed', version: '0.130.0', auth: 'authenticated', authDetail: 'Logged in using ChatGPT', supported: true, supportDetail: null, health: 'unknown', healthDetail: null, models: [], capabilities: READ_ONLY, checkedAt: 'now', ...over })
@@ -52,6 +52,17 @@ describe('providers page model', () => {
     expect(off.enabled.codex).toBe(false)
     expect(off.crossModelReview.enabled).toBe(false)
     expect(withEnabled(DEFAULT_PROVIDER_POLICY, 'codex', true).crossModelReview.enabled).toBe(false)
+  })
+
+  it('says what enabling a provider sends and what the provider may do', () => {
+    const consent = enableConsent(status())
+    expect(consent).toContain('code and diffs from your repositories are sent to Codex')
+    expect(consent).toContain('never changes files')
+    expect(enableConsent(status({ capabilities: { ...READ_ONLY, writes: true } }))).toContain('may change files')
+    expect(safetyLine(status())).toContain('Read-only')
+    expect(safetyLine(status())).toContain('not by the NEXUS permission policy')
+    expect(safetyLine(status({ capabilities: NO_CAPABILITIES }))).toContain('cannot run sessions')
+    expect(safetyLine(status({ id: 'claude', required: true, capabilities: { ...READ_ONLY, writes: true } }))).toContain('NEXUS permission policy')
   })
 
   it('a use is offered only when it can work', () => {

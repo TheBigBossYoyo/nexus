@@ -6,10 +6,19 @@ import { compatibilityInfo, missionStateInfo, type CompatIcon } from './workspac
 
 /** Small presentational pieces shared by the Workspaces pages. State always carries text and an icon or dot. */
 
-export function MissionStateBadge({ state, testId }: { state: WorkspaceMissionState; testId?: string }) {
+export function MissionStateBadge({
+  state,
+  testId,
+}: {
+  state: WorkspaceMissionState
+  testId?: string
+}) {
   return (
     <span data-testid={testId} data-state={state} className="inline-flex">
-      <StatusBadge status={missionStateInfo(state)} pulse={state === 'PLANNING' || state === 'ACTIVE' || state === 'VERIFYING'} />
+      <StatusBadge
+        status={missionStateInfo(state)}
+        pulse={state === 'PLANNING' || state === 'ACTIVE' || state === 'VERIFYING'}
+      />
     </span>
   )
 }
@@ -26,7 +35,13 @@ const COMPAT_ICON: Record<CompatIcon, ReactNode> = {
 }
 
 /** Level badge of a compatibility result: icon and text, never colour alone. */
-export function CompatBadge({ level, testId }: { level: CompatibilityResult['level']; testId?: string }) {
+export function CompatBadge({
+  level,
+  testId,
+}: {
+  level: CompatibilityResult['level']
+  testId?: string
+}) {
   const info = compatibilityInfo(level)
   return (
     <span data-testid={testId} data-level={level} className="inline-flex">
@@ -38,7 +53,15 @@ export function CompatBadge({ level, testId }: { level: CompatibilityResult['lev
   )
 }
 
-export function PassBadge({ passed, passedLabel = 'Passed', failedLabel = 'Failed' }: { passed: boolean; passedLabel?: string; failedLabel?: string }) {
+export function PassBadge({
+  passed,
+  passedLabel = 'Passed',
+  failedLabel = 'Failed',
+}: {
+  passed: boolean
+  passedLabel?: string
+  failedLabel?: string
+}) {
   return (
     <Badge tone={passed ? 'success' : 'danger'}>
       {passed ? <CheckIcon size={11} /> : <XIcon size={11} />}
@@ -48,7 +71,11 @@ export function PassBadge({ passed, passedLabel = 'Passed', failedLabel = 'Faile
 }
 
 export function Mono({ children, className }: { children: ReactNode; className?: string }) {
-  return <code className={cn('rounded-sm bg-surface-hover px-1 py-px font-mono text-code', className)}>{children}</code>
+  return (
+    <code className={cn('rounded-sm bg-surface-hover px-1 py-px font-mono text-code', className)}>
+      {children}
+    </code>
+  )
 }
 
 /** A labelled heading inside a tab. */
@@ -61,7 +88,15 @@ export function H3({ children, id }: { children: ReactNode; id?: string }) {
 }
 
 /** Plain styled table frame. Real table, scoped headers. */
-export function Table({ caption, children, testId }: { caption: string; children: ReactNode; testId?: string }) {
+export function Table({
+  caption,
+  children,
+  testId,
+}: {
+  caption: string
+  children: ReactNode
+  testId?: string
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border bg-surface" data-testid={testId}>
       <table className="w-full min-w-[640px] border-collapse text-left text-small">
@@ -72,8 +107,13 @@ export function Table({ caption, children, testId }: { caption: string; children
   )
 }
 export const Th = ({ children }: { children: ReactNode }) => (
-  <th scope="col" className="border-b bg-surface-muted px-3 py-1.5 text-caption font-medium text-text-muted">
+  <th
+    scope="col"
+    className="border-b bg-surface-muted px-3 py-1.5 text-caption font-medium text-text-muted"
+  >
     {children}
   </th>
 )
-export const Td = ({ children, className }: { children: ReactNode; className?: string }) => <td className={cn('border-b px-3 py-1.5 align-top', className)}>{children}</td>
+export const Td = ({ children, className }: { children: ReactNode; className?: string }) => (
+  <td className={cn('border-b px-3 py-1.5 align-top', className)}>{children}</td>
+)

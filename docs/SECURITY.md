@@ -284,6 +284,36 @@ Limits of these measures:
   control for imported cases.
 - The environment filter removes the variables named above. Other secrets in the process environment are passed on.
 
+## Hardening of 2026-10-05 (0.6)
+
+Found by an adversarial review of the boundaries and fixed, each with a test that fails without the fix:
+
+- **NEXUS's own git commands run nothing a repository configures.** Every git call passes
+  `core.fsmonitor=false`, `core.hooksPath=<an empty directory NEXUS owns>`, `core.pager=cat` and
+  `protocol.ext.allow=never`, and runs without the Claude credentials and Node options NEXUS withholds from
+  project commands. Before this, a hook or an exec-capable configuration key that an agent left in the shared
+  repository ran inside NEXUS's own git calls, with NEXUS's environment.
+- **NEXUS does not write through a worktree whose `.git` pointer was changed.** Before any git command that
+  changes something, the worktree's `.git` file is checked against Git's own back-pointer in the repository. A
+  pointer that names the user's repository or another task's worktree is refused.
+- **`git config` is checked word by word.** A dangerous key behind an option that takes a value
+  (`git config --type bool core.fsmonitor ...`) used to pass.
+- **Any command but git that names a `.git` path asks first**, in bash and PowerShell: the worktree pointer,
+  the repository's configuration and its hooks.
+- **A provider's command line tool is found on PATH only** and started by its absolute path (see PROVIDERS.md).
+
+Open findings of the same review, by severity:
+
+- HIGH, by design: a writing agent can write a script and run it, and the script is not inspected. Through it
+  an agent can do what the user can do, including `shutdown` and `shutdown /a`. See "No OS sandbox" below. The
+  statement "an agent cannot trigger or cancel the overnight shutdown" holds against commands the classifier
+  recognises, not against an agent that hides them in a file.
+- MEDIUM: `git branch -f`, `git tag -f` and `git update-ref` on refs outside `nexus/` do not ask; agent-written
+  text is rendered into other agents' prompts under headings without a fence (message types cannot be forged);
+  with "respect the project's Claude configuration" on, a repository's `.claude/settings.json` can carry hooks;
+  overnight approves plan and graph changes by default; a trial's code can read the hidden evaluator at
+  evaluation time; bare `git` is resolved by the system's search.
+
 ## Known gaps
 
 - **No OS sandbox.** Native Windows has none for this design. Agents and everything they launch run as

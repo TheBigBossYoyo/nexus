@@ -125,9 +125,12 @@ test.describe('Overnight Mode', () => {
       const first = powerLog(dataDir)[0]
       expect(first).toMatchObject({ operation: 'scheduleShutdown', ok: true, request: { purpose: 'failsafe', delaySeconds: 32_400, force: true } })
       expect(first?.args.slice(0, 4)).toEqual(['/s', '/f', '/t', '32400'])
+      // The first agent session may not have started yet when the dialog closes: wait for it, then compare.
+      await expect.poll(async () => (await invoke(page, 'events.list', { runId, limit: 5000 })).some((e) => e.type === 'agent.started'), { timeout: 60_000, message: 'the first agent session to start' }).toBe(true)
       const events = await invoke(page, 'events.list', { runId, limit: 5000 })
       const armedSeq = events.find((e) => e.type === 'overnight.failsafe')?.seq ?? Infinity
       const firstAgentSeq = events.find((e) => e.type === 'agent.started')?.seq ?? -1
+      expect(firstAgentSeq).toBeGreaterThan(0)
       expect(armedSeq).toBeLessThan(firstAgentSeq)
       expect((await trayModel(app))?.status).toBe('RUNNING')
 
