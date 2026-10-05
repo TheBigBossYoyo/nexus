@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipcInputs, type AppInfo, type IpcChannel, type IpcInput } from '@shared/ipc'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT } from '@shared/overnight'
+import { DEFAULT_WORKSPACE_POLICY } from '@shared/workspace'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { RunEvent } from '@shared/events'
 import type { PushMessage } from '@shared/events'
@@ -49,6 +50,33 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'background.start': { projectId: 'p1', kind: 'test_gap_analysis' },
   'background.cancel': { jobId: 'j1' },
   'expertise.list': { projectId: 'p1' },
+  'workspace.list': {},
+  'workspace.get': { workspaceId: 'w1' },
+  'workspace.create': { name: 'Platform' },
+  'workspace.setPolicy': { workspaceId: 'w1', policy: DEFAULT_WORKSPACE_POLICY },
+  'workspace.remove': { workspaceId: 'w1' },
+  'workspace.enroll': { workspaceId: 'w1' },
+  'workspace.refresh': { repositoryId: 'r1' },
+  'workspace.unenroll': { repositoryId: 'r1' },
+  'workspace.setRole': { repositoryId: 'r1', role: 'service' },
+  'workspace.discover': { workspaceId: 'w1' },
+  'workspace.addDependency': { workspaceId: 'w1', from: 'backend', to: 'shared-sdk', kind: 'package_dependency', detail: 'package.json' },
+  'workspace.removeDependency': { dependencyId: 'd1' },
+  'workspace.addService': { repositoryId: 'r1', name: 'API', description: 'The HTTP API' },
+  'workspace.registerContract': { workspaceId: 'w1', key: 'order', name: 'Order', kind: 'json_schema', provider: 'shared-sdk', path: 'contracts/order.schema.json' },
+  'workspace.addConsumer': { contractId: 'c1', repository: 'backend' },
+  'workspace.captureContract': { contractId: 'c1' },
+  'workspace.addMemory': { workspaceId: 'w1', kind: 'contract', title: 't', content: 'c', evidence: 'e', repositories: ['backend', 'shared-sdk'] },
+  'workspace.createMission': { workspaceId: 'w1', goal: 'Change the contract' },
+  'workspace.mission': { missionId: 'm1' },
+  'workspace.startMission': { missionId: 'm1' },
+  'workspace.decidePlan': { missionId: 'm1', accept: true },
+  'workspace.pauseMission': { missionId: 'm1' },
+  'workspace.resumeMission': { missionId: 'm1' },
+  'workspace.cancelMission': { missionId: 'm1' },
+  'workspace.prepareRelease': { missionId: 'm1' },
+  'workspace.publishRelease': { trainId: 't1' },
+  'workspace.cancelRelease': { trainId: 't1' },
   'overnight.get': { runId: 'r1' },
   'overnight.active': {},
   'overnight.cancelPower': { runId: 'r1' },

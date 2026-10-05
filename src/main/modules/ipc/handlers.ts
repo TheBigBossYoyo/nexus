@@ -24,6 +24,7 @@ import { ProjectService, QueryService } from './services'
 import { isReasoningRun } from '@shared/program'
 import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 import { unavailableV4Handlers, type V4Handlers } from './v4-handlers'
+import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -50,6 +51,8 @@ export interface IpcContext {
   v3?: V3Handlers
   /** v0.4 handlers (programs, backlog, background engineering). */
   v4?: V4Handlers
+  /** v0.5 handlers (workspaces). */
+  v5?: V5Handlers
 }
 
 type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
@@ -360,6 +363,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
 
     ...(ctx.v3 ?? unavailableV3Handlers()),
     ...(ctx.v4 ?? unavailableV4Handlers()),
+    ...(ctx.v5 ?? unavailableV5Handlers()),
   }
 }
 
