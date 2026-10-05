@@ -578,7 +578,12 @@ async function bootstrap(): Promise<void> {
     logger,
   })
   orchestrator.setDispatchGate({
-    canDispatch: () => usage.canDispatch(),
+    canDispatch: (runId) => {
+      if (!usage.canDispatch()) return false
+      if (!runId) return true
+      const run = repos.runs.get(runId)
+      return !run || control.hasCapacityForRun(runId, run.config.maxParallelAgents, activeAgentsOf(repos, [runId]))
+    },
     limit: (normal, runId) => {
       const byUsage = usage.limit(normal)
       return runId ? Math.min(byUsage, control.allowanceForRun(runId, normal, activeAgentsOf(repos, [runId]))) : byUsage

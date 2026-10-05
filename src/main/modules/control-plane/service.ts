@@ -467,23 +467,34 @@ export class ControlPlane {
    * A run no item owns keeps its own limit (it is adopted on the next pass).
    */
   allowanceForRun(runId: string, normal: number, activeInRun: number): number {
-    if (this.now() - this.allocatedAt > 1000) {
-      try {
-        this.reconcile()
-        this.computeAllocation()
-      } catch (e) {
-        this.log(`allocation failed: ${errorMessage(e)}`)
-        return normal
-      }
+    // Always from the present state: the question is asked at the moment a run wants to start a session, often
+    // right after it was resumed, and an answer computed while it was still paused would be zero.
+    try {
+      this.reconcile()
+      this.computeAllocation()
+    } catch (e) {
+      this.log(`allocation failed: ${errorMessage(e)}`)
+      return normal
     }
     for (const [itemId, snapshot] of this.snapshots) {
       if (!snapshot.runIds.includes(runId)) continue
       const granted = this.allocation.allowance.get(itemId)
-      if (granted === undefined) return Math.min(normal, activeInRun)
+      // The run's item holds no capacity in the queue's eyes (it is paused, blocked or not yet started there)
+      // while the run itself is working: the queue is behind the run, and the run keeps its own limit until the
+      // next pass has caught up.
+      if (granted === undefined) return normal
       const others = Math.max(0, snapshot.activeAgents - activeInRun)
       return Math.max(0, Math.min(normal, granted - others))
     }
     return normal
+  }
+
+  /**
+   * False when a run can start nothing because the capacity is used by others and it runs no session of its
+   * own. The orchestrator treats that as a closed gate (a wait), not as a run that cannot make progress.
+   */
+  hasCapacityForRun(runId: string, normal: number, activeInRun: number): boolean {
+    return activeInRun > 0 || this.allowanceForRun(runId, normal, activeInRun) > 0
   }
 
   // ───────────────────────────── boot ─────────────────────────────

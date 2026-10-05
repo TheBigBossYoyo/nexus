@@ -88,7 +88,11 @@ export interface CreateRunInput {
 
 /** The usage service's view for the scheduler (usage/service.ts implements it). */
 export interface DispatchGate {
-  canDispatch(): boolean
+  /**
+   * False while nothing new may start. With a run id: also false while that run has no capacity of its own
+   * (v0.7, the global scheduler). A closed gate is a wait, never a reason to judge a run stuck.
+   */
+  canDispatch(runId?: string): boolean
   /** The parallel-session limit to apply now (a ramp after a resume lowers it). */
   limit(normal: number, runId?: string): number
   /** Called when the gate may have reopened or the limit changed. Returns an unsubscribe function. */
@@ -634,8 +638,8 @@ export class Orchestrator implements PipelineHost {
     })
   }
 
-  private dispatchClosed(): boolean {
-    return this.gate !== null && !this.gate.canDispatch()
+  private dispatchClosed(runId?: string): boolean {
+    return this.gate !== null && !this.gate.canDispatch(runId)
   }
 
   /** Schedule a scheduler pass for the run. Passes for one run never overlap. */
@@ -684,7 +688,7 @@ export class Orchestrator implements PipelineHost {
       })
     }
 
-    const gateClosed = this.dispatchClosed()
+    const gateClosed = this.dispatchClosed(runId)
     if (!gateClosed) {
       // After a resume the gate limits how many pipelines restart at once (the ramp); the rest wait for the next tick.
       const running = [...this.active.values()].filter((p) => p.runId === runId).length

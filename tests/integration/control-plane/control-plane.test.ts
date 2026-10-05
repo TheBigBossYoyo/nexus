@@ -322,6 +322,43 @@ describe('control plane service', () => {
     expect(control.allowanceForRun('run-feature', 3, 1)).toBe(3)
   })
 
+  it('a run that was just resumed is never told it has no capacity because the queue has not caught up; a run with no capacity waits', async () => {
+    const r = rig()
+    control.setLimits({ maxAgents: 2, maxActiveItems: 4, resumeOnBoot: 'hold' })
+    r.fake.add('p1', 2)
+    control.enqueue({ type: 'program', programId: 'p1' })
+    await control.idle()
+    await control.tick()
+    // The workload is paused (a restart, a usage limit): its item holds no capacity.
+    r.fake.set('p1', { phase: 'paused', activeAgents: 0 })
+    await control.tick()
+    expect(control.overview().active).toEqual([])
+    // It is resumed and asks at once, before any pass of the queue: the answer comes from the present state.
+    r.fake.set('p1', { phase: 'working' })
+    expect(control.allowanceForRun('run-p1', 2, 0)).toBe(2)
+    expect(control.hasCapacityForRun('run-p1', 2, 0)).toBe(true)
+    // The same after a usage wait.
+    r.fake.set('p1', { phase: 'quota_wait' })
+    await control.tick()
+    r.fake.set('p1', { phase: 'working' })
+    expect(control.allowanceForRun('run-p1', 2, 0)).toBe(2)
+    // Another workload takes the whole capacity: the first has none and is told to wait, not that it may run.
+    r.fake.set('p1', { phase: 'paused' })
+    r.fake.add('p2', 2)
+    control.enqueue({ type: 'program', programId: 'p2', priority: 'P0' })
+    await control.idle()
+    await control.tick()
+    r.fake.set('p2', { activeAgents: 2 })
+    r.fake.set('p1', { phase: 'working' })
+    expect(control.allowanceForRun('run-p1', 2, 0)).toBe(0)
+    expect(control.hasCapacityForRun('run-p1', 2, 0)).toBe(false)
+    // A run that still runs a session is limited, not closed.
+    expect(control.hasCapacityForRun('run-p1', 2, 1)).toBe(true)
+    // Capacity comes back: it may start again.
+    r.fake.set('p2', { phase: 'completed', activeAgents: 0 })
+    expect(control.hasCapacityForRun('run-p1', 2, 0)).toBe(true)
+  })
+
   it('a Claude usage limit moves work to quota wait and starts nothing; the reset resumes it', async () => {
     const r = rig()
     r.fake.add('p1')
