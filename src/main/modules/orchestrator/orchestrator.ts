@@ -79,6 +79,11 @@ export interface CreateRunInput {
   acceptanceCriteria?: string[]
   /** Set by the Arena: the trial this run belongs to. */
   arenaTrialId?: string
+  /**
+   * v0.4. Start from this commit or branch instead of the checkout's HEAD. A program's missions build on the
+   * accepted work of the missions before them, which lives on the program branch, not in the user's checkout.
+   */
+  baseRef?: string
 }
 
 /** The usage service's view for the scheduler (usage/service.ts implements it). */
@@ -162,8 +167,13 @@ export class Orchestrator implements PipelineHost {
       throw new NexusError('not_a_repository', `${project.rootPath} is not a Git repository. ${input.mode.toUpperCase()} mode needs one for worktrees.`)
     }
     // The user's working tree is never modified: work happens in worktrees created from HEAD.
-    const baseBranch = isRepo ? await git.currentBranch(project.rootPath) : null
-    const baseCommit = isRepo ? await git.headCommit(project.rootPath).catch(() => null) : null
+    const baseBranch = isRepo ? (input.baseRef ?? (await git.currentBranch(project.rootPath))) : null
+    const baseCommit = !isRepo
+      ? null
+      : input.baseRef
+        ? // An unknown ref is an error of the caller, not "no commits yet".
+          await git.resolveCommit(project.rootPath, input.baseRef)
+        : await git.headCommit(project.rootPath).catch(() => null)
     if (!readOnly && !baseCommit) {
       throw new NexusError('invalid_state', 'The repository has no commits yet. Create an initial commit first.')
     }

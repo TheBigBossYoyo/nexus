@@ -307,6 +307,11 @@ While `canDispatch()` is false, a scheduler tick does this:
 | Tasks already running | Not stopped by the gate. Their sessions end through their own outcomes (a limited session ends as `quota`) |
 | Checks and merges in flight | Finish: they are local and deterministic |
 
+A run can be created with `baseRef` (0.4): its base commit is that commit or branch instead of the checkout's
+HEAD, so its integration worktree and task worktrees start there. A program uses it to make each mission build
+on the accepted work of the missions before it. An unknown ref is an error, not "no commits yet". Nothing else
+about the run changes, and the user's checkout is still not touched.
+
 When the gate is open, the limit passed to `selectRunnable` is `gate.limit(run.config.maxParallelAgents)`,
 which a ramp after a resume lowers (it also bounds how many orphaned tasks restart at once). When the gate reopens (`onChange`), every active run is ticked.
 

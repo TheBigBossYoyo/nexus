@@ -14,9 +14,10 @@ export type PowerAction = Exclude<EndAction, 'NONE'>
 /**
  * What an overnight record supervises. A mission is one run; an Arena campaign is many trial runs under one
  * deadline, one failsafe and one end-of-campaign power action. `OvernightRun.runId` holds the workload's
- * id: the run id of a mission, the campaign id of a campaign.
+ * id: the run id of a mission, the campaign id of a campaign, the program id of a program (v0.4: one
+ * autonomous work window of a long-running program).
  */
-export const WORKLOAD_TYPES = ['mission', 'arena_campaign'] as const
+export const WORKLOAD_TYPES = ['mission', 'arena_campaign', 'program'] as const
 export type WorkloadType = (typeof WORKLOAD_TYPES)[number]
 
 export const TERMINAL_REASONS = ['SUCCESS', 'FAILED', 'BLOCKED', 'QUOTA_EXHAUSTED', 'TIME_LIMIT', 'USER_CANCELLED'] as const

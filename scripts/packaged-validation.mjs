@@ -21,7 +21,7 @@ if (!exe || !existsSync(exe) || sources.length === 0) {
 }
 const root = resolve(import.meta.dirname, '..')
 const VERSION = require(join(root, 'package.json')).version
-const LATEST_SCHEMA = [1, 2, 3, 4, 5]
+const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6]
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 function schemaOf(dbPath) {
@@ -99,6 +99,12 @@ for (const source of sources) {
     }
     entry.pages = pages
     entry.checks['Home, Missions, Arena, Policy, Usage, Overnight and Settings render'] = Object.values(pages).every(Boolean)
+    // 0.4: the Programs page renders, and an upgraded database has no program.
+    await page.click('[data-testid="nav-programs"]')
+    const programsView = await page.waitForSelector('[data-testid="view-programs"]', { timeout: 15_000 }).then(() => true, () => false)
+    await shot('programs')
+    const programs = await page.evaluate(() => globalThis.nexus.invoke('program.list', {}))
+    entry.checks['Programs renders; an upgraded database has no program'] = programsView && programs.ok === true && programs.value.programs.length === 0
     if (old) {
       await page.click('[data-testid="nav-run"]')
       await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
@@ -137,7 +143,7 @@ for (const source of sources) {
     await app.close().catch(() => undefined)
   }
   entry.after = schemaOf(join(dataDir, 'nexus.db'))
-  entry.checks['schema upgraded to version 5'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
+  entry.checks['schema upgraded to version 6'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
   const oldVersion = Math.max(...entry.before.versions)
   entry.checks['the database as the older release left it was kept as a .bak copy'] = oldVersion >= LATEST_SCHEMA.at(-1) || existsSync(join(dataDir, `nexus.db.v${oldVersion}.bak`))
   entry.checks['no row was lost in the upgrade'] = entry.after.runs === entry.before.runs && entry.after.tasks === entry.before.tasks && entry.after.agents === entry.before.agents && entry.after.events >= entry.before.events

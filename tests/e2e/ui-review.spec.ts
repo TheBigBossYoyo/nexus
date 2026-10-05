@@ -11,7 +11,7 @@ import { closeApp, createRepo, invoke, launchApp, removeDir, REPO_ROOT, tempDir 
  * `test-results/ui-review/`. Skipped in a normal run.
  */
 const OUT = join(REPO_ROOT, 'test-results', 'ui-review')
-const VIEWS = ['home', 'projects', 'run', 'agents', 'arena', 'policy', 'usage', 'performance', 'intelligence', 'overnight', 'activity', 'memory', 'settings'] as const
+const VIEWS = ['home', 'projects', 'run', 'programs', 'agents', 'arena', 'policy', 'usage', 'performance', 'intelligence', 'overnight', 'activity', 'memory', 'settings'] as const
 const SIZES = [
   { name: 'wide', width: 1440, height: 900 },
   { name: 'narrow', width: 1024, height: 700 },
@@ -54,6 +54,53 @@ test.describe('UI review capture', () => {
       const run = await invoke(page, 'runs.create', { projectId: project.id, mode: 'mission', preset: 'balanced', prompt: 'Add an API module and a UI module, then integrate them.', strategy: 'SINGLE', requirePlanApproval: false } as never)
       const runId = (run as { id: string }).id
       await expect.poll(async () => (await invoke(page, 'runs.get', { runId })).run.state, { timeout: 180_000, intervals: [1000] }).toMatch(/completed|failed|awaiting_approval/)
+
+      // 0.4: one program that ran to completion (with a rejection, backlog and memory), one waiting for approval.
+      const finished = await invoke(page, 'program.create', { projectId: project.id, name: 'Modules program', goal: 'Build the API and UI modules, integrate them, then harden the integration.', preset: 'autonomous', start: true })
+      await expect.poll(async () => (await invoke(page, 'program.get', { programId: finished.id })).program.state, { timeout: 400_000, intervals: [1000] }).toMatch(/COMPLETED|BLOCKED|FAILED/)
+      const awaiting = await invoke(page, 'program.create', {
+        projectId: project.id,
+        name: 'Billing rework',
+        goal: 'Rework the billing module in small verified steps.',
+        preset: 'conservative',
+        schedule: { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' }] },
+        start: true,
+      })
+      await expect.poll(async () => (await invoke(page, 'program.get', { programId: awaiting.id })).program.pauseReason, { timeout: 120_000, intervals: [1000] }).toBe('approval')
+      await invoke(page, 'background.setSettings', { settings: { enabled: true, kinds: ['test_gap_analysis', 'dependency_audit'] } })
+      await invoke(page, 'background.start', { projectId: project.id, kind: 'test_gap_analysis' })
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme)
+        for (const size of SIZES) {
+          await resize(app, size.width, size.height)
+          await page.getByTestId('nav-programs').click()
+          await page.getByTestId(`program-row-${finished.id}`).click()
+          await expect(page.getByTestId('program-page')).toBeVisible()
+          await shot(page, `${theme}-${size.name}-program-completed-roadmap`)
+          if (size.name === 'wide') {
+            for (const tab of ['missions', 'revisions', 'decisions', 'backlog', 'memory', 'expertise'] as const) {
+              await page.getByTestId(`program-tab-${tab}`).click()
+              await shot(page, `${theme}-wide-program-tab-${tab}`)
+            }
+          }
+          await page.getByTestId('program-back').click()
+          await page.getByTestId(`program-row-${awaiting.id}`).click()
+          await expect(page.getByTestId('program-plan-approval')).toBeVisible()
+          await shot(page, `${theme}-${size.name}-program-plan-approval`)
+          await page.getByTestId('program-back').click()
+          await shot(page, `${theme}-${size.name}-programs-list`)
+          await page.getByTestId('programs-new').click()
+          await expect(page.getByTestId('program-dialog')).toBeVisible()
+          await shot(page, `${theme}-${size.name}-program-dialog-empty`)
+          await page.getByTestId('program-name').fill('Search rework')
+          await page.getByTestId('program-goal').fill('Replace the search index with an incremental one, in verified steps.')
+          await page.getByTestId('program-preset-balanced').click()
+          await page.getByTestId('program-window-enabled').check()
+          await shot(page, `${theme}-${size.name}-program-dialog-filled`)
+          await page.keyboard.press('Escape')
+        }
+        await resize(app, 1440, 900)
+      }
 
       // A finished Arena campaign, then an overnight campaign left in its final countdown.
       const cases = await invoke(page, 'arena.cases', {})

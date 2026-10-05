@@ -108,3 +108,123 @@ The end-of-session shutdown does not depend on the coding assistant.
 - `pnpm typecheck`: pass. `pnpm lint`: pass. `pnpm build`: pass.
 - `pnpm test:e2e`: 17 passed, 1 skipped (the review capture, which runs only on request), 4.3 min.
 - `pnpm test` and `pnpm stress` (1000 seeds): started 23:28 as one job.
+
+### 23:28 to 23:40 Phase A: final suites on the 0.3 tree
+
+- `pnpm test`: 126 files, 2398 tests passed, 469 s.
+- While reviewing the restart path of a campaign: after a restart, `QuotaRecoveryController.recover()` closed
+  the usage gate for every waiting overnight record. For a mission the supervisor probes and reopens it; for a
+  campaign nothing would, if the wait of its trial run had been ended by the user. Fixed (the gate is restored
+  for a waiting overnight mission only) with a regression test. Commit `e4253e5`.
+- `pnpm stress` with `NEXUS_STRESS_RUNS=1000` started 23:39 on `e4253e5` (six files: orchestrator, policy,
+  usage, Arena, overnight, overnight workload).
+- A test defect found while preparing 0.4: in `database.test.ts` the "rolls the whole migration back" case had
+  two migrations with the same version after the schema bump, so it passed for the wrong reason (a duplicate
+  key, not the broken SQL). To be corrected on `nexus-0.3` before the merge.
+
+### 23:40 Phase B started: NEXUS 0.4 (branch `nexus-0.4`, from `e4253e5`)
+
+Written while the 0.3 stress runs; only light test runs alongside it.
+
+- Domain (`src/shared/program.ts`): Program, ProgramGoal, Milestone, Workstream, BacklogItem, ProgramDecision,
+  ProgramCheckpoint, ProgramOutcome, ProgramPolicy (presets Conservative, Balanced, Autonomous),
+  ProgramSchedule (work windows), ProgramMemoryEntry, ProgramPlanRevision, ExpertiseProfile, BackgroundJob;
+  transition tables for programs and milestones; plan, revision, judgment and findings schemas; plan
+  structure validation (unique keys, known dependencies, no cycle); plan diff; `windowStatus`.
+- Migration 006 (additive, 11 tables) and repositories.
+- `ProgramEngine`: plan, mission per milestone, deterministic gates, verifier judgment, backlog, validated
+  memory, selective memory per mission, reassessment and revisions with diffs, budgets, usage waits, work
+  windows, restart recovery, user actions, decision trail, checkpoints. Missions and reasoning sessions are
+  ordinary runs; `createRun` gained `baseRef` so a mission starts from the program branch.
+- `BackgroundEngineering` (off by default, read-only runs, proposals only).
+- `ProgramWorkload`: a program as an overnight workload for one work window (`overnight.startProgram`).
+- IPC: 19 channels (`program.*`, `backlog.*`, `background.*`, `expertise.list`, `overnight.startProgram`).
+- The scripted demo runtime answers the program reasoning sessions, so the built app can run a program in E2E.
+- Tests so far, all passing:
+  - `tests/unit/program/program-model.test.ts` (24)
+  - `tests/integration/program/engine.test.ts` (16): multi-milestone completion, gate rejection, verifier
+    rejection with backlog and memory, failed mission to backlog and a stored revision, plan approval, usage
+    wait and resume, closed gate, stop policy, endless wait, restart mid-mission and mid-verification, work
+    windows, selective memory, refused memory, unreadable plans, budgets, user actions, strategy per mission.
+  - `tests/integration/program/background-overnight.test.ts` (7): background jobs, a program under the
+    overnight supervisor, migration 006.
+  - `tests/scenarios/v4-program.test.ts` (1): a whole program on the real orchestrator with the scripted
+    runtime (three real missions, one rejection, one revision, memory, backlog, user checkout untouched).
+  - `tests/stress/program-stress.test.ts`: 3000 seeded histories pass.
+- Found by these tests and fixed: a milestone that used all its missions could not be blocked (missing
+  transition `READY -> BLOCKED`), which left the program looking busy; an engine error now blocks the program
+  with the error instead of being swallowed. Found by the stress: under the `stop` usage policy a user could not
+  resume a program while Claude was still limited; a resume during a limit now waits for the reset.
+- In progress: Programs UI (agent), independent code audit of 0.4 (agent).
+
+### 00:00 to 00:33 Phase B: 0.4 audit, UI, E2E and real acceptance
+
+- Programs UI delivered (list, new-program dialog with presets and work window, program page with state
+  notices, plan approval with a diff, roadmap with verification evidence, tabs for missions, plan history,
+  decisions, backlog, memory, expertise; background-engineering card; Home section).
+- Independent code audit of 0.4 (read-only): no CRITICAL, 1 HIGH, 7 MEDIUM, 11 LOW.
+  - HIGH: the program branch could lose accepted work. A retry started from its previous attempt's result; if
+    a revision had another milestone accepted in between, accepting the retry moved the branch to a commit
+    that lacked that milestone. Fixed: the branch only fast-forwards (compare-and-swap, refused while checked
+    out), and a retry starts from the accepted work when its previous attempt does not contain the branch tip.
+  - MEDIUM, all fixed: a judgment had to cover the milestone's criteria; a mission that finished around a
+    crash was thrown away; `update-ref` was unconditional; quoted data could be closed with `</tag >`, and
+    recorded context reached mission prompts unquoted; a revision could reuse a cancelled key or drop all
+    remaining work while the program reported "completed"; a run created just before a crash was unknown to
+    the program; a milestone could be accepted with an unreadable result commit.
+  - LOW fixed: pause during a closed window, pause of a blocked program, a plan decision undoing a user pause,
+    the shown work window ignoring `respectWorkWindows`, list total, project history order, two missing
+    indexes, leftover settings keys. Not fixed: a user-cancelled mission run counts as a failed mission; the
+    retry counter of an unreadable answer is in memory only.
+  - Docs corrected where they claimed more than the code did.
+  - Regression tests added for every HIGH and MEDIUM finding (8 cases); the stress gained the invariant "the
+    program branch contains every accepted result" (1500 seeds pass).
+- Found by the E2E after a restart: the gate `no_blocking_findings` rejected a completed mission because an
+  earlier review of a since-completed task had requested changes. Fixed: a review is open only while its task
+  is not finished.
+- E2E (`tests/e2e/v4.spec.ts`, built app, scripted runtime): 3 of 3 pass. A program from the dialog to
+  completion; plan approval, a user-requested reassessment and a restart mid-mission; background engineering.
+- Real acceptance (`node scripts/program-acceptance.mjs`, real Claude Agent SDK sessions, Claude subscription): **15 of
+  15 gates, first attempt**, evidence `docs/acceptance/program-2026-10-04T23-31-29-309Z.json`.
+  - Goal: two functions in a small library, in two steps. Plan v1: 2 milestones. The user asked for a third
+    (README); the reassessment produced plan v2 (added `document-readme`, changed the criteria of `round-trip`).
+  - 3 missions (SINGLE), each started from the result of the one before; 3 milestones verified with 6 gates
+    and 5, 5 and 3 judged criteria; 10 runs, 9 observed sessions.
+  - NEXUS was quit in the middle of the second mission and started again; the program continued with the same
+    run.
+  - Backlog: 6 proposals with evidence (3 from milestone verification, 3 from a real read-only background
+    job), all still `proposed`. Memory: 2 validated entries (interfaces).
+  - The repository's own tests pass on the program branch (8 of 8, run outside NEXUS); the user's checkout is
+    untouched.
+- Usage after the run: five-hour window about a third used, seven-day 60 percent (runtime figures).
+- In progress: independent UI review of the Programs area; the 0.3 stress is still running.
+
+### 00:35 to 00:52 Phase B: Programs UI review; Phase C prepared
+
+- Independent UI review of the Programs area (read-only, 17 screenshots and source): no HIGH; 5 MEDIUM (a
+  colour token that does not exist on the approval card, a Resume button competing with Accept while a plan
+  awaits approval, the same message three times, a diff that only repeats "Added" for a first plan, a
+  full-width status select in the backlog); 7 LOW. All 5 MEDIUM and 6 LOW fixed; checked on fresh screenshots.
+- Seen on those screenshots and fixed: a program's own planning and verification sessions were listed among
+  the user's missions. `runs.list` now leaves them out unless asked, and the Home feed excludes them in SQL.
+- E2E for Programs after the fixes: 3 of 3 pass.
+- State at 00:52: `nexus-0.4` at `ecae730`; the 0.3 stress (started 23:39 on `e4253e5`) is still running, one
+  worker left (the orchestrator stress).
+- Work on 0.5 (Workspaces) is being written outside the tree while 0.3 and 0.4 are validated, in
+  `%TEMP%\claude\C--Users-user-Documents-Nexus\6b6462d8-ada3-40b3-ad87-466ce2dd7776\scratchpad\wip05`:
+  `src/shared/workspace.ts` (domain, dependency order, contract surface comparison, cross-repository plan
+  validation, release planning), `src/main/modules/workspace/{contracts,discovery,engine}.ts`, migration 007
+  and its repositories. It is brought into `nexus-0.5` once 0.4 is released.
+
+### Order of the remaining release steps (kept here so it survives a long session)
+
+1. When the 0.3 stress ends: record its result; switch to `nexus-0.3`; correct the duplicate-version test in
+   `database.test.ts` (ok = latest + 1, broken = latest + 2); run `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+   `pnpm test:e2e`, `pnpm build`, `pnpm package`, `node scripts/packaged-validation.mjs`; update the 0.3
+   release report, TEST_STATUS and BUILD_PROGRESS; commit; `git checkout main`; `git merge --no-ff nexus-0.3`;
+   `git tag -a v0.3.0`.
+2. Back on `nexus-0.4`: `git merge main`; bump the version to 0.4.0; full validation (typecheck, lint, test,
+   stress at 1000 seeds, E2E, build, package, packaged validation); write `V0_4_RELEASE_REPORT.md`; merge to
+   `main` and tag `v0.4.0` only on PASS.
+3. `nexus-0.5` from `main`: bring in the Workspaces work, tests, UI, real acceptance, audit.
+4. Reserve the last 45 minutes for the final report, preservation and the supervisor's `finish-now`.

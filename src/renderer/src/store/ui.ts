@@ -32,6 +32,8 @@ interface UiState {
   settingsSection: SettingsSection
   /** An Arena campaign to open when the Arena view shows (set by Overnight surfaces that link to a campaign). */
   arenaCampaignId: string | null
+  /** A program to open when the Programs view shows. */
+  programId: string | null
 
   setView: (view: View) => void
   selectProject: (projectId: string | null) => void
@@ -50,6 +52,8 @@ interface UiState {
   openSettings: (section?: string) => void
   /** Show the Arena view on a campaign page; null clears the request once the view has consumed it. */
   openCampaign: (campaignId: string | null) => void
+  /** Show the Programs view on a program page; null clears the request once the view has consumed it. */
+  openProgram: (programId: string | null) => void
 }
 
 export const useUiStore = create<UiState>()(
@@ -68,6 +72,7 @@ export const useUiStore = create<UiState>()(
       composerIntent: null,
       settingsSection: null,
       arenaCampaignId: null,
+      programId: null,
 
       setView: (view) => set({ view }),
       selectProject: (projectId) => set({ projectId }),
@@ -90,6 +95,7 @@ export const useUiStore = create<UiState>()(
       toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
       setComposerIntent: (composerIntent) => set({ composerIntent }),
       openSettings: (section) => set({ view: 'settings', settingsSection: section ?? null }),
+      openProgram: (programId) => set(programId ? { view: 'programs', programId } : { programId: null }),
       openCampaign: (arenaCampaignId) =>
         set(arenaCampaignId ? { view: 'arena', arenaCampaignId } : { arenaCampaignId: null }),
     }),

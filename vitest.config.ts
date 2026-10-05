@@ -36,6 +36,7 @@ export default defineConfig({
             'tests/stress/policy-*.test.ts',
             'tests/stress/usage-*.test.ts',
             'tests/stress/arena-*.test.ts',
+            'tests/stress/program-*.test.ts',
           ],
           // Scenario tests drive real git and SQLite; leave headroom for a loaded machine.
           // Generous on purpose: these waits bound a hang, they are not performance assertions, and the machine may be busy.

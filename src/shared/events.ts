@@ -196,3 +196,7 @@ export type PushMessage =
   | { kind: 'arena'; campaignId: string }
   /** v0.3. The policy pointer, candidates or statistics changed. */
   | { kind: 'policy' }
+  /** v0.4. A program, its roadmap, decisions, backlog or memory changed. */
+  | { kind: 'program'; programId: string }
+  /** v0.4. The backlog or the background jobs of a project changed. */
+  | { kind: 'backlog'; projectId: string }

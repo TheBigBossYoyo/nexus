@@ -3,6 +3,7 @@ import type { AgentOutput, AgentOutputKind } from '@shared/domain'
 import type { PushMessage, RunEvent } from '@shared/events'
 import { api } from './bridge'
 import { qk } from './queries'
+import { qkv4 } from './queries-v4'
 import { quotaWaitActive } from './usageModel'
 import type { UsageOverview } from '@shared/v3'
 import { useLiveStore } from '../store/live'
@@ -197,6 +198,12 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
           break
         case 'policy':
           schedule([qk.policyRoot(), qk.homeRoot()])
+          break
+        case 'program':
+          schedule([qkv4.programsRoot(), qk.homeRoot(), qk.runsList()])
+          break
+        case 'backlog':
+          schedule([qkv4.programsRoot(), qkv4.backgroundRoot()])
           break
         case 'auth.changed':
           schedule([qk.auth(), qk.models()])
