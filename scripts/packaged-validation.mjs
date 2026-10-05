@@ -21,7 +21,7 @@ if (!exe || !existsSync(exe) || sources.length === 0) {
 }
 const root = resolve(import.meta.dirname, '..')
 const VERSION = require(join(root, 'package.json')).version
-const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6, 7, 8]
+const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 function schemaOf(dbPath) {
@@ -143,7 +143,7 @@ for (const source of sources) {
     await app.close().catch(() => undefined)
   }
   entry.after = schemaOf(join(dataDir, 'nexus.db'))
-  entry.checks['schema upgraded to version 8'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
+  entry.checks['schema upgraded to version 9'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
   const oldVersion = Math.max(...entry.before.versions)
   entry.checks['the database as the older release left it was kept as a .bak copy'] = oldVersion >= LATEST_SCHEMA.at(-1) || existsSync(join(dataDir, `nexus.db.v${oldVersion}.bak`))
   entry.checks['no row was lost in the upgrade'] = entry.after.runs === entry.before.runs && entry.after.tasks === entry.before.tasks && entry.after.agents === entry.before.agents && entry.after.events >= entry.before.events

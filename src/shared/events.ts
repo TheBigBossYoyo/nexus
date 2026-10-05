@@ -204,3 +204,5 @@ export type PushMessage =
   | { kind: 'workspace'; workspaceId: string }
   /** v0.6. A provider's status, the provider policy or the record of provider sessions changed. */
   | { kind: 'providers' }
+  /** v0.7. The global queue, the allocation, a schedule or the runtime health changed. */
+  | { kind: 'control' }

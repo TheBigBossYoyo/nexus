@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { release } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, powerSaveBlocker, safeStorage, shell } from 'electron'
 import type { PushMessage } from '@shared/events'
 import { IPC_INVOKE_CHANNEL, IPC_PUSH_CHANNEL, type AppInfo } from '@shared/ipc'
 import { errorMessage } from '@shared/result'
@@ -22,6 +22,8 @@ import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { createV4Handlers } from './modules/ipc/v4-handlers'
 import { createV5Handlers } from './modules/ipc/v5-handlers'
 import { createV6Handlers } from './modules/ipc/v6-handlers'
+import { createV7Handlers } from './modules/ipc/v7-handlers'
+import { activeAgentsOf, ControlPlane, createWorkloadAdapters, unownedActiveRuns } from './modules/control-plane'
 import { ClaudeAgentRuntimeProvider, CodexRuntimeProvider, FakeRuntimeProvider, GeminiRuntimeProvider, ProviderService } from './modules/providers'
 import { Orchestrator } from './modules/orchestrator'
 import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload, WorkspaceMissionWorkload } from './modules/overnight'
@@ -534,6 +536,55 @@ async function bootstrap(): Promise<void> {
   overnight?.registerWorkload('workspace_mission', (id) => new WorkspaceMissionWorkload(id, { host: workspaces, get: (missionId) => repos.workspaceMissions.get(missionId), quotaResetsAt: () => usage.machineState().resetAt }))
   // A program can be an overnight workload for one autonomous work window.
   overnight?.registerWorkload('program', (id) => new ProgramWorkload(id, { host: programs, get: (programId) => repos.programs.get(programId), quotaResetsAt: () => usage.machineState().resetAt }))
+  // v0.7: the control plane. One queue above every workload and one division of the machine's agent
+  // capacity between them. It drives the engines above through adapters and reads their state; it holds no
+  // second truth. The dispatch gate now asks it, per run, how many sessions that run may hold.
+  const control = new ControlPlane({
+    items: repos.workItems,
+    schedules: repos.controlSchedules,
+    incidents: repos.controlIncidents,
+    settings: repos.settings,
+    adapters: createWorkloadAdapters(repos, { orchestrator, programs, arena, workspaces, background: backgroundJobs, defaultAgents: () => repos.settings.get().execution.maxParallelAgents }),
+    usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
+    unownedActiveRuns: () => unownedActiveRuns(repos),
+    health: {
+      database: () => {
+        db.prepare('SELECT 1').get()
+        return { level: 'HEALTHY', detail: 'The database answers.' }
+      },
+      workers: () => {
+        const active = activeAgentsOf(repos, repos.runs.listActive().map((r) => r.id))
+        return { level: 'HEALTHY', detail: `${active} agent session${active === 1 ? '' : 's'} running. Sessions run inside the NEXUS process; there is no separate worker pool in 0.7.` }
+      },
+      providers: () => {
+        const claude = providers.list().find((s) => s.id === 'claude')
+        if (!claude) return { level: 'RECOVERING', detail: 'Providers are being detected.' }
+        if (claude.auth === 'auth_required') return { level: 'BLOCKED', detail: 'Claude needs authentication.' }
+        return claude.health === 'unavailable' ? { level: 'DEGRADED', detail: claude.healthDetail ?? 'Claude is unavailable.' } : { level: 'HEALTHY', detail: `Claude: ${claude.authDetail ?? 'available'}.` }
+      },
+      usage: () => (usage.canDispatch() ? { level: 'HEALTHY', detail: `Claude usage: ${usage.status()}.` } : { level: 'RECOVERING', detail: `Waiting for Claude usage (${usage.status()}). Work continues by itself after the reset.` }),
+      power_supervisor: () => (overnight ? { level: 'HEALTHY', detail: overnight.active().length > 0 ? 'An overnight run holds the shutdown timer.' : 'No end-of-run action is armed.' } : { level: 'HEALTHY', detail: 'The overnight supervisor is not available on this platform.' }),
+      git: () => ({ level: 'HEALTHY', detail: 'Git operations go through the Git service.' }),
+      ipc: () => ({ level: 'HEALTHY', detail: 'The window talks to the runtime over Electron IPC; there is no network listener.' }),
+    },
+    notify: (_kind, title, body) => {
+      if (useFake || !Notification.isSupported()) return
+      new Notification({ title, body, silent: true }).show()
+    },
+    onChange: () => push({ kind: 'control' }),
+    onAllocationChange: () => {
+      for (const run of repos.runs.listActive()) orchestrator.requestTick(run.id)
+    },
+    logger,
+  })
+  orchestrator.setDispatchGate({
+    canDispatch: () => usage.canDispatch(),
+    limit: (normal, runId) => {
+      const byUsage = usage.limit(normal)
+      return runId ? Math.min(byUsage, control.allowanceForRun(runId, normal, activeAgentsOf(repos, [runId]))) : byUsage
+    },
+    onChange: (listener) => usage.onChange(listener),
+  })
   void Promise.resolve()
     .then(() => arena.recover())
     .catch((e: unknown) => console.error(`[nexus] arena recovery: ${errorMessage(e)}`))
@@ -543,6 +594,8 @@ async function bootstrap(): Promise<void> {
     })
     .then(() => workspaces.recover())
     .catch((e: unknown) => console.error(`[nexus] program recovery: ${errorMessage(e)}`))
+    .then(() => control.recoverOnBoot((runId) => orchestrator.recover(runId, 'resume').then(() => undefined)))
+    .catch((e: unknown) => console.error(`[nexus] control plane recovery: ${errorMessage(e)}`))
     .finally(() => recoverOvernight())
   const appInfo = async (): Promise<AppInfo> => ({
     version: app.getVersion(),
@@ -601,6 +654,7 @@ async function bootstrap(): Promise<void> {
     }),
     v4: createV4Handlers({ repos, programs, background: backgroundJobs }),
     v6: createV6Handlers({ providers }),
+    v7: createV7Handlers({ control }),
     v5: createV5Handlers({
       workspaces,
       pickDirectory: async () => {

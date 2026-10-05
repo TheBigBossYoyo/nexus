@@ -22,6 +22,7 @@ import {
   type WorkspaceRepository,
   type WorkspaceSummary,
 } from './workspace'
+import { ControlLimitsSchema, EnqueueInputSchema, PrioritySchema, ScheduleInputSchema, type ControlLimits, type ControlPlaneOverview, type GlobalWorkItem, type Schedule } from './control-plane'
 import { ProviderIdSchema, ProviderPolicySchema, type ProviderPolicy, type ProviderSession, type ProvidersOverview, type ProviderStatus } from './provider'
 import {
   BACKLOG_STATUSES,
@@ -551,6 +552,19 @@ export const ipcInputs = {
   /** One minimal real session with the provider. Explicit, because it uses that provider's quota. */
   'providers.probe': z.object({ provider: ProviderIdSchema }).strict(),
   'providers.sessions': z.object({ runId: Id }).strict(),
+  // v0.7: the control plane.
+  'control.overview': Empty,
+  /** Puts an existing program, campaign or workspace mission, or an audit, on the global queue. */
+  'control.enqueue': z.object({ item: EnqueueInputSchema }).strict(),
+  'control.setPriority': z.object({ itemId: Id, priority: PrioritySchema }).strict(),
+  'control.move': z.object({ itemId: Id, where: z.enum(['top', 'up', 'down']) }).strict(),
+  'control.pause': z.object({ itemId: Id }).strict(),
+  'control.resume': z.object({ itemId: Id }).strict(),
+  'control.cancel': z.object({ itemId: Id }).strict(),
+  'control.setLimits': z.object({ limits: ControlLimitsSchema }).strict(),
+  'control.createSchedule': z.object({ schedule: ScheduleInputSchema }).strict(),
+  'control.setScheduleEnabled': z.object({ scheduleId: Id, enabled: z.boolean() }).strict(),
+  'control.removeSchedule': z.object({ scheduleId: Id }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -675,6 +689,17 @@ export interface IpcOutputs {
   'providers.setPolicy': ProviderPolicy
   'providers.probe': { ok: boolean; detail: string; status: ProviderStatus | null }
   'providers.sessions': ProviderSession[]
+  'control.overview': ControlPlaneOverview
+  'control.enqueue': GlobalWorkItem
+  'control.setPriority': GlobalWorkItem
+  'control.move': GlobalWorkItem
+  'control.pause': GlobalWorkItem
+  'control.resume': GlobalWorkItem
+  'control.cancel': GlobalWorkItem
+  'control.setLimits': ControlLimits
+  'control.createSchedule': Schedule
+  'control.setScheduleEnabled': Schedule
+  'control.removeSchedule': null
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]

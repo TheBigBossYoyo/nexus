@@ -90,7 +90,7 @@ export interface CreateRunInput {
 export interface DispatchGate {
   canDispatch(): boolean
   /** The parallel-session limit to apply now (a ramp after a resume lowers it). */
-  limit(normal: number): number
+  limit(normal: number, runId?: string): number
   /** Called when the gate may have reopened or the limit changed. Returns an unsubscribe function. */
   onChange?(listener: () => void): () => void
 }
@@ -688,7 +688,7 @@ export class Orchestrator implements PipelineHost {
     if (!gateClosed) {
       // After a resume the gate limits how many pipelines restart at once (the ramp); the rest wait for the next tick.
       const running = [...this.active.values()].filter((p) => p.runId === runId).length
-      this.restartOrphans(run, this.gate ? Math.max(0, this.gate.limit(run.config.maxParallelAgents) - running) : Number.POSITIVE_INFINITY)
+      this.restartOrphans(run, this.gate ? Math.max(0, this.gate.limit(run.config.maxParallelAgents, run.id) - running) : Number.POSITIVE_INFINITY)
     }
 
     let tasks = repos.tasks.listByRun(runId)
@@ -706,7 +706,7 @@ export class Orchestrator implements PipelineHost {
       tasks,
       dependencies,
       activeTaskIds,
-      maxParallelAgents: this.gate ? this.gate.limit(run.config.maxParallelAgents) : run.config.maxParallelAgents,
+      maxParallelAgents: this.gate ? this.gate.limit(run.config.maxParallelAgents, run.id) : run.config.maxParallelAgents,
       now: nowIso(),
       paused: gateClosed,
     })

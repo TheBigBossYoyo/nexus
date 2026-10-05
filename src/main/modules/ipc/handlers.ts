@@ -26,6 +26,7 @@ import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 import { unavailableV4Handlers, type V4Handlers } from './v4-handlers'
 import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
+import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -56,6 +57,8 @@ export interface IpcContext {
   v5?: V5Handlers
   /** v0.6 handlers (providers). */
   v6?: V6Handlers
+  /** v0.7 handlers (the control plane). */
+  v7?: V7Handlers
 }
 
 type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
@@ -386,6 +389,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     ...(ctx.v4 ?? unavailableV4Handlers()),
     ...(ctx.v5 ?? unavailableV5Handlers()),
     ...(ctx.v6 ?? unavailableV6Handlers()),
+    ...(ctx.v7 ?? unavailableV7Handlers()),
   }
 }
 
