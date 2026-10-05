@@ -350,7 +350,7 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     } else break
   }
 
-  checkWords(seg, words, a, DELETE_CMDS.has(normalizeName(words[i] ?? '')) || MOVE_CMDS.has(normalizeName(words[i] ?? '')))
+  checkWords(seg, words, a, DELETE_CMDS.has(normalizeName(words[i] ?? '')) || MOVE_CMDS.has(normalizeName(words[i] ?? '')), normalizeName(words[i] ?? '') === 'git')
 
   const nameWord = words[i]
   if (nameWord === undefined) {
@@ -498,7 +498,7 @@ function skipXargsFlags(words: string[], from: number): number {
 // Path and secret checks on every word
 // ---------------------------------------------------------------------------------------------
 
-function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boolean): void {
+function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boolean, isGit = false): void {
   const candidates = [...words, ...seg.redirects.map((r) => r.target)]
   for (const w of candidates) {
     if (w === '') continue
@@ -506,8 +506,14 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
       if (!/\s/.test(v) || /[\\/]/.test(v)) {
         if (isSecretPath(v)) a.ask('high', `accessing secrets: ${v}`)
       }
-      if (destructive && v.split(/[\\/]/).some((s) => s.toLowerCase() === '.git')) {
+      const namesGit = v.split(/[\\/]/).some((s) => s.toLowerCase() === '.git')
+      if (destructive && namesGit) {
         a.ask('high', 'deleting or moving a .git directory', 'DESTRUCTIVE')
+      } else if (namesGit && !isGit) {
+        // Git's own files (a worktree's `.git` pointer, the repository's config and hooks) decide which
+        // repository NEXUS's later git commands act on and what they run. No command but git itself has a
+        // reason to name them.
+        a.ask('high', `touching Git's own files: ${v}`, 'SYSTEM_CHANGE')
       }
       const outside = outsideRoots(v, a)
       if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
@@ -890,8 +896,11 @@ function analyzeGitConfig(rest: string[], rlc: string[], a: Analysis): void {
     return
   }
   if (verb === 'set') positional = positional.slice(1)
-  const key = positional[0]
-  if (key !== undefined && GIT_UNSAFE_CONFIG.test(key) && !GIT_HARMLESS_CONFIG.test(key)) {
+  // The key is not always the first word: an option that takes a value (`--type bool`, `--default x`,
+  // `--comment x`, `--file f`) puts its value before it. Every word is therefore looked at as a possible key;
+  // a value that merely looks like a dangerous key costs one question, a key that is missed costs the machine.
+  const key = positional.find((word) => GIT_UNSAFE_CONFIG.test(word) && !GIT_HARMLESS_CONFIG.test(word))
+  if (key !== undefined) {
     a.ask('high', `git config ${key} can make git run arbitrary programs`, 'SYSTEM_CHANGE')
   }
 }
