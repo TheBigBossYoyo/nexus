@@ -7,7 +7,8 @@ import type { Project, Run } from '@shared/domain'
 import { DEFAULT_WORKSPACE_POLICY, type PlannedCrossRepoTask, type Workspace, type WorkspaceMission } from '@shared/workspace'
 import { EventBus } from '@main/modules/events'
 import { GitService } from '@main/modules/git'
-import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
+import BetterSqlite3 from 'better-sqlite3'
+import { createRepositories, MIGRATIONS, openDatabase, runMigrations, type Database, type Repositories } from '@main/modules/persistence'
 import { ipcInputs } from '@shared/ipc'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT, type OvernightRun } from '@shared/overnight'
 import { OvernightSupervisor, WorkspaceMissionWorkload, type OvernightOrchestrator } from '@main/modules/overnight'
@@ -649,5 +650,27 @@ describe('workspace engine: audit regressions', () => {
     expect(isReasoningRun(planner)).toBe(true)
     expect(rig.repos.runs.listRecentUser(50).map((r) => r.id)).not.toContain(planner.id)
     expect(rig.repos.settings.getValue(`workspace-starting:${mission.id}`)).toBeNull()
+  })
+})
+
+describe('migration 007 (workspaces)', () => {
+  it('is additive: a schema-6 database keeps every row and its tables, and gains the workspace tables', () => {
+    const old = new BetterSqlite3(':memory:')
+    old.pragma('foreign_keys = ON')
+    runMigrations(old, MIGRATIONS.filter((m) => m.version <= 6))
+    const before = createRepositories(old)
+    const project = before.projects.insert(makeProject())
+    const ddl = (db: BetterSqlite3.Database): Map<string, string> => new Map((db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'").all() as { name: string; sql: string }[]).map((r) => [r.name, r.sql]))
+    const earlier = ddl(old)
+    runMigrations(old, MIGRATIONS.filter((m) => m.version <= 7))
+    const after = ddl(old)
+    for (const [name, sql] of earlier) expect(after.get(name), name).toBe(sql)
+    const added = [...after.keys()].filter((name) => !earlier.has(name) && !name.startsWith('idx_') && !name.startsWith('sqlite_autoindex'))
+    expect(added.length).toBeGreaterThanOrEqual(10)
+    for (const name of added) expect(name.startsWith('workspace') || ['enrolled_repositories', 'contract_versions', 'contract_consumers', 'release_trains', 'cross_repo_dependencies', 'workspace_services'].includes(name) || /contract|release|repo|service/.test(name), name).toBe(true)
+    const repos = createRepositories(old)
+    expect(repos.projects.require(project.id).id).toBe(project.id)
+    expect(repos.workspaces.list()).toEqual([])
+    old.close()
   })
 })
