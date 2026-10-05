@@ -276,3 +276,43 @@ Written while the 0.3 stress runs; only light test runs alongside it.
 3. 0.6 (providers), 0.7 (control plane) as far as time allows, each on its branch; partial work stays unmerged.
 4. `docs/ONE_DOT_ZERO_READINESS.md`, `docs/OVERNIGHT_FINAL_REPORT_0_3_TO_1_0.md`, preservation, then
    `finish-now` to the shutdown supervisor. Start finalization no later than 09:45.
+
+### 02:40 to 03:50 Release of 0.4.0; 0.6 built; 0.7 core built
+
+- **0.4.0 released** at 03:13. The stress in the second checkout ended with 997 of 1000 orchestrator seeds:
+  seeds 13, 16 and 22 timed out in the first three minutes, while a full test suite, a typecheck and a lint ran
+  beside it. Seeds 13 to 22 alone: 10 of 10; seeds 1 to 60 alone: 60 of 60, same commit. Recorded as it
+  happened in `docs/V0_4_RELEASE_REPORT.md`. `main` = `3e1b8b3`, tag `v0.4.0`.
+- **0.5** (`nexus-0.5`, version 0.5.0): `pnpm test` 137 files, 2600 of 2601 (one failure: the timing-based
+  evaluator of the Arena case `performance-optimization` measured a ratio of 24.1 against a limit of 24 while
+  the machine was loaded; the file passed alone, 16 of 16); E2E 22 passed. Its 1000-seed stress started at
+  03:12 in the second checkout. Still owed before a release: an independent code audit, an independent UI
+  review, a real acceptance run, a clean full suite, package.
+- **0.6** (`nexus-0.6`, from `nexus-0.5`): providers.
+  - `AgentRuntimeProvider`, discovery, provider policy, a router that is itself an `AgentRuntime` (the
+    orchestrator did not change), fallback with recorded reasons, provider sessions (schema 8), usage isolation,
+    provider-aware evidence (`codex:gpt-5.5` in mission outcomes and Arena trials), Providers page, provider
+    line in the mission inspector, IPC, PROVIDERS.md.
+  - Codex is installed on this computer (`codex-cli 0.130.0`) and signed in through its own tool ("Logged in
+    using ChatGPT"). NEXUS drives `codex exec --json` read-only. Its default model was refused by the service
+    for this tool version; `gpt-5.5`, which the service listed, works and is NEXUS's default for Codex.
+  - **Real Codex evidence** (`pnpm smoke:providers`, `docs/acceptance/providers-smoke-2026-10-05T*.json`): one
+    read-only review of a small commit with a real defect. Outcome success, verdict `request_changes`, the
+    defect named (an empty list divides by zero), two shell commands run, the attempt to write a file refused
+    by the Codex sandbox, the working directory fingerprint unchanged, 46k input tokens (36k cached).
+  - Gemini is not installed here; it is detected only and cannot be enabled.
+  - Tests: `pnpm test` 139 files, 2639 passed; E2E 24 passed (2 new, scripted providers).
+- **0.7** (`nexus-0.7`, from `nexus-0.6`): the control plane core, in the NEXUS process.
+  - Built: global work items (six types, P0 to P3, ten states, persisted order), allocation of agent capacity
+    between workloads through the orchestrator's dispatch gate (running sessions are never stopped; free
+    capacity goes to the higher priority first), adoption of every working workload however it was started,
+    durable schedules (a missed one fires once), runtime health per component, restrained notifications, boot
+    reconciliation, Control Center page, IPC (`control.*`), schema 9.
+  - Tests: `pnpm test` 140 files, 2671 passed before the page was added; 21 control-plane tests including
+    10,000 seeded allocations; E2E 1 of 1 (an adopted mission, a program from the queue, limits, a schedule,
+    a restart).
+  - **Not built, and 0.7 cannot be released without them:** a runtime process separate from the window (the
+    control plane lives in the Electron main process, which already keeps running in the tray when the window
+    is closed), a client and runtime IPC boundary of its own, and a worker manager with leases. Home was not
+    redesigned into the Control Center; the Control Center is its own page.
+- Usage: no agents and no real Claude runs were started between 02:36 and the reset at 04:10.
