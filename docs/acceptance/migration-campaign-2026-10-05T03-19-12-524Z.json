@@ -1,0 +1,441 @@
+{
+  "kind": "migration-campaign",
+  "executable": "dev build",
+  "version": "0.5.0",
+  "startedAt": "2026-10-05T03:18:31.941Z",
+  "databases": [
+    {
+      "label": "0.1",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-adv-data-GmThcM",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.1": true,
+        "every run is readable with all its tasks and agents (1)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 1 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (27 tables)": true
+      },
+      "before": {
+        "schema": 1,
+        "rows": 1703,
+        "tables": 27,
+        "runs": 1,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 1740,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.2.0",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-v02-data-lT2lR2",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.2.0": true,
+        "every run is readable with all its tasks and agents (1)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 2 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (41 tables)": true
+      },
+      "before": {
+        "schema": 2,
+        "rows": 2217,
+        "tables": 41,
+        "runs": 1,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 2250,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.2.1",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-rot-data-v5Hj3a",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.2.1": true,
+        "every run is readable with all its tasks and agents (1)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 3 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (44 tables)": true
+      },
+      "before": {
+        "schema": 3,
+        "rows": 281,
+        "tables": 44,
+        "runs": 1,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 313,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.3-arena",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-arena-data-vAa9ds",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.3-arena": true,
+        "every run is readable with all its tasks and agents (6)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (1)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 4 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (64 tables)": true
+      },
+      "before": {
+        "schema": 4,
+        "rows": 2074,
+        "tables": 64,
+        "runs": 6,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 1
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 2079,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.3-adaptive",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-adaptive-data-eSawxw",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.3-adaptive": true,
+        "every run is readable with all its tasks and agents (1)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 4 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (64 tables)": true
+      },
+      "before": {
+        "schema": 4,
+        "rows": 327,
+        "tables": 64,
+        "runs": 1,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 332,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.3.0-final",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-pkg-data-De9XrX",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.3.0-final": true,
+        "every run is readable with all its tasks and agents (1)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 5 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (64 tables)": true
+      },
+      "before": {
+        "schema": 5,
+        "rows": 314,
+        "tables": 64,
+        "runs": 1,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 318,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.4-program",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-program-data-RRAABk",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.4-program": true,
+        "every run is readable with all its tasks and agents (10)": true,
+        "every program is listed and opens (1)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 6 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (75 tables)": true
+      },
+      "before": {
+        "schema": 6,
+        "rows": 1100,
+        "tables": 75,
+        "runs": 10,
+        "programs": 1,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 1103,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.5-workspace",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-workspace-data-uXOFiz",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.5-workspace": true,
+        "every run is readable with all its tasks and agents (4)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (1, 1)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 7 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (88 tables)": true
+      },
+      "before": {
+        "schema": 7,
+        "rows": 726,
+        "tables": 88,
+        "runs": 4,
+        "programs": 0,
+        "workspaces": 1,
+        "workspaceMissions": 1,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 728,
+        "tables": 92
+      },
+      "rowChanges": []
+    },
+    {
+      "label": "0.6",
+      "source": "C:\\Users\\user\\AppData\\Local\\Temp/nexus-pkg-data-7ki1aY",
+      "checks": {
+        "launches as 0.5.0 on a database of 0.6": true,
+        "every run is readable with all its tasks and agents (1)": true,
+        "every program is listed and opens (0)": true,
+        "every workspace and workspace mission is listed and opens (0, 0)": true,
+        "every Arena campaign is listed and opens (0)": true,
+        "the pages render (home, run, programs, workspaces, arena, usage, providers, control, overnight, settings)": true,
+        "the schema was upgraded from 8 to the newest (9), every version in order": true,
+        "the database as the older version left it was kept as a backup copy": true,
+        "no table lost or changed its number of rows (89 tables)": true
+      },
+      "before": {
+        "schema": 8,
+        "rows": 2254,
+        "tables": 89,
+        "runs": 1,
+        "programs": 0,
+        "workspaces": 0,
+        "workspaceMissions": 0,
+        "campaigns": 0
+      },
+      "app": {
+        "version": "0.5.0",
+        "isPackaged": false
+      },
+      "runProblems": [],
+      "pages": {
+        "home": true,
+        "run": true,
+        "programs": true,
+        "workspaces": true,
+        "arena": true,
+        "usage": true,
+        "providers": true,
+        "control": true,
+        "overnight": true,
+        "settings": true
+      },
+      "after": {
+        "schema": 9,
+        "rows": 2255,
+        "tables": 92
+      },
+      "rowChanges": []
+    }
+  ],
+  "passed": true
+}
