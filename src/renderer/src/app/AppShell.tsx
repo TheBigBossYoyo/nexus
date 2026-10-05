@@ -13,6 +13,7 @@ import { QuotaBanner } from './QuotaBanner'
 import { Sidebar } from './Sidebar'
 import { Toasts } from './Toasts'
 import { ViewRouter } from './ViewRouter'
+import { ConnectionAnnouncer, ConnectionBanner, ConnectionContent, StartupState } from './ConnectionGate'
 
 function Banners() {
   return (
@@ -59,11 +60,20 @@ export function AppShell() {
       <ErrorBoundary label="Navigation failed">
         <Sidebar />
       </ErrorBoundary>
-      <main id="main-content" tabIndex={-1} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <ShellSlotsContext.Provider value={slots}>
-          <ViewRouter />
-        </ShellSlotsContext.Provider>
-      </main>
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <ErrorBoundary label="Connection banner failed">
+          <ConnectionBanner />
+        </ErrorBoundary>
+        <ConnectionContent>
+          <main id="main-content" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+            <ShellSlotsContext.Provider value={slots}>
+              <ViewRouter />
+            </ShellSlotsContext.Provider>
+          </main>
+        </ConnectionContent>
+      </div>
+      <ConnectionAnnouncer />
+      <StartupState />
       <ApprovalDrawer />
       <RecoveryDialog />
       <CommandPalette />

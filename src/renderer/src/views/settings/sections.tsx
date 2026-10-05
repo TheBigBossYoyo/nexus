@@ -24,6 +24,7 @@ import {
   type Column,
   type SelectOption,
 } from '../../components/ui'
+import { PROFILE_EXPLANATION } from '../security/securityModel'
 import { buildMcpServer, type McpDraft } from './settingsForm'
 
 export interface SectionProps {
@@ -167,6 +168,23 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
           />
         )}
       </Field>
+      <Field
+        label="Execution profile"
+        hint="STANDARD gates agent commands and scripts as before. RESTRICTED gates them more strictly. Neither is a sandbox."
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={e.profile}
+            onChange={(v) => set('execution', { profile: v })}
+            options={[
+              { value: 'STANDARD', label: 'STANDARD' },
+              { value: 'RESTRICTED', label: 'RESTRICTED' },
+            ]}
+            data-testid="exec-profile"
+          />
+        )}
+      </Field>
       <div className="grid grid-cols-2 gap-3">
         {num('Max parallel agents (BALANCED)', 'maxParallelAgents', 1, 16, 'BALANCED uses at most 4')}
         {num('Max agents (MAXIMUM)', 'maximumPresetAgents', 1, 16)}
@@ -183,6 +201,23 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
         onChange={(v) => set('execution', { requirePlanApproval: v })}
         label="Require plan approval by default"
       />
+      <Field label="Execution profile" hint="How strictly NEXUS gates the commands and scripts agents run." error={error('execution.profile')}>
+        {(id) => (
+          <Select
+            id={id}
+            value={e.profile}
+            onChange={(v) => set('execution', { profile: v })}
+            options={[
+              { value: 'STANDARD', label: 'Standard (recommended)' },
+              { value: 'RESTRICTED', label: 'Restricted (more approvals)' },
+            ]}
+            data-testid="exec-profile"
+          />
+        )}
+      </Field>
+      <Notice tone="neutral" title="Neither profile is a sandbox" data-testid="exec-profile-note">
+        {PROFILE_EXPLANATION}
+      </Notice>
     </Stack>
   )
 }

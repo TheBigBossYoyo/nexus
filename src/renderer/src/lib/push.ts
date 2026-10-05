@@ -6,7 +6,9 @@ import { qk } from './queries'
 import { qkv4 } from './queries-v4'
 import { qkv5 } from './queries-v5'
 import { qkv6 } from './queries-v6'
-import { qkControl } from './queries-v7'
+import { qkControl, qkRuntime } from './queries-v7'
+import { useConnectionStore } from '../store/connection'
+import { useUiStore } from '../store/ui'
 import { quotaWaitActive } from './usageModel'
 import type { UsageOverview } from '@shared/v3'
 import { useLiveStore } from '../store/live'
@@ -214,6 +216,16 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
         case 'control':
           schedule([qkControl.root()])
           break
+        case 'runtime':
+          schedule([qkRuntime.root(), qkControl.root()])
+          break
+        case 'connection':
+          // A new connection or a restarted runtime: everything cached is old, so everything is read again.
+          if (useConnectionStore.getState().apply(message.state)) void qc.invalidateQueries()
+          break
+        case 'desktop':
+          if (message.action === 'show' && message.view === 'control') useUiStore.getState().setView('control')
+          break
         case 'backlog':
           schedule([qkv4.programsRoot(), qkv4.backgroundRoot()])
           break
@@ -237,6 +249,14 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
 export function startPush(qc: QueryClient): () => void {
   const handler = createPushHandler(qc)
   const unsubscribe = api.onPush((m) => handler.handle(m))
+  // The state the window is in now; a window without the bridge (a browser) behaves as connected.
+  void api
+    .invoke('desktop.connection', {})
+    .then((state) => {
+      // A push that arrived first is newer than this answer.
+      if (useConnectionStore.getState().state === null && useConnectionStore.getState().apply(state)) void qc.invalidateQueries()
+    })
+    .catch(() => undefined)
   return () => {
     unsubscribe()
     handler.dispose()

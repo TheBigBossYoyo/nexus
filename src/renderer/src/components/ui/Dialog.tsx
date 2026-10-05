@@ -69,6 +69,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
   danger = false,
   loading = false,
   testId,
@@ -79,6 +80,7 @@ export function ConfirmDialog({
   title: string
   children: ReactNode
   confirmLabel?: string
+  cancelLabel?: string
   danger?: boolean
   loading?: boolean
   testId?: string
@@ -92,7 +94,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button onClick={onClose} {...(danger ? { 'data-autofocus': true } : {})}>
-            Cancel
+            {cancelLabel}
           </Button>
           <Button
             variant={danger ? 'danger' : 'primary'}

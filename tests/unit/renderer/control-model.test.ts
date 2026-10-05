@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONTROL_LIMITS, ScheduleInputSchema, type GlobalWorkItem, type Schedule } from '@shared/control-plane'
-import { actionLine, capacityLine, EMPTY_SCHEDULE_FORM, HEALTH_LABEL, itemActions, itemLine, scheduleInput, scheduleLine, STATE_LABEL, validateScheduleForm } from '../../../src/renderer/src/views/control/controlModel'
+import { actionLine, cancelConfirmation, cancelLabel, CANCEL_PRESERVATION, capacityLine, describeError, EMPTY_SCHEDULE_FORM, hasStarted, HEALTH_LABEL, HOLD_LABEL, inspectorOf, isStarting, itemActions, itemLine, itemPresentation, loadState, queueAnnouncement, RELEASE_LABEL, scheduleDeleteConfirmation, scheduleInput, scheduleLine, STARTING_WINDOW_MS, STATE_LABEL, validateScheduleForm } from '../../../src/renderer/src/views/control/controlModel'
 
 const item = (over: Partial<GlobalWorkItem> = {}): GlobalWorkItem => ({ id: 'i', type: 'program', refId: 'p', title: 'Program', priority: 'P2', position: 1, state: 'QUEUED', requestedAgents: 2, deadlineAt: null, notBefore: null, scheduleId: null, heldByUser: false, payload: null, detail: null, createdAt: '', updatedAt: '', startedAt: null, finishedAt: null, ...over })
 
@@ -41,13 +41,169 @@ describe('control center model', () => {
     expect(actionLine(schedule.action, { program: 'RaceDeck' })).toBe('Continue the program "RaceDeck"')
     expect(actionLine({ type: 'scheduled_audit', projectId: 'x', kind: 'dependency_audit' }, {})).toBe('Run a dependency audit')
 
-    expect(validateScheduleForm(EMPTY_SCHEDULE_FORM)).toMatchObject({ ok: false, errors: { name: expect.any(String), programId: expect.any(String) } })
-    expect(validateScheduleForm({ ...EMPTY_SCHEDULE_FORM, name: 'x', programId: 'p', time: '25:00' }).errors.time).toContain('HH:MM')
-    const form = { ...EMPTY_SCHEDULE_FORM, name: '  Nightly  ', programId: 'p1', kind: 'weekly' as const, day: 'sunday' as const, time: '03:00', priority: 'P1' as const }
+    expect(validateScheduleForm(EMPTY_SCHEDULE_FORM)).toMatchObject({ ok: false, errors: { name: expect.any(String), targetId: expect.any(String) } })
+    expect(validateScheduleForm({ ...EMPTY_SCHEDULE_FORM, name: 'x', targetId: 'p', time: '25:00' }).errors.time).toContain('HH:MM')
+    const form = { ...EMPTY_SCHEDULE_FORM, name: '  Nightly  ', targetId: 'p1', kind: 'weekly' as const, day: 'sunday' as const, time: '03:00', priority: 'P1' as const }
     expect(validateScheduleForm(form).ok).toBe(true)
     const input = scheduleInput(form)
     expect(input).toEqual({ name: 'Nightly', rule: { kind: 'weekly', day: 'sunday', time: '03:00' }, action: { type: 'program', programId: 'p1' }, priority: 'P1', enabled: true })
     expect(ScheduleInputSchema.safeParse(input).success).toBe(true)
     expect(ScheduleInputSchema.safeParse(scheduleInput({ ...form, kind: 'daily' })).success).toBe(true)
+  })
+
+  it('builds a schedule for every action type the channel allows', () => {
+    const base = { ...EMPTY_SCHEDULE_FORM, name: 'N', targetId: 't1' }
+    const cases = [
+      [{ actionType: 'program' as const }, { type: 'program', programId: 't1' }],
+      [{ actionType: 'arena' as const }, { type: 'arena', campaignId: 't1' }],
+      [{ actionType: 'workspace_mission' as const }, { type: 'workspace_mission', missionId: 't1' }],
+      [{ actionType: 'scheduled_audit' as const, auditKind: 'architecture_audit' as const }, { type: 'scheduled_audit', projectId: 't1', kind: 'architecture_audit' }],
+    ] as const
+    for (const [over, action] of cases) {
+      const input = scheduleInput({ ...base, ...over, priority: 'P0' })
+      expect(input.action).toEqual(action)
+      expect(input.priority).toBe('P0')
+      expect(ScheduleInputSchema.safeParse(input).success).toBe(true)
+    }
+    expect(validateScheduleForm({ ...base, actionType: 'arena', targetId: '' }).errors.targetId).toContain('campaign')
+  })
+
+  it('uses one verb pair for hold and release', () => {
+    expect([HOLD_LABEL, RELEASE_LABEL]).toEqual(['Hold', 'Release'])
+  })
+
+  describe('cancel confirmation', () => {
+    it('a never-started item is removed without a question and says Remove', () => {
+      for (const state of ['QUEUED', 'READY', 'SCHEDULED'] as const) {
+        expect(hasStarted(item({ state }))).toBe(false)
+        expect(cancelConfirmation(item({ state }))).toBeNull()
+        expect(cancelLabel(item({ state }))).toBe('Remove')
+      }
+      // Held before it ever started: still only a queue entry.
+      expect(cancelConfirmation(item({ state: 'PAUSED', heldByUser: true }))).toBeNull()
+    })
+
+    it('anything that started asks, including paused, blocked and waiting-for-usage items', () => {
+      for (const state of ['RUNNING', 'QUOTA_WAIT', 'BLOCKED'] as const) expect(cancelConfirmation(item({ state }))).not.toBeNull()
+      // Paused by the system, or held after it ran.
+      expect(cancelConfirmation(item({ state: 'PAUSED', heldByUser: false }))).not.toBeNull()
+      expect(cancelConfirmation(item({ state: 'PAUSED', heldByUser: true, startedAt: '2026-01-01T00:00:00Z' }))).not.toBeNull()
+      // A queued item that has a start time ran before.
+      expect(cancelConfirmation(item({ state: 'QUEUED', startedAt: '2026-01-01T00:00:00Z' }))).not.toBeNull()
+      expect(cancelLabel(item({ state: 'RUNNING' }))).toBe('Cancel')
+    })
+
+    it('names the workload, the type and the running sessions, and says they are stopped, not drained', () => {
+      const c = cancelConfirmation({ ...item({ state: 'RUNNING', type: 'arena', title: 'Nightly campaign' }), activeAgents: 3, allowance: 3 })
+      expect(c?.title).toContain('Nightly campaign')
+      expect(c?.lines.join(' ')).toContain('Arena campaign')
+      expect(c?.lines.join(' ')).toContain('3 running agent sessions will be stopped at once')
+      expect(c?.lines.join(' ')).toContain('not allowed to finish')
+      expect(c?.lines.join(' ')).toContain('cannot be resumed')
+      expect(c?.confirmLabel).toBe('Cancel workload')
+      expect(c?.keepLabel).toBe('Keep it running')
+      expect(cancelConfirmation({ ...item({ state: 'RUNNING' }), activeAgents: 1, allowance: 1 })?.lines.join(' ')).toContain('1 running agent session will be stopped')
+      expect(cancelConfirmation({ ...item({ state: 'RUNNING' }), activeAgents: 0, allowance: 1 })?.lines.join(' ')).toContain('No agent session is running at this moment')
+      // A paused or blocked item does not claim a count it cannot know.
+      expect(cancelConfirmation(item({ state: 'BLOCKED' }))?.lines.join(' ')).toContain('Any agent session it is running is stopped at once')
+    })
+
+    it('states what is kept per workload type, and never claims a worktree is deleted', () => {
+      for (const type of ['mission', 'program', 'arena', 'workspace_mission', 'background_job', 'scheduled_audit'] as const) {
+        const c = cancelConfirmation(item({ type, state: 'RUNNING' }))
+        expect(c?.preserved).toBe(CANCEL_PRESERVATION[type])
+        expect(c?.preserved.length).toBeGreaterThan(0)
+        expect(c?.preserved.join(' ')).not.toMatch(/(is|are|will be) (deleted|removed|discarded)/i)
+      }
+      expect(CANCEL_PRESERVATION.mission.join(' ')).toContain('does not delete')
+      expect(CANCEL_PRESERVATION.program.join(' ')).toContain('Milestones that already completed keep their work')
+      expect(CANCEL_PRESERVATION.arena.join(' ')).toContain('already finished keep their results')
+      expect(CANCEL_PRESERVATION.workspace_mission.join(' ')).toContain('already completed keep their work')
+      expect(CANCEL_PRESERVATION.scheduled_audit.join(' ')).toContain('no findings')
+    })
+  })
+
+  it('deleting a schedule always asks, and says that work it already queued stays', () => {
+    const schedule = { id: 's1', name: 'Nightly', enabled: true }
+    const none = scheduleDeleteConfirmation(schedule, [])
+    expect(none.title).toContain('Nightly')
+    expect(none.confirmLabel).toBe('Delete schedule')
+    expect(none.keepLabel).toBe('Keep schedule')
+    expect(none.preserved.join(' ')).toContain('No work from this schedule is on the queue')
+    const running = scheduleDeleteConfirmation(schedule, [
+      { scheduleId: 's1', title: 'Program A', state: 'RUNNING' },
+      { scheduleId: 's1', title: 'Old', state: 'COMPLETED' },
+      { scheduleId: 'other', title: 'Other', state: 'RUNNING' },
+    ])
+    expect(running.preserved.join(' ')).toContain('“Program A”')
+    expect(running.preserved.join(' ')).toContain('not cancelled')
+    expect(running.preserved.join(' ')).not.toContain('Other')
+  })
+
+  describe('blocked and failed items', () => {
+    it('are never presented like an ordinary queued job', () => {
+      const queued = itemPresentation(item({ state: 'QUEUED' }))
+      expect(queued).toMatchObject({ emphasis: 'normal', label: 'Queued', reasonLabel: null, hint: null })
+      const blocked = itemPresentation({ ...item({ state: 'BLOCKED', type: 'program' }), reason: 'Milestone 2 could not start.' })
+      expect(blocked).toMatchObject({ emphasis: 'attention', tone: 'warning', label: 'Blocked', reasonLabel: 'Blocked because', reasonText: 'Milestone 2 could not start.' })
+      expect(blocked.hint).toContain('Programs page')
+      const failed = itemPresentation(item({ state: 'FAILED', detail: 'The run crashed.' }))
+      expect(failed).toMatchObject({ emphasis: 'failure', tone: 'danger', label: 'Failed', reasonLabel: 'Failed because', reasonText: 'The run crashed.' })
+      expect(itemPresentation(item({ state: 'BLOCKED' })).reasonText).toBe('No reason was recorded.')
+      expect(itemPresentation(item({ state: 'PAUSED', heldByUser: true })).label).toBe('Held')
+    })
+  })
+
+  describe('load and mutation errors', () => {
+    it('is never a permanent loading state', () => {
+      expect(loadState({ hasData: false, isError: false, error: null })).toEqual({ kind: 'loading' })
+      expect(loadState({ hasData: false, isError: true, error: new Error('Database is locked') })).toEqual({ kind: 'error', message: 'Database is locked' })
+      expect(loadState({ hasData: true, isError: false, error: null })).toEqual({ kind: 'ready', stale: null })
+      expect(loadState({ hasData: true, isError: true, error: new Error('timeout') })).toEqual({ kind: 'ready', stale: 'timeout' })
+    })
+
+    it('always has some text for an error', () => {
+      expect(describeError(new Error('x'))).toBe('x')
+      expect(describeError('y')).toBe('y')
+      expect(describeError({ message: 'z' })).toBe('z')
+      expect(describeError(null).length).toBeGreaterThan(0)
+      expect(describeError(new Error('')).length).toBeGreaterThan(0)
+    })
+  })
+
+  it('reads Starting… for a just-started item with no session yet', () => {
+    const now = Date.parse('2026-01-01T00:10:00Z')
+    const fresh = { ...item({ state: 'RUNNING', type: 'program', startedAt: '2026-01-01T00:09:40Z' }), activeAgents: 0, allowance: 2 }
+    expect(isStarting(fresh, now)).toBe(true)
+    expect(itemLine(fresh, now)).toBe('Program · Starting…')
+    expect(itemLine({ ...fresh, startedAt: new Date(now - STARTING_WINDOW_MS - 1000).toISOString() }, now)).toBe('Program · 0 agents running, may hold 2')
+    expect(itemLine({ ...fresh, detail: 'Waiting for your approval of the plan.' }, now)).toContain('0 agents running')
+    expect(itemLine({ ...fresh, activeAgents: 1 }, now)).toBe('Program · 1 agent running, may hold 2')
+    expect(isStarting({ ...fresh, state: 'QUEUED' }, now)).toBe(false)
+  })
+
+  it('announces queue changes for a screen reader, and nothing on the first read', () => {
+    const a = item({ id: 'a', title: 'Alpha', state: 'QUEUED' })
+    expect(queueAnnouncement(null, [a])).toBe('')
+    expect(queueAnnouncement(new Map([['a', 'QUEUED']]), [a])).toBe('')
+    expect(queueAnnouncement(new Map([['a', 'QUEUED']]), [{ ...a, state: 'RUNNING' }])).toBe('Alpha: now running')
+    expect(queueAnnouncement(new Map(), [{ ...a, state: 'BLOCKED' }])).toBe('Alpha: added, blocked')
+  })
+
+  it('describes an item for the inspector from the overview alone', () => {
+    const schedule: Schedule = { id: 's1', name: 'Nightly', rule: { kind: 'daily', time: '22:00' }, action: { type: 'program', programId: 'p' }, priority: 'P1', enabled: true, nextRunAt: null, lastRunAt: null, lastResult: null, createdAt: '', updatedAt: '' }
+    const overview = { schedules: [schedule], incidents: [{ at: '2026-01-01T00:00:00Z', summary: 'Blocked: x', itemId: 'i' }, { at: '2026-01-01T00:00:00Z', summary: 'Other', itemId: 'z' }] }
+    const info = inspectorOf({ ...item({ state: 'BLOCKED', scheduleId: 's1', priority: 'P1', requestedAgents: 3 }), reason: 'Blocked: x' }, overview)
+    const facts = Object.fromEntries(info.facts.map((f) => [f.label, f.value]))
+    expect(facts.Priority).toContain('P1')
+    expect(facts.Agents).toBe('3 requested')
+    expect(facts.Schedule).toContain('Nightly')
+    expect(facts.Deadline).toBe('None')
+    expect(facts.Provider).toContain('Not reported')
+    expect(info.why).toBe('Blocked: x')
+    expect(info.events).toEqual([{ at: '2026-01-01T00:00:00Z', summary: 'Blocked: x' }])
+    const running = inspectorOf({ ...item({ state: 'RUNNING' }), activeAgents: 2, allowance: 3 }, overview)
+    expect(running.why).toBeNull()
+    expect(Object.fromEntries(running.facts.map((f) => [f.label, f.value])).Agents).toBe('2 running · 3 granted · 2 requested')
   })
 })

@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { ControlPlaneOverview } from '../../src/shared/control-plane'
+import type { ConnectionState } from '../../src/shared/runtime-protocol'
+import { IPC_INVOKE_CHANNEL } from '../../src/shared/ipc-channels'
 import {
   closeApp,
   createRepo,
   dismissApprovalDrawer,
   invoke,
+  killRuntime,
   launchApp,
   removeDir,
   screenshot,
@@ -72,6 +75,36 @@ test.describe('NEXUS 0.7 control plane', () => {
         'ipc',
       ])
         await expect(page.getByTestId(`health-${part}`)).toHaveAttribute('data-level', 'HEALTHY')
+      // The window reached READY: no startup state and no connection banner are left.
+      await expect(page.getByTestId('startup-state')).toHaveCount(0)
+      await expect(page.getByTestId('connection-banner')).toHaveCount(0)
+      expect((await invoke(page, 'desktop.connection', {})).phase).toBe('READY')
+      await expect(page.getByTestId('control-runtime')).toContainText('Healthy')
+      await expect(page.getByTestId('control-claude')).toContainText('Available')
+      // Without worker processes the strip says where sessions run.
+      await expect(page.getByTestId('control-workers')).toBeVisible()
+
+      // Dispatch is paused and resumed from the header; a pause says that running work continues.
+      const toggle = page.getByTestId('dispatch-toggle')
+      await expect(toggle).toHaveText('Pause dispatch')
+      await toggle.click()
+      await expect(toggle).toHaveText('Resume dispatch')
+      await expect(page.getByTestId('control-dispatch-paused')).toContainText('Work that is running continues')
+      expect((await invoke(page, 'control.overview', {})).dispatchPaused).toBe(true)
+      await toggle.click()
+      await expect(toggle).toHaveText('Pause dispatch')
+      await expect(page.getByTestId('control-dispatch-paused')).toHaveCount(0)
+      expect((await invoke(page, 'control.overview', {})).dispatchPaused).toBe(false)
+
+      // Runtime diagnostics are closed until asked for; the stop button asks first and Escape keeps the runtime.
+      await expect(page.getByTestId('runtime-diagnostics-body')).toHaveCount(0)
+      await page.getByTestId('runtime-diagnostics-toggle').click()
+      await expect(page.getByTestId('runtime-diagnostics-body')).toContainText('Process')
+      await page.getByTestId('runtime-shutdown').click()
+      await expect(page.getByTestId('runtime-shutdown-dialog')).toContainText('Closing only the window stops nothing')
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('runtime-shutdown-dialog')).toHaveCount(0)
+      expect((await invoke(page, 'runtime.status', {})).phase).toBe('READY')
       await expect(page.getByTestId('control-capacity-line')).toHaveText(
         '0 of 6 agents in use · 0 of 4 workloads running',
       )
@@ -158,6 +191,12 @@ test.describe('NEXUS 0.7 control plane', () => {
         'RUNNING',
       )
       await screenshot(page, 'v7-control-running')
+      // The inspector explains what the scheduler decided about the item.
+      await page.getByTestId(`work-item-open-${item?.id ?? ''}`).click()
+      await expect(page.getByTestId('inspector-decisions')).toContainText('Scheduler decisions')
+      await expect(page.getByTestId('inspector-decision-list')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('work-item-inspector')).toHaveCount(0)
       // The same program cannot be queued twice.
       const twice = await page.evaluate(
         async (programId) =>
@@ -231,10 +270,188 @@ test.describe('NEXUS 0.7 control plane', () => {
         (o) => o.schedules[0]?.enabled === false && o.schedules[0]?.nextRunAt === null,
         'the schedule to be switched off',
       )
-      await page.getByTestId(`schedule-remove-${schedule?.id ?? ''}`).click()
+      // Deleting a schedule asks first; keeping it leaves it in place.
+      const removeButton = page.getByTestId(`schedule-remove-${schedule?.id ?? ''}`)
+      await removeButton.click()
+      const deleteDialog = page.getByTestId('schedule-delete-dialog')
+      await expect(deleteDialog).toContainText('Continue at night')
+      await deleteDialog.getByRole('button', { name: 'Keep schedule' }).click()
+      await expect(deleteDialog).toHaveCount(0)
+      await expect(removeButton).toBeFocused()
+      await expect(page.getByTestId(`schedule-${schedule?.id ?? ''}`)).toBeVisible()
+      await removeButton.click()
+      await deleteDialog.getByTestId('confirm-dialog-confirm').click()
       await expect(page.getByTestId('control-schedules-empty')).toBeVisible()
     } finally {
       await closeApp(launched.app)
+    }
+  })
+
+  test('the Control Center shows a failed load with Retry, blocked and failed work, and asks before it cancels', async () => {
+    test.setTimeout(120_000)
+    const repo = createRepo()
+    const dataDir = tempDir('data')
+    dirs.push(repo, dataDir)
+    const { app, page } = await launchApp(dataDir, repo)
+    try {
+      // The overview is answered by a wrapper in the main process: first it fails, then it carries three
+      // items that no scripted workload can produce on demand (a running arena campaign, a blocked program, a failed audit).
+      await app.evaluate(({ ipcMain }, channel) => {
+        type Reply = { ok: boolean; value?: Record<string, unknown[]>; error?: { code: string; message: string } }
+        type Handler = (event: unknown, channel: string, input: unknown) => Promise<Reply> | Reply
+        const state = globalThis as unknown as { __e2e?: { mode: string } }
+        if (state.__e2e) return
+        state.__e2e = { mode: 'fail' }
+        const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+        const original = handlers.get(channel)
+        if (!original) throw new Error('No invoke handler to wrap')
+        const at = new Date().toISOString()
+        const item = (over: Record<string, unknown>): Record<string, unknown> => ({
+          refId: null, priority: 'P2', position: 1, requestedAgents: 2, deadlineAt: null, notBefore: null, scheduleId: null,
+          heldByUser: false, payload: null, detail: null, createdAt: at, updatedAt: at, startedAt: at, finishedAt: null, ...over,
+        })
+        ipcMain.removeHandler(channel)
+        ipcMain.handle(channel, async (event, name: string, input: unknown) => {
+          if (name !== 'control.overview') return original(event, name, input)
+          const mode = state.__e2e?.mode
+          if (mode === 'fail') return { ok: false, error: { code: 'internal', message: 'The queue database is locked.' } }
+          const reply = await original(event, name, input)
+          if (mode === 'seed' && reply.ok && reply.value) {
+            reply.value['active']?.push({ ...item({ id: 'e2e-running', type: 'arena', title: 'Nightly campaign', state: 'RUNNING' }), activeAgents: 2, allowance: 3 })
+            reply.value['waiting']?.push({ ...item({ id: 'e2e-blocked', type: 'program', title: 'Blocked program', state: 'BLOCKED', detail: 'Milestone 2 could not start.' }), reason: 'Milestone 2 could not start.' })
+            reply.value['finished']?.unshift(item({ id: 'e2e-failed', type: 'scheduled_audit', title: 'Dependency audit', state: 'FAILED', detail: 'The analysis run crashed.', finishedAt: at }))
+            reply.value['incidents']?.unshift({ at, summary: 'Blocked program: Milestone 2 could not start.', itemId: 'e2e-blocked' })
+          }
+          return reply
+        })
+      }, IPC_INVOKE_CHANNEL)
+
+      // A failed load is an error with its text and a Retry, never a permanent "Loading".
+      await page.getByTestId('nav-control').click()
+      await expect(page.getByTestId('control-load-error')).toBeVisible()
+      await expect(page.getByTestId('control-load-error-text')).toHaveText('The queue database is locked.')
+      await expect(page.getByTestId('control-loading')).toHaveCount(0)
+      await screenshot(page, 'v7-control-load-error')
+      await app.evaluate(() => {
+        ;(globalThis as unknown as { __e2e: { mode: string } }).__e2e.mode = 'seed'
+      })
+      await page.getByTestId('control-retry').click()
+      await expect(page.getByTestId('control-load-error')).toHaveCount(0)
+      await expect(page.getByTestId('control-page')).toBeVisible()
+
+      // Blocked work is not an ordinary queued job: its own group, a label, the reason and what to do.
+      const blocked = page.getByTestId('work-item-e2e-blocked')
+      await expect(page.getByTestId('control-attention')).toContainText('Needs attention (1)')
+      await expect(blocked).toHaveAttribute('data-emphasis', 'attention')
+      await expect(page.getByTestId('work-item-badge-e2e-blocked')).toHaveText('Blocked')
+      await expect(page.getByTestId('work-item-reason-e2e-blocked')).toContainText('Blocked because: Milestone 2 could not start.')
+      await expect(page.getByTestId('finished-e2e-failed')).toHaveAttribute('data-emphasis', 'failure')
+      await expect(page.getByTestId('finished-reason-e2e-failed')).toContainText('Failed because: The analysis run crashed.')
+      await screenshot(page, 'v7-control-blocked')
+
+      // The inspector opens from the title, shows the reason and the item's events, and returns focus on Escape.
+      const open = page.getByTestId('work-item-open-e2e-blocked')
+      await open.click()
+      const inspector = page.getByTestId('work-item-inspector')
+      await expect(inspector).toBeVisible()
+      await expect(page.getByTestId('inspector-reason')).toContainText('Milestone 2 could not start.')
+      await expect(page.getByTestId('inspector-events')).toContainText('Milestone 2 could not start.')
+      await expect(inspector).toContainText('Priority')
+      await expect(inspector).toContainText('Agents')
+      await page.keyboard.press('Escape')
+      await expect(inspector).toHaveCount(0)
+      await expect(open).toBeFocused()
+
+      // Cancelling work that runs asks first: what stops, how many sessions, what is kept; Escape keeps it.
+      const cancel = page.getByTestId('work-item-cancel-e2e-running')
+      await cancel.click()
+      const dialog = page.getByTestId('cancel-dialog-e2e-running')
+      await expect(dialog).toBeVisible()
+      await expect(dialog).toContainText('Nightly campaign')
+      await expect(dialog).toContainText('Arena campaign')
+      await expect(dialog).toContainText('2 running agent sessions will be stopped at once')
+      await expect(dialog.getByTestId('confirm-preserved')).toContainText('Trials that already finished keep their results.')
+      await expect(dialog.getByRole('button', { name: 'Keep it running' })).toBeFocused()
+      await screenshot(page, 'v7-control-cancel-dialog')
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+      await expect(cancel).toBeFocused()
+      // The item does not exist in the queue, so the confirmed cancel fails: the error stays in the dialog and the page works.
+      await cancel.click()
+      await dialog.getByTestId('confirm-dialog-confirm').click()
+      await expect(dialog.getByRole('alert')).toBeVisible()
+      await dialog.getByRole('button', { name: 'Keep it running' }).click()
+      await expect(dialog).toHaveCount(0)
+      await expect(page.getByTestId('work-item-e2e-running')).toBeVisible()
+    } finally {
+      await closeApp(app)
+    }
+  })
+
+  test('with worker processes the sessions of a program appear as worker rows', async () => {
+    test.setTimeout(420_000)
+    const repo = createRepo()
+    const dataDir = tempDir('data')
+    dirs.push(repo, dataDir)
+    const { app, page } = await launchApp(dataDir, repo, { NEXUS_FAKE_WORKERS: '1' })
+    try {
+      await openProject(page)
+      const projectId = (await invoke(page, 'projects.list', {}))[0]?.id ?? ''
+      const program = await invoke(page, 'program.create', {
+        projectId,
+        name: 'Worker program',
+        goal: 'Build the modules and harden them.',
+        preset: 'autonomous',
+        start: false,
+      })
+      await page.getByTestId('nav-control').click()
+      await page.getByTestId('control-enqueue-program').selectOption(program.id)
+      await page.getByTestId('control-enqueue-submit').click()
+      await waitForOverview(page, (o) => o.active.some((i) => i.refId === program.id), 'the program to start')
+      // The header counts worker processes, not "inside the runtime".
+      await expect(page.getByTestId('control-workers')).not.toContainText('Inside the runtime')
+      await page.getByTestId('runtime-diagnostics-toggle').click()
+      await expect(page.getByTestId('workers-table')).toBeVisible({ timeout: 60_000 })
+      await expect(page.locator('[data-testid^="worker-row-"]').first()).toBeVisible()
+      await expect(page.getByTestId('leases-table')).toBeVisible()
+      await screenshot(page, 'v7-control-workers')
+    } finally {
+      await closeApp(app)
+    }
+  })
+
+  test('a lost connection is shown as stale and inert, and the window re-reads everything when it is back', async () => {
+    test.setTimeout(180_000)
+    const repo = createRepo()
+    const dataDir = tempDir('data')
+    dirs.push(repo, dataDir)
+    const { app, page } = await launchApp(dataDir, repo)
+    try {
+      await page.getByTestId('nav-control').click()
+      await expect(page.getByTestId('control-capacity-line')).toBeVisible()
+      await expect(page.getByTestId('connection-banner')).toHaveCount(0)
+
+      killRuntime(dataDir)
+      const banner = page.getByTestId('connection-banner')
+      await expect(banner).toBeVisible({ timeout: 30_000 })
+      await expect(banner).toHaveAttribute('data-phase', /DISCONNECTED|CONNECTING|STARTING_RUNTIME|RECOVERING/)
+      // While it is lost the content is marked stale and cannot be operated; the banner can.
+      await expect.poll(async () => page.getByTestId('connection-content').getAttribute('data-stale'), { timeout: 30_000 }).toBe('true')
+      await expect(page.getByTestId('connection-content')).toHaveAttribute('inert', '')
+      await expect(page.getByTestId('connection-retry')).toBeEnabled()
+      await page.getByTestId('connection-diagnostics').click()
+      await expect(page.getByTestId('connection-diagnostics-panel')).toContainText('Attempts')
+      await screenshot(page, 'v7-control-disconnected')
+
+      // The window's main process starts the runtime again; the banner goes and the data is fresh.
+      await expect(page.getByTestId('connection-banner')).toHaveCount(0, { timeout: 120_000 })
+      await expect(page.getByTestId('connection-content')).toHaveAttribute('data-stale', 'false')
+      const connection: ConnectionState = await invoke(page, 'desktop.connection', {})
+      expect(connection.phase).toBe('READY')
+      await expect(page.getByTestId('control-capacity-line')).toHaveText('0 of 6 agents in use · 0 of 4 workloads running')
+      await expect(page.getByTestId('connection-announcer')).toContainText('Reconnected')
+    } finally {
+      await closeApp(app)
     }
   })
 })
