@@ -51,7 +51,7 @@ describe('openDatabase', () => {
     open.push(db)
     const bad = [
       { version: 6, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
-      { version: 6, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
+      { version: 7, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
     ]
     expect(() => runMigrations(db, [{ version: 1, name: 'initial', sql: '' }, { version: 2, name: 'v0-2', sql: '' }, { version: 3, name: 'overnight', sql: '' }, { version: 4, name: 'v0-3', sql: '' }, { version: 5, name: 'overnight-workloads', sql: '' }, ...bad])).toThrow()
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'extra_%'").all()
