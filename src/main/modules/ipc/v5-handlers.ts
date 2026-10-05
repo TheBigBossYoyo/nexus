@@ -58,6 +58,13 @@ export function createV5Handlers(ctx: V5Context): V5Handlers {
     'workspace.pauseMission': ({ missionId }) => engine().pauseMission(missionId),
     'workspace.resumeMission': ({ missionId }) => engine().resumeMission(missionId),
     'workspace.cancelMission': ({ missionId }) => engine().cancelMission(missionId),
+    'workspace.createProgram': async ({ workspaceId, program, start }) => {
+      const created = engine().createProgram(workspaceId, program)
+      return start ? engine().startProgram(created.id) : created
+    },
+    'workspace.startProgram': ({ programId }) => engine().startProgram(programId),
+    'workspace.resumeProgram': ({ programId }) => engine().resumeProgram(programId),
+    'workspace.cancelProgram': ({ programId }) => engine().cancelProgram(programId),
     'workspace.prepareRelease': ({ missionId }) => engine().prepareReleaseTrain(missionId),
     // Always refused: NEXUS prepares releases and does not publish them. The channel exists so the refusal is explicit and recorded.
     'workspace.publishRelease': ({ trainId }) => engine().publishReleaseTrain(trainId),

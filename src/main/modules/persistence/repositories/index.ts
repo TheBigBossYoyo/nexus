@@ -34,6 +34,7 @@ import {
   WorkspaceDependencyStore,
   WorkspaceMemoryStore,
   WorkspaceMissionStore,
+  WorkspaceProgramStore,
   WorkspaceRepositoryStore,
   WorkspaceTaskStore,
 } from './workspace'
@@ -153,6 +154,7 @@ export interface Repositories {
   contractConsumers: ContractConsumerStore
   contractVersions: ContractVersionStore
   workspaceMissions: WorkspaceMissionStore
+  workspacePrograms: WorkspaceProgramStore
   workspaceTasks: WorkspaceTaskStore
   releaseTrains: ReleaseTrainStore
   workspaceMemory: WorkspaceMemoryStore
@@ -233,6 +235,7 @@ export function createRepositories(db: Database): Repositories {
     contractConsumers: new ContractConsumerStore(db),
     contractVersions: new ContractVersionStore(db),
     workspaceMissions: new WorkspaceMissionStore(db),
+    workspacePrograms: new WorkspaceProgramStore(db),
     workspaceTasks: new WorkspaceTaskStore(db),
     releaseTrains: new ReleaseTrainStore(db),
     workspaceMemory: new WorkspaceMemoryStore(db),

@@ -11,6 +11,7 @@ import {
   type WorkspaceDecision,
   type WorkspaceMemoryEntry,
   type WorkspaceMission,
+  type WorkspaceProgram,
   type WorkspaceRepository,
 } from '@shared/workspace'
 import type { Database } from '../database'
@@ -194,6 +195,11 @@ export class WorkspaceMissionStore extends Table<WorkspaceMission> {
     return this.query('WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?', [workspaceId, clamp(limit, 50, 200)])
   }
 
+  /** The missions of a workspace program, oldest first. */
+  listByProgram(programId: string): WorkspaceMission[] {
+    return this.query('WHERE program_id = ? ORDER BY created_at, rowid', [programId])
+  }
+
   /** Missions the engine still has to drive or watch. */
   listOpen(): WorkspaceMission[] {
     const closed = [...TERMINAL_WORKSPACE_MISSION_STATES, 'DRAFT']
@@ -207,6 +213,29 @@ export class WorkspaceMissionStore extends Table<WorkspaceMission> {
 
   getByPlannerRun(runId: string): WorkspaceMission | null {
     return this.one('WHERE planner_run_id = ?', [runId])
+  }
+}
+
+const programCodec: Codec<WorkspaceProgram> = {
+  table: 'workspace_programs',
+  fields: { id: 'text', workspaceId: 'text', name: 'text', goal: 'text', milestones: 'json', state: 'text', blockedReason: 'text', createdAt: 'text', startedAt: 'text', updatedAt: 'text', finishedAt: 'text' },
+}
+
+export class WorkspaceProgramStore extends Table<WorkspaceProgram> {
+  constructor(db: Database) {
+    super(db, programCodec, 'workspace program')
+  }
+
+  listByWorkspace(workspaceId: string, limit = 30): WorkspaceProgram[] {
+    return this.query('WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?', [workspaceId, clamp(limit, 30, 200)])
+  }
+
+  listOpen(): WorkspaceProgram[] {
+    return this.query("WHERE state IN ('ACTIVE', 'BLOCKED') ORDER BY created_at, rowid")
+  }
+
+  countActive(workspaceId: string): number {
+    return (prepare(this.db, "SELECT COUNT(*) AS n FROM workspace_programs WHERE workspace_id = ? AND state IN ('ACTIVE', 'BLOCKED')").get(workspaceId) as { n: number }).n
   }
 }
 

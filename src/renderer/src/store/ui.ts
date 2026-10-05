@@ -34,6 +34,8 @@ interface UiState {
   arenaCampaignId: string | null
   /** A program to open when the Programs view shows. */
   programId: string | null
+  /** A workspace to open when the Workspaces view shows. */
+  workspaceId: string | null
 
   setView: (view: View) => void
   selectProject: (projectId: string | null) => void
@@ -54,6 +56,8 @@ interface UiState {
   openCampaign: (campaignId: string | null) => void
   /** Show the Programs view on a program page; null clears the request once the view has consumed it. */
   openProgram: (programId: string | null) => void
+  /** Show the Workspaces view on a workspace page; null clears the request once the view has consumed it. */
+  openWorkspace: (workspaceId: string | null) => void
 }
 
 export const useUiStore = create<UiState>()(
@@ -73,6 +77,7 @@ export const useUiStore = create<UiState>()(
       settingsSection: null,
       arenaCampaignId: null,
       programId: null,
+      workspaceId: null,
 
       setView: (view) => set({ view }),
       selectProject: (projectId) => set({ projectId }),
@@ -95,6 +100,7 @@ export const useUiStore = create<UiState>()(
       toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
       setComposerIntent: (composerIntent) => set({ composerIntent }),
       openSettings: (section) => set({ view: 'settings', settingsSection: section ?? null }),
+      openWorkspace: (workspaceId) => set(workspaceId ? { view: 'workspaces', workspaceId } : { workspaceId: null }),
       openProgram: (programId) => set(programId ? { view: 'programs', programId } : { programId: null }),
       openCampaign: (arenaCampaignId) =>
         set(arenaCampaignId ? { view: 'arena', arenaCampaignId } : { arenaCampaignId: null }),

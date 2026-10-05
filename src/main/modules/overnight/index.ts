@@ -1,6 +1,8 @@
 export { OvernightSupervisor } from './supervisor'
 export type { OvernightAmendment, OvernightArenaHost, OvernightArenaStartInput, OvernightDeps, OvernightOrchestrator, OvernightProgramStartInput, OvernightStartInput } from './supervisor'
 export { ProgramWorkload } from './program-workload'
+export { WorkspaceMissionWorkload } from './workspace-workload'
+export type { WorkspaceWorkloadDeps, WorkspaceWorkloadHost } from './workspace-workload'
 export type { ProgramWorkloadDeps, ProgramWorkloadHost } from './program-workload'
 export { buildCheckpoint, buildOvernightReport } from './report'
 export type { GitStateCapture } from './report'

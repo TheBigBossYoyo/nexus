@@ -16,6 +16,7 @@ import { cn } from '../../lib/cn'
 import { useNow } from '../../lib/useNow'
 import { useUiStore } from '../../store/ui'
 import { HomePrograms } from '../programs/HomePrograms'
+import { HomeWorkspaces } from '../workspaces/HomeWorkspaces'
 import { IndicatorGlyph, useUsageIndicator } from '../../app/UsagePopover'
 import {
   ArrowRightIcon,
@@ -514,6 +515,7 @@ export function HomeView() {
                 <div className="flex min-w-0 flex-col gap-5">
                   <ActiveMissions data={data} />
                   <HomePrograms />
+                  <HomeWorkspaces />
                   <RecentMissions data={data} />
                 </div>
                 <div className="flex min-w-0 flex-col gap-5">

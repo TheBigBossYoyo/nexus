@@ -269,6 +269,14 @@ export const ProgramsIcon = (p: IconProps) => (
     <path d="M3.5 5v1.5a1.5 1.5 0 0 0 1.5 1.5h1.5M8 9.5V11a1.5 1.5 0 0 0 1.5 1.5H11" />
   </Svg>
 )
+export const WorkspacesIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="2.5" width="5" height="4" rx="1" />
+    <rect x="9" y="9.5" width="5" height="4" rx="1" />
+    <rect x="2" y="9.5" width="5" height="4" rx="1" />
+    <path d="M7 4.5h2.5a1.5 1.5 0 0 1 1.5 1.5v3.5M4.5 6.5v3" />
+  </Svg>
+)
 export const MinusIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M3 8h10" />

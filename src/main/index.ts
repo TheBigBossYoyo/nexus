@@ -22,7 +22,7 @@ import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { createV4Handlers } from './modules/ipc/v4-handlers'
 import { createV5Handlers } from './modules/ipc/v5-handlers'
 import { Orchestrator } from './modules/orchestrator'
-import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload } from './modules/overnight'
+import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload, WorkspaceMissionWorkload } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from './modules/policy'
@@ -497,6 +497,8 @@ async function bootstrap(): Promise<void> {
     push,
     logger,
   })
+  // A cross-repository mission can be an overnight workload.
+  overnight?.registerWorkload('workspace_mission', (id) => new WorkspaceMissionWorkload(id, { host: workspaces, get: (missionId) => repos.workspaceMissions.get(missionId), quotaResetsAt: () => usage.machineState().resetAt }))
   // A program can be an overnight workload for one autonomous work window.
   overnight?.registerWorkload('program', (id) => new ProgramWorkload(id, { host: programs, get: (programId) => repos.programs.get(programId), quotaResetsAt: () => usage.machineState().resetAt }))
   void Promise.resolve()

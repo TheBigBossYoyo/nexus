@@ -452,6 +452,51 @@ export interface WorkspaceMission {
   finishedAt: string | null
 }
 
+// ───────────────────────────── workspace programs ─────────────────────────────
+
+export const WORKSPACE_PROGRAM_STATES = ['DRAFT', 'ACTIVE', 'BLOCKED', 'COMPLETED', 'CANCELLED'] as const
+export type WorkspaceProgramState = (typeof WORKSPACE_PROGRAM_STATES)[number]
+
+export interface WorkspaceMilestone {
+  title: string
+  /** The goal of the cross-repository mission that carries this milestone out. */
+  goal: string
+  missionId: string | null
+  state: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'BLOCKED' | 'CANCELLED'
+}
+
+/**
+ * A goal pursued across several cross-repository missions, one per milestone, in the order the user gave.
+ * A milestone is complete when its mission passed the workspace's global verification; the next mission then
+ * starts from the results of the ones before it, in every repository. The milestones are written by the user:
+ * a workspace program does not plan or replan them (that is what a single-repository program does).
+ */
+export interface WorkspaceProgram {
+  id: string
+  workspaceId: string
+  name: string
+  goal: string
+  milestones: WorkspaceMilestone[]
+  state: WorkspaceProgramState
+  blockedReason: string | null
+  createdAt: string
+  startedAt: string | null
+  updatedAt: string
+  finishedAt: string | null
+}
+
+export const WorkspaceProgramInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    goal: z.string().trim().min(1).max(4000),
+    milestones: z
+      .array(z.object({ title: z.string().trim().min(1).max(120), goal: z.string().trim().min(1).max(4000) }).strict())
+      .min(1)
+      .max(12),
+  })
+  .strict()
+export type WorkspaceProgramInput = z.infer<typeof WorkspaceProgramInputSchema>
+
 // ───────────────────────────── release trains ─────────────────────────────
 
 export const BUMP_KINDS = ['major', 'minor', 'patch', 'none'] as const
@@ -606,6 +651,7 @@ export interface WorkspaceDetail {
   order: OrderResult
   contracts: (Contract & { versions: ContractVersion[]; consumers: ContractConsumer[] })[]
   missions: WorkspaceMission[]
+  programs: WorkspaceProgram[]
   releaseTrains: ReleaseTrain[]
   memory: WorkspaceMemoryEntry[]
   decisions: WorkspaceDecision[]
@@ -616,4 +662,5 @@ export interface WorkspaceSummary {
   repositories: number
   contracts: number
   activeMissions: number
+  activePrograms: number
 }

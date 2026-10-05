@@ -5,6 +5,7 @@ import {
   RepositoryRoleSchema,
   WORKSPACE_MEMORY_KINDS,
   WorkspacePolicySchema,
+  WorkspaceProgramInputSchema,
   type CompatibilityResult,
   type Contract,
   type ContractConsumer,
@@ -17,6 +18,7 @@ import {
   type WorkspaceDetail,
   type WorkspaceMemoryEntry,
   type WorkspaceMission,
+  type WorkspaceProgram,
   type WorkspaceRepository,
   type WorkspaceSummary,
 } from './workspace'
@@ -368,6 +370,8 @@ export const ipcInputs = {
    * the window; at its end the program is paused in a safe state before the end action.
    */
   'overnight.startProgram': z.object({ programId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
+  /** v0.5: a cross-repository mission under the overnight supervisor. */
+  'overnight.startWorkspaceMission': z.object({ missionId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
   'overnight.get': z.object({ runId: Id }).strict(),
   'overnight.active': Empty,
   'overnight.cancelPower': z.object({ runId: Id }).strict(),
@@ -529,6 +533,11 @@ export const ipcInputs = {
   'workspace.pauseMission': z.object({ missionId: Id }).strict(),
   'workspace.resumeMission': z.object({ missionId: Id }).strict(),
   'workspace.cancelMission': z.object({ missionId: Id }).strict(),
+  /** A workspace program: an ordered series of cross-repository missions, one per milestone the user wrote. */
+  'workspace.createProgram': z.object({ workspaceId: Id, program: WorkspaceProgramInputSchema, start: z.boolean().optional() }).strict(),
+  'workspace.startProgram': z.object({ programId: Id }).strict(),
+  'workspace.resumeProgram': z.object({ programId: Id }).strict(),
+  'workspace.cancelProgram': z.object({ programId: Id }).strict(),
   'workspace.prepareRelease': z.object({ missionId: Id }).strict(),
   /** Always refused in 0.5: NEXUS prepares release trains and does not publish them. */
   'workspace.publishRelease': z.object({ trainId: Id }).strict(),
@@ -602,6 +611,7 @@ export interface IpcOutputs {
   'overnight.start': { run: Run; overnight: OvernightStatus }
   'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
   'overnight.startProgram': { programId: string; overnight: OvernightStatus }
+  'overnight.startWorkspaceMission': { missionId: string; overnight: OvernightStatus }
   'program.list': { programs: ProgramSummary[]; total: number }
   'program.get': ProgramDetail
   'program.presets': Record<ProgramPreset, ProgramPolicy>
@@ -644,6 +654,10 @@ export interface IpcOutputs {
   'workspace.pauseMission': WorkspaceMission
   'workspace.resumeMission': WorkspaceMission
   'workspace.cancelMission': WorkspaceMission
+  'workspace.createProgram': WorkspaceProgram
+  'workspace.startProgram': WorkspaceProgram
+  'workspace.resumeProgram': WorkspaceProgram
+  'workspace.cancelProgram': WorkspaceProgram
   'workspace.prepareRelease': ReleaseTrain
   'workspace.publishRelease': never
   'workspace.cancelRelease': ReleaseTrain

@@ -336,6 +336,24 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       }
       return supervisor.startProgram({ programId, policy: p, confirmed, confirmation })
     },
+    'overnight.startWorkspaceMission': async ({ missionId, policy: p, confirmed, confirmation }) => {
+      const supervisor = overnight()
+      if (ctx.confirmPower) {
+        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const detail = [
+          `Workspace mission: ${repos.workspaceMissions.require(missionId).goal.replace(/\s+/g, ' ').slice(0, 160)}`,
+          `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
+          `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the mission ends`,
+          `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
+          p.endAction !== 'NONE' && p.failsafeEnabled
+            ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
+            : 'Failsafe: none',
+        ].join('\n')
+        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Run this workspace mission unattended?' : 'Authorize NEXUS to control Windows power state for this workspace mission?', detail)
+        if (!ok) throw new NexusError('invalid_state', 'The overnight workspace mission was not authorized.')
+      }
+      return supervisor.startWorkspaceMission({ missionId, policy: p, confirmed, confirmation })
+    },
     'overnight.get': ({ runId }) => ctx.overnight?.status(runId) ?? null,
     'overnight.active': () => ctx.overnight?.active() ?? [],
     'overnight.cancelPower': ({ runId }) => overnight().cancelPower(runId),

@@ -136,6 +136,21 @@ CREATE TABLE workspace_tasks (
 CREATE INDEX idx_workspace_tasks_mission ON workspace_tasks(mission_id, ordinal);
 CREATE INDEX idx_workspace_tasks_run ON workspace_tasks(run_id);
 
+CREATE TABLE workspace_programs (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  milestones TEXT NOT NULL,
+  state TEXT NOT NULL,
+  blocked_reason TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT
+);
+CREATE INDEX idx_workspace_programs_workspace ON workspace_programs(workspace_id, created_at);
+
 CREATE TABLE workspace_release_trains (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

@@ -26,6 +26,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     group: 'workspace',
     keywords: 'program milestones roadmap goal long horizon backlog background engineering',
   },
+  {
+    view: 'workspaces',
+    label: 'Workspaces',
+    group: 'workspace',
+    keywords: 'workspace repositories multi repo contracts dependency graph release train cross-repository',
+  },
   { view: 'agents', label: 'Agents', group: 'workspace', keywords: 'workers output tools' },
   {
     view: 'arena',
@@ -87,6 +93,7 @@ export const VIEW_META: Record<View, { title: string; context?: string }> = {
   projects: { title: 'Projects', context: 'Workspace' },
   run: { title: 'Missions', context: 'Workspace' },
   programs: { title: 'Programs', context: 'Workspace' },
+  workspaces: { title: 'Workspaces', context: 'Workspace' },
   agents: { title: 'Agents', context: 'Workspace' },
   arena: { title: 'Arena', context: 'Intelligence' },
   policy: { title: 'Policy', context: 'Intelligence' },
@@ -105,6 +112,7 @@ export const VIEWS_WITH_OWN_HEADER: readonly View[] = [
   'home',
   'projects',
   'programs',
+  'workspaces',
   'arena',
   'policy',
   'usage',

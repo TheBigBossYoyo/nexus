@@ -35,6 +35,9 @@ import {
   type WorkspaceMemoryKind,
   type WorkspaceMission,
   type WorkspaceMissionState,
+  type WorkspaceProgram,
+  type WorkspaceProgramInput,
+  WorkspaceProgramInputSchema,
   type WorkspacePlan,
   type WorkspacePolicy,
   type WorkspaceRepository,
@@ -396,6 +399,7 @@ export class WorkspaceEngine {
       repositories: this.repos.enrolledRepositories.countByWorkspace(workspace.id),
       contracts: this.repos.workspaceContracts.countByWorkspace(workspace.id),
       activeMissions: this.repos.workspaceMissions.countActive(workspace.id),
+      activePrograms: this.repos.workspacePrograms.countActive(workspace.id),
     }))
   }
 
@@ -417,6 +421,7 @@ export class WorkspaceEngine {
       order: dependencyOrder(repositories.map((r) => r.key), this.edges(workspaceId)),
       contracts: this.repos.workspaceContracts.listByWorkspace(workspaceId).map((c) => ({ ...c, versions: this.repos.contractVersions.listByContract(c.id, 20), consumers: this.repos.contractConsumers.listByContract(c.id) })),
       missions: this.repos.workspaceMissions.listByWorkspace(workspaceId, 30),
+      programs: this.repos.workspacePrograms.listByWorkspace(workspaceId, 20),
       releaseTrains: this.repos.releaseTrains.listByWorkspace(workspaceId, 20),
       memory: this.repos.workspaceMemory.listByWorkspace(workspaceId, 100),
       decisions: this.repos.workspaceDecisions.recent(workspaceId, 100),
@@ -435,6 +440,114 @@ export class WorkspaceEngine {
     const entry = this.repos.workspaceMemory.insert({ id: newId(), workspaceId, kind: input.kind, title: input.title.trim(), content: input.content.trim(), evidence: input.evidence.trim(), repositories, source: { kind: 'user', missionId: null }, createdAt: this.iso() })
     this.announce(workspaceId)
     return entry
+  }
+
+  // ───────────────────────────── workspace programs ─────────────────────────────
+
+  createProgram(workspaceId: string, input: WorkspaceProgramInput): WorkspaceProgram {
+    this.repos.workspaces.require(workspaceId)
+    const parsed = WorkspaceProgramInputSchema.parse(input)
+    const at = this.iso()
+    const program = this.repos.workspacePrograms.insert({
+      id: newId(),
+      workspaceId,
+      name: parsed.name,
+      goal: parsed.goal,
+      milestones: parsed.milestones.map((m) => ({ title: m.title, goal: m.goal, missionId: null, state: 'PLANNED' as const })),
+      state: 'DRAFT',
+      blockedReason: null,
+      createdAt: at,
+      startedAt: null,
+      updatedAt: at,
+      finishedAt: null,
+    })
+    this.decide(workspaceId, null, 'program_created', `Workspace program "${program.name}" created with ${program.milestones.length} milestone(s).`)
+    this.announce(workspaceId)
+    return program
+  }
+
+  async startProgram(programId: string): Promise<WorkspaceProgram> {
+    const program = this.repos.workspacePrograms.require(programId)
+    if (program.state !== 'DRAFT') throw new NexusError('invalid_state', `The workspace program is ${program.state}; only a draft can be started`)
+    this.repos.workspacePrograms.update(programId, { state: 'ACTIVE', startedAt: this.iso(), updatedAt: this.iso() })
+    await this.advanceProgram(programId)
+    return this.repos.workspacePrograms.require(programId)
+  }
+
+  async cancelProgram(programId: string): Promise<WorkspaceProgram> {
+    const program = this.repos.workspacePrograms.require(programId)
+    if (program.state === 'COMPLETED' || program.state === 'CANCELLED') return program
+    for (const m of program.milestones) if (m.missionId && m.state === 'ACTIVE') await this.cancelMission(m.missionId).catch((e: unknown) => this.log(`cancel mission ${m.missionId}: ${errorMessage(e)}`))
+    const updated = this.repos.workspacePrograms.update(programId, { state: 'CANCELLED', milestones: this.repos.workspacePrograms.require(programId).milestones.map((m) => (m.state === 'COMPLETED' ? m : { ...m, state: 'CANCELLED' as const })), finishedAt: this.iso(), updatedAt: this.iso() })
+    this.decide(program.workspaceId, null, 'program_cancelled', `Workspace program "${program.name}" cancelled.`)
+    this.announce(program.workspaceId)
+    return updated
+  }
+
+  /**
+   * Follows the missions of a workspace program: a milestone is complete when its mission passed global
+   * verification; then the next milestone's mission starts. A blocked or failed mission blocks the program
+   * until that mission is resumed.
+   */
+  private advanceProgram(programId: string): Promise<void> {
+    // One at a time per program, so a milestone never gets two missions.
+    return this.serial(`program:${programId}`, () => this.followProgram(programId))
+  }
+
+  private async followProgram(programId: string): Promise<void> {
+    for (let guard = 0; guard < 20; guard++) {
+      const program = this.repos.workspacePrograms.get(programId)
+      if (!program || (program.state !== 'ACTIVE' && program.state !== 'BLOCKED')) return
+      const index = program.milestones.findIndex((m) => m.state !== 'COMPLETED')
+      const save = (patch: Partial<WorkspaceProgram>): void => {
+        this.repos.workspacePrograms.update(programId, { ...patch, updatedAt: this.iso() })
+        this.announce(program.workspaceId)
+      }
+      if (index === -1) {
+        save({ state: 'COMPLETED', blockedReason: null, finishedAt: this.iso() })
+        this.decide(program.workspaceId, null, 'program_completed', `Workspace program "${program.name}" completed: ${program.milestones.length} milestone(s) verified.`)
+        return
+      }
+      const milestone = program.milestones[index]
+      if (!milestone) return
+      const set = (state: WorkspaceProgram['milestones'][number]['state'], missionId = milestone.missionId): WorkspaceProgram['milestones'] => program.milestones.map((m, i) => (i === index ? { ...m, state, missionId } : m))
+      if (!milestone.missionId) {
+        const goal = `${milestone.goal}\n\nThis is milestone ${index + 1} of ${program.milestones.length} ("${milestone.title}") of the program "${program.name}".`
+        const mission = await this.createMission(program.workspaceId, { goal, programId })
+        save({ milestones: set('ACTIVE', mission.id) })
+        this.decide(program.workspaceId, mission.id, 'program_milestone_started', `Milestone ${index + 1} of "${program.name}" started: ${milestone.title}.`)
+        await this.startMission(mission.id)
+        continue
+      }
+      const mission = this.repos.workspaceMissions.get(milestone.missionId)
+      if (mission?.state === 'COMPLETED') {
+        save({ milestones: set('COMPLETED'), state: 'ACTIVE', blockedReason: null })
+        this.decide(program.workspaceId, mission.id, 'program_milestone_completed', `Milestone ${index + 1} of "${program.name}" completed and verified.`)
+        continue
+      }
+      if (!mission || mission.state === 'CANCELLED' || mission.state === 'FAILED') {
+        // The mission is gone for good: the milestone can be carried out by a new mission when the program is resumed.
+        if (program.state !== 'BLOCKED') save({ state: 'BLOCKED', blockedReason: `The mission of milestone "${milestone.title}" was ${mission ? mission.state.toLowerCase() : 'removed'}.`, milestones: set('BLOCKED', null) })
+        return
+      }
+      if (mission.state === 'BLOCKED') {
+        if (program.state !== 'BLOCKED') save({ state: 'BLOCKED', blockedReason: `Milestone "${milestone.title}": ${mission.blockedReason ?? 'its mission is blocked'}`, milestones: set('BLOCKED') })
+        return
+      }
+      if (program.state === 'BLOCKED') save({ state: 'ACTIVE', blockedReason: null, milestones: set('ACTIVE') })
+      return
+    }
+  }
+
+  /** Resumes a blocked workspace program: its blocked mission is resumed, or a new mission carries the milestone out. */
+  async resumeProgram(programId: string): Promise<WorkspaceProgram> {
+    const program = this.repos.workspacePrograms.require(programId)
+    if (program.state !== 'BLOCKED') throw new NexusError('invalid_state', `The workspace program is ${program.state}; only a blocked one can be resumed`)
+    const milestone = program.milestones.find((m) => m.state !== 'COMPLETED')
+    this.repos.workspacePrograms.update(programId, { state: 'ACTIVE', blockedReason: null, milestones: program.milestones.map((m) => (m === milestone ? { ...m, state: m.missionId ? ('ACTIVE' as const) : ('PLANNED' as const) } : m)), updatedAt: this.iso() })
+    if (milestone?.missionId && this.repos.workspaceMissions.get(milestone.missionId)?.state === 'BLOCKED') await this.resumeMission(milestone.missionId)
+    await this.advanceProgram(programId)
+    return this.repos.workspacePrograms.require(programId)
   }
 
   // ───────────────────────────── missions: user actions ─────────────────────────────
@@ -546,12 +659,16 @@ export class WorkspaceEngine {
   async tick(): Promise<void> {
     if (this.disposed) return
     await Promise.allSettled(this.repos.workspaceMissions.listOpen().map((m) => this.advance(m.id)))
+    for (const program of this.repos.workspacePrograms.listOpen()) await this.advanceProgram(program.id).catch((e: unknown) => this.log(`program ${program.id}: ${errorMessage(e)}`))
   }
 
   advance(missionId: string): Promise<void> {
     return this.serial(missionId, async () => {
       try {
         await this.step(missionId)
+        const programId = this.repos.workspaceMissions.get(missionId)?.programId
+        // Outside this mission's queue: the program may start the next mission, which has its own.
+        if (programId) setImmediate(() => void this.advanceProgram(programId).catch((e: unknown) => this.log(`program ${programId}: ${errorMessage(e)}`)))
       } catch (e) {
         this.log(`${missionId}: ${errorMessage(e)}`)
         const mission = this.repos.workspaceMissions.get(missionId)
@@ -800,8 +917,15 @@ export class WorkspaceEngine {
 
   private async startTask(mission: WorkspaceMission, workspace: Workspace, task: CrossRepoTask, all: CrossRepoTask[]): Promise<void> {
     const repository = this.repos.enrolledRepositories.require(task.repositoryId)
-    // Within one repository the tasks of a mission build on each other.
-    const previous = all.filter((t) => t.repositoryId === task.repositoryId && t.state === 'COMPLETED' && t.resultCommit).at(-1)
+    // Within one repository the tasks of a mission build on each other; in a workspace program they also
+    // build on what the earlier milestones' missions left in that repository.
+    const earlier = mission.programId
+      ? this.repos.workspaceMissions
+          .listByProgram(mission.programId)
+          .filter((m) => m.id !== mission.id && m.state === 'COMPLETED')
+          .flatMap((m) => this.repos.workspaceTasks.listByMission(m.id))
+      : []
+    const previous = [...earlier, ...all].filter((t) => t.repositoryId === task.repositoryId && t.state === 'COMPLETED' && t.resultCommit).at(-1)
     const prompt = await this.buildTaskPrompt(mission, task, all)
     const run = await this.deps.host.createRun({
       projectId: repository.projectId,

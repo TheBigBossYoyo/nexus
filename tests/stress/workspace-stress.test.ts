@@ -6,7 +6,7 @@ import { EventBus } from '@main/modules/events'
 import type { GitService } from '@main/modules/git'
 import { createRepositories, openDatabase, type Repositories } from '@main/modules/persistence'
 import type { ProgramRunHost } from '@main/modules/program'
-import { WorkspaceEngine, WORKSPACE_PLANNER_MARKER } from '@main/modules/workspace'
+import { WorkspaceEngine } from '@main/modules/workspace'
 import { makeProject, makeTask, runConfig } from '../integration/persistence/fixtures'
 
 /**
