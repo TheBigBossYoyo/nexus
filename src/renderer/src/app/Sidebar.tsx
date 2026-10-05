@@ -25,6 +25,7 @@ import {
   SidebarIcon,
   StatusDot,
   Tooltip,
+  ProvidersIcon,
   UsageIcon,
 } from '../components/ui'
 import { NAV_GROUPS, NAV_ITEMS } from './nav'
@@ -41,6 +42,7 @@ const ICONS: Record<string, ReactNode> = {
   arena: <ArenaIcon size={16} />,
   policy: <PolicyIcon size={16} />,
   usage: <UsageIcon size={16} />,
+  providers: <ProvidersIcon size={16} />,
   performance: <PerformanceIcon size={16} />,
   intelligence: <IntelligenceIcon size={16} />,
   overnight: <MoonIcon size={16} />,

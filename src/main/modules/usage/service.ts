@@ -34,6 +34,11 @@ export interface UsageServiceDeps {
   bus: EventBus
   runtime: AgentRuntime
   push: (message: PushMessage) => void
+  /**
+   * v0.6: true for an agent whose session runs on a provider other than Claude. What such a session reports
+   * (tokens, limits, starts, failures) says nothing about the Claude account and is not recorded here.
+   */
+  isOtherProvider?: (agentId: string) => boolean
   now?: () => number
   logger?: (line: string) => void
 }
@@ -201,6 +206,7 @@ export class UsageIntelligenceService {
 
   private onEvent(event: RunEvent): void {
     if (this.disposed) return
+    if (event.agentId && event.type.startsWith('agent.') && this.deps.isOtherProvider?.(event.agentId)) return
     try {
       switch (event.type) {
         case 'agent.rate_limited':

@@ -222,7 +222,11 @@ async function bootstrap(): Promise<void> {
 
   // Usage intelligence observes what the runtime reports (limits, resets, per-session usage) and is the
   // gate every new Claude session passes. It reads nothing but the Agent SDK's own events and calls.
-  const usage = new UsageIntelligenceService({ repos, bus, runtime, push, logger })
+  const isOtherProvider = (agentId: string): boolean => {
+    const provider = repos.providerSessions.latestProviderOfAgent(agentId)
+    return provider !== null && provider !== 'claude'
+  }
+  const usage = new UsageIntelligenceService({ repos, bus, runtime, push, logger, isOtherProvider })
   const probe = new RuntimeAvailabilityProbe({ runtime, settings: () => repos.settings.get() })
   // The policy engine decides the strategy of ADAPTIVE runs from stored evidence and records every
   // mission's outcome. It never changes the active policy by itself.

@@ -30,6 +30,8 @@ import {
   type CodexRuntimeOptions,
   type CommandRunner,
 } from '@main/modules/providers'
+import { EventBus } from '@main/modules/events'
+import { UsageIntelligenceService } from '@main/modules/usage'
 import { makeAgent, makeProject, makeRun } from '../persistence/fixtures'
 
 const spec = (overrides: Partial<SessionSpec> = {}): SessionSpec => ({
@@ -376,8 +378,6 @@ describe('provider service: routing real sessions, fallback, outage, recovery', 
     expect(overview.usage.find((u) => u.provider === 'codex')).toMatchObject({ observed: { sessions: 1 }, windows: [], windowsSource: 'not_exposed' })
     expect(overview.usage.find((u) => u.provider === 'claude')?.observed.sessions).toBe(2)
     expect(overview.performance.find((p) => p.provider === 'codex')).toMatchObject({ sessions: 1, completed: 1, failed: 0 })
-    // The other provider's session never touched the Claude usage simulation.
-    expect(r.claudeRuntime.usage.probes).toBe(0)
   })
 
   it('an outage: failed sessions degrade the provider, then Claude reviews instead with the reason recorded; a probe recovers it', async () => {
@@ -481,5 +481,54 @@ describe('provider service: routing real sessions, fallback, outage, recovery', 
     expect(repos.providerSessions.listByRun(r.run.id)[0]).toMatchObject({ outcome: 'failed' })
     repos.runs.delete(r.run.id)
     expect(repos.providerSessions.listRecent()).toEqual([])
+  })
+})
+
+describe('usage isolation between providers', () => {
+  it('what a session of another provider reports never moves the Claude usage status or totals', async () => {
+    const db = openDatabase(':memory:')
+    const repos = createRepositories(db)
+    const bus = new EventBus(repos.events, repos.transaction)
+    const project = repos.projects.insert(makeProject())
+    const run = repos.runs.insert(makeRun(project.id))
+    const claudeAgent = repos.agents.insert(makeAgent(run.id, null))
+    const codexAgent = repos.agents.insert(makeAgent(run.id, null))
+    const claudeRuntime = new FakeAgentRuntime({ script: completeWith({ text: 'ok' }) })
+    const service = new ProviderService({
+      providers: [new FakeRuntimeProvider('claude', claudeRuntime), new FakeRuntimeProvider('codex', new FakeAgentRuntime({ script: completeWith({ text: 'ok' }) }), {}, 'gpt-fake')],
+      sessions: repos.providerSessions,
+      settings: repos.settings,
+      runOfAgent: (id) => repos.agents.get(id)?.runId ?? null,
+    })
+    await service.refresh()
+    service.setPolicy(REVIEW_BY_CODEX)
+    const isOtherProvider = (agentId: string): boolean => {
+      const p = repos.providerSessions.latestProviderOfAgent(agentId)
+      return p !== null && p !== 'claude'
+    }
+    const usage = new UsageIntelligenceService({ repos, bus, runtime: service.router, push: () => undefined, isOtherProvider })
+    try {
+      await collect(service.router.startSession(spec({ agentId: claudeAgent.id, role: 'worker' })))
+      await collect(service.router.startSession(spec({ agentId: codexAgent.id, role: 'reviewer' })))
+      expect([isOtherProvider(claudeAgent.id), isOtherProvider(codexAgent.id), isOtherProvider('unknown')]).toEqual([false, true, false])
+      const turn = (agentId: string): void => {
+        bus.emit({ runId: run.id, agentId, type: 'agent.usage', payload: { inputTokens: 0, outputTokens: 0, costUsd: 0, turn: { sdkSessionId: `s-${agentId}`, role: 'reviewer', turns: 1, durationMs: 1000, models: [{ model: 'm', inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 }] } } })
+      }
+      // A limit, a failure and tokens reported for the other provider's agent: Claude's picture does not move.
+      bus.emit({ runId: run.id, agentId: codexAgent.id, type: 'agent.rate_limited', payload: { status: 'rejected', resetsAt: null, limitType: 'five_hour' } })
+      turn(codexAgent.id)
+      expect(usage.status()).toBe('AVAILABLE')
+      expect(usage.canDispatch()).toBe(true)
+      expect(repos.usageEvents.totals().limitEvents).toBe(0)
+      const before = repos.usageEvents.totals()
+      // The same events for a Claude agent are recorded as before 0.6.
+      turn(claudeAgent.id)
+      expect(repos.usageEvents.totals()).not.toEqual(before)
+      bus.emit({ runId: run.id, agentId: claudeAgent.id, type: 'agent.rate_limited', payload: { status: 'rejected', resetsAt: null, limitType: 'five_hour' } })
+      expect(usage.canDispatch()).toBe(false)
+    } finally {
+      usage.dispose()
+      db.close()
+    }
   })
 })

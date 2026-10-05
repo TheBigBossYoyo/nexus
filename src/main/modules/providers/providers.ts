@@ -290,8 +290,10 @@ export class FakeRuntimeProvider implements AgentRuntimeProvider {
     return this.model
   }
 
+  /** The scripted Claude reports what its scripted runtime reports; a test can set `usage` instead. */
   async usageReport(): Promise<RuntimeUsageReport | null> {
-    return this.usage
+    if (this.usage) return this.usage
+    return this.id === 'claude' ? ((await this.fake?.getUsageReport?.({ subscriptionMode: true }).catch(() => null)) ?? null) : null
   }
 
   async probe(): Promise<{ ok: boolean; detail: string }> {

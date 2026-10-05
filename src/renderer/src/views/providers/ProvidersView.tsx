@@ -109,7 +109,7 @@ function RoutingCard({ overview, onPolicy, saving }: { overview: ProvidersOvervi
           />
           <div className="flex items-center gap-2 pl-[42px]">
             <span className="text-small text-text-secondary">Reviewer</span>
-            <Select value={policy.crossModelReview.reviewer} options={others} disabled={saving} onChange={(reviewer) => onPolicy({ ...policy, crossModelReview: { enabled: false, reviewer } })} data-testid="routing-review-provider" aria-label="Reviewing provider" />
+            <Select value={policy.crossModelReview.reviewer} options={others} disabled={saving} className="w-44" onChange={(reviewer) => onPolicy({ ...policy, crossModelReview: { enabled: false, reviewer } })} data-testid="routing-review-provider" aria-label="Reviewing provider" />
             {!review.available && review.reason ? (
               <span className="text-small text-text-muted" data-testid="routing-review-blocked">
                 {review.reason}
@@ -128,7 +128,7 @@ function RoutingCard({ overview, onPolicy, saving }: { overview: ProvidersOvervi
           />
           <div className="flex items-center gap-2 pl-[42px]">
             <span className="text-small text-text-secondary">Candidate B</span>
-            <Select value={policy.heterogeneousSpeculation.secondCandidate} options={others} disabled={saving} onChange={(secondCandidate) => onPolicy({ ...policy, heterogeneousSpeculation: { enabled: false, secondCandidate } })} data-testid="routing-speculation-provider" aria-label="Provider of candidate B" />
+            <Select value={policy.heterogeneousSpeculation.secondCandidate} options={others} disabled={saving} className="w-44" onChange={(secondCandidate) => onPolicy({ ...policy, heterogeneousSpeculation: { enabled: false, secondCandidate } })} data-testid="routing-speculation-provider" aria-label="Provider of candidate B" />
             {!speculation.available && speculation.reason ? (
               <span className="text-small text-text-muted" data-testid="routing-speculation-blocked">
                 {speculation.reason}
@@ -188,7 +188,7 @@ export function ProvidersView() {
   const o = overview.data ?? null
   const onPolicy = (policy: ProviderPolicy): void => save.mutate({ policy })
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="view-providers">
+    <div className="flex h-full min-h-0 flex-col" data-testid="providers-page">
       <PageHeader
         title="Providers"
         context="Intelligence"
