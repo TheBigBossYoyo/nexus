@@ -509,12 +509,11 @@ export class WorkspaceEngine {
       this.repos.workspaceMissions.update(missionId, { blockedReason: null, updatedAt: this.iso() })
       this.decide(mission.workspaceId, missionId, 'resumed', `Resumed by the user (${back}).`)
       this.setState(missionId, back)
-      for (const task of this.repos.workspaceTasks.listByMission(missionId)) {
-        const run = task.runId ? this.repos.runs.get(task.runId) : null
-        if (task.state === 'RUNNING' && run?.state === 'paused' && run.pauseReason !== 'quota') {
-          const resume = run.pauseReason === 'recovery' ? this.deps.host.recover(run.id, 'resume') : this.deps.host.resumeRun(run.id)
-          await Promise.resolve(resume).catch((e: unknown) => this.log(`resume ${run.id}: ${errorMessage(e)}`))
-        }
+      // Every run the pause stopped continues: the tasks in flight and, while planning, the planner session.
+      for (const run of this.liveRuns(missionId)) {
+        if (run.state !== 'paused' || run.pauseReason === 'quota') continue
+        const resume = run.pauseReason === 'recovery' ? this.deps.host.recover(run.id, 'resume') : this.deps.host.resumeRun(run.id)
+        await Promise.resolve(resume).catch((e: unknown) => this.log(`resume ${run.id}: ${errorMessage(e)}`))
       }
       await this.step(missionId)
       return this.repos.workspaceMissions.require(missionId)
