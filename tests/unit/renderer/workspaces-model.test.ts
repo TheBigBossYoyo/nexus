@@ -203,7 +203,8 @@ describe('mission actions and notices', () => {
     expect(missionActions('ACTIVE')).toMatchObject({ pause: true, resume: false, cancel: true })
     expect(missionActions('PAUSED')).toMatchObject({ pause: false, resume: true })
     expect(missionActions('BLOCKED')).toMatchObject({ resume: true, cancel: true })
-    expect(missionActions('WAITING_FOR_QUOTA')).toMatchObject({ resume: true })
+    // The engine resumes a usage wait by itself; offering Resume there would only produce an error.
+    expect(missionActions('WAITING_FOR_QUOTA')).toMatchObject({ resume: false, cancel: true })
     expect(missionActions('COMPLETED')).toMatchObject({ pause: false, resume: false, cancel: false, prepareRelease: true })
     for (const s of ['FAILED', 'CANCELLED'] as const) expect(missionActions(s)).toMatchObject({ start: false, pause: false, resume: false, cancel: false, prepareRelease: false })
   })

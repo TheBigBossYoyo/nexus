@@ -52,7 +52,11 @@ import { data, extractJson } from '@main/modules/program/reasoning'
 import { extractSurface } from './contracts'
 import { discoverManifestEdges, readManifest } from './discovery'
 
-export const WORKSPACE_PLANNER_MARKER = 'NEXUS WORKSPACE PLANNER'
+import { WORKSPACE_PLANNER_MARKER } from '@shared/program'
+export { WORKSPACE_PLANNER_MARKER }
+/** Written before a run is created and removed once the mission knows the run: what is left after a crash in between. */
+const startingKey = (missionId: string): string => `workspace-starting:${missionId}`
+const TASK_PROMPT_MARK = 'part of a change across several repositories.'
 
 export interface WorkspaceEngineDeps {
   repos: Repositories
@@ -684,6 +688,7 @@ export class WorkspaceEngine {
         const current = this.repos.workspaceMissions.require(mission.id)
         if (!WORKING.includes(current.state) && current.state !== 'WAITING_FOR_QUOTA') return
         this.decide(current.workspaceId, current.id, 'recovered', 'NEXUS restarted; the mission continues.')
+        await this.cancelUnrecordedRuns(current)
         for (const run of this.liveRuns(current.id)) {
           if (run.state === 'paused' && run.pauseReason === 'recovery') await Promise.resolve(this.deps.host.recover(run.id, 'resume')).catch((e: unknown) => this.log(`recover ${run.id}: ${errorMessage(e)}`))
         }
@@ -808,8 +813,10 @@ export class WorkspaceEngine {
       const allowed = repositories.filter((r) => workspace.policy.allowedRepositories.includes(r.key))
       const home = [...allowed].sort((a, b) => dependentsOf(b.key, edges).length - dependentsOf(a.key, edges).length || a.key.localeCompare(b.key))[0]
       if (!home) return this.block(mission, 'The workspace policy allows no repository.')
+      this.repos.settings.setValue(startingKey(mission.id), { at: new Date().toISOString() })
       const run = await this.deps.host.createRun({ projectId: home.projectId, mode: 'ask', preset: workspace.policy.missionPreset, prompt: this.buildPlanPrompt(mission), overrides: { requirePlanApproval: false } })
       this.repos.workspaceMissions.update(mission.id, { plannerRunId: run.id, updatedAt: this.iso() })
+      this.repos.settings.deleteValue(startingKey(mission.id))
       this.announce(workspace.id)
       return
     }
@@ -919,14 +926,9 @@ export class WorkspaceEngine {
     const repository = this.repos.enrolledRepositories.require(task.repositoryId)
     // Within one repository the tasks of a mission build on each other; in a workspace program they also
     // build on what the earlier milestones' missions left in that repository.
-    const earlier = mission.programId
-      ? this.repos.workspaceMissions
-          .listByProgram(mission.programId)
-          .filter((m) => m.id !== mission.id && m.state === 'COMPLETED')
-          .flatMap((m) => this.repos.workspaceTasks.listByMission(m.id))
-      : []
-    const previous = [...earlier, ...all].filter((t) => t.repositoryId === task.repositoryId && t.state === 'COMPLETED' && t.resultCommit).at(-1)
+    const previous = [...this.earlierTasks(mission), ...all].filter((t) => t.repositoryId === task.repositoryId && t.state === 'COMPLETED' && t.resultCommit).at(-1)
     const prompt = await this.buildTaskPrompt(mission, task, all)
+    this.repos.settings.setValue(startingKey(mission.id), { at: new Date().toISOString() })
     const run = await this.deps.host.createRun({
       projectId: repository.projectId,
       mode: 'mission',
@@ -938,11 +940,48 @@ export class WorkspaceEngine {
       ...(previous?.resultCommit ? { baseRef: previous.resultCommit } : {}),
     })
     this.repos.workspaceTasks.update(task.id, { state: 'RUNNING', runId: run.id, baseCommit: run.baseCommit, startedAt: this.iso() })
+    this.repos.settings.deleteValue(startingKey(mission.id))
     this.decide(workspace.id, mission.id, 'task_started', `Task ${task.key} started in ${task.repository}.`, { runId: run.id })
     this.announce(workspace.id)
   }
 
-  /** The newest result of a repository in this mission, or null (then its HEAD is what counts). */
+  /** In a workspace program: the tasks of the earlier milestones' completed missions, oldest first. */
+  private earlierTasks(mission: WorkspaceMission): CrossRepoTask[] {
+    if (!mission.programId) return []
+    return this.repos.workspaceMissions
+      .listByProgram(mission.programId)
+      .filter((m) => m.id !== mission.id && m.state === 'COMPLETED')
+      .flatMap((m) => this.repos.workspaceTasks.listByMission(m.id))
+  }
+
+  /**
+   * Where a repository stands for this mission: its newest result in the mission, else (in a workspace program)
+   * the newest result an earlier milestone left there, else null (then its HEAD is what counts).
+   */
+  private standOf(mission: WorkspaceMission, all: CrossRepoTask[], repositoryId: string): string | null {
+    return this.resultOf(all, repositoryId) ?? this.resultOf(this.earlierTasks(mission), repositoryId)
+  }
+
+  /**
+   * NEXUS stopped between creating a run and recording it: the run exists and the mission does not know it.
+   * Such a run is cancelled, so a restart never leaves two runs working on one task.
+   */
+  private async cancelUnrecordedRuns(mission: WorkspaceMission): Promise<void> {
+    const marker = this.repos.settings.getValue<{ at: string }>(startingKey(mission.id))
+    if (!marker) return
+    this.repos.settings.deleteValue(startingKey(mission.id))
+    const recorded = new Set([mission.plannerRunId, ...this.repos.workspaceTasks.listByMission(mission.id).map((t) => t.runId)])
+    const mine = (run: Run): boolean => (run.mode === 'ask' ? run.prompt.startsWith(WORKSPACE_PLANNER_MARKER) : run.prompt.includes(TASK_PROMPT_MARK))
+    for (const repository of this.repos.enrolledRepositories.listByWorkspace(mission.workspaceId)) {
+      for (const run of this.repos.runs.listByProject(repository.projectId)) {
+        if (recorded.has(run.id) || TERMINAL_RUN.includes(run.state) || run.createdAt < marker.at || !mine(run)) continue
+        await Promise.resolve(this.deps.host.cancelRun(run.id)).catch((e: unknown) => this.log(`cancel unrecorded run ${run.id}: ${errorMessage(e)}`))
+        this.decide(mission.workspaceId, mission.id, 'recovered', 'A run that was started just before NEXUS stopped was cancelled; the mission starts it again.', { runId: run.id })
+      }
+    }
+  }
+
+  /** The newest result of a repository in this mission, or null. */
   private resultOf(all: CrossRepoTask[], repositoryId: string): string | null {
     return all.filter((t) => t.repositoryId === repositoryId && t.state === 'COMPLETED' && t.resultCommit).at(-1)?.resultCommit ?? null
   }
@@ -950,7 +989,7 @@ export class WorkspaceEngine {
   private async buildTaskPrompt(mission: WorkspaceMission, task: CrossRepoTask, all: CrossRepoTask[]): Promise<string> {
     const repository = this.repos.enrolledRepositories.require(task.repositoryId)
     const parts = [
-      `Task "${task.title}" in the repository "${repository.key}" (${repository.role}), part of a change across several repositories.`,
+      `Task "${task.title}" in the repository "${repository.key}" (${repository.role}), ${TASK_PROMPT_MARK}`,
       '',
       task.objective,
       '',
@@ -972,7 +1011,7 @@ export class WorkspaceEngine {
         continue
       }
       const consumer = this.repos.contractConsumers.find(contract.id, repository.id)
-      const read = await this.readAt(provider, contract.path, this.resultOf(all, provider.id))
+      const read = await this.readAt(provider, contract.path, this.standOf(mission, all, provider.id))
       parts.push(
         '',
         `This repository CONSUMES the contract "${contract.key}" (${contract.kind}), provided by ${provider.key}. The current content of the contract, after the provider's change:`,
@@ -1016,8 +1055,9 @@ export class WorkspaceEngine {
       // The contract after the mission against the contract the mission started from, both read from the
       // provider's own commits. Nothing is stored yet: a version is recorded only for work that verified.
       const providerTasks = tasks.filter((t) => t.repositoryId === provider.id)
-      const afterRead = await this.readAt(provider, contract.path, this.resultOf(tasks, provider.id))
-      const beforeRead = await this.readAt(provider, contract.path, providerTasks[0]?.baseCommit ?? null)
+      // A provider this mission did not change stands where the program's earlier milestones left it.
+      const afterRead = await this.readAt(provider, contract.path, this.standOf(mission, tasks, provider.id))
+      const beforeRead = await this.readAt(provider, contract.path, providerTasks[0]?.baseCommit ?? this.standOf(mission, tasks, provider.id))
       if (!afterRead) {
         checks.push({ name: `contract ${contract.key}`, repository: provider.key, passed: false, detail: `${contract.path} could not be read in ${provider.key} after the mission.` })
         continue
@@ -1036,7 +1076,7 @@ export class WorkspaceEngine {
         if (!repository) continue
         const updated = this.resultOf(tasks, repository.id) !== null
         if (consumer.copyPath) {
-          const copy = await this.readAt(repository, consumer.copyPath, this.resultOf(tasks, repository.id))
+          const copy = await this.readAt(repository, consumer.copyPath, this.standOf(mission, tasks, repository.id))
           const inSync = copy !== null && extractSurface(contract.kind, copy.content).hash === captured.version.hash
           consumersInSync.push({ repository: repository.key, inSync, detail: copy === null ? `Its copy ${consumer.copyPath} could not be read.` : inSync ? `Its copy ${consumer.copyPath} equals version ${captured.version.version}.` : `Its copy ${consumer.copyPath} differs from version ${captured.version.version}.` })
           // A copy that lags behind a compatible change is noted; behind a breaking one it fails the mission.
@@ -1067,7 +1107,7 @@ export class WorkspaceEngine {
       const contract = this.repos.workspaceContracts.getByKey(workspace.id, c.contract)
       const provider = contract ? byId.get(contract.providerRepositoryId) : null
       if (contract && provider && c.result.level !== 'identical') {
-        await this.captureContract(contract.id, this.resultOf(tasks, provider.id)).catch((e: unknown) => this.log(`capture ${contract.key}: ${errorMessage(e)}`))
+        await this.captureContract(contract.id, this.standOf(mission, tasks, provider.id)).catch((e: unknown) => this.log(`capture ${contract.key}: ${errorMessage(e)}`))
       }
       if (c.result.level === 'identical') continue
       const involved = [provider?.key, ...c.consumersInSync.map((x) => x.repository)].filter((k): k is string => Boolean(k))
@@ -1124,7 +1164,10 @@ export class WorkspaceEngine {
   }
 
   cancelReleaseTrain(trainId: string): ReleaseTrain {
+    const existing = this.repos.releaseTrains.require(trainId)
+    if (existing.state === 'CANCELLED') return existing
     const train = this.repos.releaseTrains.update(trainId, { state: 'CANCELLED' })
+    this.decide(train.workspaceId, train.missionId, 'release_cancelled', 'The prepared release train was cancelled. Nothing had been published.')
     this.announce(train.workspaceId)
     return train
   }

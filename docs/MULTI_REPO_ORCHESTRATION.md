@@ -172,8 +172,9 @@ Through three channels, all in the task's prompt or base:
 3. The content of each contract the task names. If the task's repository provides the contract, the prompt
    says so, names the contract file and its consumers, and says to change the contract file itself. If the
    repository consumes it, the prompt includes the contract file as the provider left it, in a quoted block
-   (up to 12000 characters), read from the provider's newest result commit in this mission, or from the
-   provider's `HEAD` when the mission did not change the provider. If the consumer keeps its own copy, the
+   (up to 12000 characters), read from the provider's newest result commit in this mission; when the mission did
+   not change the provider, from the result an earlier milestone of the same workspace program left there, and
+   otherwise from the provider's `HEAD`. If the consumer keeps its own copy, the
    prompt says where it is and to make that file exactly equal to the content shown and to adapt the code and
    tests that use it.
 
@@ -250,8 +251,8 @@ The engine does not run its own quota recovery. It observes the usage dispatch g
 - When the usage service reports a change and nothing limits the mission any more, it returns to its state and
   writes `quota_resumed`. The engine also checks on a 15 second timer.
 
-`workspace.resumeMission` does not accept `WAITING_FOR_QUOTA`; Pause does. The UI offers Resume in that state;
-see Limits.
+`workspace.resumeMission` does not accept `WAITING_FOR_QUOTA`; Pause does. The UI offers no Resume in that
+state: the mission continues by itself.
 
 ## Recovery after a restart
 
@@ -393,18 +394,19 @@ final shutdown replacing the failsafe.
 
 - A failed task blocks the mission; it does not fail it. `FAILED` is never set by the engine. After a failed
   verification, Resume verifies again from the same results. Fixing the cause means starting a new mission.
-- The verification of a contract reads the provider at its result commit in this mission, or at `HEAD` of the
-  provider's checkout when the mission did not change the provider. In a workspace program, a later milestone
-  that changes only consumers therefore reads the provider as it is in your checkout, not as an earlier
-  milestone left it on its result branch. This path has no test.
+- The verification of a contract reads the provider at its result commit in this mission. When the mission did
+  not change the provider it reads the result an earlier milestone of the same workspace program left there,
+  and outside a program `HEAD` of the provider's checkout.
 - Without a program, a mission's tasks start from what is checked out in each repository now, not from the
   results of earlier missions. Merge a result branch into your branch yourself to build on it.
-- A run is created before the engine records it on the task or the mission. A crash in that gap can leave a run
-  that no task owns, and the task would start another. The program engine of 0.4 guards the same gap with a
-  marker; the workspace engine does not, and no test covers it.
+- A run is created before the engine records it on the task or the mission. The engine writes a marker
+  (`workspace-starting:<mission id>` in the settings table) before it creates a run and removes it once the run
+  is recorded. After a restart, a run of the workspace's repositories that was created after the marker, is
+  not recorded on the mission and carries the planner marker or the task prompt's opening line is cancelled, and
+  the mission starts the step again. A run of yours in the same repository is not touched.
 - `READY` and `BLOCKED` task states and the `FAILED` mission state exist in the types and are not set.
-- The UI offers Resume for `WAITING_FOR_QUOTA`; the engine accepts Resume only from `PAUSED` and `BLOCKED` and
-  answers with an `invalid_state` error. The mission resumes by itself when the limit clears.
+- Resume is accepted only from `PAUSED` and `BLOCKED`. A mission waiting for the usage limit resumes by itself
+  when the limit clears.
 - One mission can have several planner sessions over its life (each retry or rejection). Only the latest is
   recorded on the mission.
 - The consumer check for a consumer without a declared copy counts any completed task in that repository as

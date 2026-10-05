@@ -76,7 +76,7 @@ export function PolicyTab({ detail }: { detail: WorkspaceDetail }) {
       </fieldset>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Field label="Protected branches" hint="Comma-separated. NEXUS never starts from or prepares a release on these without a new branch." error={check.errors.protectedBranches} className="md:col-span-2">
+        <Field label="Protected branches" hint="Comma-separated. Recorded with the workspace for your release process. NEXUS writes only to its own nexus/ branches in any case." error={check.errors.protectedBranches} className="md:col-span-2">
           {(id) => <Input id={id} value={form.protectedBranches} onChange={(e) => patch({ protectedBranches: e.target.value })} aria-invalid={!!check.errors.protectedBranches} className="font-mono" data-testid="policy-protected" />}
         </Field>
         {numberField('maxRepositoriesPerMission', 'Max repositories per mission', '1 to 20', 'policy-max-repos')}

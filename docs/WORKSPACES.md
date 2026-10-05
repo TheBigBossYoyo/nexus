@@ -163,7 +163,7 @@ name and a description only).
 | Field | Default | Meaning |
 |---|---|---|
 | `allowedRepositories` | `[]` (a repository is added when enrolled) | Keys of the repositories a mission may change. Empty means nothing runs. Every key must be an enrolled repository |
-| `protectedBranches` | `main`, `master`, `release` | Branch names, at most 20. Stored and shown. The engine does not read it (see Limits) |
+| `protectedBranches` | `main`, `master`, `release` | Branch names, at most 20. Stored and shown for your own release process. The engine does not read it (see Limits) |
 | `maxRepositoriesPerMission` | 5 | 1 to 20. A plan may span at most this many repositories |
 | `maxTasksPerMission` | 12 | 1 to 40. A plan may have at most this many tasks |
 | `maxParallelRepositories` | 1 | 1 to 4. Tasks of different repositories with no dependency between them may run at the same time. A repository never has two tasks running |

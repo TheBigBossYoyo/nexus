@@ -360,7 +360,7 @@ export function missionActions(state: WorkspaceMissionState): MissionActions {
   return {
     start: state === 'DRAFT',
     pause: state === 'PLANNING' || state === 'ACTIVE' || state === 'VERIFYING',
-    resume: state === 'PAUSED' || state === 'BLOCKED' || state === 'WAITING_FOR_QUOTA',
+    resume: state === 'PAUSED' || state === 'BLOCKED',
     cancel: !isTerminalMission(state),
     decidePlan: state === 'AWAITING_APPROVAL',
     prepareRelease: state === 'COMPLETED',
@@ -388,7 +388,7 @@ export function missionNotice(m: Pick<WorkspaceMission, 'state' | 'blockedReason
     case 'PAUSED':
       return { tone: 'neutral', title: 'Paused', text: 'No new task starts while the mission is paused. Resume continues where it stopped.' }
     case 'WAITING_FOR_QUOTA':
-      return { tone: 'neutral', title: 'Waiting for the usage limit to reset', text: 'This is not a failure. The mission continues by itself when the limit resets; you can also resume it yourself.' }
+      return { tone: 'neutral', title: 'Waiting for the usage limit to reset', text: 'This is not a failure. The mission continues by itself when the limit resets.' }
     case 'BLOCKED':
       return {
         tone: 'warning',

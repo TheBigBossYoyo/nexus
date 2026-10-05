@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -12,6 +12,7 @@ import { ipcInputs } from '@shared/ipc'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT, type OvernightRun } from '@shared/overnight'
 import { OvernightSupervisor, WorkspaceMissionWorkload, type OvernightOrchestrator } from '@main/modules/overnight'
 import { FakePowerController } from '@main/modules/power'
+import { isReasoningRun, WORKSPACE_PLANNER_MARKER } from '@shared/program'
 import { WorkspaceEngine } from '@main/modules/workspace'
 import { makeProject } from '../persistence/fixtures'
 import { FakeProgramHost, sleep } from '../program/harness'
@@ -561,5 +562,92 @@ describe('workspace programs and overnight workspace missions', () => {
     expect(done.finalReport).toContain('`sdk` in shared-sdk [COMPLETED]')
     expect(power.calls.map((c) => (c.request ? `${c.operation}:${c.request.purpose}` : c.operation)).slice(-3)).toEqual(['scheduleShutdown:failsafe', 'cancelShutdown', 'scheduleShutdown:final'])
     expect(ipcInputs['overnight.startWorkspaceMission'].safeParse({ missionId: 'm', policy, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT, command: 'x' }).success).toBe(false)
+  })
+})
+
+describe('workspace engine: audit regressions', () => {
+  let rig: Rig
+  afterEach(async () => {
+    await rig.cleanup()
+  })
+
+  const drive = async (predicate: () => boolean, what: string): Promise<void> => {
+    const deadline = Date.now() + 60_000
+    for (;;) {
+      await rig.engine.idle()
+      await new Promise((resolve) => setImmediate(resolve))
+      await rig.engine.idle()
+      if (predicate()) return
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
+      for (const m of rig.repos.workspaceMissions.listOpen()) if (m.state === 'AWAITING_APPROVAL') await rig.engine.decidePlan(m.id, true)
+      await rig.engine.tick()
+      await sleep(15)
+    }
+  }
+
+  it('a later milestone that changes only consumers reads the contract from the earlier milestone, not from the checkout', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    // Milestone 1 changes the provider only; milestone 2 brings the consumers in step.
+    rig.host.answers.plan = [planJson([task('sdk', 'shared-sdk', { contracts: ['order'] })]), planJson([task('api', 'backend', { contracts: ['order'] }), task('ui', 'desktop', { dependsOn: ['api'], contracts: ['order'] })])]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    const program = rig.engine.createProgram(ws.id, { name: 'Currency', goal: 'g', milestones: [{ title: 'Provider', goal: 'Add the field to the contract.' }, { title: 'Consumers', goal: 'Adapt the consumers.' }] })
+    await rig.engine.startProgram(program.id)
+    await drive(() => ['COMPLETED', 'BLOCKED'].includes(rig.repos.workspacePrograms.require(program.id).state), 'the program to end')
+    expect(rig.repos.workspacePrograms.require(program.id)).toMatchObject({ state: 'COMPLETED' })
+    const [, second] = rig.repos.workspaceMissions.listByProgram(program.id)
+    const tasks = rig.repos.workspaceTasks.listByMission(second!.id)
+    expect(tasks.map((t) => t.key)).toEqual(['api', 'ui'])
+    // The consumers were shown the contract with the new field, which exists only on milestone 1's result branch.
+    for (const t of tasks) expect(rig.repos.runs.require(t.runId!).prompt, t.key).toContain('currency')
+    // And they were verified against it: the copies equal the provider's contract as milestone 1 left it.
+    const checked = second!.verification!.contracts.find((c) => c.contract === 'order')!
+    expect(checked.result.level).toBe('identical')
+    expect(checked.consumersInSync.map((c) => [c.repository, c.inSync])).toEqual([['backend', true], ['desktop', true]])
+    // The provider's checkout itself still has the first version.
+    expect(readFileSync(join(rig.paths.sdk, 'contracts/order.schema.json'), 'utf8')).toBe(V1)
+  })
+
+  it('a run created just before a crash and never recorded is cancelled on recovery; recorded runs continue', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    rig.host.mission = () => 'hang'
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    await rig.until(() => rig.repos.workspaceTasks.listByMission(mission.id).some((t) => t.state === 'RUNNING'), 'the first task to run')
+    const recorded = rig.repos.workspaceTasks.listByMission(mission.id).find((t) => t.state === 'RUNNING')!
+    // The crash window: the marker is written, a run is created, and NEXUS stops before the task knows it.
+    const at = new Date(Date.now() - 1).toISOString()
+    const sdk = rig.repos.enrolledRepositories.listByWorkspace(ws.id).find((r) => r.key === 'shared-sdk')!
+    const orphan = await rig.host.createRun({ projectId: sdk.projectId, mode: 'mission', preset: 'balanced', prompt: 'Task "x" in the repository "shared-sdk" (library), part of a change across several repositories.' })
+    const unrelated = await rig.host.createRun({ projectId: sdk.projectId, mode: 'mission', preset: 'balanced', prompt: 'A mission the user started.' })
+    rig.repos.settings.setValue(`workspace-starting:${mission.id}`, { at })
+
+    const engine = rig.restart()
+    await engine.recover()
+    await engine.idle()
+    expect(rig.host.cancelled).toContain(orphan.id)
+    expect(rig.host.cancelled).not.toContain(unrelated.id)
+    expect(rig.host.cancelled).not.toContain(recorded.runId)
+    expect(rig.repos.settings.getValue(`workspace-starting:${mission.id}`)).toBeNull()
+    expect(rig.repos.workspaceTasks.getByRun(recorded.runId!)).toMatchObject({ state: 'RUNNING' })
+    // In ordinary operation the marker never outlives the start of a run.
+    expect(rig.host.created.filter((c) => c.kind === 'mission').length).toBeGreaterThan(0)
+  })
+
+  it('the planner session is an internal run: lists of missions leave it out', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    const planner = rig.host.created.find((c) => c.input.mode === 'ask')!.run
+    expect(planner.prompt.startsWith(WORKSPACE_PLANNER_MARKER)).toBe(true)
+    expect(isReasoningRun(planner)).toBe(true)
+    expect(rig.repos.runs.listRecentUser(50).map((r) => r.id)).not.toContain(planner.id)
+    expect(rig.repos.settings.getValue(`workspace-starting:${mission.id}`)).toBeNull()
   })
 })

@@ -20,9 +20,15 @@ export const REASONING_MARKERS = {
   background: 'NEXUS BACKGROUND ANALYSIS',
 } as const
 
+/** The first line of the prompt of the session that plans a cross-repository mission (v0.5). */
+export const WORKSPACE_PLANNER_MARKER = 'NEXUS WORKSPACE PLANNER'
+
+/** Every marker of a read-only session NEXUS runs for itself; lists of missions leave these runs out. */
+export const INTERNAL_RUN_MARKERS: readonly string[] = [...Object.values(REASONING_MARKERS), WORKSPACE_PLANNER_MARKER]
+
 /** True for a read-only run NEXUS started for itself (planning, verifying, reassessing, background analysis). */
 export function isReasoningRun(run: { mode: string; prompt: string }): boolean {
-  return run.mode === 'ask' && Object.values(REASONING_MARKERS).some((marker) => run.prompt.startsWith(marker))
+  return run.mode === 'ask' && INTERNAL_RUN_MARKERS.some((marker) => run.prompt.startsWith(marker))
 }
 
 // ───────────────────────────── states ─────────────────────────────

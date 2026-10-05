@@ -144,8 +144,8 @@ marked as authorized.
 
 Cancel train (`workspace.cancelRelease`) marks the train `CANCELLED`. It is a label on the plan. Nothing was
 published, so nothing needs undoing, and no branch or version is touched. A cancelled train stays in the list.
-Cancelling does not record a decision, and the engine does not stop you from cancelling a train that is
-already cancelled.
+Cancelling records a `release_cancelled` decision. Cancelling a train that is already cancelled changes
+nothing.
 
 ## What you do next, by hand
 

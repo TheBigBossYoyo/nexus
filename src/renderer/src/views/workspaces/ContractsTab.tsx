@@ -256,7 +256,7 @@ function RegisterContract({ detail }: { detail: WorkspaceDetail }) {
               <Select id={id} value={form.provider} onChange={(provider) => patch({ provider })} options={[{ value: '', label: 'Choose a repository' }, ...detail.repositories.map((r) => ({ value: r.key, label: r.key }))]} data-testid="contract-provider" />
             )}
           </Field>
-          <Field label="Path in the provider" hint="For example openapi/api.yaml" error={err('path')} className="md:col-span-2">
+          <Field label="Path in the provider" hint="For example openapi/api.json (OpenAPI is read as JSON)" error={err('path')} className="md:col-span-2">
             {(id) => <Input id={id} value={form.path} onChange={(e) => patch({ path: e.target.value })} onBlur={() => touch('path')} aria-invalid={!!err('path')} data-testid="contract-path" />}
           </Field>
           <div className="flex items-center gap-2 md:col-span-2">

@@ -225,7 +225,7 @@ comparison.
 
 - Six kinds, each read by a small deterministic reader written for NEXUS, not by the format's own tooling. A
   contract in any other format, or a file that does not parse by these readers, is `unknown`.
-- OpenAPI must be JSON. The Contracts form's example path ends in `.yaml`; a YAML document is registered but
+- OpenAPI must be JSON. A YAML document is registered but
   reads as a parse error and every comparison of it is `unknown`.
 - A TypeScript contract is read lexically; type-level meaning (inheritance, generics, overloads) is not
   followed.
