@@ -890,15 +890,22 @@ export class WorkspaceEngine {
       const provider = byId.get(contract.providerRepositoryId)
       const providerChanged = provider ? this.resultOf(tasks, provider.id) !== null : false
       if (!provider || (!touched.has(contract.key) && !providerChanged)) continue
-      const before = this.repos.contractVersions.latest(contract.id)
-      let captured: Awaited<ReturnType<WorkspaceEngine['captureContract']>>
-      try {
-        captured = await this.captureContract(contract.id, this.resultOf(tasks, provider.id))
-      } catch (e) {
-        checks.push({ name: `contract ${contract.key}`, repository: provider.key, passed: false, detail: errorMessage(e).slice(0, 240) })
+      // The contract after the mission against the contract the mission started from, both read from the
+      // provider's own commits. Nothing is stored yet: a version is recorded only for work that verified.
+      const providerTasks = tasks.filter((t) => t.repositoryId === provider.id)
+      const afterRead = await this.readAt(provider, contract.path, this.resultOf(tasks, provider.id))
+      const beforeRead = await this.readAt(provider, contract.path, providerTasks[0]?.baseCommit ?? null)
+      if (!afterRead) {
+        checks.push({ name: `contract ${contract.key}`, repository: provider.key, passed: false, detail: `${contract.path} could not be read in ${provider.key} after the mission.` })
         continue
       }
-      const result = captured.created && before ? captured.result : compareSurfaces(captured.version, captured.version)
+      const after = extractSurface(contract.kind, afterRead.content)
+      const before = beforeRead ? extractSurface(contract.kind, beforeRead.content) : null
+      const result: CompatibilityResult = before ? compareSurfaces(before, after) : { compatible: true, level: 'identical', changes: [], summary: 'The contract is new in this mission.' }
+      const stored = this.repos.contractVersions.listByContract(contract.id, 200)
+      const fromVersion = before ? (stored.filter((v) => v.hash === before.hash).at(-1)?.version ?? null) : null
+      const toVersion = stored.filter((v) => v.hash === after.hash).at(-1)?.version ?? (stored.at(-1)?.version ?? 0) + 1
+      const captured = { version: { hash: after.hash, version: toVersion, parseError: after.parseError } }
       const breaking = result.level === 'breaking' || result.level === 'unknown'
       const consumersInSync: WorkspaceVerification['contracts'][number]['consumersInSync'] = []
       for (const consumer of this.repos.contractConsumers.listByContract(contract.id)) {
@@ -917,7 +924,7 @@ export class WorkspaceEngine {
         }
       }
       checks.push({ name: `contract ${contract.key} is readable`, repository: provider.key, passed: captured.version.parseError === null, detail: captured.version.parseError ?? `Version ${captured.version.version}: ${result.summary}` })
-      contracts.push({ contract: contract.key, fromVersion: captured.created ? (before?.version ?? null) : captured.version.version, toVersion: captured.version.version, result, consumersInSync })
+      contracts.push({ contract: contract.key, fromVersion, toVersion, result, consumersInSync })
     }
     // 3. A release order exists for what changed.
     const release = this.releasePlanFor(workspace.id, tasks, contracts)
@@ -931,14 +938,18 @@ export class WorkspaceEngine {
       this.decide(workspace.id, mission.id, 'verification_failed', `Global verification failed: ${failed.length} check(s).`, { failed: failed.map((c) => c.name) })
       return this.block(mission, `Global verification failed: ${failed.slice(0, 4).map((c) => `${c.name} (${c.detail})`).join('; ')}`)
     }
-    // Passed: record what the workspace learned between its repositories, and prepare (never publish) the release.
+    // Passed: record the contract versions of the verified work and what the workspace learned between its
+    // repositories, and prepare (never publish) the release.
     for (const c of contracts) {
-      if (c.fromVersion === null || c.fromVersion === c.toVersion) continue
       const contract = this.repos.workspaceContracts.getByKey(workspace.id, c.contract)
       const provider = contract ? byId.get(contract.providerRepositoryId) : null
+      if (contract && provider && c.result.level !== 'identical') {
+        await this.captureContract(contract.id, this.resultOf(tasks, provider.id)).catch((e: unknown) => this.log(`capture ${contract.key}: ${errorMessage(e)}`))
+      }
+      if (c.result.level === 'identical') continue
       const involved = [provider?.key, ...c.consumersInSync.map((x) => x.repository)].filter((k): k is string => Boolean(k))
       if (involved.length >= 2) {
-        this.repos.workspaceMemory.insert({ id: newId(), workspaceId: workspace.id, kind: 'contract', title: `Contract ${c.contract} v${c.fromVersion} -> v${c.toVersion}`, content: `${c.result.summary} Consumers: ${c.consumersInSync.map((x) => `${x.repository} ${x.inSync ? 'in step' : 'behind'}`).join(', ')}.`, evidence: `Global verification of mission ${mission.id}.`, repositories: [...new Set(involved)], source: { kind: 'verification', missionId: mission.id }, createdAt: this.iso() })
+        this.repos.workspaceMemory.insert({ id: newId(), workspaceId: workspace.id, kind: 'contract', title: `Contract ${c.contract} v${c.fromVersion ?? '?'} -> v${c.toVersion}`, content: `${c.result.summary} Consumers: ${c.consumersInSync.map((x) => `${x.repository} ${x.inSync ? 'in step' : 'behind'}`).join(', ')}.`, evidence: `Global verification of mission ${mission.id}.`, repositories: [...new Set(involved)], source: { kind: 'verification', missionId: mission.id }, createdAt: this.iso() })
       }
     }
     if (release.steps.length > 0) {

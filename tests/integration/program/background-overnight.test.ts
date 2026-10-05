@@ -262,7 +262,8 @@ describe('migration 006 (programs)', () => {
     const run = before.runs.insert(makeRun(project.id, { state: 'completed', prompt: 'A 0.3 mission' }))
     const ddl = (db: BetterSqlite3.Database): Map<string, string> => new Map((db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'").all() as { name: string; sql: string }[]).map((r) => [r.name, r.sql]))
     const earlier = ddl(old)
-    runMigrations(old)
+    // Migration 006 on its own: later migrations have their own tests.
+    runMigrations(old, MIGRATIONS.filter((m) => m.version <= 6))
     const after = ddl(old)
     for (const [name, sql] of earlier) expect(after.get(name), name).toBe(sql)
     const added = [...after.keys()].filter((name) => !earlier.has(name) && !name.startsWith('idx_') && !name.startsWith('sqlite_autoindex'))

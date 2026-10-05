@@ -1,0 +1,425 @@
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { Project, Run } from '@shared/domain'
+import { DEFAULT_WORKSPACE_POLICY, type PlannedCrossRepoTask, type Workspace, type WorkspaceMission } from '@shared/workspace'
+import { EventBus } from '@main/modules/events'
+import { GitService } from '@main/modules/git'
+import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
+import { WorkspaceEngine } from '@main/modules/workspace'
+import { makeProject } from '../persistence/fixtures'
+import { FakeProgramHost, sleep } from '../program/harness'
+
+/**
+ * The workspace engine on three real Git repositories (a shared SDK that owns a contract, a backend and a
+ * desktop app that each keep a copy of it) with a stand-in for the orchestrator.
+ */
+const sh = (cwd: string, ...args: string[]): string => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim()
+const schema = (properties: Record<string, unknown>, required = ['id']): string => `${JSON.stringify({ title: 'Order', type: 'object', required, properties }, null, 2)}\n`
+const V1 = schema({ id: { type: 'string' }, total: { type: 'number' } })
+const V2_COMPATIBLE = schema({ id: { type: 'string' }, total: { type: 'number' }, currency: { type: 'string' } })
+const V2_BREAKING = schema({ id: { type: 'string' }, amount: { type: 'number' } })
+
+interface Rig {
+  root: string
+  db: Database
+  repos: Repositories
+  bus: EventBus
+  host: FakeProgramHost
+  engine: WorkspaceEngine
+  paths: Record<'sdk' | 'backend' | 'desktop' | 'docs', string>
+  gate: { open: boolean; set(open: boolean): void }
+  workspace(): Promise<Workspace>
+  until(predicate: () => boolean, what: string, timeoutMs?: number): Promise<void>
+  untilState(missionId: string, states: WorkspaceMission['state'][]): Promise<WorkspaceMission>
+  restart(): WorkspaceEngine
+  cleanup(): Promise<void>
+}
+
+function makeRig(): Rig {
+  const root = mkdtempSync(join(tmpdir(), 'nexus-workspace-it-'))
+  const repo = (name: string, files: Record<string, string>): string => {
+    const dir = join(root, name)
+    execFileSync('git', ['init', '-q', '-b', 'main', dir], { windowsHide: true })
+    sh(dir, 'config', 'user.name', 'Test User')
+    sh(dir, 'config', 'user.email', 'test@example.com')
+    sh(dir, 'config', 'commit.gpgsign', 'false')
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(join(dir, path, '..'), { recursive: true })
+      writeFileSync(join(dir, path), content)
+    }
+    sh(dir, 'add', '-A')
+    sh(dir, 'commit', '-q', '-m', 'initial')
+    return dir
+  }
+  const pkg = (name: string, version: string, dependencies: Record<string, string> = {}): string => `${JSON.stringify({ name, version, type: 'module', scripts: { test: 'node --test' }, dependencies }, null, 2)}\n`
+  const sdk = repo('shared-sdk', { 'package.json': pkg('@acme/sdk', '2.2.9'), 'contracts/order.schema.json': V1 })
+  const backend = repo('backend', { 'package.json': pkg('backend', '1.8.4', { '@acme/sdk': '^2.2.0' }), 'contracts/order.schema.json': V1 })
+  const desktop = repo('desktop', { 'package.json': pkg('desktop', '0.7.3', { backend: `file:${backend.replace(/\\/g, '/')}` }), 'vendor/order.schema.json': V1 })
+  const docs = repo('docs', { 'README.md': '# docs\n' })
+  const db = openDatabase(':memory:')
+  const repos = createRepositories(db)
+  const bus = new EventBus(repos.events, repos.transaction)
+  const git = new GitService()
+  const host = new FakeProgramHost(repos, bus, git, sdk)
+  const listeners = new Set<() => void>()
+  const gate = {
+    open: true,
+    set(open: boolean) {
+      gate.open = open
+      for (const l of listeners) l()
+    },
+  }
+  const projects = {
+    open: async (path: string): Promise<Project> => {
+      const existing = repos.projects.list().find((p) => p.rootPath === path)
+      if (existing) return existing
+      const base = makeProject({ name: path.split(/[\\/]/).pop() ?? 'repo', rootPath: path })
+      // Each repository has its own stack: the docs repository has no check command at all.
+      const profile = base.profile ? { ...base.profile, languages: path === docs ? ['Markdown'] : ['JavaScript'], frameworks: [], commands: path === docs ? { build: null, test: null, lint: null, typecheck: null } : { build: null, test: 'node --test', lint: null, typecheck: null } } : null
+      return repos.projects.insert({ ...base, profile })
+    },
+  }
+  const engines: WorkspaceEngine[] = []
+  const build = (): WorkspaceEngine => {
+    const engine = new WorkspaceEngine({ repos, bus, git, host, projects, usage: { canDispatch: () => gate.open, onChange: (l) => (listeners.add(l), () => void listeners.delete(l)) }, tickIntervalMs: 0 })
+    engines.push(engine)
+    return engine
+  }
+  const rig: Rig = {
+    root,
+    db,
+    repos,
+    bus,
+    host,
+    engine: build(),
+    paths: { sdk, backend, desktop, docs },
+    gate,
+    async workspace() {
+      const ws = rig.engine.createWorkspace({ name: 'Acme platform', description: 'SDK, backend and desktop' })
+      await rig.engine.enroll(ws.id, { path: sdk, role: 'library' })
+      await rig.engine.enroll(ws.id, { path: backend, role: 'service' })
+      await rig.engine.enroll(ws.id, { path: desktop, role: 'application' })
+      const contract = await rig.engine.registerContract(ws.id, { key: 'order', name: 'Order schema', kind: 'json_schema', provider: 'shared-sdk', path: 'contracts/order.schema.json' })
+      rig.engine.addConsumer(contract.id, { repository: 'backend', copyPath: 'contracts/order.schema.json' })
+      rig.engine.addConsumer(contract.id, { repository: 'desktop', copyPath: 'vendor/order.schema.json' })
+      return repos.workspaces.require(ws.id)
+    },
+    async until(predicate, what, timeoutMs = 30_000) {
+      const deadline = Date.now() + timeoutMs
+      for (;;) {
+        await rig.engine.idle()
+        if (predicate()) return
+        if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
+        await rig.engine.tick()
+        await sleep(15)
+      }
+    },
+    async untilState(missionId, states) {
+      await rig.until(() => states.includes(repos.workspaceMissions.require(missionId).state), `mission state ${states.join('|')}`).catch((e: unknown) => {
+        const m = repos.workspaceMissions.require(missionId)
+        throw new Error(`${e instanceof Error ? e.message : String(e)}; mission is ${m.state} (${m.blockedReason ?? ''}); tasks ${repos.workspaceTasks.listByMission(missionId).map((t) => `${t.key}:${t.state}`).join(' ')}; decisions ${repos.workspaceDecisions.listByMission(missionId).map((d) => d.kind).join(' > ')}`)
+      })
+      return repos.workspaceMissions.require(missionId)
+    },
+    restart() {
+      rig.engine.dispose()
+      host.simulateRestart()
+      rig.engine = build()
+      return rig.engine
+    },
+    async cleanup() {
+      for (const e of engines) e.dispose()
+      await Promise.race([Promise.allSettled(engines.map((e) => e.idle())), sleep(2000)])
+      db.close()
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    },
+  }
+  return rig
+}
+
+const task = (key: string, repository: string, over: Partial<PlannedCrossRepoTask> = {}): PlannedCrossRepoTask => ({ key, repository, title: `Task ${key}`, objective: `Change ${repository}.`, acceptanceCriteria: [`${key} done`], dependsOn: [], contracts: [], ...over })
+const planJson = (tasks: PlannedCrossRepoTask[]): string => `\`\`\`json\n${JSON.stringify({ summary: 'Change the order contract and its users.', tasks, risks: [] })}\n\`\`\``
+const CHAIN = [task('sdk', 'shared-sdk', { contracts: ['order'] }), task('api', 'backend', { dependsOn: ['sdk'], contracts: ['order'] }), task('ui', 'desktop', { dependsOn: ['api'], contracts: ['order'] })]
+
+/** What a completing mission writes: the provider changes the contract, each consumer updates its copy. */
+function writes(rig: Rig, content: string, options: { skip?: string[] } = {}): (run: Run, repoPath: string) => Record<string, string> {
+  return (_run, repoPath): Record<string, string> => {
+    if (repoPath === rig.paths.sdk) return { 'contracts/order.schema.json': content }
+    if (repoPath === rig.paths.backend) return options.skip?.includes('backend') ? { 'src/api.js': 'export const api = 1\n' } : { 'contracts/order.schema.json': content, 'src/api.js': 'export const api = 1\n' }
+    if (repoPath === rig.paths.desktop) return options.skip?.includes('desktop') ? { 'src/ui.js': 'export const ui = 1\n' } : { 'vendor/order.schema.json': content, 'src/ui.js': 'export const ui = 1\n' }
+    return { 'note.txt': 'x\n' }
+  }
+}
+
+describe('workspace engine', () => {
+  let rig: Rig
+  afterEach(async () => {
+    await rig.cleanup()
+  })
+
+  it('onboarding: explicit enrollment, facts per repository, the organization graph with provenance', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    const detail = rig.engine.detail(ws.id)
+    expect(detail.repositories.map((r) => [r.key, r.role, r.packageName, r.packageVersion, r.branch, r.manifest])).toEqual([
+      ['shared-sdk', 'library', '@acme/sdk', '2.2.9', 'main', 'package.json'],
+      ['backend', 'service', 'backend', '1.8.4', 'main', 'package.json'],
+      ['desktop', 'application', 'desktop', '0.7.3', 'main', 'package.json'],
+    ])
+    // Enrolling makes a repository an allowed one; nothing else is.
+    expect(detail.workspace.policy.allowedRepositories).toEqual(['shared-sdk', 'backend', 'desktop'])
+    // Edges from the manifests and from the declared contract consumers, each with where it comes from.
+    const byId = new Map(detail.repositories.map((r) => [r.id, r.key]))
+    const edges = detail.dependencies.map((e) => [byId.get(e.fromRepositoryId), byId.get(e.toRepositoryId), e.kind, e.provenance.source])
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        ['backend', 'shared-sdk', 'package_dependency', 'manifest'],
+        ['desktop', 'backend', 'package_dependency', 'manifest'],
+        ['backend', 'shared-sdk', 'schema', 'contract'],
+        ['desktop', 'shared-sdk', 'schema', 'contract'],
+      ]),
+    )
+    expect(detail.dependencies.every((e) => e.provenance.detail.length > 0)).toBe(true)
+    expect(detail.order).toEqual({ ok: true, order: ['shared-sdk', 'backend', 'desktop'], levels: [['shared-sdk'], ['backend'], ['desktop']] })
+
+    // A different stack is not assumed: the docs repository has no manifest and no check command, and says so.
+    const docs = await rig.engine.enroll(ws.id, { path: rig.paths.docs, role: 'documentation' })
+    expect(docs).toMatchObject({ key: 'docs', packageName: null, packageVersion: null, manifest: null, languages: ['Markdown'], commands: { build: null, test: null } })
+    expect(rig.engine.detail(ws.id).repositories.find((r) => r.key === 'docs')?.health).toMatchObject({ level: 'unknown' })
+
+    await expect(rig.engine.enroll(ws.id, { path: rig.paths.docs })).rejects.toThrow(/already enrolled/)
+    await expect(rig.engine.enroll(ws.id, { path: rig.root })).rejects.toThrow(/not a Git repository/)
+    // A user-stated dependency needs a reason and cannot close a cycle.
+    expect(() => rig.engine.addDependency(ws.id, { from: 'docs', to: 'desktop', kind: 'documentation', detail: '' })).toThrow(/what shows/)
+    rig.engine.addDependency(ws.id, { from: 'docs', to: 'desktop', kind: 'documentation', detail: 'The docs describe the desktop app.' })
+    expect(() => rig.engine.addDependency(ws.id, { from: 'shared-sdk', to: 'docs', kind: 'documentation', detail: 'x' })).toThrow(/cycle/)
+    rig.engine.unenroll(docs.id)
+    expect(rig.engine.detail(ws.id).workspace.policy.allowedRepositories).toEqual(['shared-sdk', 'backend', 'desktop'])
+  })
+
+  it('contracts: versions by content, compatibility against the one before, paths confined to the repository', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    const contract = rig.repos.workspaceContracts.getByKey(ws.id, 'order')!
+    expect(rig.repos.contractVersions.listByContract(contract.id).map((v) => [v.version, v.surface.length, v.parseError])).toEqual([[1, 2, null]])
+    // Nothing changed: no new version.
+    expect((await rig.engine.captureContract(contract.id, null)).created).toBe(false)
+
+    writeFileSync(join(rig.paths.sdk, 'contracts/order.schema.json'), V2_COMPATIBLE)
+    sh(rig.paths.sdk, 'commit', '-qam', 'add currency')
+    const compatible = await rig.engine.captureContract(contract.id, null)
+    expect(compatible).toMatchObject({ created: true, version: { version: 2 }, result: { compatible: true, level: 'compatible' } })
+    writeFileSync(join(rig.paths.sdk, 'contracts/order.schema.json'), V2_BREAKING)
+    sh(rig.paths.sdk, 'commit', '-qam', 'rename total')
+    const breaking = await rig.engine.captureContract(contract.id, null)
+    expect(breaking.result).toMatchObject({ compatible: false, level: 'breaking' })
+    expect(breaking.result.changes.map((c) => [c.path, c.change])).toEqual(expect.arrayContaining([['Order.total', 'removed'], ['Order.currency', 'removed'], ['Order.amount', 'added']]))
+    // An earlier commit can be read too: versions are by content, so it is a fourth version.
+    expect((await rig.engine.captureContract(contract.id, 'HEAD~2')).version.hash).toBe(rig.repos.contractVersions.listByContract(contract.id)[0]!.hash)
+
+    for (const path of ['../backend/package.json', 'C:\\Windows\\win.ini', '/etc/passwd', '-rf', 'a/../../b']) {
+      await expect(rig.engine.registerContract(ws.id, { key: 'bad', name: 'bad', kind: 'json_schema', provider: 'shared-sdk', path }), path).rejects.toThrow(/Not a path inside the repository/)
+    }
+    await expect(rig.engine.registerContract(ws.id, { key: 'missing', name: 'x', kind: 'json_schema', provider: 'shared-sdk', path: 'contracts/none.json' })).rejects.toThrow(/does not exist/)
+    expect(() => rig.engine.addConsumer(contract.id, { repository: 'shared-sdk' })).toThrow(/provider/)
+    expect(() => rig.engine.addConsumer(contract.id, { repository: 'backend', copyPath: '../../x' })).toThrow()
+  })
+
+  it('a cross-repository mission: plan shown first, tasks in dependency order in their own repositories, global verification, a prepared release train', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    const heads = { sdk: sh(rig.paths.sdk, 'rev-parse', 'HEAD'), backend: sh(rig.paths.backend, 'rev-parse', 'HEAD'), desktop: sh(rig.paths.desktop, 'rev-parse', 'HEAD') }
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency to orders everywhere.', start: true })
+    const waiting = await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    // Nothing runs before the user has seen the plan.
+    expect(waiting.plan?.tasks.map((t) => t.key)).toEqual(['sdk', 'api', 'ui'])
+    expect(rig.host.created.filter((c) => c.kind === 'mission')).toHaveLength(0)
+    await rig.engine.decidePlan(mission.id, true)
+    const done = await rig.untilState(mission.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+
+    // Provider first, then each consumer; one run per task, each in its own repository.
+    const tasks = rig.repos.workspaceTasks.listByMission(mission.id)
+    const runs = rig.host.created.filter((c) => c.kind === 'mission')
+    expect(tasks.map((t) => [t.key, t.repository, t.state])).toEqual([['sdk', 'shared-sdk', 'COMPLETED'], ['api', 'backend', 'COMPLETED'], ['ui', 'desktop', 'COMPLETED']])
+    const projectOf = (key: string): string => rig.repos.enrolledRepositories.getByKey(ws.id, key)!.projectId
+    expect(runs.map((r) => r.input.projectId)).toEqual([projectOf('shared-sdk'), projectOf('backend'), projectOf('desktop')])
+    expect(tasks.every((t) => t.resultCommit && t.resultBranch?.startsWith('nexus/integration-'))).toBe(true)
+    // Messaging: a consumer's task gets the provider's NEW contract and is told where its own copy is.
+    expect(runs[0]!.input.prompt).toContain('PROVIDES the contract "order"')
+    expect(runs[1]!.input.prompt).toContain('CONSUMES the contract "order"')
+    expect(runs[1]!.input.prompt).toContain('"currency"')
+    expect(runs[1]!.input.prompt).toContain('keeps its own copy of the contract at contracts/order.schema.json')
+    expect(runs[2]!.input.prompt).toContain('vendor/order.schema.json')
+    expect(runs[2]!.input.prompt).toContain('What the tasks this one depends on reported')
+    expect(runs[1]!.input.prompt).toContain('do not try to reach or edit them')
+
+    // Global verification: every repository's task and checks, the contract, every consumer.
+    const verification = done.verification!
+    expect(verification.passed).toBe(true)
+    expect(verification.contracts).toEqual([
+      expect.objectContaining({ contract: 'order', fromVersion: 1, toVersion: 2, result: expect.objectContaining({ level: 'compatible', compatible: true }), consumersInSync: [expect.objectContaining({ repository: 'backend', inSync: true }), expect.objectContaining({ repository: 'desktop', inSync: true })] }),
+    ])
+    expect(verification.checks.filter((c) => c.name.startsWith('checks of')).map((c) => [c.repository, c.passed])).toEqual([['shared-sdk', true], ['backend', true], ['desktop', true]])
+
+    // A release train is prepared in dependency order with versions; it is not published and cannot be.
+    const train = rig.repos.releaseTrains.listByWorkspace(ws.id)[0]!
+    expect(train).toMatchObject({ state: 'PREPARED', publishAuthorized: false, missionId: mission.id })
+    expect(train.plan.steps.map((s) => [s.repository, s.currentVersion, s.nextVersion, s.bump, s.after])).toEqual([
+      ['shared-sdk', '2.2.9', '2.3.0', 'minor', []],
+      ['backend', '1.8.4', '1.8.5', 'patch', ['shared-sdk']],
+      ['desktop', '0.7.3', '0.7.4', 'patch', ['backend', 'shared-sdk']],
+    ])
+    expect(() => rig.engine.publishReleaseTrain(train.id)).toThrow(/does not publish/)
+    expect(rig.repos.workspaceDecisions.recent(ws.id).some((d) => d.kind === 'publish_refused')).toBe(true)
+    // Cross-repository memory was recorded for the contract change.
+    expect(rig.repos.workspaceMemory.listByWorkspace(ws.id)[0]).toMatchObject({ kind: 'contract', repositories: ['shared-sdk', 'backend', 'desktop'], source: { kind: 'verification' } })
+
+    // The original checkouts are exactly as they were: same HEAD, same branch, clean.
+    for (const [name, path] of [['sdk', rig.paths.sdk], ['backend', rig.paths.backend], ['desktop', rig.paths.desktop]] as const) {
+      expect(sh(path, 'rev-parse', 'HEAD'), name).toBe(heads[name])
+      expect(sh(path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main')
+      expect(sh(path, 'status', '--porcelain')).toBe('')
+    }
+  })
+
+  it('a breaking contract change with a consumer left behind fails global verification', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_BREAKING, { skip: ['desktop'] })
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Rename total to amount.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    const blocked = await rig.untilState(mission.id, ['BLOCKED', 'COMPLETED'])
+    expect(blocked.state).toBe('BLOCKED')
+    expect(blocked.blockedReason).toContain('desktop is in step with contract order')
+    expect(blocked.verification).toMatchObject({ passed: false })
+    expect(blocked.verification!.contracts[0]).toMatchObject({ result: { level: 'breaking' }, consumersInSync: [{ repository: 'backend', inSync: true }, { repository: 'desktop', inSync: false }] })
+    // No release train is prepared for a change that did not verify.
+    expect(rig.repos.releaseTrains.listByWorkspace(ws.id)).toHaveLength(0)
+
+    // A compatible change with the same consumer left behind passes, and says the consumer is behind.
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE, { skip: ['desktop'] })
+    const second = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(second.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(second.id, true)
+    const done = await rig.untilState(second.id, ['BLOCKED', 'COMPLETED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+    expect(done.verification!.checks.find((c) => c.name === 'desktop is in step with contract order')).toMatchObject({ passed: true, detail: expect.stringContaining('older, compatible') })
+  })
+
+  it('refuses a plan outside the workspace policy or against the dependency order', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.engine.setPolicy(ws.id, { ...rig.repos.workspaces.require(ws.id).policy, allowedRepositories: ['shared-sdk', 'backend'] })
+    // First answer: work in a repository that is not allowed. Second: a consumer before its provider.
+    rig.host.answers.plan = [planJson(CHAIN), planJson([task('api', 'backend'), task('sdk', 'shared-sdk', { dependsOn: ['api'] })]), planJson([task('sdk', 'shared-sdk'), task('api', 'backend', { dependsOn: ['sdk'] })])]
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Change things.', start: true })
+    const blocked = await rig.untilState(mission.id, ['BLOCKED', 'AWAITING_APPROVAL'])
+    expect(blocked.state).toBe('BLOCKED')
+    expect(blocked.blockedReason).toContain('No valid cross-repository plan')
+    expect(rig.repos.workspaceTasks.listByMission(mission.id)).toHaveLength(0)
+    expect(rig.host.created.filter((c) => c.kind === 'mission')).toHaveLength(0)
+    // The user resumes: a valid plan is accepted.
+    await rig.engine.resumeMission(mission.id)
+    expect((await rig.untilState(mission.id, ['AWAITING_APPROVAL'])).plan?.tasks.map((t) => t.repository)).toEqual(['shared-sdk', 'backend'])
+    expect(() => rig.engine.setPolicy(ws.id, { ...DEFAULT_WORKSPACE_POLICY, allowedRepositories: ['somewhere-else'] })).toThrow(/Not enrolled/)
+
+    // With no allowed repository nothing can start.
+    const empty = rig.engine.createWorkspace({ name: 'Empty' })
+    const idle = await rig.engine.createMission(empty.id, { goal: 'x' })
+    await expect(rig.engine.startMission(idle.id)).rejects.toThrow(/allows no repository/)
+  })
+
+  it('a failed task blocks the mission before anything that depends on it starts; resume runs it again', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    rig.host.mission = (i) => (i === 1 ? 'fail' : 'complete')
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    const blocked = await rig.untilState(mission.id, ['BLOCKED'])
+    expect(blocked.blockedReason).toContain('Task api (backend) failed')
+    expect(rig.repos.workspaceTasks.listByMission(mission.id).map((t) => t.state)).toEqual(['COMPLETED', 'FAILED', 'PLANNED'])
+    expect(rig.host.created.filter((c) => c.kind === 'mission')).toHaveLength(2)
+    await rig.engine.resumeMission(mission.id)
+    const done = await rig.untilState(mission.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+    expect(rig.host.created.filter((c) => c.kind === 'mission').map((c) => rig.repos.projects.require(c.input.projectId).name)).toEqual(['shared-sdk', 'backend', 'backend', 'desktop'])
+  })
+
+  it('a usage limit is a wait; a restart continues the same runs', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    rig.host.mission = (i) => (i === 0 ? 'quota' : i === 1 ? 'hang' : 'complete')
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    const waiting = await rig.untilState(mission.id, ['WAITING_FOR_QUOTA'])
+    expect(waiting).toMatchObject({ resumeState: 'ACTIVE', blockedReason: null, error: null })
+    const first = rig.host.created.filter((c) => c.kind === 'mission')[0]!.run
+    await rig.host.resumeRun(first.id)
+    await rig.untilState(mission.id, ['ACTIVE'])
+    await rig.host.apply(first.id, 'complete')
+    await rig.until(() => rig.host.created.filter((c) => c.kind === 'mission').length === 2, 'the second task')
+    const second = rig.host.created.filter((c) => c.kind === 'mission')[1]!.run
+
+    const engine = rig.restart()
+    expect(rig.repos.runs.require(second.id)).toMatchObject({ state: 'paused', pauseReason: 'recovery' })
+    await engine.recover()
+    expect(rig.host.resumed).toContain(second.id)
+    expect(rig.repos.workspaceTasks.getByRun(second.id)).toMatchObject({ key: 'api', state: 'RUNNING' })
+    await rig.host.apply(second.id, 'complete')
+    const done = await rig.untilState(mission.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+    // Three tasks, three runs: nothing was started twice.
+    expect(rig.host.created.filter((c) => c.kind === 'mission')).toHaveLength(3)
+  })
+
+  it('independent repositories may run at the same time; one repository never has two writers', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    await rig.engine.enroll(ws.id, { path: rig.paths.docs, role: 'documentation' })
+    rig.engine.setPolicy(ws.id, { ...rig.repos.workspaces.require(ws.id).policy, maxParallelRepositories: 2 })
+    // docs and shared-sdk are independent; two tasks are in shared-sdk.
+    rig.host.answers.plan = [planJson([task('sdk-a', 'shared-sdk'), task('sdk-b', 'shared-sdk'), task('notes', 'docs')])]
+    rig.host.mission = () => 'hang'
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Tidy up.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    await rig.until(() => rig.repos.workspaceTasks.listByMission(mission.id).filter((t) => t.state === 'RUNNING').length === 2, 'two running tasks')
+    const running = rig.repos.workspaceTasks.listByMission(mission.id).filter((t) => t.state === 'RUNNING')
+    expect(running.map((t) => t.repository).sort()).toEqual(['docs', 'shared-sdk'])
+    await rig.engine.tick()
+    expect(rig.repos.workspaceTasks.listByMission(mission.id).filter((t) => t.state === 'RUNNING')).toHaveLength(2)
+    // The second task of the same repository starts only after the first, and from its result.
+    const sdkA = running.find((t) => t.repository === 'shared-sdk')!
+    await rig.host.apply(sdkA.runId!, 'complete')
+    await rig.until(() => rig.repos.workspaceTasks.listByMission(mission.id).some((t) => t.key === 'sdk-b' && t.state === 'RUNNING'), 'the second task of the same repository')
+    const sdkB = rig.repos.workspaceTasks.listByMission(mission.id).find((t) => t.key === 'sdk-b')!
+    expect(sdkB.baseCommit).toBe(rig.repos.workspaceTasks.listByMission(mission.id).find((t) => t.key === 'sdk-a')!.resultCommit)
+
+    const cancelled = await rig.engine.cancelMission(mission.id)
+    expect(cancelled.state).toBe('CANCELLED')
+    expect(rig.host.cancelled.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('workspace memory is for what lies between repositories', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    expect(() => rig.engine.addMemory(ws.id, { kind: 'architecture', title: 'Backend uses Express', content: 'x', evidence: 'package.json', repositories: ['backend'] })).toThrow(/at least two repositories/)
+    const entry = rig.engine.addMemory(ws.id, { kind: 'release_convention', title: 'SDK first', content: 'The SDK is released before the backend.', evidence: 'backend/package.json depends on @acme/sdk', repositories: ['shared-sdk', 'backend', 'ghost'] })
+    expect(entry.repositories).toEqual(['shared-sdk', 'backend'])
+  })
+})
