@@ -451,4 +451,10 @@ describe('program engine stress', () => {
     }
     expect(failures, failures.join('\n\n')).toEqual([])
   })
+
+  // Seeds that once failed, whatever range is selected. 1552: a milestone whose result was built on an older
+  // state of the program branch was verified, accepted, refused by the branch and blocked again on every resume.
+  it.each([1552])('keeps its invariants on seed %i, which once failed', async (seed) => {
+    await runSeed(seed)
+  })
 })
