@@ -316,3 +316,48 @@ Written while the 0.3 stress runs; only light test runs alongside it.
     is closed), a client and runtime IPC boundary of its own, and a worker manager with leases. Home was not
     redesigned into the Control Center; the Control Center is its own page.
 - Usage: no agents and no real Claude runs were started between 02:36 and the reset at 04:10.
+
+### 03:50 to 05:17 Audits of 0.5 and 0.6, real acceptance of 0.5, reliability campaign, release of 0.5.0
+
+- 04:10: the five-hour usage window reset (93 percent at 03:53). Three independent read-only reviews started:
+  code audit of 0.5, security audit of 0.6, UI review of both.
+- **Real acceptance of 0.5** (`scripts/workspace-acceptance.mjs`, three disposable repositories, a shared JSON
+  Schema): 15 of 15 gates on the first attempt at 04:12, and again at 04:56 after the audit fixes.
+- **Audit of 0.5:** 1 HIGH (global verification passed for a repository whose checks never ran), 7 MEDIUM. The
+  HIGH and five MEDIUM fixed with tests; see `V0_5_RELEASE_REPORT.md`.
+- **Reliability campaign** (5000 histories per engine, on the 0.7 code, in a third checkout): control plane,
+  workspace and usage passed. **Program stress failed on seed 1552**: a real defect of the released 0.4.0 (a
+  result built on an older state of the program branch was verified, accepted, refused by the branch and
+  blocked, again on every resume). Fixed, 5000 passed, the seed is a permanent test. **Both overnight stresses
+  failed on four seeds**: a failsafe lost to a restart of Windows within a minute of arming stayed "armed" in
+  the record. Fixed (on the 0.6 line), 2 x 5000 passed.
+- A request to stop the processes of a running validation chain was refused by the permission system; the
+  chain was left to finish and the fix was made in another checkout.
+- **0.5.0 released** at 05:17: `pnpm test` 137 files, 2606 passed; E2E 22; package; packaged validation 19 of 19;
+  stress 1000 (before the audit fixes) plus the workspace and program stresses after them. `main` = `389d95f`,
+  tag `v0.5.0`. The script that wrote the release documents stopped halfway, so TEST_STATUS and BUILD_PROGRESS
+  for 0.5.0 are not in the tagged commit; they are on the 0.6 line.
+
+### 05:17 to 06:45 Real acceptance of 0.6, the boundary review, security hardening, release of 0.6.0
+
+- **Audit of 0.6:** 1 HIGH (the Codex tool was started by name through `cmd.exe` in the task's worktree, so a
+  planted `codex.cmd` would run), 4 MEDIUM, all fixed with tests; UI review: 3 HIGH (consent and truthfulness
+  of the Providers page), fixed. See `V0_6_RELEASE_REPORT.md`.
+- **Real acceptance of 0.6** (`scripts/provider-acceptance.mjs`): a real mission implemented and verified by
+  Claude and reviewed by a real Codex session, read-only: 14 of 14 gates at 05:22, and again at 06:43 on the
+  final code. `pnpm smoke:providers`: a real Codex review that finds a planted defect, cannot write, and does
+  not run a `codex.cmd` planted in the repository.
+- **Adversarial review of the boundaries** (for the 1.0 question, on the 0.7 code): 3 HIGH and 1 HIGH by
+  design. Fixed on the 0.6 line, each with a test that fails without the fix: an agent's shell could rewrite a
+  worktree's `.git` pointer so that NEXUS wrote into the user's repository; `git config` behind a value option
+  passed the classifier and the configured program then ran inside NEXUS's own git. NEXUS's git now runs no
+  hooks, no file system monitor, no pager and no `ext` transport, without the withheld credentials. Open by
+  design: a writing agent can write a script and run it uninspected. Six MEDIUM open (`SECURITY.md`).
+- Three failures during the validation of 0.6, none answered by loosening a check: the timing evaluator of the
+  Arena case `performance-optimization` under load (it now measures again before failing; case version 3), an
+  E2E test that did not wait for the first agent session, and the order of two steps in the packaged
+  validation script.
+- **0.6.0 released** at 06:44: `pnpm test` 139 files, 2650 passed; E2E 24; package; packaged validation 20 of 20;
+  stress 1000 (before the hardening) plus 100 orchestrator seeds after it. `main` = `0a2874f`, tag `v0.6.0`.
+- **Migration campaign:** the 0.7 development build on nine real databases from 0.1 to 0.6: 9 of 9 checks each.
+- 0.7 merged with the hardened 0.6: `pnpm test` 141 files, 2686 passed. It stays a partial branch.
