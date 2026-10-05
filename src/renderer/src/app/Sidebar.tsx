@@ -25,6 +25,7 @@ import {
   SidebarIcon,
   StatusDot,
   Tooltip,
+  ControlIcon,
   ProvidersIcon,
   UsageIcon,
 } from '../components/ui'
@@ -45,6 +46,7 @@ const ICONS: Record<string, ReactNode> = {
   providers: <ProvidersIcon size={16} />,
   performance: <PerformanceIcon size={16} />,
   intelligence: <IntelligenceIcon size={16} />,
+  control: <ControlIcon size={16} />,
   overnight: <MoonIcon size={16} />,
   activity: <ActivityIcon size={16} />,
   memory: <MemoryIcon size={16} />,

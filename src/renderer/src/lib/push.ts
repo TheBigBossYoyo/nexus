@@ -6,6 +6,7 @@ import { qk } from './queries'
 import { qkv4 } from './queries-v4'
 import { qkv5 } from './queries-v5'
 import { qkv6 } from './queries-v6'
+import { qkControl } from './queries-v7'
 import { quotaWaitActive } from './usageModel'
 import type { UsageOverview } from '@shared/v3'
 import { useLiveStore } from '../store/live'
@@ -209,6 +210,9 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
           break
         case 'providers':
           schedule([qkv6.root()])
+          break
+        case 'control':
+          schedule([qkControl.root()])
           break
         case 'backlog':
           schedule([qkv4.programsRoot(), qkv4.backgroundRoot()])

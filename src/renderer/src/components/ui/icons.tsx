@@ -204,6 +204,13 @@ export const ProvidersIcon = (p: IconProps) => (
     <path d="M7.2 5.1 4.3 10.9M8.8 5.1l2.9 5.8M5.25 12.5h5.5" />
   </Svg>
 )
+/** A queue: three rows of different length, the first one active. */
+export const ControlIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="3.25" cy="4" r="1.25" />
+    <path d="M6.5 4h7M2.5 8h11M2.5 12h7" />
+  </Svg>
+)
 export const MoonIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M13 9.6A5.5 5.5 0 0 1 6.4 3 5.5 5.5 0 1 0 13 9.6z" />
