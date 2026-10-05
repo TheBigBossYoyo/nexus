@@ -8,6 +8,10 @@ import { DEFAULT_WORKSPACE_POLICY, type PlannedCrossRepoTask, type Workspace, ty
 import { EventBus } from '@main/modules/events'
 import { GitService } from '@main/modules/git'
 import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
+import { ipcInputs } from '@shared/ipc'
+import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT, type OvernightRun } from '@shared/overnight'
+import { OvernightSupervisor, WorkspaceMissionWorkload, type OvernightOrchestrator } from '@main/modules/overnight'
+import { FakePowerController } from '@main/modules/power'
 import { WorkspaceEngine } from '@main/modules/workspace'
 import { makeProject } from '../persistence/fixtures'
 import { FakeProgramHost, sleep } from '../program/harness'
@@ -421,5 +425,141 @@ describe('workspace engine', () => {
     expect(() => rig.engine.addMemory(ws.id, { kind: 'architecture', title: 'Backend uses Express', content: 'x', evidence: 'package.json', repositories: ['backend'] })).toThrow(/at least two repositories/)
     const entry = rig.engine.addMemory(ws.id, { kind: 'release_convention', title: 'SDK first', content: 'The SDK is released before the backend.', evidence: 'backend/package.json depends on @acme/sdk', repositories: ['shared-sdk', 'backend', 'ghost'] })
     expect(entry.repositories).toEqual(['shared-sdk', 'backend'])
+  })
+})
+
+describe('workspace programs and overnight workspace missions', () => {
+  let rig: Rig
+  let supervisor: OvernightSupervisor | null = null
+  afterEach(async () => {
+    supervisor?.dispose()
+    supervisor = null
+    await rig.cleanup()
+  })
+
+  /** Accepts every plan that comes up for approval until the predicate holds. */
+  const drive = async (predicate: () => boolean, what: string): Promise<void> => {
+    const deadline = Date.now() + 60_000
+    for (;;) {
+      await rig.engine.idle()
+      await new Promise((resolve) => setImmediate(resolve))
+      await rig.engine.idle()
+      if (predicate()) return
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
+      for (const m of rig.repos.workspaceMissions.listOpen()) if (m.state === 'AWAITING_APPROVAL') await rig.engine.decidePlan(m.id, true)
+      await rig.engine.tick()
+      await sleep(15)
+    }
+  }
+
+  it('a workspace program runs one cross-repository mission per milestone, each building on the one before', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    let step = 0
+    rig.host.files = (run, repoPath) => {
+      // The first milestone adds a field, the second another: every repository changes in both.
+      const fields: Record<string, unknown> = { id: { type: 'string' }, total: { type: 'number' }, currency: { type: 'string' } }
+      if (step >= 3) fields['tax'] = { type: 'number' }
+      step++
+      return writes(rig, schema(fields))(run, repoPath)
+    }
+    const program = rig.engine.createProgram(ws.id, { name: 'Money', goal: 'Orders carry currency and tax everywhere.', milestones: [{ title: 'Currency', goal: 'Add the currency field.' }, { title: 'Tax', goal: 'Add the tax field.' }] })
+    expect(program).toMatchObject({ state: 'DRAFT', milestones: [{ state: 'PLANNED', missionId: null }, { state: 'PLANNED', missionId: null }] })
+    await rig.engine.startProgram(program.id)
+    await drive(() => rig.repos.workspacePrograms.require(program.id).state === 'COMPLETED', 'the workspace program to complete')
+
+    const done = rig.repos.workspacePrograms.require(program.id)
+    expect(done.milestones.map((m) => m.state)).toEqual(['COMPLETED', 'COMPLETED'])
+    const missions = rig.repos.workspaceMissions.listByProgram(program.id)
+    expect(missions.map((m) => [m.state, m.verification?.passed])).toEqual([['COMPLETED', true], ['COMPLETED', true]])
+    expect(missions[1]!.goal).toContain('milestone 2 of 2')
+    // One mission at a time: the second started after the first was verified.
+    expect(Date.parse(missions[0]!.finishedAt!)).toBeLessThanOrEqual(Date.parse(missions[1]!.startedAt!))
+    // In every repository the second milestone's task starts from the first milestone's result.
+    const first = rig.repos.workspaceTasks.listByMission(missions[0]!.id)
+    const second = rig.repos.workspaceTasks.listByMission(missions[1]!.id)
+    for (const task of second) expect(task.baseCommit, task.repository).toBe(first.find((t) => t.repositoryId === task.repositoryId)!.resultCommit)
+    // The contract went through two verified versions after the first.
+    const contract = rig.repos.workspaceContracts.getByKey(ws.id, 'order')!
+    expect(rig.repos.contractVersions.listByContract(contract.id).map((v) => v.version)).toEqual([1, 2, 3])
+    expect(rig.engine.detail(ws.id).programs.map((p) => p.state)).toEqual(['COMPLETED'])
+    expect(rig.engine.list()[0]).toMatchObject({ activePrograms: 0, activeMissions: 0 })
+  })
+
+  it('a blocked mission blocks its workspace program; resuming the program resumes the mission', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    rig.host.mission = (i) => (i === 0 ? 'fail' : 'complete')
+    const program = rig.engine.createProgram(ws.id, { name: 'Money', goal: 'g', milestones: [{ title: 'Currency', goal: 'Add the currency field.' }] })
+    await rig.engine.startProgram(program.id)
+    await drive(() => rig.repos.workspacePrograms.require(program.id).state === 'BLOCKED', 'the workspace program to block')
+    const blocked = rig.repos.workspacePrograms.require(program.id)
+    expect(blocked.blockedReason).toContain('failed')
+    expect(blocked.milestones[0]).toMatchObject({ state: 'BLOCKED' })
+    expect(rig.engine.list()[0]).toMatchObject({ activePrograms: 1 })
+    await rig.engine.resumeProgram(program.id)
+    await drive(() => rig.repos.workspacePrograms.require(program.id).state === 'COMPLETED', 'the workspace program to complete after the resume')
+    // Still one mission for the milestone: the blocked one was resumed, not replaced.
+    expect(rig.repos.workspaceMissions.listByProgram(program.id)).toHaveLength(1)
+
+    const cancelled = rig.engine.createProgram(ws.id, { name: 'Other', goal: 'g', milestones: [{ title: 'One', goal: 'x' }, { title: 'Two', goal: 'y' }] })
+    rig.host.mission = () => 'hang'
+    await rig.engine.startProgram(cancelled.id)
+    await drive(() => rig.repos.workspaceMissions.listByProgram(cancelled.id).some((m) => m.state === 'ACTIVE'), 'the mission to be active')
+    const after = await rig.engine.cancelProgram(cancelled.id)
+    expect(after).toMatchObject({ state: 'CANCELLED', milestones: [{ state: 'CANCELLED' }, { state: 'CANCELLED' }] })
+    expect(rig.repos.workspaceMissions.listByProgram(cancelled.id).map((m) => m.state)).toEqual(['CANCELLED'])
+    expect(() => rig.engine.createProgram(ws.id, { name: 'x', goal: 'g', milestones: [] })).toThrow()
+  })
+
+  it('a workspace mission under the overnight supervisor: failsafe first, global verification, report, power action', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    const power = new FakePowerController()
+    const orchestrator = new Proxy({}, { get: () => async () => undefined }) as unknown as OvernightOrchestrator
+    supervisor = new OvernightSupervisor({ repos: rig.repos, bus: rig.bus, orchestrator, power, git: new GitService(), push: () => undefined, flush: () => undefined, reportsDir: join(rig.root, 'reports'), bootTime: () => 0, tickIntervalMs: 0, stopTimeoutMs: 5000 })
+    supervisor.registerWorkload('workspace_mission', (id) => new WorkspaceMissionWorkload(id, { host: rig.engine, get: (missionId) => rig.repos.workspaceMissions.get(missionId), quotaResetsAt: () => null }))
+    const waitFor = async (id: string, states: string[]): Promise<OvernightRun> => {
+      const deadline = Date.now() + 30_000
+      for (;;) {
+        await supervisor!.idle()
+        await rig.engine.idle()
+        const record = rig.repos.overnight.require(id)
+        if (states.includes(record.state)) return record
+        if (Date.now() > deadline) throw new Error(`overnight is ${record.state}; mission ${rig.repos.workspaceMissions.require(id).state}`)
+        await rig.engine.tick()
+        await supervisor!.tick()
+        await sleep(20)
+      }
+    }
+    const policy = { ...DEFAULT_OVERNIGHT_POLICY, forceCloseApplications: true }
+
+    // A plan nobody is there to approve ends the night as a blocker.
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    const unapproved = await rig.engine.createMission(ws.id, { goal: 'Add a currency.' })
+    await expect(supervisor.startWorkspaceMission({ missionId: unapproved.id, policy, confirmed: false, confirmation: OVERNIGHT_CONFIRMATION_TEXT })).rejects.toThrow(/authorization/)
+    await supervisor.startWorkspaceMission({ missionId: unapproved.id, policy: { ...policy, shutdownOn: { ...policy.shutdownOn, blocker: false } }, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT })
+    expect(power.calls[0]).toMatchObject({ operation: 'scheduleShutdown', request: { purpose: 'failsafe' } })
+    expect(rig.repos.overnight.require(unapproved.id)).toMatchObject({ workloadType: 'workspace_mission', projectId: 'workspace' })
+    const blocked = await waitFor(unapproved.id, ['DONE'])
+    expect(blocked).toMatchObject({ terminalReason: 'BLOCKED', powerAction: null })
+    expect(blocked.terminalDetail).toContain('waiting for approval')
+
+    // Approved beforehand, the same mission runs through the night and ends with the power action.
+    await rig.engine.decidePlan(unapproved.id, true)
+    await rig.engine.pauseMission(unapproved.id)
+    await supervisor.startWorkspaceMission({ missionId: unapproved.id, policy, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT })
+    const done = await waitFor(unapproved.id, ['POWER_ACTION_SCHEDULED'])
+    expect(done.terminalReason).toBe('SUCCESS')
+    expect(rig.repos.workspaceMissions.require(unapproved.id)).toMatchObject({ state: 'COMPLETED', verification: { passed: true } })
+    expect(done.finalReport).toContain('# NEXUS Overnight Workspace Mission')
+    expect(done.finalReport).toContain('Nothing was published')
+    expect(done.finalReport).toContain('`sdk` in shared-sdk [COMPLETED]')
+    expect(power.calls.map((c) => (c.request ? `${c.operation}:${c.request.purpose}` : c.operation)).slice(-3)).toEqual(['scheduleShutdown:failsafe', 'cancelShutdown', 'scheduleShutdown:final'])
+    expect(ipcInputs['overnight.startWorkspaceMission'].safeParse({ missionId: 'm', policy, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT, command: 'x' }).success).toBe(false)
   })
 })
