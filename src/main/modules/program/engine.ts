@@ -811,7 +811,12 @@ export class ProgramEngine {
     const milestones = this.repos.milestones.listByProgram(program.id)
     // A milestone left in VERIFYING without a run (a restart between two steps): verify it again.
     const verifying = milestones.find((m) => m.state === 'VERIFYING')
-    if (verifying) return this.verifyMilestone(program, verifying)
+    if (verifying) {
+      // The verifier's answer is applied to the program's current milestone, so it must be this one. (After a
+      // restart it could point elsewhere; the answer was then dropped and the milestone verified again, forever.)
+      if (program.currentMilestoneId !== verifying.id) this.patch(program.id, { currentMilestoneId: verifying.id })
+      return this.verifyMilestone(this.repos.programs.require(program.id), verifying)
+    }
     // A reassessment the user asked for happens before the next mission.
     if (this.repos.settings.getValue<string>(userReplanKey(program.id))) {
       if (program.replans < program.policy.maxReplans) return this.setState(program.id, 'REPLANNING')
@@ -962,6 +967,18 @@ export class ProgramEngine {
     ]
     // A mission with an integration branch whose commit cannot be read has a result nobody can verify or keep.
     if (run.integrationBranch && !resultCommit) gates.push({ name: 'result_readable', passed: false, detail: `The result branch ${run.integrationBranch} could not be read.` })
+    // The program branch only moves forward. A result that was built on an older state of it (another milestone
+    // was accepted while this mission ran, around a restart) can never be recorded, whatever a verifier says:
+    // it is rejected here, before a verifier session is spent on it, and the milestone is carried out again
+    // from the current state. (Found by the 5000-history stress: such a milestone was verified, accepted,
+    // refused by the branch and blocked, again on every resume.)
+    if (resultCommit && program.branch) {
+      const project = this.repos.projects.require(program.projectId)
+      const tip = await this.deps.git.resolveCommit(project.rootPath, `refs/heads/${program.branch}`).catch(() => null)
+      if (tip && tip !== resultCommit && !(await this.deps.git.isAncestor(project.rootPath, tip, resultCommit).catch(() => false))) {
+        gates.push({ name: 'builds_on_accepted_work', passed: false, detail: `The result ${resultCommit.slice(0, 12)} does not contain the work accepted on ${program.branch} since this mission started.` })
+      }
+    }
     // `changes_present` is recorded for the verifier and the user; a milestone may legitimately need no change.
     const hardFailure = gates.find((g) => !g.passed && g.name !== 'changes_present') ?? null
     return { gates, resultCommit, hardFailure }
@@ -994,8 +1011,14 @@ export class ProgramEngine {
 
   private async onVerifierEnded(program: Program, run: Run | null): Promise<void> {
     const { repos } = this
-    const milestone = program.currentMilestoneId ? repos.milestones.get(program.currentMilestoneId) : null
-    if (!milestone || milestone.state !== 'VERIFYING' || !milestone.evidence) return
+    const current = program.currentMilestoneId ? repos.milestones.get(program.currentMilestoneId) : null
+    // A verifier's answer belongs to the milestone that is being verified. There is at most one.
+    const milestone = current?.state === 'VERIFYING' ? current : (repos.milestones.listByProgram(program.id).find((m) => m.state === 'VERIFYING') ?? null)
+    if (!milestone || !milestone.evidence) return
+    if (program.currentMilestoneId !== milestone.id) {
+      this.patch(program.id, { currentMilestoneId: milestone.id })
+      program = this.repos.programs.require(program.id)
+    }
     const parsed = run?.state === 'completed' ? parseJudgment(this.answerOf(run)) : ({ ok: false, error: `The verifier run ${run?.state ?? 'is missing'}${run?.error ? `: ${run.error}` : ''}` } as const)
     if (!parsed.ok) {
       // Never accepted without a judgment. The milestone stays in VERIFYING and is verified again.

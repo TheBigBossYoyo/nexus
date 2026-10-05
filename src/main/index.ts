@@ -20,14 +20,16 @@ import { createIpcHandlers, dispatchIpc } from './modules/ipc/handlers'
 import { ProjectService } from './modules/ipc/services'
 import { createV3Handlers } from './modules/ipc/v3-handlers'
 import { createV4Handlers } from './modules/ipc/v4-handlers'
+import { createV5Handlers } from './modules/ipc/v5-handlers'
 import { Orchestrator } from './modules/orchestrator'
-import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload } from './modules/overnight'
+import { ArenaCampaignWorkload, OvernightSupervisor, ProgramWorkload, WorkspaceMissionWorkload } from './modules/overnight'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { createRepositories, openDatabase } from './modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from './modules/policy'
 import { BackgroundEngineering, ProgramEngine } from './modules/program'
 import { FakePowerController, WindowsPowerController, type PowerController } from './modules/power'
 import { QuotaRecoveryController, RuntimeAvailabilityProbe, UsageIntelligenceService } from './modules/usage'
+import { WorkspaceEngine } from './modules/workspace'
 import { OvernightTray } from './tray'
 
 const require = createRequire(import.meta.url)
@@ -483,6 +485,20 @@ async function bootstrap(): Promise<void> {
     logger,
   })
   programControl = programs
+  // Workspaces: related repositories changed together. Each cross-repository task is an ordinary mission in its
+  // own repository; the engine orders them, verifies the whole and prepares (never publishes) the release.
+  const workspaces = new WorkspaceEngine({
+    repos,
+    bus,
+    git,
+    host: orchestrator,
+    projects: new ProjectService(repos, git, logger),
+    usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
+    push,
+    logger,
+  })
+  // A cross-repository mission can be an overnight workload.
+  overnight?.registerWorkload('workspace_mission', (id) => new WorkspaceMissionWorkload(id, { host: workspaces, get: (missionId) => repos.workspaceMissions.get(missionId), quotaResetsAt: () => usage.machineState().resetAt }))
   // A program can be an overnight workload for one autonomous work window.
   overnight?.registerWorkload('program', (id) => new ProgramWorkload(id, { host: programs, get: (programId) => repos.programs.get(programId), quotaResetsAt: () => usage.machineState().resetAt }))
   void Promise.resolve()
@@ -492,6 +508,7 @@ async function bootstrap(): Promise<void> {
       backgroundJobs.recover()
       return programs.recover()
     })
+    .then(() => workspaces.recover())
     .catch((e: unknown) => console.error(`[nexus] program recovery: ${errorMessage(e)}`))
     .finally(() => recoverOvernight())
   const appInfo = async (): Promise<AppInfo> => ({
@@ -550,6 +567,15 @@ async function bootstrap(): Promise<void> {
       },
     }),
     v4: createV4Handlers({ repos, programs, background: backgroundJobs }),
+    v5: createV5Handlers({
+      workspaces,
+      pickDirectory: async () => {
+        const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        const options = { title: 'Enroll a repository', properties: ['openDirectory' as const] }
+        const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
+        return result.canceled ? null : (result.filePaths[0] ?? null)
+      },
+    }),
   })
 
   ipcMain.handle(IPC_INVOKE_CHANNEL, (event, channel: unknown, input: unknown) => {
@@ -594,6 +620,7 @@ async function bootstrap(): Promise<void> {
         // the agent sessions have ended, so what they used is still recorded.
         programs.dispose()
         backgroundJobs.dispose()
+        workspaces.dispose()
         arena.dispose()
         recovery.dispose()
         // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.

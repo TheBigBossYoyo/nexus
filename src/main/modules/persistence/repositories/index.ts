@@ -24,6 +24,21 @@ import {
   WorkstreamRepository,
 } from './program'
 import {
+  ContractConsumerStore,
+  ContractStore,
+  ContractVersionStore,
+  EnrolledRepositoryStore,
+  ReleaseTrainStore,
+  ServiceStore,
+  WorkspaceDecisionStore,
+  WorkspaceDependencyStore,
+  WorkspaceMemoryStore,
+  WorkspaceMissionStore,
+  WorkspaceProgramStore,
+  WorkspaceRepositoryStore,
+  WorkspaceTaskStore,
+} from './workspace'
+import {
   ContextPackRepository,
   FactRepository,
   GraphProposalRepository,
@@ -130,6 +145,20 @@ export interface Repositories {
   backlog: BacklogRepository
   expertise: ExpertiseRepository
   backgroundJobs: BackgroundJobRepository
+  // v0.5
+  workspaces: WorkspaceRepositoryStore
+  enrolledRepositories: EnrolledRepositoryStore
+  workspaceServices: ServiceStore
+  workspaceDependencies: WorkspaceDependencyStore
+  workspaceContracts: ContractStore
+  contractConsumers: ContractConsumerStore
+  contractVersions: ContractVersionStore
+  workspaceMissions: WorkspaceMissionStore
+  workspacePrograms: WorkspaceProgramStore
+  workspaceTasks: WorkspaceTaskStore
+  releaseTrains: ReleaseTrainStore
+  workspaceMemory: WorkspaceMemoryStore
+  workspaceDecisions: WorkspaceDecisionStore
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -198,6 +227,19 @@ export function createRepositories(db: Database): Repositories {
     backlog: new BacklogRepository(db),
     expertise: new ExpertiseRepository(db),
     backgroundJobs: new BackgroundJobRepository(db),
+    workspaces: new WorkspaceRepositoryStore(db),
+    enrolledRepositories: new EnrolledRepositoryStore(db),
+    workspaceServices: new ServiceStore(db),
+    workspaceDependencies: new WorkspaceDependencyStore(db),
+    workspaceContracts: new ContractStore(db),
+    contractConsumers: new ContractConsumerStore(db),
+    contractVersions: new ContractVersionStore(db),
+    workspaceMissions: new WorkspaceMissionStore(db),
+    workspacePrograms: new WorkspaceProgramStore(db),
+    workspaceTasks: new WorkspaceTaskStore(db),
+    releaseTrains: new ReleaseTrainStore(db),
+    workspaceMemory: new WorkspaceMemoryStore(db),
+    workspaceDecisions: new WorkspaceDecisionStore(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }

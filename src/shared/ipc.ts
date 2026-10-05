@@ -1,5 +1,28 @@
 import { z } from 'zod'
 import {
+  ContractKindSchema,
+  DependencyKindSchema,
+  RepositoryRoleSchema,
+  WORKSPACE_MEMORY_KINDS,
+  WorkspacePolicySchema,
+  WorkspaceProgramInputSchema,
+  type CompatibilityResult,
+  type Contract,
+  type ContractConsumer,
+  type ContractVersion,
+  type CrossRepoDependency,
+  type CrossRepoTask,
+  type ReleaseTrain,
+  type Service,
+  type Workspace,
+  type WorkspaceDetail,
+  type WorkspaceMemoryEntry,
+  type WorkspaceMission,
+  type WorkspaceProgram,
+  type WorkspaceRepository,
+  type WorkspaceSummary,
+} from './workspace'
+import {
   BACKLOG_STATUSES,
   BackgroundJobKindSchema,
   BackgroundSettingsSchema,
@@ -172,6 +195,9 @@ export interface AgentDetail {
 }
 
 /** Renderer → main request schemas. Every handler validates its input with these before acting. */
+/** A repository, contract or task key of a workspace. */
+const WorkspaceKey = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
+
 export const ipcInputs = {
   'app.info': Empty,
   'app.openDataDir': Empty,
@@ -344,6 +370,8 @@ export const ipcInputs = {
    * the window; at its end the program is paused in a safe state before the end action.
    */
   'overnight.startProgram': z.object({ programId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
+  /** v0.5: a cross-repository mission under the overnight supervisor. */
+  'overnight.startWorkspaceMission': z.object({ missionId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
   'overnight.get': z.object({ runId: Id }).strict(),
   'overnight.active': Empty,
   'overnight.cancelPower': z.object({ runId: Id }).strict(),
@@ -475,6 +503,45 @@ export const ipcInputs = {
   'background.start': z.object({ projectId: Id, kind: BackgroundJobKindSchema }).strict(),
   'background.cancel': z.object({ jobId: Id }).strict(),
   'expertise.list': z.object({ projectId: Id }).strict(),
+
+  // v0.5: workspaces. The renderer names repositories, contracts and tasks by key or id; it never supplies a
+  // command, and a path inside a repository is checked again in the main process.
+  'workspace.list': Empty,
+  'workspace.get': z.object({ workspaceId: Id }).strict(),
+  'workspace.create': z.object({ name: z.string().trim().min(1).max(120), description: z.string().trim().max(2000).optional() }).strict(),
+  'workspace.setPolicy': z.object({ workspaceId: Id, policy: WorkspacePolicySchema }).strict(),
+  'workspace.remove': z.object({ workspaceId: Id }).strict(),
+  /** Without `path` the native folder picker opens. Enrolling is always an explicit choice. */
+  'workspace.enroll': z.object({ workspaceId: Id, path: z.string().min(1).max(1024).optional(), key: WorkspaceKey.optional(), role: RepositoryRoleSchema.optional() }).strict(),
+  'workspace.refresh': z.object({ repositoryId: Id }).strict(),
+  'workspace.unenroll': z.object({ repositoryId: Id }).strict(),
+  'workspace.setRole': z.object({ repositoryId: Id, role: RepositoryRoleSchema }).strict(),
+  'workspace.discover': z.object({ workspaceId: Id }).strict(),
+  'workspace.addDependency': z.object({ workspaceId: Id, from: WorkspaceKey, to: WorkspaceKey, kind: DependencyKindSchema, detail: z.string().trim().min(1).max(400) }).strict(),
+  'workspace.removeDependency': z.object({ dependencyId: Id }).strict(),
+  'workspace.addService': z.object({ repositoryId: Id, name: z.string().trim().min(1).max(80), description: z.string().trim().max(400) }).strict(),
+  'workspace.registerContract': z.object({ workspaceId: Id, key: WorkspaceKey, name: z.string().trim().min(1).max(120), kind: ContractKindSchema, provider: WorkspaceKey, path: z.string().trim().min(1).max(400) }).strict(),
+  'workspace.addConsumer': z.object({ contractId: Id, repository: WorkspaceKey, copyPath: z.string().trim().min(1).max(400).nullable().optional() }).strict(),
+  'workspace.captureContract': z.object({ contractId: Id }).strict(),
+  'workspace.addMemory': z
+    .object({ workspaceId: Id, kind: z.enum(WORKSPACE_MEMORY_KINDS), title: z.string().trim().min(1).max(160), content: z.string().trim().min(1).max(1500), evidence: z.string().trim().min(1).max(1500), repositories: z.array(WorkspaceKey).min(2).max(20) })
+    .strict(),
+  'workspace.createMission': z.object({ workspaceId: Id, goal: z.string().trim().min(1).max(8000), start: z.boolean().optional() }).strict(),
+  'workspace.mission': z.object({ missionId: Id }).strict(),
+  'workspace.startMission': z.object({ missionId: Id }).strict(),
+  'workspace.decidePlan': z.object({ missionId: Id, accept: z.boolean() }).strict(),
+  'workspace.pauseMission': z.object({ missionId: Id }).strict(),
+  'workspace.resumeMission': z.object({ missionId: Id }).strict(),
+  'workspace.cancelMission': z.object({ missionId: Id }).strict(),
+  /** A workspace program: an ordered series of cross-repository missions, one per milestone the user wrote. */
+  'workspace.createProgram': z.object({ workspaceId: Id, program: WorkspaceProgramInputSchema, start: z.boolean().optional() }).strict(),
+  'workspace.startProgram': z.object({ programId: Id }).strict(),
+  'workspace.resumeProgram': z.object({ programId: Id }).strict(),
+  'workspace.cancelProgram': z.object({ programId: Id }).strict(),
+  'workspace.prepareRelease': z.object({ missionId: Id }).strict(),
+  /** Always refused in 0.5: NEXUS prepares release trains and does not publish them. */
+  'workspace.publishRelease': z.object({ trainId: Id }).strict(),
+  'workspace.cancelRelease': z.object({ trainId: Id }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -544,6 +611,7 @@ export interface IpcOutputs {
   'overnight.start': { run: Run; overnight: OvernightStatus }
   'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
   'overnight.startProgram': { programId: string; overnight: OvernightStatus }
+  'overnight.startWorkspaceMission': { missionId: string; overnight: OvernightStatus }
   'program.list': { programs: ProgramSummary[]; total: number }
   'program.get': ProgramDetail
   'program.presets': Record<ProgramPreset, ProgramPolicy>
@@ -562,6 +630,37 @@ export interface IpcOutputs {
   'background.start': BackgroundJob
   'background.cancel': BackgroundJob
   'expertise.list': ExpertiseProfile[]
+  'workspace.list': WorkspaceSummary[]
+  'workspace.get': WorkspaceDetail
+  'workspace.create': Workspace
+  'workspace.setPolicy': Workspace
+  'workspace.remove': null
+  'workspace.enroll': WorkspaceRepository | null
+  'workspace.refresh': WorkspaceRepository
+  'workspace.unenroll': null
+  'workspace.setRole': WorkspaceRepository
+  'workspace.discover': CrossRepoDependency[]
+  'workspace.addDependency': CrossRepoDependency
+  'workspace.removeDependency': null
+  'workspace.addService': Service
+  'workspace.registerContract': Contract
+  'workspace.addConsumer': ContractConsumer
+  'workspace.captureContract': { version: ContractVersion; result: CompatibilityResult; created: boolean }
+  'workspace.addMemory': WorkspaceMemoryEntry
+  'workspace.createMission': WorkspaceMission
+  'workspace.mission': { mission: WorkspaceMission; tasks: CrossRepoTask[] }
+  'workspace.startMission': WorkspaceMission
+  'workspace.decidePlan': WorkspaceMission
+  'workspace.pauseMission': WorkspaceMission
+  'workspace.resumeMission': WorkspaceMission
+  'workspace.cancelMission': WorkspaceMission
+  'workspace.createProgram': WorkspaceProgram
+  'workspace.startProgram': WorkspaceProgram
+  'workspace.resumeProgram': WorkspaceProgram
+  'workspace.cancelProgram': WorkspaceProgram
+  'workspace.prepareRelease': ReleaseTrain
+  'workspace.publishRelease': never
+  'workspace.cancelRelease': ReleaseTrain
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]

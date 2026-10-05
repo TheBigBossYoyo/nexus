@@ -200,3 +200,5 @@ export type PushMessage =
   | { kind: 'program'; programId: string }
   /** v0.4. The backlog or the background jobs of a project changed. */
   | { kind: 'backlog'; projectId: string }
+  /** v0.5. A workspace, its repositories, graph, contracts, missions or release trains changed. */
+  | { kind: 'workspace'; workspaceId: string }

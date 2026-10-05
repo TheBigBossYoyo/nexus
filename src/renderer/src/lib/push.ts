@@ -4,6 +4,7 @@ import type { PushMessage, RunEvent } from '@shared/events'
 import { api } from './bridge'
 import { qk } from './queries'
 import { qkv4 } from './queries-v4'
+import { qkv5 } from './queries-v5'
 import { quotaWaitActive } from './usageModel'
 import type { UsageOverview } from '@shared/v3'
 import { useLiveStore } from '../store/live'
@@ -201,6 +202,9 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
           break
         case 'program':
           schedule([qkv4.programsRoot(), qk.homeRoot(), qk.runsList()])
+          break
+        case 'workspace':
+          schedule([qkv5.root(), qk.homeRoot(), qk.runsList()])
           break
         case 'backlog':
           schedule([qkv4.programsRoot(), qkv4.backgroundRoot()])

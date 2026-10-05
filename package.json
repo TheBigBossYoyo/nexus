@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Local-first multi-agent software-engineering control plane",
   "author": "Youssef Melki",
@@ -23,6 +23,7 @@
     "accept:proposal": "node scripts/dynamic-proposal-acceptance.mjs",
     "accept:rotation": "node scripts/session-rotation-acceptance.mjs",
     "accept:arena": "node scripts/arena-acceptance.mjs",
+    "accept:workspace": "node scripts/workspace-acceptance.mjs",
     "accept:speculative": "node scripts/strategy-acceptance.mjs speculative",
     "accept:adaptive": "node scripts/strategy-acceptance.mjs adaptive",
     "stress": "vitest run -c vitest.stress.config.ts",

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Project, Run } from '@shared/domain'
@@ -76,6 +76,10 @@ export class FakeProgramHost implements ProgramRunHost {
   /** The strategy a mission run reports having resolved to. */
   resolved: (index: number, input: CreateInput) => string = (_i, input) => (input.strategy === 'ADAPTIVE' || !input.strategy ? 'BUILD' : input.strategy)
   delayMs = 0
+  /** Whether the project of a run has a check command that ran. Default: yes. */
+  checksRan: (run: Run) => boolean = () => true
+  /** The files a completing mission writes (path to content), given the repository it runs in. Default: one marker file. */
+  files: ((run: Run, repoPath: string) => Record<string, string>) | null = null
   private missions = 0
   private readonly asks: Record<AskKind, number> = { plan: 0, replan: 0, verify: 0, background: 0 }
 
@@ -91,7 +95,8 @@ export class FakeProgramHost implements ProgramRunHost {
   }
 
   private kindOf(prompt: string): AskKind {
-    if (prompt.startsWith(REASONING_MARKERS.plan)) return 'plan'
+    // The workspace planner (0.5) is answered from the same queue as the program planner.
+    if (prompt.startsWith(REASONING_MARKERS.plan) || prompt.startsWith('NEXUS WORKSPACE PLANNER')) return 'plan'
     if (prompt.startsWith(REASONING_MARKERS.replan)) return 'replan'
     if (prompt.startsWith(REASONING_MARKERS.verify)) return 'verify'
     return 'background'
@@ -166,20 +171,26 @@ export class FakeProgramHost implements ProgramRunHost {
     if (behavior === 'quota') return this.quota(runId)
     if (behavior === 'fail') return this.fail(runId, 'the planner gave up')
     const branch = `nexus/integration-${shortId(runId)}`
+    // The repository of the run's own project: a workspace has several.
+    const root = this.repos.projects.get(run.projectId)?.rootPath ?? this.root
     if (behavior === 'nochange') {
-      sh(this.root, 'branch', '--no-track', branch, run.baseCommit ?? 'HEAD')
+      sh(root, 'branch', '--no-track', branch, run.baseCommit ?? 'HEAD')
     } else {
       // A commit on the integration branch, made in a throwaway worktree: the user's checkout is not touched.
       const dir = mkdtempSync(join(tmpdir(), 'nexus-program-wt-'))
       rmSync(dir, { recursive: true, force: true })
-      sh(this.root, 'worktree', 'add', '-q', '-b', branch, dir, run.baseCommit ?? 'HEAD')
-      writeFileSync(join(dir, `mission-${shortId(runId)}.txt`), `work of ${runId}\n`)
+      sh(root, 'worktree', 'add', '-q', '-b', branch, dir, run.baseCommit ?? 'HEAD')
+      const files = this.files?.(run, root) ?? { [`mission-${shortId(runId)}.txt`]: `work of ${runId}\n` }
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(join(dir, path, '..'), { recursive: true })
+        writeFileSync(join(dir, path), content)
+      }
       sh(dir, 'add', '-A')
-      sh(dir, '-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', 'commit', '-q', '-m', `mission ${shortId(runId)}`)
-      sh(this.root, 'worktree', 'remove', '--force', dir)
+      sh(dir, '-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', 'commit', '-q', '--allow-empty', '-m', `mission ${shortId(runId)}`)
+      sh(root, 'worktree', 'remove', '--force', dir)
     }
     this.repos.tasks.insert(makeTask(runId, 'work', { state: 'completed', resultSummary: 'Implemented the milestone.' }))
-    this.repos.verifications.insert({ id: newId(), runId, taskId: null, agentId: null, attempt: 1, kind: 'checks', passed: behavior !== 'checks_fail', summary: behavior === 'checks_fail' ? '1 of 2 commands failed' : 'All commands passed', criteria: [], commands: [], failures: [], createdAt: nowIso() })
+    this.repos.verifications.insert({ id: newId(), runId, taskId: null, agentId: null, attempt: 1, kind: 'checks', passed: behavior !== 'checks_fail', summary: behavior === 'checks_fail' ? '1 of 2 commands failed' : 'All commands passed', criteria: [], commands: this.checksRan(run) ? [{ name: 'test', command: 'npm test', cwd: root, exitCode: behavior === 'checks_fail' ? 1 : 0, timedOut: false, durationMs: 1, output: '' }] : [], failures: [], createdAt: nowIso() })
     this.repos.runs.update(runId, { state: 'completed', integrationBranch: branch, finishedAt: nowIso() })
     this.bus.emit({ runId, type: 'run.completed', payload: { summary: 'done' } })
   }

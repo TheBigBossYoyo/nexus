@@ -198,7 +198,7 @@ only knows how to run, stop and describe its own work.
 
 | Member | Meaning |
 |---|---|
-| `id`, `type`, `state` | The workload id (run id or campaign id), `mission` or `arena_campaign`, and its phase: `working`, `paused`, `quota_wait`, `completed`, `failed`, `cancelled`, `missing` |
+| `id`, `type`, `state` | The workload id (run id, campaign id, program id or workspace mission id), `mission`, `arena_campaign`, `program` or `workspace_mission`, and its phase: `working`, `paused`, `quota_wait`, `completed`, `failed`, `cancelled`, `missing` |
 | `start()` | Begin the work. Called once, after the failsafe is armed |
 | `pause(detail)` | Stop working and stay resumable. Resolves when nothing of the workload is running |
 | `resume()`, `cancel()` | Continue; end for good |
@@ -216,6 +216,15 @@ Since 0.4 a program is the third workload type (`ProgramWorkload`, `overnight.st
 work window of a long-running program. The deadline is the end of the window; at the end the program is
 paused in a safe state, checkpointed and reported before the power action. A program that completes, fails,
 is blocked or waits for a plan approval ends the window early. See LONG_HORIZON_AUTONOMY.md.
+
+Since 0.5 a cross-repository mission is the fourth workload type (`WorkspaceMissionWorkload`,
+`overnight.startWorkspaceMission`, workload type `workspace_mission`). The mission keeps its own task queue,
+usage wait and global verification; the supervisor owns the deadline and the power lifecycle. A completed
+mission ends `SUCCESS`. A blocked mission, a plan waiting for approval and a paused mission end the night as
+`BLOCKED`, so the plan must already be approved when the night starts. At the deadline the mission is paused.
+The report is `overnight-workspace-<start>.md` in the NEXUS reports directory. The watchdog and the run budgets
+are not applied to it. The Workspaces view has no control for it in 0.5; the IPC channel is the way in. See
+MULTI_REPO_ORCHESTRATION.md.
 
 | | `MissionWorkload` | `ArenaCampaignWorkload` |
 |---|---|---|

@@ -1,0 +1,6 @@
+export { WorkspaceEngine, WORKSPACE_PLANNER_MARKER } from './engine'
+export type { WorkspaceEngineDeps } from './engine'
+export { contentHash, extractSurface, guessContractKind } from './contracts'
+export type { ExtractedSurface } from './contracts'
+export { discoverManifestEdges, readManifest } from './discovery'
+export type { DiscoveredEdge, ManifestDependency, ManifestInfo } from './discovery'

@@ -17,7 +17,7 @@ export type PowerAction = Exclude<EndAction, 'NONE'>
  * id: the run id of a mission, the campaign id of a campaign, the program id of a program (v0.4: one
  * autonomous work window of a long-running program).
  */
-export const WORKLOAD_TYPES = ['mission', 'arena_campaign', 'program'] as const
+export const WORKLOAD_TYPES = ['mission', 'arena_campaign', 'program', 'workspace_mission'] as const
 export type WorkloadType = (typeof WORKLOAD_TYPES)[number]
 
 export const TERMINAL_REASONS = ['SUCCESS', 'FAILED', 'BLOCKED', 'QUOTA_EXHAUSTED', 'TIME_LIMIT', 'USER_CANCELLED'] as const

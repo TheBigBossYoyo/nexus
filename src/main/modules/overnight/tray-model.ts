@@ -44,7 +44,7 @@ export function buildTrayModel(input: TrayInput): TrayModel {
   const paused = o.state === 'QUOTA_PAUSED' || input.runState === 'paused'
   const status: TrayStatus = pendingFinal ? 'SHUTDOWN SCHEDULED' : o.state === 'FINALIZING' || o.state === 'CANCELLING' ? 'FINALIZING' : paused ? 'PAUSED' : 'RUNNING'
 
-  const what = o.workloadType === 'arena_campaign' ? 'Arena campaign' : o.workloadType === 'program' ? 'program' : 'mission'
+  const what = o.workloadType === 'arena_campaign' ? 'Arena campaign' : o.workloadType === 'program' ? 'program' : o.workloadType === 'workspace_mission' ? 'workspace mission' : 'mission'
   const lines = ['NEXUS']
   if (status === 'SHUTDOWN SCHEDULED' && o.powerAction) {
     lines.push(`Overnight ${what} finished`, `${ACTION_LABEL[o.powerAction.action] ?? o.powerAction.action} scheduled ${input.time(o.powerAction.executeAt)}`)

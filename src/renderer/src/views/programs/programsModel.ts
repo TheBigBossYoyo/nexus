@@ -504,6 +504,7 @@ export const GATE_LABEL: Record<string, string> = {
   no_blocking_findings: 'No blocking review findings',
   mission_verified: 'Mission verified',
   changes_present: 'Changes present',
+  builds_on_accepted_work: 'Builds on accepted work',
   criteria_judged: 'Criteria judged',
 }
 export const gateLabel = (g: string): string => GATE_LABEL[g] ?? g

@@ -6,6 +6,7 @@ import { ProjectsView } from '../views/projects/ProjectsView'
 import { RunView } from '../views/run/RunView'
 import { AgentsView } from '../views/agents/AgentsView'
 import { ProgramsView } from '../views/programs/ProgramsView'
+import { WorkspacesView } from '../views/workspaces/WorkspacesView'
 import { ArenaView } from '../views/arena/ArenaView'
 import { PolicyView } from '../views/policy/PolicyView'
 import { UsageView } from '../views/usage/UsageView'
@@ -29,6 +30,8 @@ function renderView(view: View) {
       return <RunView />
     case 'programs':
       return <ProgramsView />
+    case 'workspaces':
+      return <WorkspacesView />
     case 'agents':
       return <AgentsView />
     case 'arena':

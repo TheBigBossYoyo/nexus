@@ -99,6 +99,7 @@ export function buildPaletteItems(ctx: PaletteContext): PaletteItem[] {
 
   const OPEN_LABEL: Partial<Record<string, string>> = {
     programs: 'Open Programs',
+    workspaces: 'Open Workspaces',
     arena: 'Open Arena',
     usage: 'Open Usage',
     policy: 'Open Policy',

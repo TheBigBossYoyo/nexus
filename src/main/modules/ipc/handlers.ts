@@ -24,6 +24,7 @@ import { ProjectService, QueryService } from './services'
 import { isReasoningRun } from '@shared/program'
 import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 import { unavailableV4Handlers, type V4Handlers } from './v4-handlers'
+import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -50,6 +51,8 @@ export interface IpcContext {
   v3?: V3Handlers
   /** v0.4 handlers (programs, backlog, background engineering). */
   v4?: V4Handlers
+  /** v0.5 handlers (workspaces). */
+  v5?: V5Handlers
 }
 
 type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
@@ -333,6 +336,24 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       }
       return supervisor.startProgram({ programId, policy: p, confirmed, confirmation })
     },
+    'overnight.startWorkspaceMission': async ({ missionId, policy: p, confirmed, confirmation }) => {
+      const supervisor = overnight()
+      if (ctx.confirmPower) {
+        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const detail = [
+          `Workspace mission: ${repos.workspaceMissions.require(missionId).goal.replace(/\s+/g, ' ').slice(0, 160)}`,
+          `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
+          `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the mission ends`,
+          `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
+          p.endAction !== 'NONE' && p.failsafeEnabled
+            ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
+            : 'Failsafe: none',
+        ].join('\n')
+        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Run this workspace mission unattended?' : 'Authorize NEXUS to control Windows power state for this workspace mission?', detail)
+        if (!ok) throw new NexusError('invalid_state', 'The overnight workspace mission was not authorized.')
+      }
+      return supervisor.startWorkspaceMission({ missionId, policy: p, confirmed, confirmation })
+    },
     'overnight.get': ({ runId }) => ctx.overnight?.status(runId) ?? null,
     'overnight.active': () => ctx.overnight?.active() ?? [],
     'overnight.cancelPower': ({ runId }) => overnight().cancelPower(runId),
@@ -360,6 +381,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
 
     ...(ctx.v3 ?? unavailableV3Handlers()),
     ...(ctx.v4 ?? unavailableV4Handlers()),
+    ...(ctx.v5 ?? unavailableV5Handlers()),
   }
 }
 

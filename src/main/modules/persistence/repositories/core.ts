@@ -1,4 +1,4 @@
-import { REASONING_MARKERS } from '@shared/program'
+import { INTERNAL_RUN_MARKERS } from '@shared/program'
 import {
   TERMINAL_RUN_STATES,
   type Project,
@@ -99,9 +99,9 @@ export class RunRepository extends Table<Run> {
   listRecentUser(limit = 50): Run[] {
     return this.query(
       `WHERE id NOT IN (SELECT run_id FROM arena_trials WHERE run_id IS NOT NULL)
-         AND NOT (mode = 'ask' AND prompt LIKE 'NEXUS %' AND (${Object.values(REASONING_MARKERS).map(() => 'prompt LIKE ?').join(' OR ')}))
+         AND NOT (mode = 'ask' AND prompt LIKE 'NEXUS %' AND (${INTERNAL_RUN_MARKERS.map(() => 'prompt LIKE ?').join(' OR ')}))
        ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-      [...Object.values(REASONING_MARKERS).map((marker) => `${marker}%`), Math.min(Math.max(1, limit), 500)],
+      [...INTERNAL_RUN_MARKERS.map((marker) => `${marker}%`), Math.min(Math.max(1, limit), 500)],
     )
   }
 
