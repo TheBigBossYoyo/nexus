@@ -361,3 +361,31 @@ Written while the 0.3 stress runs; only light test runs alongside it.
   stress 1000 (before the hardening) plus 100 orchestrator seeds after it. `main` = `0a2874f`, tag `v0.6.0`.
 - **Migration campaign:** the 0.7 development build on nine real databases from 0.1 to 0.6: 9 of 9 checks each.
 - 0.7 merged with the hardened 0.6: `pnpm test` 141 files, 2686 passed. It stays a partial branch.
+
+
+### 06:45 to 07:15, and the continuation at 20:19
+
+- 0.7 merged with the released 0.6.0. A sixth MEDIUM finding of the boundary review fixed on the 0.7 branch
+  (moving a branch or tag, or writing a ref outside `nexus/`, asks first).
+- **The first full E2E run of 0.7 failed four tests**, every one a run that is resumed and must complete. The
+  new gate answered a just-resumed run that it may hold no session and the orchestrator paused it again. Fixed
+  and tested; the four pass. `pnpm test` on 0.7: 141 files, 2688 passed.
+- An independent UI review of the latest application found three HIGH items on the Control Center (no
+  confirmation for Cancel and Delete, an endless "Loading" beside an error, blocked work that cannot be opened).
+  Not fixed; listed in `V0_7_RELEASE_REPORT.md`.
+- A small Arena comparison on the packaged 0.6.0 build was started at 06:49 (ADAPTIVE turned out not to be an
+  Arena strategy; SINGLE and BUILD on three cases). One trial was evaluated.
+- **At about 07:15 a tool call was declined and the session stopped and waited.** `finish-now` was not sent.
+  The failsafe shut the computer down at the hard limit, 10:36.
+- **20:19, continued by the user.** Run again: E2E on 0.7 (25 of 25 passed (1 capture-only test skipped by design), 8.2 min, run in the continuation), the migration campaign (9 of 9 checks on each of nine databases, the 0.6 one holding a real mission with a Codex review (`migration-campaign-2026-10-05T19-37-27-463Z.json`; a run minutes earlier is kept too: it counted a newly registered Arena case version as a changed table)), the control
+  plane stress (passed, 472 s). Written into the repository: `V0_7_RELEASE_REPORT.md`, `ONE_DOT_ZERO_READINESS.md`,
+  `OVERNIGHT_FINAL_REPORT_0_3_TO_1_0.md`. No shutdown was triggered in the continuation.
+
+### Final state
+
+| | |
+|---|---|
+| `main` | `0a2874f`, 0.6.0 |
+| Tags of the night | `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0` |
+| `nexus-0.7` | PARTIAL, unmerged, checked out |
+| 1.0 | NOT READY FOR RC; no tag, no candidate |
