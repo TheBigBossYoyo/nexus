@@ -26,8 +26,8 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 ## What's new in 0.6
 
 The 0.6 feature set removes the assumption that an agent is Claude. Claude stays required and first-class; other
-providers are optional, off until you enable them, and never needed. This section describes the feature set; it
-does not announce a release. Details: [PROVIDERS](docs/PROVIDERS.md).
+providers are optional, off until you enable them, and never needed. Released as 0.6.0. Details:
+[PROVIDERS](docs/PROVIDERS.md).
 
 | Feature | What it does |
 |---|---|
