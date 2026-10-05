@@ -105,6 +105,12 @@ for (const source of sources) {
     await shot('programs')
     const programs = await page.evaluate(() => globalThis.nexus.invoke('program.list', {}))
     entry.checks['Programs renders; an upgraded database has no program'] = programsView && programs.ok === true && programs.value.programs.length === 0
+    // 0.5: the Workspaces page renders, and an upgraded database has no workspace.
+    await page.click('[data-testid="nav-workspaces"]')
+    const workspacesView = await page.waitForSelector('[data-testid="view-workspaces"]', { timeout: 15_000 }).then(() => true, () => false)
+    await shot('workspaces')
+    const workspaces = await page.evaluate(() => globalThis.nexus.invoke('workspace.list', {}))
+    entry.checks['Workspaces renders; an upgraded database has no workspace'] = workspacesView && workspaces.ok === true && workspaces.value.length === 0
     if (old) {
       await page.click('[data-testid="nav-run"]')
       await page.click(`[data-testid="sidebar-run-${old.run.id}"]`).catch(() => undefined)
