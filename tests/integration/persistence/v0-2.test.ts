@@ -568,6 +568,8 @@ describe('v0.1 to v0.2 migration', () => {
       { version: 7, name: 'workspaces' },
       { version: 8, name: 'providers' },
       { version: 9, name: 'control-plane' },
+      { version: 10, name: 'workers' },
+      { version: 11, name: 'security' },
     ])
     const repos = createRepositories(db)
     expect(repos.projects.require(seeded.project.id)).toEqual(seeded.project)
@@ -591,7 +593,7 @@ describe('v0.1 to v0.2 migration', () => {
     // Reopening is a no-op.
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()).toHaveLength(9)
+    expect(again.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()).toHaveLength(11)
     expect(count(again, 'graph_revisions')).toBe(1)
     expect(createRepositories(again).runs.require(seeded.run.id).prompt).toBe('Legacy v0.1 mission')
   })
@@ -641,7 +643,7 @@ describe('v0.1 to v0.2 migration', () => {
     // The real migration still applies afterwards.
     const db = openDatabase(path)
     open.push(db)
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 9 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 11 })
   })
 
   it('rolls back the real v0.2 migration when a later migration fails, leaving the DB at v0.1', () => {

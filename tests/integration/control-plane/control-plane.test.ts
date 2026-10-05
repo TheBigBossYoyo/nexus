@@ -511,7 +511,7 @@ describe('control plane service', () => {
     r.fake.set('a', { phase: 'completed', activeAgents: 0 })
     r.fake.workloads.delete('b')
     control = r.build()
-    expect(control.limits()).toEqual({ maxAgents: 2, maxActiveItems: 1, resumeOnBoot: 'hold' })
+    expect(control.limits()).toEqual({ maxAgents: 2, maxActiveItems: 1, resumeOnBoot: 'hold', agingMinutes: 30 })
     expect(repos.workItems.listOpen().map((i) => [i.refId, i.state, i.priority, i.heldByUser])).toEqual(before.active.concat(before.waiting as never).sort(compareWorkItems).sort((x, y) => x.position - y.position).map((i) => [i.refId, i.state, i.priority, i.heldByUser]))
     const resumed: string[] = []
     await control.recoverOnBoot(async (runId) => void resumed.push(runId))
@@ -566,7 +566,7 @@ describe('control plane service', () => {
     await control.tick()
     const health = control.health()
     expect(health.level).toBe('BLOCKED')
-    expect(health.components.map((c) => c.component)).toEqual(['database', 'scheduler', 'workers', 'providers', 'git', 'usage', 'power_supervisor', 'ipc'])
+    expect(health.components.map((c) => c.component)).toEqual(['database', 'scheduler', 'workers', 'providers', 'git', 'usage', 'power_supervisor', 'ipc', 'schedules'])
     expect(health.components.find((c) => c.component === 'git')).toMatchObject({ level: 'DEGRADED', detail: 'The check failed: git is missing' })
     expect(health.components.find((c) => c.component === 'scheduler')).toMatchObject({ level: 'HEALTHY' })
     broken = true

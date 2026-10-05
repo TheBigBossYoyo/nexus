@@ -144,9 +144,12 @@ export class CodexRuntimeProvider implements AgentRuntimeProvider {
   private readonly codex: CodexCliRuntime
   /** Probes run in an empty temporary directory, where there is nothing to verify and nothing to change. */
   private readonly probeRuntime: CodexCliRuntime
+  /** What runs the sessions: the runtime itself, or the same sessions hosted in worker processes (0.7). */
+  private readonly sessions: AgentRuntime
 
-  constructor(private readonly deps: { run?: CommandRunner; runtime?: CodexCliRuntime; snapshot?: (cwd: string) => Promise<string | null>; probeCwd: () => string }) {
+  constructor(private readonly deps: { run?: CommandRunner; runtime?: CodexCliRuntime; snapshot?: (cwd: string) => Promise<string | null>; probeCwd: () => string; host?: (runtime: AgentRuntime) => AgentRuntime }) {
     this.codex = deps.runtime ?? new CodexCliRuntime({ version: () => this.version, ...(deps.snapshot ? { snapshot: deps.snapshot } : {}) })
+    this.sessions = deps.host ? deps.host(this.codex) : this.codex
     this.probeRuntime = deps.runtime ?? new CodexCliRuntime({ version: () => this.version })
   }
 
@@ -181,7 +184,7 @@ export class CodexRuntimeProvider implements AgentRuntimeProvider {
   }
 
   runtime(): AgentRuntime {
-    return this.codex
+    return this.sessions
   }
 
   defaultModel(): string {

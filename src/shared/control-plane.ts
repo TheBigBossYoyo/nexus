@@ -29,17 +29,17 @@ export const PrioritySchema = z.enum(PRIORITIES)
 export type Priority = z.infer<typeof PrioritySchema>
 export const DEFAULT_PRIORITY: Priority = 'P2'
 
-export const WORK_ITEM_STATES = ['QUEUED', 'READY', 'RUNNING', 'PAUSED', 'QUOTA_WAIT', 'BLOCKED', 'SCHEDULED', 'COMPLETED', 'FAILED', 'CANCELLED'] as const
+export const WORK_ITEM_STATES = ['QUEUED', 'READY', 'RUNNING', 'PAUSED', 'QUOTA_WAIT', 'BLOCKED', 'SCHEDULED', 'FINALIZING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const
 export type WorkItemState = (typeof WORK_ITEM_STATES)[number]
 export const TERMINAL_WORK_ITEM_STATES: readonly WorkItemState[] = ['COMPLETED', 'FAILED', 'CANCELLED']
 /** States in which an item holds, or may be given, agent capacity. */
-export const LIVE_WORK_ITEM_STATES: readonly WorkItemState[] = ['RUNNING', 'QUOTA_WAIT']
+export const LIVE_WORK_ITEM_STATES: readonly WorkItemState[] = ['RUNNING', 'QUOTA_WAIT', 'FINALIZING']
 
 /**
  * What the workload behind an item is doing, as its own engine reports it. The control plane never keeps a
  * second truth about a workload: an item's state is derived from this.
  */
-export type WorkloadPhase = 'not_started' | 'working' | 'paused' | 'quota_wait' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'missing'
+export type WorkloadPhase = 'not_started' | 'working' | 'finalizing' | 'paused' | 'quota_wait' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'missing'
 
 export interface WorkloadSnapshot {
   phase: WorkloadPhase
@@ -83,6 +83,8 @@ export function stateFromPhase(phase: WorkloadPhase, current: WorkItemState, hel
   switch (phase) {
     case 'working':
       return 'RUNNING'
+    case 'finalizing':
+      return 'FINALIZING'
     case 'quota_wait':
       return 'QUOTA_WAIT'
     case 'paused':
@@ -125,10 +127,15 @@ export const ControlLimitsSchema = z
     maxActiveItems: z.number().int().min(1).max(16),
     /** After a restart of NEXUS: continue what was running, or leave everything paused for the user. */
     resumeOnBoot: z.enum(['resume', 'hold']),
+    /**
+     * Fairness: a waiting item is treated as one priority higher for every this many minutes it has waited,
+     * so lower-priority work is not kept out for good by a stream of higher-priority work. 0 switches it off.
+     */
+    agingMinutes: z.number().int().min(0).max(1440).default(30),
   })
   .strict()
 export type ControlLimits = z.infer<typeof ControlLimitsSchema>
-export const DEFAULT_CONTROL_LIMITS: ControlLimits = { maxAgents: 6, maxActiveItems: 4, resumeOnBoot: 'hold' }
+export const DEFAULT_CONTROL_LIMITS: ControlLimits = { maxAgents: 6, maxActiveItems: 4, resumeOnBoot: 'hold', agingMinutes: 30 }
 
 export interface AllocationInput {
   items: readonly GlobalWorkItem[]
@@ -137,6 +144,29 @@ export interface AllocationInput {
   limits: ControlLimits
   /** False while the Claude usage gate is closed: nothing new starts and no capacity is granted. */
   claudeAvailable: boolean
+  /** True while the user paused dispatch: nothing starts and nothing more is granted; what runs keeps running. */
+  paused?: boolean
+  /** The present time, for aging. Absent: no aging. */
+  now?: number
+}
+
+/**
+ * The priority an item is served with: its own, raised by one for every `agingMinutes` it has waited without
+ * starting. Only items that have not started age; a running item keeps its own priority.
+ */
+export function effectivePriority(item: Pick<GlobalWorkItem, 'priority' | 'state' | 'createdAt' | 'startedAt'>, now: number | undefined, agingMinutes: number): Priority {
+  if (now === undefined || agingMinutes <= 0 || item.startedAt !== null || (item.state !== 'QUEUED' && item.state !== 'READY')) return item.priority
+  const waited = Math.max(0, now - Date.parse(item.createdAt))
+  const steps = Math.floor(waited / (agingMinutes * 60_000))
+  return PRIORITIES[Math.max(0, PRIORITY_RANK[item.priority] - steps)] ?? item.priority
+}
+
+/** The order in which capacity is handed out: queue order with aging applied. Deterministic. */
+export function serviceOrder<T extends GlobalWorkItem>(items: readonly T[], now: number | undefined, agingMinutes: number): T[] {
+  return items
+    .map((item) => ({ item, served: { ...item, priority: effectivePriority(item, now, agingMinutes) } }))
+    .sort((a, b) => compareWorkItems(a.served, b.served))
+    .map((x) => x.item)
 }
 
 export interface Allocation {
@@ -157,11 +187,13 @@ export interface Allocation {
  * - Free capacity goes to items in queue order, so a higher priority gets it first. A lower-priority item
  *   that is already running keeps its sessions and gets no new one until the higher priority has what it asked for.
  * - A queued item starts only when at least one session can be granted to it and a workload slot is free.
- * - While Claude is unavailable nothing starts and nothing more is granted.
+ * - While Claude is unavailable, or dispatch is paused, nothing starts and nothing more is granted.
+ * - A waiting item rises one priority for every `agingMinutes` it has waited, so it is not starved.
  */
 export function allocate(input: AllocationInput): Allocation {
   const { limits } = input
-  const ordered = [...input.items].sort(compareWorkItems)
+  const ordered = serviceOrder(input.items, input.now, limits.agingMinutes ?? 0)
+  const open = !input.paused && input.claudeAvailable
   const live = ordered.filter((i) => LIVE_WORK_ITEM_STATES.includes(i.state))
   const queued = ordered.filter((i) => (i.state === 'QUEUED' || i.state === 'READY') && !i.heldByUser)
   const activeOf = (id: string): number => Math.max(0, input.active.get(id) ?? 0)
@@ -179,9 +211,13 @@ export function allocate(input: AllocationInput): Allocation {
     const active = activeOf(item.id)
     const want = Math.max(1, item.requestedAgents)
     if (isLive) {
-      const extra = input.claudeAvailable && item.state === 'RUNNING' ? Math.min(Math.max(0, want - active), free) : 0
+      const extra = open && item.state === 'RUNNING' ? Math.min(Math.max(0, want - active), free) : 0
       allowance.set(item.id, active + extra)
       free -= extra
+      continue
+    }
+    if (input.paused) {
+      waiting.set(item.id, 'Dispatch is paused. Nothing new starts until you resume it.')
       continue
     }
     if (!input.claudeAvailable) {
@@ -193,7 +229,8 @@ export function allocate(input: AllocationInput): Allocation {
       continue
     }
     if (free <= 0) {
-      waiting.set(item.id, `Waiting for agent capacity (${limits.maxAgents} agents in use or reserved).`)
+      const ahead = ordered.find((other) => other.id !== item.id && allowance.has(other.id) && PRIORITY_RANK[other.priority] < PRIORITY_RANK[item.priority])
+      waiting.set(item.id, ahead ? `Waiting for agent capacity: higher-priority work is active (${ahead.priority} "${ahead.title}").` : `Waiting for agent capacity (${limits.maxAgents} agents in use or reserved).`)
       continue
     }
     const grant = Math.min(want, free)
@@ -290,7 +327,7 @@ export function describeRule(rule: ScheduleRule): string {
 
 // ───────────────────────────── health ─────────────────────────────
 
-export const HEALTH_COMPONENTS = ['database', 'scheduler', 'workers', 'providers', 'git', 'usage', 'power_supervisor', 'ipc'] as const
+export const HEALTH_COMPONENTS = ['database', 'scheduler', 'workers', 'providers', 'git', 'usage', 'power_supervisor', 'ipc', 'schedules'] as const
 export type HealthComponent = (typeof HEALTH_COMPONENTS)[number]
 export type HealthLevel = 'HEALTHY' | 'DEGRADED' | 'RECOVERING' | 'BLOCKED'
 
@@ -310,7 +347,7 @@ export function overallHealth(components: readonly ComponentHealth[]): HealthLev
 
 // ───────────────────────────── notifications ─────────────────────────────
 
-export const NOTIFICATION_KINDS = ['milestone_completed', 'quota_paused', 'quota_resumed', 'program_blocked', 'arena_regression', 'overnight_completed', 'security_high', 'work_item_failed', 'schedule_started'] as const
+export const NOTIFICATION_KINDS = ['milestone_completed', 'quota_paused', 'quota_resumed', 'program_blocked', 'workload_blocked', 'arena_regression', 'overnight_completed', 'security_high', 'work_item_failed', 'schedule_started'] as const
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
 export interface NotificationRecord {
@@ -350,6 +387,10 @@ export interface ControlPlaneOverview {
   /** The newest incidents: failures, blocks, recoveries. */
   incidents: { at: string; summary: string; itemId: string | null }[]
   bootedAt: string
+  /** True while the user paused the start of new work. */
+  dispatchPaused: boolean
+  /** Worker processes: how many exist, how many hold a session, and the limit. Null when sessions run in the runtime itself. */
+  workers: { live: number; busy: number; max: number } | null
 }
 
 export const EnqueueInputSchema = z.discriminatedUnion('type', [

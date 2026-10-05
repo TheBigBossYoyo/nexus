@@ -27,6 +27,7 @@ import { unavailableV4Handlers, type V4Handlers } from './v4-handlers'
 import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
+import { createSecurityHandlers } from './v7-security-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -390,6 +391,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     ...(ctx.v5 ?? unavailableV5Handlers()),
     ...(ctx.v6 ?? unavailableV6Handlers()),
     ...(ctx.v7 ?? unavailableV7Handlers()),
+    ...createSecurityHandlers(repos),
   }
 }
 

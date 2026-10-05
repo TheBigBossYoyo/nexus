@@ -26,19 +26,33 @@ const importsOf = (text: string): string[] => [...text.matchAll(/(?:from|import\
  * other code path can run a power command.
  */
 describe('power control isolation', () => {
-  it('only the overnight supervisor and the main entry point import the power module', () => {
+  it('only the overnight supervisor and the runtime core import the power module', () => {
     const importers = files
       .filter((f) => !f.path.startsWith('src/main/modules/power/'))
       .filter((f) => importsOf(f.text).some((i) => /(^|\/)modules\/power(\/|$)|^\.\/power$|^\.\.\/power$/.test(i)))
       .map((f) => f.path)
       .sort()
-    expect(importers).toEqual(['src/main/index.ts', 'src/main/modules/overnight/supervisor.ts'])
+    // 0.7: the runtime core is where the controller is constructed. The window's process, the workers and the
+    // local server never see it.
+    expect(importers).toEqual(['src/main/modules/overnight/supervisor.ts', 'src/main/runtime/core.ts'])
   })
 
-  it('the main entry point only constructs the controller and passes it to the supervisor', () => {
-    const main = files.find((f) => f.path === 'src/main/index.ts')?.text ?? ''
+  it('the window process, the worker process and the local protocol cannot reach the power module or the supervisor', () => {
+    const outside = files.filter((f) => ['src/main/index.ts', 'src/main/desktop.ts', 'src/main/worker.ts'].includes(f.path) || f.path.startsWith('src/main/modules/workers/') || f.path.startsWith('src/main/modules/runtime/'))
+    expect(outside.length).toBeGreaterThan(6)
+    for (const f of outside) {
+      expect(importsOf(f.text).filter((i) => /modules\/power|\/power$|overnight\/supervisor|modules\/overnight$/.test(i)), f.path).toEqual([])
+      expect(f.text, f.path).not.toMatch(/PowerController|scheduleShutdown|cancelShutdown|OvernightSupervisor/)
+    }
+    // The protocol's frames carry a channel of the closed contract or one of three fixed questions; none is a power operation.
+    const protocol = files.find((f) => f.path === 'src/shared/runtime-protocol.ts')?.text ?? ''
+    expect([...protocol.matchAll(/kind: z\.literal\('([^']+)'\)/g)].map((m) => m[1])).toEqual(['confirm', 'pickDirectory', 'openDataDir'])
+  })
+
+  it('the runtime core only constructs the controller and passes it to the supervisor', () => {
+    const main = files.find((f) => f.path === 'src/main/runtime/core.ts')?.text ?? ''
     // The variable holding the controller is referenced exactly where it is created and where it is handed over.
-    const uses = main.split('\n').filter((line) => /\bpower\b/.test(line) && !/^\s*(\/\/|\*)/.test(line) && !/import /.test(line) && !/console.error/.test(line))
+    const uses = main.split('\n').filter((line) => /\bpower\b/.test(line) && !/^\s*(\/\/|\*)/.test(line) && !/import /.test(line) && !/logger\(/.test(line))
     expect(uses.map((l) => l.trim())).toEqual([
       'let power: PowerController | null = null',
       "power = useFakePower ? new FakePowerController({ logFile: join(dataDir, 'fake-power.log') }) : new WindowsPowerController()",
@@ -46,7 +60,7 @@ describe('power control isolation', () => {
       'power,',
     ])
     // The fake controller can only be chosen in an unpackaged build.
-    expect(main).toMatch(/const useFakePower = !app\.isPackaged && /)
+    expect(main).toMatch(/const useFakePower = !host\.isPackaged && /)
   })
 
   it('no source file outside the power module names a power executable or power API', () => {
@@ -59,9 +73,28 @@ describe('power control isolation', () => {
     expect(offenders).toEqual([])
   })
 
-  it('child processes are spawned only by the process runner, the power controller and the SDK adapter', () => {
+  it('child processes are spawned only by the process runner, the power controller and the four places that start a NEXUS process', () => {
     const spawners = files.filter((f) => importsOf(f.text).some((i) => i === 'node:child_process' || i === 'child_process')).map((f) => f.path).sort()
-    expect(spawners).toEqual(['src/main/modules/power/windows-power-controller.ts', 'src/main/modules/process/run-process.ts'])
+    expect(spawners).toEqual([
+      // 0.7: the window starts the runtime; the runtime's host starts the window; the worker manager forks workers;
+      // the endpoint file's access list is narrowed with icacls.
+      'src/main/desktop.ts',
+      'src/main/modules/power/windows-power-controller.ts',
+      'src/main/modules/process/run-process.ts',
+      'src/main/modules/runtime/endpoint.ts',
+      'src/main/modules/workers/manager.ts',
+      'src/main/runtime-electron.ts',
+    ])
+    const text = (path: string): string => files.find((f) => f.path === path)?.text ?? ''
+    const calls = (path: string, fn: string): string[] => [...text(path).matchAll(new RegExp(`\\b${fn}\\(([^,)]+)`, 'g'))].map((m) => (m[1] ?? '').trim())
+    // Each of them starts one fixed thing: this executable, the worker entry, or icacls. None takes a command from a caller.
+    expect(calls('src/main/desktop.ts', 'spawn')).toEqual(['process.execPath'])
+    expect(calls('src/main/runtime-electron.ts', 'spawn')).toEqual(['process.execPath'])
+    expect(calls('src/main/modules/workers/manager.ts', 'fork')).toEqual(['options.entry'])
+    expect(calls('src/main/modules/runtime/endpoint.ts', 'execFile')).toEqual(["'icacls'"])
+    for (const path of ['src/main/desktop.ts', 'src/main/runtime-electron.ts', 'src/main/modules/workers/manager.ts', 'src/main/modules/runtime/endpoint.ts']) {
+      expect(text(path), path).not.toMatch(/\bexec\(|execSync|spawnSync|shell: true/)
+    }
   })
 
   it('the renderer and the preload bridge cannot reach the power module or Node', () => {
@@ -82,6 +115,8 @@ describe('power control isolation', () => {
     }
     const channels = Object.keys(ipcInputs)
     expect(channels.filter((c) => /power|shutdown|sleep|hibernate/i.test(c))).toEqual(['overnight.cancelPower'])
+    // Stopping the NEXUS runtime is its own channel and has nothing to do with the computer's power state.
+    expect(channels).toContain('runtime.stop')
   })
 })
 

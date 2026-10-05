@@ -40,6 +40,19 @@ export function unownedActiveRuns(repos: Repositories): { id: string; title: str
 }
 
 /**
+ * Missions the user started directly that the last stop of the runtime interrupted: paused for recovery and
+ * owned by no engine. After a restart they are resumed when the user chose `resume`, also when the runtime
+ * died before the queue had adopted them.
+ */
+export function unownedRecoveryRuns(repos: Repositories): string[] {
+  return repos.runs
+    .listActive()
+    .filter((run) => run.state === 'paused' && run.pauseReason === 'recovery' && !isReasoningRun(run))
+    .filter((run) => !repos.arenaTrials.getByRun(run.id) && !repos.programMissions.getByRun(run.id) && !repos.programs.getByRun(run.id) && !repos.workspaceTasks.getByRun(run.id) && !repos.backgroundJobs.getByRun(run.id))
+    .map((run) => run.id)
+}
+
+/**
  * Workloads that are working now and are not on the queue: a program, a campaign or a workspace mission the
  * user started from its own page, and missions started from the composer. The queue adopts them, so the
  * global capacity covers everything that uses agents however it was started.
@@ -108,7 +121,8 @@ export function createWorkloadAdapters(repos: Repositories, engines: AdapterEngi
       return snapshotOf(phase, [p.currentRunId, ...live], p.state === 'BLOCKED' ? oneLine(p.blockedReason, 200) || null : null)
     },
     title: ({ refId }) => (refId ? (repos.programs.get(refId)?.name ?? null) : null),
-    requestedAgents: () => engines.defaultAgents(),
+    // A program asks for what its own policy allows it to run at once.
+    requestedAgents: ({ refId }) => (refId ? (repos.programs.get(refId)?.policy.maxAgents ?? engines.defaultAgents()) : engines.defaultAgents()),
   }
 
   const arena: WorkloadAdapter = {

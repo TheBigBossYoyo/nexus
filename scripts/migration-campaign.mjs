@@ -74,6 +74,7 @@ for (const pair of pairs) {
   try {
     const page = await app.firstWindow()
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 60_000 })
+    await (await import('./acceptance-common.mjs')).waitForRuntime(page)
     const call = async (channel, input = {}) => {
       const result = await page.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
       if (!result.ok) throw new Error(`${channel}: ${result.error.code} ${result.error.message}`)
@@ -135,7 +136,8 @@ for (const pair of pairs) {
     entry.checks['the session ran to its end'] = false
     log('ERROR', entry.error)
   } finally {
-    await app.close().catch(() => undefined)
+    // The runtime holds the database open; it is stopped before the database is read.
+    await (await import('./acceptance-common.mjs')).stopNexus(app, dataDir)
   }
 
   const after = inspect(join(dataDir, 'nexus.db'))

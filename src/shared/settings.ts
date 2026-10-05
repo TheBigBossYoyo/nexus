@@ -10,6 +10,7 @@ import {
   type RunConfig,
   type CheckCommands,
 } from './domain'
+import { ExecutionProfileSchema } from './security'
 import { DEFAULT_USAGE_SETTINGS, UsageSettingsSchema } from './v3'
 
 export const McpServerSettingSchema = z.object({
@@ -58,6 +59,8 @@ export const SettingsSchema = z.object({
     sessionRotationTurns: z.number().int().min(0).max(1000),
     leaseMinutes: z.number().int().min(1).max(240),
     checkTimeoutMinutes: z.number().int().min(1).max(120),
+    /** 0.7: how strictly agent commands and scripts are gated. Not a sandbox in either mode. Old stored settings read as STANDARD. */
+    profile: ExecutionProfileSchema.default('STANDARD'),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */
@@ -120,6 +123,7 @@ export const DEFAULT_SETTINGS: Settings = {
     sessionRotationTurns: 60,
     leaseMinutes: 30,
     checkTimeoutMinutes: 15,
+    profile: 'STANDARD',
   },
   git: {
     removeWorktreesOnSuccess: false,

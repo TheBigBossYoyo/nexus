@@ -10,6 +10,7 @@ import {
   nextOccurrence,
   overallHealth,
   scheduleDue,
+  serviceOrder,
   ScheduleInputSchema,
   stateFromPhase,
   TERMINAL_WORK_ITEM_STATES,
@@ -34,6 +35,7 @@ import { newId } from '@shared/ids'
 import { NexusError } from '@shared/result'
 
 const LIMITS_KEY = 'control-limits'
+const DISPATCH_PAUSED_KEY = 'control-dispatch-paused'
 const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** How the control plane drives one kind of workload. Each adapter is a thin view of an engine that already exists. */
@@ -80,6 +82,17 @@ export interface ControlPlaneDeps {
   incidents: IncidentStore
   settings: { getValue<T>(key: string): T | null; setValue(key: string, value: unknown): void }
   adapters: Partial<Record<WorkItemType, WorkloadAdapter>>
+  /**
+   * One row per occurrence of a schedule that fired. With it an occurrence fires once however often the
+   * runtime restarts; without it (tests of the pure service) the schedule's stored next time is the only guard.
+   */
+  firings?: { claim(scheduleId: string, occurrence: string, firedAt: string): boolean; complete(scheduleId: string, occurrence: string, itemId: string | null, result: string): void }
+  /** Why an item was started, granted capacity or made to wait; one record when the answer changes. */
+  decisions?: { insert(decision: { at: string; itemId: string; decision: string; reason: string }): void }
+  /** Runs `fn` as one database transaction. */
+  transaction?: <T>(fn: () => T) => T
+  /** Worker processes, for the overview. */
+  workers?: () => { live: number; busy: number; max: number } | null
   /** The Claude usage gate. */
   usage: { canDispatch(): boolean; onChange?(listener: () => void): () => void }
   /**
@@ -118,6 +131,7 @@ export class ControlPlane {
   private lastError: string | null = null
   private readonly shown: NotificationRecord[] = []
   private readonly bootedAt: string
+  private readonly lastDecision = new Map<string, string>()
 
   constructor(private readonly deps: ControlPlaneDeps) {
     this.bootedAt = this.iso()
@@ -173,6 +187,11 @@ export class ControlPlane {
     }
   }
 
+  /** A notification from outside the queue (a milestone, a regression, a refused tool call). The restraint rules apply. */
+  announce(kind: NotificationKind, subject: string, title: string, body: string): void {
+    this.notify(kind, subject, title, body)
+  }
+
   // ───────────────────────────── limits ─────────────────────────────
 
   limits(): ControlLimits {
@@ -187,6 +206,20 @@ export class ControlPlane {
     this.allocatedAt = 0
     void this.tick()
     return parsed.data
+  }
+
+  /** True while the user paused dispatch: what runs keeps running, nothing new starts. Stored, so it survives a restart. */
+  dispatchPaused(): boolean {
+    return this.deps.settings.getValue<unknown>(DISPATCH_PAUSED_KEY) === true
+  }
+
+  setDispatchPaused(paused: boolean): boolean {
+    if (paused === this.dispatchPaused()) return paused
+    this.deps.settings.setValue(DISPATCH_PAUSED_KEY, paused)
+    this.incident(paused ? 'Dispatch was paused: nothing new starts until it is resumed.' : 'Dispatch was resumed.', null)
+    this.allocatedAt = 0
+    void this.tick()
+    return paused
   }
 
   // ───────────────────────────── queue ─────────────────────────────
@@ -338,18 +371,35 @@ export class ControlPlane {
     const now = new Date(this.now())
     for (const schedule of this.deps.schedules.list()) {
       const { due, nextRunAt } = scheduleDue(schedule, now)
-      if (!due) continue
-      let result: string
-      try {
-        const item = this.enqueue(this.enqueueInputOf(schedule.action, schedule.priority), { scheduleId: schedule.id })
-        result = `Queued "${item.title}".`
-        this.notify('schedule_started', schedule.id, `Scheduled: ${schedule.name}`, result)
-      } catch (e) {
-        // A schedule that cannot queue its work says why and keeps its next time; it never retries in a loop.
-        result = `Not queued: ${errorMessage(e)}`
-        this.incident(`Schedule "${schedule.name}" queued nothing: ${errorMessage(e)}`, null)
+      if (!due || !schedule.nextRunAt) continue
+      const occurrence = schedule.nextRunAt
+      const advance = (lastResult: string | null): void =>
+        void this.deps.schedules.update(schedule.id, { nextRunAt, ...(lastResult !== null ? { lastRunAt: now.toISOString(), lastResult: lastResult.slice(0, 300) } : {}), enabled: schedule.rule.kind === 'once' ? false : schedule.enabled, updatedAt: now.toISOString() })
+      // The claim, the queued item and the schedule's next time are one transaction: after a crash anywhere in
+      // between, either all of it happened or none of it did, and the occurrence is claimed at most once.
+      const fire = (): void => {
+        if (this.deps.firings && !this.deps.firings.claim(schedule.id, occurrence, now.toISOString())) {
+          // This occurrence already fired (before a restart that lost the schedule's new time). Only move on.
+          advance(null)
+          return
+        }
+        let result: string
+        let itemId: string | null = null
+        try {
+          const item = this.enqueue(this.enqueueInputOf(schedule.action, schedule.priority), { scheduleId: schedule.id })
+          itemId = item.id
+          result = `Queued "${item.title}".`
+          this.notify('schedule_started', schedule.id, `Scheduled: ${schedule.name}`, result)
+        } catch (e) {
+          // A schedule that cannot queue its work says why and keeps its next time; it never retries in a loop.
+          result = `Not queued: ${errorMessage(e)}`
+          this.incident(`Schedule "${schedule.name}" queued nothing: ${errorMessage(e)}`, null)
+        }
+        this.deps.firings?.complete(schedule.id, occurrence, itemId, result)
+        advance(result)
       }
-      this.deps.schedules.update(schedule.id, { nextRunAt, lastRunAt: now.toISOString(), lastResult: result.slice(0, 300), enabled: schedule.rule.kind === 'once' ? false : schedule.enabled, updatedAt: now.toISOString() })
+      if (this.deps.transaction) this.deps.transaction(fire)
+      else fire()
     }
   }
 
@@ -418,7 +468,7 @@ export class ControlPlane {
         this.notify('work_item_failed', item.id, `${WORK_ITEM_TYPE_LABEL[item.type]} failed`, `${item.title}${snapshot.detail ? `: ${snapshot.detail}` : ''}`)
       } else if (state === 'BLOCKED') {
         this.incident(`${label} is blocked${snapshot.detail ? `: ${snapshot.detail}` : '.'}`, item.id)
-        if (item.type === 'program') this.notify('program_blocked', item.id, 'Program blocked', `${item.title}${snapshot.detail ? `: ${snapshot.detail}` : ''}`)
+        this.notify(item.type === 'program' ? 'program_blocked' : 'workload_blocked', item.id, `${WORK_ITEM_TYPE_LABEL[item.type]} blocked`, `${item.title}${snapshot.detail ? `: ${snapshot.detail}` : ''}`)
       } else if (state === 'QUOTA_WAIT') {
         this.notify('quota_paused', 'claude', 'Waiting for the Claude usage limit', 'Work that needs Claude is waiting. It continues by itself after the reset.')
       } else if (state === 'RUNNING' && item.state === 'QUOTA_WAIT') {
@@ -432,7 +482,8 @@ export class ControlPlane {
     const items = this.deps.items.listOpen()
     const active = new Map<string, number>()
     for (const item of items) active.set(item.id, this.snapshots.get(item.id)?.activeAgents ?? 0)
-    this.allocation = allocate({ items, active, limits: this.limits(), claudeAvailable: this.deps.usage.canDispatch() })
+    this.allocation = allocate({ items, active, limits: this.limits(), claudeAvailable: this.deps.usage.canDispatch(), paused: this.dispatchPaused(), now: this.now() })
+    this.recordDecisions(items)
     this.allocatedAt = this.now()
     const signature = [...this.allocation.allowance].map(([id, n]) => `${id}:${n}`).join(',')
     if (signature !== this.allocationSignature) {
@@ -440,6 +491,29 @@ export class ControlPlane {
       this.deps.onAllocationChange?.()
     }
     return this.allocation
+  }
+
+  /** Records why each open item has what it has, when that changed since the last allocation. */
+  private recordDecisions(items: readonly GlobalWorkItem[]): void {
+    if (!this.deps.decisions) return
+    const open = new Set<string>()
+    for (const item of items) {
+      open.add(item.id)
+      const waiting = this.allocation.waiting.get(item.id)
+      const granted = this.allocation.allowance.get(item.id)
+      const decision = this.allocation.admit.includes(item.id) ? 'ADMIT' : waiting ? 'WAIT' : granted !== undefined ? 'GRANT' : null
+      if (!decision) continue
+      const reason = decision === 'WAIT' ? (waiting as string) : decision === 'ADMIT' ? `Started with ${granted} of ${item.requestedAgents} agent(s) at ${item.priority}.` : `May hold ${granted} of ${item.requestedAgents} agent(s).`
+      const signature = `${decision}|${reason}`
+      if (this.lastDecision.get(item.id) === signature) continue
+      this.lastDecision.set(item.id, signature)
+      try {
+        this.deps.decisions.insert({ at: this.iso(), itemId: item.id, decision, reason })
+      } catch (e) {
+        this.log(`decision not recorded: ${errorMessage(e)}`)
+      }
+    }
+    for (const id of [...this.lastDecision.keys()]) if (!open.has(id)) this.lastDecision.delete(id)
   }
 
   private async admit(): Promise<void> {
@@ -504,14 +578,23 @@ export class ControlPlane {
    * (programs, workspace missions and Arena campaigns continue by their own recovery rules; a plain mission
    * is paused by the orchestrator and resumed here only when the limits say `resume`).
    */
-  async recoverOnBoot(resumeMission?: (runId: string) => Promise<void>): Promise<void> {
+  async recoverOnBoot(resumeMission?: (runId: string) => Promise<void>, interruptedMissions?: () => string[]): Promise<void> {
     const open = this.deps.items.listOpen()
     if (open.length > 0) this.incident(`NEXUS started; ${open.length} open work item${open.length === 1 ? '' : 's'} read from the queue.`, null)
     await this.tick()
     if (this.limits().resumeOnBoot !== 'resume' || !resumeMission) return
+    const resumed = new Set<string>()
     for (const item of this.deps.items.listOpen()) {
       if (item.type !== 'mission' || !item.refId || item.heldByUser || item.state !== 'PAUSED') continue
+      resumed.add(item.refId)
       await resumeMission(item.refId).catch((e: unknown) => this.incident(`Mission "${item.title}" was not resumed after the restart: ${errorMessage(e)}`, item.id))
+    }
+    // A mission the runtime lost before the queue had adopted it has no item; it is resumed all the same.
+    for (const runId of interruptedMissions?.() ?? []) {
+      if (resumed.has(runId)) continue
+      const item = this.deps.items.findOpenByRef('mission', runId)
+      if (item?.heldByUser) continue
+      await resumeMission(runId).catch((e: unknown) => this.incident(`A mission was not resumed after the restart: ${errorMessage(e)}`, item?.id ?? null))
     }
     await this.tick()
   }
@@ -528,6 +611,13 @@ export class ControlPlane {
         const late = every > 0 && this.now() - this.lastTickAt > Math.max(30_000, every * 10)
         return { component, level: late ? 'DEGRADED' : 'HEALTHY', detail: late ? 'The scheduler has not run for a while.' : 'Passes are running.', checkedAt: at }
       }
+      if (component === 'schedules' && !this.deps.health?.schedules) {
+        const enabled = this.deps.schedules.list().filter((s) => s.enabled && s.nextRunAt)
+        const overdue = enabled.filter((s) => this.now() - Date.parse(s.nextRunAt as string) > Math.max(60_000, every * 30))
+        if (overdue.length > 0) return { component, level: 'DEGRADED', detail: `${overdue.length} schedule${overdue.length === 1 ? ' is' : 's are'} past the time and did not fire.`, checkedAt: at }
+        const next = enabled.map((s) => s.nextRunAt as string).sort()[0]
+        return { component, level: 'HEALTHY', detail: enabled.length === 0 ? 'No schedule is switched on.' : `${enabled.length} schedule${enabled.length === 1 ? '' : 's'} switched on; the next fires at ${next}. Schedules fire while the runtime runs, with or without a window.`, checkedAt: at }
+      }
       const probe = this.deps.health?.[component]
       if (!probe) return { component, level: 'HEALTHY', detail: 'Not checked in this process.', checkedAt: at }
       try {
@@ -540,10 +630,10 @@ export class ControlPlane {
   }
 
   overview(): ControlPlaneOverview {
-    const open = this.deps.items.listOpen().sort(compareWorkItems)
     const limits = this.limits()
+    const open = serviceOrder(this.deps.items.listOpen(), this.now(), limits.agingMinutes)
     const activeOf = (id: string): number => this.snapshots.get(id)?.activeAgents ?? 0
-    const live: WorkItemState[] = ['RUNNING', 'QUOTA_WAIT']
+    const live: WorkItemState[] = ['RUNNING', 'QUOTA_WAIT', 'FINALIZING']
     return {
       health: this.health(),
       limits,
@@ -558,6 +648,8 @@ export class ControlPlane {
       schedules: this.deps.schedules.list(),
       incidents: this.deps.incidents.recent(20),
       bootedAt: this.bootedAt,
+      dispatchPaused: this.dispatchPaused(),
+      workers: this.deps.workers?.() ?? null,
     }
   }
 }

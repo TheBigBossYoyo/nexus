@@ -12,7 +12,15 @@ export default defineConfig({
   main: {
     resolve: { alias },
     build: {
-      rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/main/index.ts') } },
+      // Three entry points: the app (window or runtime, by argument), the worker the runtime forks, and the
+      // runtime hosted by plain Node, which tests start and kill without a window.
+      rollupOptions: {
+        input: {
+          index: resolve(import.meta.dirname, 'src/main/index.ts'),
+          worker: resolve(import.meta.dirname, 'src/main/worker.ts'),
+          'runtime-node': resolve(import.meta.dirname, 'src/main/runtime-node.ts'),
+        },
+      },
     },
   },
   preload: {

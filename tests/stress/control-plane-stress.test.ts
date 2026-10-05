@@ -169,7 +169,7 @@ async function history(seed: number): Promise<string[]> {
           op = `move ${any.refId}`
           control.move(any.id, pick(['top', 'up', 'down'] as const))
         } else if (roll < 0.76) {
-          const limits: ControlLimits = { maxAgents: 1 + Math.floor(rnd() * 8), maxActiveItems: 1 + Math.floor(rnd() * 5), resumeOnBoot: pick(['resume', 'hold'] as const) }
+          const limits: ControlLimits = { maxAgents: 1 + Math.floor(rnd() * 8), maxActiveItems: 1 + Math.floor(rnd() * 5), resumeOnBoot: pick(['resume', 'hold'] as const), agingMinutes: pick([0, 30] as const) }
           op = `limits ${limits.maxAgents}/${limits.maxActiveItems}`
           control.setLimits(limits)
         } else if (roll < 0.84) {

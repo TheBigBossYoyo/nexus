@@ -1,16 +1,19 @@
 import { Menu, nativeImage, Tray, type NativeImage } from 'electron'
-import { buildTrayModel, type TrayAction, type TrayModel, type TrayStatus } from './modules/overnight/tray-model'
-import type { TrayInput } from './modules/overnight/tray-model'
+import type { TrayAction, TrayStatus } from './modules/overnight/tray-model'
+import type { RuntimeTrayAction, RuntimeTrayStatus, TraySnapshot } from './modules/runtime/tray-model'
 
-const COLORS: Record<TrayStatus, [number, number, number]> = {
+const COLORS: Record<TrayStatus | RuntimeTrayStatus, [number, number, number]> = {
   RUNNING: [72, 187, 120],
   PAUSED: [237, 181, 62],
   FINALIZING: [99, 161, 255],
   'SHUTDOWN SCHEDULED': [240, 82, 82],
+  IDLE: [148, 156, 170],
+  ATTENTION: [240, 140, 62],
+  RECOVERING: [99, 161, 255],
 }
 
 /** A filled disc drawn in code: the build has no icon assets. */
-function icon(status: TrayStatus): NativeImage {
+function icon(status: TrayStatus | RuntimeTrayStatus): NativeImage {
   const size = 32
   const [r, g, b] = COLORS[status]
   const pixels = Buffer.alloc(size * size * 4)
@@ -30,42 +33,42 @@ function icon(status: TrayStatus): NativeImage {
   return nativeImage.createFromBitmap(pixels, { width: size, height: size, scaleFactor: 2 })
 }
 
-/** Windows tray icon for Overnight Mode. Exists only while a mission needs the app to stay alive. */
-export class OvernightTray {
+/**
+ * The Windows tray icon of the NEXUS runtime. It exists while the runtime does, whether or not a window is
+ * open, and says what the runtime is doing. During an overnight mission it shows that mission, as since 0.2,
+ * with the runtime's own entries below.
+ */
+export class RuntimeTray {
   private tray: Tray | null = null
-  private last: TrayModel | null = null
 
   constructor(
-    private readonly read: () => TrayInput,
-    private readonly onAction: (action: TrayAction, runId: string) => void,
+    private readonly read: () => TraySnapshot,
+    private readonly onAction: (action: RuntimeTrayAction | TrayAction, runId?: string) => void,
   ) {}
 
-  /** The model currently shown (tests read it through the app). */
-  model(): TrayModel | null {
-    return this.last
-  }
-
   refresh(): void {
-    const model = buildTrayModel(this.read())
-    this.last = model
-    if (!model.visible || model.status === null || model.runId === null) {
-      this.tray?.destroy()
-      this.tray = null
+    let snapshot: TraySnapshot
+    try {
+      snapshot = this.read()
+    } catch {
       return
     }
-    const runId = model.runId
+    const overnight = snapshot.overnight?.visible && snapshot.overnight.status && snapshot.overnight.runId ? snapshot.overnight : null
+    const status = overnight?.status ?? snapshot.runtime.status
     if (!this.tray) {
-      this.tray = new Tray(icon(model.status))
-      this.tray.on('double-click', () => this.onAction('open', runId))
-    } else {
-      this.tray.setImage(icon(model.status))
-    }
-    this.tray.setToolTip(model.tooltip)
+      this.tray = new Tray(icon(status))
+      this.tray.on('double-click', () => this.onAction('open'))
+    } else this.tray.setImage(icon(status))
+    this.tray.setToolTip(overnight ? overnight.tooltip : snapshot.runtime.tooltip)
+    const runId = overnight?.runId ?? undefined
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
-        ...model.lines.map((label) => ({ label, enabled: false })),
+        ...(overnight ? overnight.lines : snapshot.runtime.lines).map((label) => ({ label, enabled: false })),
         { type: 'separator' as const },
-        ...model.items.map((item) => ({ label: item.label, enabled: item.enabled, click: () => this.onAction(item.action, runId) })),
+        // The mission's own entries (pause, cancel shutdown, cancel mission); "Open NEXUS" comes from the runtime's.
+        ...(overnight ? overnight.items.filter((item) => item.action !== 'open').map((item) => ({ label: item.label, enabled: item.enabled, click: () => this.onAction(item.action, runId) })) : []),
+        ...(overnight ? [{ type: 'separator' as const }] : []),
+        ...snapshot.runtime.items.map((item) => ({ label: item.label, enabled: item.enabled, click: () => this.onAction(item.action) })),
       ]),
     )
   }

@@ -27,6 +27,7 @@
     "accept:workspace": "node scripts/workspace-acceptance.mjs",
     "accept:speculative": "node scripts/strategy-acceptance.mjs speculative",
     "accept:adaptive": "node scripts/strategy-acceptance.mjs adaptive",
+    "accept:v07": "node scripts/v07-acceptance.mjs",
     "stress": "vitest run -c vitest.stress.config.ts",
     "supervisor:build": "esbuild scripts/dev-supervisor/development-overnight-supervisor.ts --bundle --platform=node --format=esm --alias:@shared=./src/shared --alias:@main=./src/main --outfile=out/dev-supervisor/development-overnight-supervisor.mjs",
     "package": "electron-vite build && electron-builder --win nsis"

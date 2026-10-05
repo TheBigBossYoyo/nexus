@@ -23,6 +23,7 @@ import {
   type WorkspaceSummary,
 } from './workspace'
 import { ControlLimitsSchema, EnqueueInputSchema, PrioritySchema, ScheduleInputSchema, type ControlLimits, type ControlPlaneOverview, type GlobalWorkItem, type Schedule } from './control-plane'
+import { SecurityDecisionsInputSchema, type SecurityDecisionPage } from './security'
 import { ProviderIdSchema, ProviderPolicySchema, type ProviderPolicy, type ProviderSession, type ProvidersOverview, type ProviderStatus } from './provider'
 import {
   BACKLOG_STATUSES,
@@ -199,6 +200,9 @@ export interface AgentDetail {
 /** Renderer → main request schemas. Every handler validates its input with these before acting. */
 /** A repository, contract or task key of a workspace. */
 const WorkspaceKey = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
+
+import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
+import type { WorkersOverview } from './workers'
 
 export const ipcInputs = {
   'app.info': Empty,
@@ -565,6 +569,18 @@ export const ipcInputs = {
   'control.createSchedule': z.object({ schedule: ScheduleInputSchema }).strict(),
   'control.setScheduleEnabled': z.object({ scheduleId: Id, enabled: z.boolean() }).strict(),
   'control.removeSchedule': z.object({ scheduleId: Id }).strict(),
+  'control.decisions': z.object({ itemId: Id }).strict(),
+  // v0.7: the runtime process and its workers. `desktop.*` is answered by the window's own main process.
+  'runtime.status': Empty,
+  'runtime.workers': Empty,
+  'runtime.workerSelfTest': Empty,
+  'runtime.tray': Empty,
+  'runtime.setDispatchPaused': z.object({ paused: z.boolean() }).strict(),
+  'runtime.stop': Empty,
+  'desktop.connection': Empty,
+  'desktop.reconnect': Empty,
+  // v0.7: the execution security decision log (read-only, paged).
+  'security.decisions': SecurityDecisionsInputSchema,
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -700,6 +716,19 @@ export interface IpcOutputs {
   'control.createSchedule': Schedule
   'control.setScheduleEnabled': Schedule
   'control.removeSchedule': null
+  'control.decisions': { at: string; itemId: string; decision: string; reason: string }[]
+  'runtime.status': RuntimeStatus
+  'runtime.workers': WorkersOverview
+  /** Starts one worker process without a session and says whether it came up. Uses no provider. */
+  'runtime.workerSelfTest': { ok: boolean; pid: number | null; capabilities: string[]; milliseconds: number; detail: string }
+  /** What the tray shows; read by tests. */
+  'runtime.tray': unknown
+  'runtime.setDispatchPaused': { paused: boolean }
+  /** Stops the runtime: work in progress is paused as when NEXUS quits and continues after the next start. */
+  'runtime.stop': { stopping: boolean }
+  'desktop.connection': ConnectionState
+  'desktop.reconnect': ConnectionState
+  'security.decisions': SecurityDecisionPage
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]
