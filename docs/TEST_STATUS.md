@@ -1,7 +1,35 @@
 # Test Status
 
-Factual status as of 2026-10-05 02:10 (+01:00), version 0.3.0, branch `nexus-0.3` (released as `v0.3.0`). Details and evidence:
-`docs/V0_3_RELEASE_REPORT.md`. The 0.2.1, 0.2.0 and 0.1 sections below are the earlier records, unchanged.
+Factual status as of 2026-10-05 03:15 (+01:00), version 0.4.0, branch `nexus-0.4` (released as `v0.4.0`). Details and
+evidence: `docs/V0_4_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
+
+## 0.4.0: automated (no Claude usage)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | pass |
+| `pnpm lint` | pass |
+| `pnpm test` | 132 files, 2497 tests passed, 451 s |
+| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 6 of 7 files passed; orchestrator 997 of 1000 in the run (three timeouts in the first three minutes, under a full test suite on the same machine) |
+| Orchestrator stress, seeds 1 to 60, alone, same commit | 60 of 60 passed |
+| `pnpm test:e2e` | 20 Playwright tests passed, 1 capture-only test skipped by design |
+| `pnpm package` | produced `release/NEXUS-Setup-0.4.0.exe` (207,299,109 bytes, SHA-256 `3990d228...91df3e`) |
+| `node scripts/packaged-validation.mjs` on 0.1, 0.2.0 and 0.2.1 databases | 18 of 18 checks each, schema 6 |
+
+## 0.4.0: manual
+
+| Check | Result |
+|---|---|
+| Program with real Claude (`node scripts/program-acceptance.mjs`) | passed, 15 of 15 gates, first attempt: 3 milestones, 3 missions, one revision, 6 backlog proposals, 2 memory entries, a restart in the middle |
+
+Not verified: a real usage limit during a program; a program under a real shutdown timer; a program on the
+packaged build with real Claude; the installer.
+
+## Intermittent failures (0.4.0)
+
+The orchestrator stress has a 120 s limit per seeded run. Three seeds (13, 16, 22) exceeded it while a full
+`pnpm test`, a typecheck and a lint ran beside the stress; each passed when run without that load. Run the
+stress without other suites.
 
 ## 0.3.0: automated (no Claude usage), final tree
 
