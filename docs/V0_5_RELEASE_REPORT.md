@@ -1,5 +1,13 @@
 # NEXUS 0.5.0 Release Report
 
+> **Addendum, 2026-10-05 (added after the release; the report below is unchanged).**
+> 1. Tag `v0.5.0` (commit `389d95f`) does not contain the 0.5.0 entries of `docs/TEST_STATUS.md` and
+>    `docs/BUILD_PROGRESS.md`; they were committed afterwards as `f8e5a67`. The tag was not moved.
+> 2. 0.5.0 contains two security defects that were fixed in 0.6.0 (commit `42a88ea`): a rewritable worktree `.git`
+>    pointer, and `git config` behind a value option running a configured program inside NEXUS's git calls. 0.5.0 is
+>    not recommended; use 0.6.0 or later. See `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and "Release
+>    history and supported versions" in `README.md`.
+
 Date: 2026-10-05 (built and validated 2026-10-05 00:40 to 05:17, +01:00). Branch `nexus-0.5`, 0.5.0 in
 `package.json`. Released by the unattended overnight release train the user authorized: merged into
 `main` with `--no-ff` and tagged `v0.5.0`.

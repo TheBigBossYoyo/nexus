@@ -2,6 +2,10 @@
 
 Factual log. Test and build status lives in TEST_STATUS.md.
 
+Note, 2026-10-05: tag `v0.5.0` (commit `389d95f`) does not contain the "v0.5.0" section of this page. It was
+committed afterwards as `f8e5a67`, which is not in the history of `v0.5.0`. The tag was not moved. See "Release
+history and supported versions" in `README.md`; 0.2.1 to 0.5.0 also contain security defects fixed in 0.6.0.
+
 ## Completed
 
 | Phase | What exists |

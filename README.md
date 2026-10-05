@@ -142,6 +142,41 @@ The design and its deviations from the implementation are in [V0_3_DESIGN](docs/
 
 The design and its deviations from the implementation are in [V0_2_DESIGN](docs/V0_2_DESIGN.md).
 
+## Release history and supported versions
+
+Use 0.6.0 or later. 0.6.0 is the minimum recommended line. Earlier tags are kept as they are, for history; no tag
+has been rewritten or deleted. Dates are those of the tagged commit (+01:00).
+
+| Version | Tag | Date | Status | Note |
+|---|---|---|---|---|
+| 0.1, 0.2.0 | none | 2026-10-04 | Not recommended | Never tagged. Both are before the security fixes of 0.6.0; the worktree pointer defect is recorded as present since 0.1 |
+| 0.2.1 | `v0.2.1` | 2026-10-04 | Not recommended | Contains both defects fixed in 0.6.0 (see below) |
+| 0.3.0 | `v0.3.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
+| 0.4.0 | `v0.4.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
+| 0.5.0 | `v0.5.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0. The tag also lacks the 0.5.0 entries of `docs/TEST_STATUS.md` and `docs/BUILD_PROGRESS.md` (see below) |
+| 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended | Contains the fixes. Report: `docs/V0_6_RELEASE_REPORT.md` |
+| 0.7 | none | not released | Branch `nexus-0.7`, not merged, not tagged | See `docs/V0_7_RELEASE_REPORT.md` |
+
+Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
+record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
+
+1. An agent's shell could rewrite a task worktree's `.git` pointer file. NEXUS's next commit, reset or clean then
+   acted on the user's repository or on another task's worktree. Recorded as present since 0.1. Fixed in 0.6.0
+   (commit `42a88ea`).
+2. A `git config` command with a value option in front of the key (for example `--type bool core.fsmonitor ...`)
+   passed the command classifier, and the program the configuration named then ran inside NEXUS's own git calls,
+   with NEXUS's environment. Recorded as present since 0.2.1. Fixed in 0.6.0 (commit `42a88ea`).
+
+0.2.1 is affected too. In the source of tag `v0.2.1`, the git service has no check of the worktree pointer and
+passes no `core.fsmonitor`, `core.hooksPath`, `core.pager` or `protocol.ext.allow` setting to git, and the command
+classifier tests only the first positional word of `git config` as a key and has no rule for non-git commands that
+name a `.git` path. This is a reading of the source; the defects were not reproduced on a build of 0.2.1.
+
+The 0.5.0 tag gap. Tag `v0.5.0` points at commit `389d95f` (2026-10-05 05:17:26). The test status and build
+progress for 0.5.0 were committed 28 seconds later, as `f8e5a67`, which is not in the history of `v0.5.0`. At that
+tag, `docs/TEST_STATUS.md` still describes 0.4.0 and `docs/BUILD_PROGRESS.md` has no 0.5.0 section. Current
+`main` and later tags have both.
+
 ## Requirements
 
 | Requirement | Notes |

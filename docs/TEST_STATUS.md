@@ -3,6 +3,11 @@
 Factual status as of 2026-10-05 06:45 (+01:00), version 0.6.0, branch `nexus-0.6` (released as `v0.6.0`). Details and
 evidence: `docs/V0_6_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
 
+Note, 2026-10-05: tag `v0.5.0` (commit `389d95f`) does not contain the "0.5.0" sections of this page. At that tag the
+page still describes 0.4.0. They were committed afterwards as `f8e5a67` ("they missed the release commit"), which is
+not in the history of `v0.5.0`. The tag was not moved. See "Release history and supported versions" in `README.md`;
+0.2.1 to 0.5.0 also contain security defects fixed in 0.6.0.
+
 ## 0.6.0: automated (no Claude usage)
 
 | Command | Result |
