@@ -1,34 +1,63 @@
 # NEXUS 0.3.0 Release Report
 
-Date: 2026-10-04. Branch `nexus-0.3`, 0.3.0 in `package.json`. Not merged into `main`, not tagged.
+Date: 2026-10-05 (final validation 2026-10-04 23:39 to 2026-10-05 02:10, +01:00). Branch `nexus-0.3`, 0.3.0 in
+`package.json`. Released by the unattended overnight release train the user authorized: merged into `main`
+with `--no-ff` and tagged `v0.3.0`.
 
 ## Verdict
 
-**PARTIAL.**
+**PASS**, with two items NOT VERIFIED that the release criteria allow to stay open.
 
-Every item of the 0.3 acceptance gate that could be run was run and passed on the 0.3.0 tree, including the
-three real-runtime items. It is not a full PASS for these reasons:
+The 0.3 gate was: Overnight Arena, a generalized workload lifecycle, quota pause and resume, finalization, the
+power lifecycle, a completed UI review, no open CRITICAL or HIGH finding, and every final suite green on the
+final tree. All of that holds (sections below). Not verified:
 
-- A real Claude usage limit did not occur during development, so real quota exhaustion and a real automatic
+- A real Claude usage limit did not occur and none was provoked, so real quota exhaustion and a real automatic
   resume are NOT VERIFIED. The path is covered by simulation only (scenarios, 1000 seeded histories, E2E).
 - The NSIS installer was built and not executed (same reason as 0.2.1). Install and uninstall are NOT VERIFIED.
-- Overnight Arena (a campaign under the overnight supervisor with an end-of-campaign power action) is NOT
-  IMPLEMENTED.
-- Some findings of the UI review are not fixed (listed below).
+
+The report dated 2026-10-04 gave PARTIAL because Overnight Arena did not exist and UI review findings were
+open. Both were closed on 2026-10-04 and 2026-10-05; see "Changes since the PARTIAL verdict".
 
 ## Test results on the final tree
 
-All on the 0.3.0 tree, one command at a time.
+Final tree: the commit that carries this report. Its only differences from `0902f0a`, on which every suite
+below ran, are documents and one evidence file.
 
 | Check | Result |
 |---|---|
 | `pnpm typecheck` | pass |
 | `pnpm lint` | pass |
-| `pnpm test` | 121 files, 2338 tests passed, 752 s |
-| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 5 files passed in one run, 5295 s: 1000 orchestrator seeds, 1000 policy simulations, 1000 usage histories, 1000 Arena campaign histories, 1000 overnight histories. No failure dump |
-| `pnpm test:e2e` | 16 of 16 passed, 4.1 min, run after the version bump |
+| `pnpm test` | 126 files, 2399 tests passed, 783 s |
+| `pnpm stress` with `NEXUS_STRESS_RUNS=1000` | 6 files passed in one run, 7600 s: 1000 orchestrator seeds, 1000 policy simulations, 1000 usage histories, 1000 Arena campaign histories, 1000 overnight histories, 1000 overnight workload histories. No failure dump. See the note below |
+| `pnpm test:e2e` | 17 of 17 passed (1 capture-only test skipped by design), 6.8 min |
 | `pnpm package` | pass |
 | Packaged build on real 0.1, 0.2.0 and 0.2.1 databases | pass, 17 of 17 checks on each |
+
+Note on the stress run. It started at 23:39 on `e4253e5` and its code was loaded then. While it ran, the same
+checkout was switched to the 0.4 and 0.5 branches for other work, and other test runs shared the machine, which
+is why it took 7600 s instead of about 5300 s. The only change on `nexus-0.3` after `e4253e5` is one corrected
+persistence test (`0902f0a`), which no stress file reads. The run was not repeated on `0902f0a`.
+
+## Changes since the PARTIAL verdict
+
+- **Overnight Arena.** An Arena campaign runs under the overnight supervisor: authorization and failsafe before
+  the first trial, usage-limit waits inside the deadline, the campaign suspended at the deadline, a final
+  report, the end action. Covered by `tests/integration/arena/overnight-arena.test.ts` (13 tests),
+  `tests/stress/overnight-workload-stress.test.ts` (1000 histories) and an E2E test on the built app with the
+  fake power controller.
+- **Generalized workload lifecycle.** The supervisor drives an `AutonomousWorkload` (start, pause, resume,
+  cancel, checkpoint, deadline state, finalization, summary, recovery). Missions and Arena campaigns are two
+  implementations. Schema 5 stores the workload type with each overnight record.
+- **Defect found by the work:** after a restart the usage gate was closed for a waiting overnight campaign with
+  nothing to reopen it. Fixed (the gate is restored for a waiting mission only), with a regression test.
+- **UI review.** The open items of the first review were done, and two further independent reviews of the
+  Overnight Arena screens found no HIGH finding; their MEDIUM findings were fixed (wording that separates the
+  final action from the failsafe, authorization text that names the action and claims no consent before the
+  box is ticked, inapplicable actions hidden, layout at 1024 px, skip link, timer outside the status region).
+- **Tests corrected.** Two tests used a fixed wall-clock date and failed after 22:00 UTC; their clocks are now
+  relative. One persistence test passed for the wrong reason (two test migrations with the same version) and
+  now uses two distinct versions.
 
 0.2.1 had 80 files, 1772 tests and 10 E2E tests. The baseline of this release (commit `2b9f208`) was green.
 
@@ -117,14 +146,15 @@ is better.
 
 | | |
 |---|---|
-| Installer | `release/NEXUS-Setup-0.3.0.exe`, 207,152,853 bytes |
-| SHA-256 | `a7dd53dd86f611d1fc91cee5c2fb3e246050fad04b111b3898756e908f4bf495` |
+| Installer | `release/NEXUS-Setup-0.3.0.exe`, 207,250,922 bytes, built 2026-10-05 02:07 from `0902f0a` |
+| SHA-256 | `2d905b9e10835472a9bd79abcccb1d870fc0e47e98cbdfb86eebbd29eb38e650` |
 | Installed launch, uninstall | **NOT VERIFIED.** The installer was not executed (see the 0.2.1 report) |
 
 Verified on `release/win-unpacked/NEXUS.exe`, with real databases of 0.1 (schema 1), 0.2.0 (schema 2) and 0.2.1
-(schema 3), 17 checks each, all passed (`packaged-validation-2026-10-04T21-12-44-080Z.json`):
+(schema 3), 17 checks each, all passed (`packaged-validation-2026-10-05T01-10-11-387Z.json`; the earlier
+run on the first 0.3.0 build is `packaged-validation-2026-10-04T21-12-44-080Z.json`):
 
-- Launches as packaged 0.3.0. Schema upgraded to 4, no row lost, and the older database kept as
+- Launches as packaged 0.3.0. Schema upgraded to 5, no row lost, and the older database kept as
   `nexus.db.v<n>.bak`.
 - The old run is readable and opens in the redesigned Mission Control (strategy shown as "Not recorded").
 - Home, Missions, Arena, Policy, Usage, Overnight and Settings render.
@@ -133,7 +163,7 @@ Verified on `release/win-unpacked/NEXUS.exe`, with real databases of 0.1 (schema
 - Overnight panel renders, start disabled until authorized. No test switch works in a packaged build.
 
 A real ADAPTIVE mission on the packaged 0.3.0 build (`release/win-unpacked/NEXUS.exe`, real Claude sessions)
-completed with 15 of 15 gates: task profile, policy decision (Build, default layer), real planner, worker,
+completed with 15 of 15 gates on the first 0.3.0 build (it was not repeated on the final build): task profile, policy decision (Build, default layer), real planner, worker,
 reviewer and verifier sessions, independent test run, mission outcome and observed usage recorded, user checkout
 untouched. Evidence: `adaptive-mission-2026-10-04T21-14-53-810Z.json`.
 
@@ -189,9 +219,8 @@ Not fixed:
 - Trial repositories are removed only by `arena.cleanup`; there is no button for it yet, and the Node.js status
   (`arena.status`) is not shown before a campaign is created. A campaign without Node.js fails at start with
   the reason.
-- UI: project facts alignment and the missing-check-commands note in the composer; one status badge component
-  across all pages; per-strategy counts next to the Arena progress strip; Agents list below about 1100 px;
-  dark theme and focus rings were not re-checked after the fixes.
+- UI: project facts alignment. Dark theme and focus rings were not re-checked after the fixes. (The status
+  badge, the per-strategy counts, the Agents list below 1100 px and the composer note were done on 2026-10-04.)
 - The fix authors did not run each new regression test against the unfixed code. The auditors' own proofs are
   the evidence that the defects existed.
 
@@ -204,15 +233,15 @@ Complete light redesign: design tokens, a collapsible three-group navigation, a 
 global status, Home, Mission Control, the task inspector with seven tabs, Agents, the composer with a strategy
 selector and "what Adaptive would choose", Arena, Policy, Usage, Overnight, Activity, Settings.
 
-- 16 E2E tests on the built app with the scripted runtime; 6 are new and cover navigation, the usage states,
+- 17 E2E tests on the built app with the scripted runtime (one more than on 2026-10-04: Overnight Arena); 6 of the first 16 were new in 0.3 and cover navigation, the usage states,
   the quota banner with automatic resume for a known and an unknown reset, an ADAPTIVE mission, an Arena
   campaign created through the dialog, and the policy page.
 - 11 stored screenshots of screens that are the same on every run (first launch, empty and default states).
   They are specific to this machine's font rendering. Mission Control, the inspector, Arena results and the
   quota states are captured on every run and not compared pixel by pixel, because they show times and ids.
 - The independent review's verdict was a qualified yes: a real redesign with honest usage wording, Mission
-  Control not yet at flagship quality. Its findings were then worked through (see Audit). No second review was
-  run after the fixes.
+  Control not yet at flagship quality. Its findings were then worked through (see Audit). Two further
+  reviews covered the Overnight Arena screens (see "Changes since the PARTIAL verdict").
 
 ## Known limitations
 
@@ -221,8 +250,8 @@ selector and "what Adaptive would choose", Arena, Policy, Usage, Overnight, Acti
 - The runtime's usage report is an SDK method marked experimental. If it changes or disappears, NEXUS shows
   "not exposed by runtime" and probes with one minimal session.
 - Observed usage is what NEXUS sessions reported. Other Claude clients use the same account and are not seen.
-- Overnight Arena is not implemented. A campaign runs unattended, pauses for a usage limit, resumes and
-  proposes candidates, with no power action.
+- Overnight Arena was exercised with the fake power controller only. No real campaign ran under a real
+  shutdown timer.
 - Arena cases need Node.js 20 or newer on PATH. Repository-origin cases can be provisioned but not created
   through the UI.
 - One real campaign of six trials is not evidence about strategies. NEXUS does not claim that any strategy is
@@ -236,8 +265,8 @@ selector and "what Adaptive would choose", Arena, Policy, Usage, Overnight, Acti
 
 ## Ready to merge and tag?
 
-The branch is in a state that can be merged into `main` and tagged `v0.3.0`, with the limitations above stated
-in the README and the documents. It was not merged or tagged: that is the user's decision.
+Yes. Merged into `main` with `--no-ff` and tagged `v0.3.0` on 2026-10-05 under the release policy of the
+overnight release train (a release that passes its gate is merged and tagged; a partial one is not).
 
 ## Evidence
 
