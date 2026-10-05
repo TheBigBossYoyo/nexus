@@ -62,10 +62,11 @@ The release record is `docs/V0_2_1_RELEASE_REPORT.md`.
 | Arena | Case format with pinned definitions, 12 built-in cases with hidden evaluators, isolated trials, versioned scoring, campaigns with budgets, quota pause and restart recovery |
 | Adaptive policy | Task profiler, evidence aggregation, engine with seeded exploration, candidates, manual promotion, rollback, pin, mission outcomes, simulator |
 | UI | Light design system, new shell and navigation, Home, Mission Control, inspector, Agents, composer with strategy selector, Arena, Policy, Usage, Overnight, Activity, Settings |
+| Overnight workloads | `AutonomousWorkload` lifecycle under the overnight supervisor; missions and Arena campaigns (Overnight Arena) as workloads; migration 005 |
 | Persistence | Migration 004 (20 tables, additive); a copy of the database is kept before a schema upgrade |
-| Validation | 2338 tests, 16 E2E, 1000-seed stresses, three code audits and a UI review with fixes, real ADAPTIVE mission, real speculative task, real Arena campaign, packaged 0.3.0 verified against 0.1, 0.2.0 and 0.2.1 databases |
+| Validation | 2399 tests, 17 E2E, 1000-seed stresses, three code audits and a UI review with fixes, real ADAPTIVE mission, real speculative task, real Arena campaign, packaged 0.3.0 verified against 0.1, 0.2.0 and 0.2.1 databases |
 
-The release record is `docs/V0_3_RELEASE_REPORT.md`; the log of the work is `docs/V0_3_PROGRESS.md`.
+Released as `v0.3.0` on 2026-10-05. The release record is `docs/V0_3_RELEASE_REPORT.md`; the log of the work is `docs/V0_3_PROGRESS.md`.
 
 ## Known failures and open items (v0.1 record)
 
