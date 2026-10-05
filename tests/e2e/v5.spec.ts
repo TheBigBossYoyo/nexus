@@ -183,8 +183,8 @@ test.describe('NEXUS 0.5 workspaces', () => {
       const workspaceId = await buildWorkspace(page, f)
 
       await page.getByTestId('workspace-tab-graph').click()
-      await expect(page.getByTestId('repo-backend')).toBeVisible()
-      await expect(page.getByTestId('repo-desktop')).toBeVisible()
+      await expect(page.getByTestId('graph-node-backend')).toBeVisible()
+      await expect(page.getByTestId('graph-node-desktop')).toBeVisible()
       await screenshot(page, 'v5-workspace-graph')
       await page.getByTestId('workspace-tab-contracts').click()
       await expect(page.getByTestId('contract-capture-order')).toBeVisible()
@@ -302,7 +302,7 @@ test.describe('NEXUS 0.5 workspaces', () => {
         ['COMPLETED', 'BLOCKED', 'FAILED'],
         400_000,
       )
-      expect(ended.mission.state).toBe('BLOCKED')
+      expect(ended.mission.state, JSON.stringify({ v: ended.mission.verification, t: ended.tasks.map((t) => [t.key, t.contracts, t.summary]) })).toBe('BLOCKED')
       expect(ended.mission.blockedReason ?? '').toContain('Global verification failed')
       expect(ended.mission.verification).toMatchObject({ passed: false })
       expect(

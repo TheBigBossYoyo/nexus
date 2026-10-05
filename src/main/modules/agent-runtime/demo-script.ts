@@ -350,6 +350,17 @@ export function createDemoScript(): FakeScript {
         await ctx.completeTurn({ text: 'No plan.', structuredOutput: { summary: '' } })
         return
       }
+      // 0.5: a task of a cross-repository mission is one task here, and its worker is handed the whole task
+      // text (the contract it provides or consumes), which is what `writer` acts on.
+      const at = spec.prompt.indexOf('part of a change across several repositories')
+      if (at >= 0) {
+        const from = spec.prompt.lastIndexOf('Task "', at)
+        const to = spec.prompt.indexOf('</goal>', at)
+        const text = spec.prompt.slice(from >= 0 ? from : at, to >= 0 ? to + '</goal>'.length : undefined)
+        const change = { ...plan.tasks[0], id: 'change', title: 'Make the cross-repository change', description: text, suggestedFiles: [], acceptanceCriteria: ['The change is in this repository'] }
+        await ctx.completeTurn({ text: 'Plan ready.', structuredOutput: { ...plan, summary: 'One change in this repository.', acceptanceCriteria: ['The change is in this repository'], tasks: [change] } })
+        return
+      }
       await ctx.completeTurn({ text: 'Plan ready.', structuredOutput: plan })
     },
     worker: writer(''),
