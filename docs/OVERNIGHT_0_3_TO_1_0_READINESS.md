@@ -228,3 +228,51 @@ Written while the 0.3 stress runs; only light test runs alongside it.
    `main` and tag `v0.4.0` only on PASS.
 3. `nexus-0.5` from `main`: bring in the Workspaces work, tests, UI, real acceptance, audit.
 4. Reserve the last 45 minutes for the final report, preservation and the supervisor's `finish-now`.
+
+### 00:52 to 02:40 Release of 0.3.0; 0.4 validated except its stress; 0.5 engine, UI, tests, documents
+
+- **0.3.0 released.** The 1000-seed stress ended at 01:46 (6 files passed, 7600 s on a shared machine; it had
+  started at 23:39 on `e4253e5`). On `0902f0a` (one corrected persistence test on top of `e4253e5`): typecheck
+  and lint pass; `pnpm test` 126 files, 2399 tests; E2E 17 passed; package built
+  (`release/NEXUS-Setup-0.3.0.exe`, 207,250,922 bytes, SHA-256
+  `2d905b9e10835472a9bd79abcccb1d870fc0e47e98cbdfb86eebbd29eb38e650`); packaged validation 17 of 17 on each of
+  three older databases. Release report rewritten with the verdict PASS (real usage limit and installer
+  execution stay NOT VERIFIED). `main` = merge commit `af3e3ed`, tag `v0.3.0`.
+- **A second checkout for long runs:** `%LOCALAPPDATA%\NexusValidation`, a plain clone with its own
+  `pnpm install` (no junction). It has no Electron binary and is used for vitest only (stress, unit,
+  integration). E2E and packaging stay in the main checkout.
+- **0.4.0 candidate** (`nexus-0.4`, version 0.4.0, merged with `main`): typecheck and lint pass; `pnpm test`
+  132 files, 2497 tests, 451 s; E2E 20 passed (1 capture-only skipped); package built
+  (`release/NEXUS-Setup-0.4.0.exe`, 207,299,109 bytes, SHA-256
+  `3990d22858e55c275e8e61d57619b23e6734b68722e8c483b535c270cd91df3e`); packaged validation 18 of 18 on each of
+  three older databases (schema 6, Programs page). The 1000-seed stress started at 01:47 in the second checkout
+  on `c75b8db` and is still running. 0.4 is merged and tagged only when it has passed.
+- **0.5 (branch `nexus-0.5`):**
+  - Workspace programs (an ordered series of cross-repository missions, each building on the one before) and
+    a workspace mission as an overnight workload (`overnight.startWorkspaceMission`).
+  - Documents written by a separate agent that read the code: WORKSPACES.md, MULTI_REPO_ORCHESTRATION.md,
+    CONTRACTS.md, RELEASE_TRAINS.md. Its reading produced 16 observations. Fixed from them: a later milestone
+    that changes only consumers read the contract from the checkout instead of the earlier milestone's result
+    (regression test fails without the fix); a run created just before a crash was unknown to the mission
+    (marker, cancelled on recovery); the planner session appeared among the user's missions; Resume was
+    offered during a usage wait although the engine refuses it; cancelling a release train was unrecorded; two
+    UI hints said more than the code does. Left as documented limits: `protectedBranches` is not consulted;
+    a failed verification re-verifies the same results; cycle checks on consumers happen at mission start;
+    release versions come from the manifest facts at enrollment; no UI for workspace programs or for starting
+    a workspace mission overnight (IPC only).
+  - E2E `tests/e2e/v5.spec.ts`, 2 of 2 pass on the built app. Writing it showed that the scripted demo runtime
+    never carried a cross-repository task to its worker, so the app-level path had not been exercised before;
+    fixed in the demo script.
+- **Usage at 02:36:** five-hour window 67 percent (resets 04:10 local), seven-day 64 percent. Until 04:10 no
+  further agents and no real-Claude acceptance are started. The independent code audit and UI review of 0.5
+  and its real acceptance run are planned for after the reset.
+
+### Order of the remaining steps (as of 02:40)
+
+1. When the 0.4 stress ends: write `docs/V0_4_RELEASE_REPORT.md`, update TEST_STATUS and BUILD_PROGRESS on
+   `nexus-0.4`, merge into `main`, tag `v0.4.0` (only on PASS).
+2. 0.5: migration 007 test, full suites, stress, audit, UI review, real acceptance, release report; version
+   0.5.0; merge and tag only on PASS.
+3. 0.6 (providers), 0.7 (control plane) as far as time allows, each on its branch; partial work stays unmerged.
+4. `docs/ONE_DOT_ZERO_READINESS.md`, `docs/OVERNIGHT_FINAL_REPORT_0_3_TO_1_0.md`, preservation, then
+   `finish-now` to the shutdown supervisor. Start finalization no later than 09:45.
