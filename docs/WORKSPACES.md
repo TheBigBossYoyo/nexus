@@ -80,7 +80,7 @@ Each repository shows one of three levels in the Overview tab:
 | Level | When |
 |---|---|
 | `attention` | The repository is not allowed by the workspace policy: no mission may change it |
-| `unknown` | It is allowed but has no build command and no test command: its tasks cannot be checked, and a mission that changes it fails its global verification (see MULTI_REPO_ORCHESTRATION.md) |
+| `unknown` | It is allowed but has no build command and no test command: its tasks cannot be checked, and a mission that changes it fails its global verification, unless its role is `documentation` (see MULTI_REPO_ORCHESTRATION.md) |
 | `ok` | Enrolled, allowed, and it has at least a build or a test command |
 
 ### Services
@@ -166,7 +166,7 @@ name and a description only).
 | `protectedBranches` | `main`, `master`, `release` | Branch names, at most 20. Stored and shown for your own release process. The engine does not read it (see Limits) |
 | `maxRepositoriesPerMission` | 5 | 1 to 20. A plan may span at most this many repositories |
 | `maxTasksPerMission` | 12 | 1 to 40. A plan may have at most this many tasks |
-| `maxParallelRepositories` | 1 | 1 to 4. Tasks of different repositories with no dependency between them may run at the same time. A repository never has two tasks running |
+| `maxParallelRepositories` | 1 | 1 to 4. Tasks of different repositories with no dependency between them may run at the same time. Within one mission a repository never has two tasks running; two missions can work in the same repository at once, each on its own branches |
 | `reviewMode` | `standard` | `standard`, `dual` or `auto`. Passed to every task's run |
 | `publishing` | `never` | The only value the schema accepts. NEXUS does not publish |
 | `requireConsumerUpdateOnBreakingChange` | `true` | A breaking contract change fails the global verification when a consumer is not up to date |
@@ -262,7 +262,7 @@ Failure and resuming:
   blocked mission and the program continues. Resuming the mission itself also lets the program continue.
 - A mission that was cancelled or removed blocks the program, and the milestone's mission link is cleared.
   `workspace.resumeProgram` then starts a new mission for that milestone.
-- `workspace.cancelProgram` cancels the active milestone's mission and marks every milestone that is not
+- `workspace.cancelProgram` cancels every mission of the program that is not finished and marks every milestone that is not
   completed as cancelled. Completed milestones, their missions and their result branches stay.
 - A program is advanced after each step of its mission and by the engine's 15 second timer, so it continues
   after a restart together with its mission.

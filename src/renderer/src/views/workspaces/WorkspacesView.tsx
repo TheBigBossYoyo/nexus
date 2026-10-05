@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useWorkspaces } from '../../lib/queries-v5'
 import { useUiStore } from '../../store/ui'
-import { ArrowRightIcon, Button, Card, EmptyState, PageHeader, PlusIcon, WorkspacesIcon } from '../../components/ui'
+import {
+  ArrowRightIcon,
+  Button,
+  Card,
+  EmptyState,
+  PageHeader,
+  PlusIcon,
+  WorkspacesIcon,
+} from '../../components/ui'
 import { BlockSkeleton, ReadError } from '../usage/shared'
 import { NewWorkspaceDialog } from './NewWorkspaceDialog'
 import { WorkspacePage } from './WorkspacePage'
@@ -34,7 +42,13 @@ export function WorkspacesView() {
         title="Workspaces"
         context="Workspace"
         actions={
-          <Button size="sm" variant="primary" icon={<PlusIcon size={12} />} onClick={() => setDialog(true)} data-testid="workspaces-new">
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<PlusIcon size={12} />}
+            onClick={() => setDialog(true)}
+            data-testid="workspaces-new"
+          >
             New workspace
           </Button>
         }
@@ -45,7 +59,11 @@ export function WorkspacesView() {
             <BlockSkeleton rows={4} testId="workspaces-loading" />
           ) : workspaces.isError ? (
             <div data-testid="workspaces-error">
-              <ReadError error={workspaces.error} calm="Workspaces are not available in this build yet." onRetry={() => void workspaces.refetch()} />
+              <ReadError
+                error={workspaces.error}
+                calm="Workspaces are not available in this build yet."
+                onRetry={() => void workspaces.refetch()}
+              />
             </div>
           ) : rows.length === 0 ? (
             <Card>
@@ -54,13 +72,20 @@ export function WorkspacesView() {
                 title="No workspaces yet"
                 data-testid="workspaces-empty"
                 action={
-                  <Button variant="primary" icon={<PlusIcon size={12} />} onClick={() => setDialog(true)} data-testid="workspaces-new-empty">
+                  <Button
+                    variant="primary"
+                    icon={<PlusIcon size={12} />}
+                    onClick={() => setDialog(true)}
+                    data-testid="workspaces-new-empty"
+                  >
                     New workspace
                   </Button>
                 }
               >
-                A workspace is a set of related Git repositories that one goal can change together, such as a shared library, its backend, its apps and its documentation. NEXUS keeps track of how they depend on
-                each other, plans the work in the right order, and checks the repositories together before anything is released.
+                A workspace is a set of related Git repositories that one goal can change together,
+                such as a shared library, its backend, its apps and its documentation. NEXUS keeps
+                track of how they depend on each other, plans the work in the right order, and
+                checks the repositories together before anything is released.
               </EmptyState>
             </Card>
           ) : (
@@ -80,9 +105,18 @@ export function WorkspacesView() {
                       className="flex w-full items-start gap-3 rounded-lg border bg-surface px-4 py-3 text-left transition-colors hover:bg-surface-muted"
                     >
                       <div className="min-w-0 flex-1">
-                        <span className="block min-w-0 truncate text-heading font-semibold">{r.workspace.name}</span>
-                        {r.workspace.description ? <p className="m-0 mt-0.5 line-clamp-2 text-text-secondary">{r.workspace.description}</p> : null}
-                        <dl className="m-0 mt-2 flex flex-wrap gap-x-5 gap-y-1 text-small text-text-secondary" title={workspaceCountsText(r)}>
+                        <span className="block min-w-0 truncate text-heading font-semibold">
+                          {r.workspace.name}
+                        </span>
+                        {r.workspace.description ? (
+                          <p className="m-0 mt-0.5 line-clamp-2 text-text-secondary">
+                            {r.workspace.description}
+                          </p>
+                        ) : null}
+                        <dl
+                          className="m-0 mt-2 flex flex-wrap gap-x-5 gap-y-1 text-small text-text-secondary"
+                          title={workspaceCountsText(r)}
+                        >
                           <div className="flex gap-1">
                             <dt className="text-text-muted">Repositories</dt>
                             <dd className="tnum m-0">{r.repositories}</dd>
@@ -106,7 +140,11 @@ export function WorkspacesView() {
           )}
         </div>
       </div>
-      <NewWorkspaceDialog open={dialog} onClose={() => setDialog(false)} onCreated={setWorkspaceId} />
+      <NewWorkspaceDialog
+        open={dialog}
+        onClose={() => setDialog(false)}
+        onCreated={setWorkspaceId}
+      />
     </div>
   )
 }

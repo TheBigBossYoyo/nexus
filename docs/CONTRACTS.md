@@ -78,8 +78,9 @@ hash.
 A consumer is an enrolled repository that uses the contract. `workspace.addConsumer` (Contracts tab) takes the
 repository and an optional copy path.
 
-- The copy path is where the consumer keeps its own copy of the contract: a vendored schema, a generated client
-  or its source. Same path rules as above. The file does not have to exist when you declare it.
+- The copy path is where the consumer keeps its own copy of the contract file: a vendored schema. The copy is
+  compared with the contract as a whole file (line endings aside), so a file that is derived from the contract
+  but not equal to it, such as a generated client, is not a copy in this sense and would never be in step.
 - The provider cannot be a consumer, and a repository is a consumer of a contract once.
 - Declaring a consumer also adds an edge from the consumer to the provider to the organization graph, with
   the source `contract` (WORKSPACES.md).
@@ -103,7 +104,7 @@ When a version is recorded:
 | `workspace.captureContract` (the Capture button) | The file at `HEAD` of the provider. This records the committed content whatever produced it; it is not a check |
 | A cross-repository mission passes global verification | The file at the provider's result commit of that mission, when its comparison was not `identical` |
 
-A version is read from Git (`git show <commit>:<path>`, at most 4 MB), so it is the committed content, never
+A version is read from Git (`git show <commit>:<path>`; a file larger than 4 MB is refused, never cut), so it is the committed content, never
 the working tree. A version recorded by a mission is recorded only for verified work: a mission that fails
 verification, or is cancelled, records none (`tests/stress/workspace-stress.test.ts` checks that no version
 beyond the first exists for a mission that did not complete). `nextContractVersion` in `src/shared/workspace.ts`
@@ -240,3 +241,24 @@ comparison.
   `tests/scenarios/v5-workspace.test.ts` (a contract changed in a provider and copied by two consumers, on the
   real orchestrator). Extraction is tested on small samples of each kind; large real-world files in each
   format were not part of the tests.
+
+## Limits found by the audit of 0.5
+
+- A contract whose content before the mission cannot be read (a Git failure, not a missing file) is compared as
+  `unknown`, which the consumer rule treats like a breaking change. Only a file that was really absent at the
+  mission's base is "new".
+- TypeScript: a type alias whose object body spans several lines (`export type Order = {` ... `}`) is read as
+  one element without its fields, so a field removed or retyped inside it is not seen. Object-literal return
+  types and class methods without a return annotation are not read. Use interfaces for contract types, or do
+  not rely on `compatible` for such files.
+- Protobuf: the body of a `service` is read up to its first closing brace. An `rpc` with an options block hides
+  the `rpc`s after it, in both versions, so removing one of those is not seen.
+- A `typescript_api`, `protobuf` or `database_schema` contract larger than 512 KB is not read (parse error,
+  `unknown`). The readers are linear in the size of the file.
+- For `json_schema`, `event_schema`, `protobuf` and `database_schema` every element counts as something the
+  provider sends. A new required property, field or NOT NULL column is therefore `compatible`, although a
+  consumer that produces such data is broken by it. In the real acceptance run of 0.5 a new required property
+  `currency` was classified `compatible` for exactly this reason; both consumers were adapted because the plan
+  said so, not because the classification demanded it.
+- A consumer without a copy path counts as in step with a breaking change as soon as a task completed in it
+  with a result. NEXUS does not check what that task changed.

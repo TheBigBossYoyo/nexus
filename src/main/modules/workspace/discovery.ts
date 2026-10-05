@@ -24,7 +24,7 @@ export interface ManifestInfo {
   dependencies: ManifestDependency[]
 }
 
-const MAX_MANIFEST_BYTES = 2_000_000
+const MAX_MANIFEST_BYTES = 256_000
 
 function readText(path: string): string | null {
   try {

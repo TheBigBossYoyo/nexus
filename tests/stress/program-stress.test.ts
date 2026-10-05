@@ -238,7 +238,7 @@ async function runSeed(seed: number): Promise<void> {
   const fail = (message: string): never => {
     const p = world.repos.programs.get(world.programId)
     throw new Error(
-      `seed ${seed}: ${message}\n  ops: ${log.join(' | ')}\n  program: ${JSON.stringify(p ? { state: p.state, pause: p.pauseReason, blocked: p.blockedReason, run: p.currentRunKind, missions: p.missions, replans: p.replans, plan: p.planVersion } : null)}\n  milestones: ${world.repos.milestones.listByProgram(world.programId).map((m) => `${m.key}:${m.state}:${m.attempts}`).join(', ')}\n  runs: ${world.created.map((c) => `${c.kind}:${world.repos.runs.require(c.run.id).state}`).join(', ')}`,
+      `seed ${seed}: ${message}\n  decisions (newest first): ${world.repos.programDecisions.listByProgram(world.programId).slice(-16).map((d) => d.kind + ': ' + d.summary.slice(0, 110)).join(' || ')}\n  ops: ${log.join(' | ')}\n  program: ${JSON.stringify(p ? { state: p.state, pause: p.pauseReason, blocked: p.blockedReason, run: p.currentRunKind, missions: p.missions, replans: p.replans, plan: p.planVersion } : null)}\n  milestones: ${world.repos.milestones.listByProgram(world.programId).map((m) => `${m.key}:${m.state}:${m.attempts}`).join(', ')}\n  runs: ${world.created.map((c) => `${c.kind}:${world.repos.runs.require(c.run.id).state}`).join(', ')}`,
     )
   }
 
@@ -450,5 +450,11 @@ describe('program engine stress', () => {
       }
     }
     expect(failures, failures.join('\n\n')).toEqual([])
+  })
+
+  // Seeds that once failed, whatever range is selected. 1552: a milestone whose result was built on an older
+  // state of the program branch was verified, accepted, refused by the branch and blocked again on every resume.
+  it.each([1552])('keeps its invariants on seed %i, which once failed', async (seed) => {
+    await runSeed(seed)
   })
 })

@@ -78,6 +78,12 @@ class World {
                 if (content === undefined) throw new Error('no such path')
                 return { exitCode: 0, stdout: content, stderr: '', output: content }
               }
+              if (args[0] === 'cat-file' && args[1] === '-e') {
+                // As git does: exit 0 when the commit has the path, 128 with a message when it has not.
+                const [commit, ...rest] = (args[2] ?? '').split(':')
+                const exists = this.commits.get(root)?.get(commit ?? '')?.[rest.join(':')] !== undefined
+                return { exitCode: exists ? 0 : 128, stdout: '', stderr: exists ? '' : `fatal: path '${rest.join(':')}' does not exist in '${commit}'`, output: '' }
+              }
               throw new Error(`git ${args[0]} is not available in the stress`)
             }
           default:

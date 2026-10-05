@@ -53,7 +53,7 @@ describe('v0.5 workspace mission on the real orchestrator', () => {
 
   it('changes a shared contract, its provider and two consumers in dependency order, verifies the whole, and leaves every checkout untouched', async () => {
     h = await createHarness({ script: createDemoScript() })
-    const pkg = (name: string, version: string, dependencies: Record<string, string> = {}): string => `${JSON.stringify({ name, version, dependencies }, null, 2)}\n`
+    const pkg = (name: string, version: string, dependencies: Record<string, string> = {}): string => `${JSON.stringify({ name, version, scripts: { test: 'node --version' }, dependencies }, null, 2)}\n`
     const sdk = await repository('shared-sdk', { 'package.json': pkg('@acme/sdk', '2.2.9'), 'contracts/order.schema.json': schema })
     const backend = await repository('backend', { 'package.json': pkg('backend', '1.8.4', { '@acme/sdk': '^2.2.0' }), 'contracts/order.schema.json': schema })
     const desktop = await repository('desktop', { 'package.json': pkg('desktop', '0.7.3', { backend: '^1.8.0' }), 'vendor/order.schema.json': schema })

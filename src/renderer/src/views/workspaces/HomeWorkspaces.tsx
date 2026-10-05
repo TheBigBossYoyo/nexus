@@ -33,7 +33,8 @@ export function HomeWorkspaces() {
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{r.workspace.name}</div>
                 <div className="truncate text-small text-text-muted">
-                  {plural(r.activeMissions, 'active mission')} across {plural(r.repositories, 'repository', 'repositories')}
+                  {plural(r.activeMissions, 'active mission')} across{' '}
+                  {plural(r.repositories, 'repository', 'repositories')}
                 </div>
               </div>
               <ArrowRightIcon size={14} className="shrink-0 text-text-muted" />

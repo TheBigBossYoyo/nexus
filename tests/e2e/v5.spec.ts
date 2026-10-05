@@ -18,7 +18,7 @@ function repository(name: string, files: Record<string, string>): string {
   git(root, 'config', 'user.email', 'e2e@example.invalid')
   git(root, 'config', 'commit.gpgsign', 'false')
   for (const [path, content] of Object.entries({
-    'package.json': `${JSON.stringify({ name, version: '1.0.0' }, null, 2)}\n`,
+    'package.json': `${JSON.stringify({ name, version: '1.0.0', scripts: { test: 'node --version' } }, null, 2)}\n`,
     'README.md': `# ${name}\n`,
     ...files,
   })) {

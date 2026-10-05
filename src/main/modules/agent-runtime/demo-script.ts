@@ -101,10 +101,10 @@ export function createDemoScript(): FakeScript {
           }
           await write(provided, next)
         }
-        for (const m of spec.prompt.matchAll(/<(contract_[a-z0-9_]+)>\n([\s\S]*?)\n<\/\1>\nThis repository keeps its own copy of the contract at (\S+?)\. /g)) {
+        for (const m of spec.prompt.matchAll(/BEGIN CONTRACT ([0-9a-f]+)\n([\s\S]*?)\nEND CONTRACT \1\nThis repository keeps its own copy of the contract at (\S+?)\. /g)) {
           // `[demo:skip-consumer]` in the goal leaves the copies as they are (a consumer left behind).
           if (spec.prompt.includes('[demo:skip-consumer]')) continue
-          await write(m[3] ?? 'contract.copy', `${(m[2] ?? '').replace(/&lt;/g, '<')}`)
+          await write(m[3] ?? 'contract.copy', `${m[2] ?? ''}\n`)
         }
         await write(`change-${Date.now().toString(36)}.txt`, 'cross-repository change\n')
         await ctx.sleep(200)
