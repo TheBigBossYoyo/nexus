@@ -304,25 +304,216 @@ Found by an adversarial review of the boundaries and fixed, each with a test tha
 
 Open findings of the same review, by severity:
 
-- HIGH, by design: a writing agent can write a script and run it, and the script is not inspected. Through it
-  an agent can do what the user can do, including `shutdown` and `shutdown /a`. See "No OS sandbox" below. The
-  statement "an agent cannot trigger or cancel the overnight shutdown" holds against commands the classifier
-  recognises, not against an agent that hides them in a file.
+- HIGH, narrowed in 0.7: a writing agent can write a script and run it, and the script was not inspected.
+  0.7 inspects scripts, inline code, encoded PowerShell and package scripts and refuses power commands in them
+  (see "0.7: execution security"). It remains true that code NEXUS cannot read (a compiled binary, a command
+  built at run time, a test file a test runner executes) can do what the user can do, including `shutdown` and
+  `shutdown /a`. See "Not a full OS sandbox".
 - MEDIUM: `git branch -f`, `git tag -f` and `git update-ref` on refs outside `nexus/` do not ask; agent-written
   text is rendered into other agents' prompts under headings without a fence (message types cannot be forged);
   with "respect the project's Claude configuration" on, a repository's `.claude/settings.json` can carry hooks;
   overnight approves plan and graph changes by default; a trial's code can read the hidden evaluator at
   evaluation time; bare `git` is resolved by the system's search.
 
+## 0.7: execution security (trust, provenance, interpreters, package scripts)
+
+Before 0.7 the classifier saw only the first word of `powershell foo.ps1`, `python foo.py`, `node foo.js` or
+`pnpm test`. An agent could write a file and run it. 0.7 looks through the interpreter at what will run and
+judges that. This is static inspection, a defence layer: it makes the obvious and the careless visible and
+gateable. It is not a sandbox, and nothing below should be read as one (see "Not a full OS sandbox").
+
+The code is in `src/main/modules/policies/`: `execution-policy.ts` (the decision), `interpreters.ts`,
+`package-scripts.ts`, `content-inspector.ts`, `provenance.ts`, `capabilities.ts`, `security-log.ts`; shared
+vocabulary in `src/shared/security.ts`. It runs inside `createAuthorizer` after the 0.2 command classifier and
+can only make a decision stricter, never weaker.
+
+### Trust model
+
+Every judged thing gets one of five classifications (shown in the decision log):
+
+| Classification | Meaning |
+|---|---|
+| `TRUSTED_NEXUS_INTERNAL` | NEXUS's own commands (its git calls, its verification runner). They do not pass through the agent authorizer. |
+| `TRUSTED_PROJECT_COMMAND` | A command you configured: a run check command, a "safe command prefix", a project script in the profile, as long as the script text is unchanged from the base commit. |
+| `UNTRUSTED_AGENT_AUTHORED` | A file, script body or inline code an agent wrote or changed. |
+| `UNTRUSTED_REPOSITORY_CODE` | Code in the repository's base commit, unchanged. Written by someone else; inspected like everything else, but not assumed hostile. |
+| `SYSTEM_SENSITIVE` | Touches the machine or NEXUS: power, registry, services, scheduled tasks, credentials, security tooling, NEXUS's database. |
+
+### Execution provenance
+
+A file counts as agent-authored when either source says so:
+
+1. **Recorded writes.** `Write`, `Edit` and `NotebookEdit` calls, and the targets of shell redirections and the
+   common file-writing commands (`Out-File`, `Set-Content`, `Add-Content`, `tee`, `New-Item`, `cp`, `mv` ...) that
+   the classifier sees. Each record keeps path, sha256 (when the content was known), creating and modifying agent,
+   task, run, time, worktree and trust. They are kept in memory and in the `file_provenance` table, so they
+   survive a restart.
+2. **Difference from the run's base commit.** The file is compared with `git show <base>:<path>` (line endings
+   normalised). New or different means agent-authored or agent-modified. This survives restarts and also catches
+   files that a program an agent ran produced, which no tool call announced. The comparison is against the
+   run's base commit, not the task worktree's, so what an earlier task merged is still "changed by an agent".
+   `node_modules` is treated as installed dependency code unless a write there was recorded.
+
+A tool call's record is made when the call is authorised, before it runs.
+
+### Interpreter policy
+
+Interpreters are recognised by resolved executable name, so `.exe` suffixes, full paths and case do not matter:
+`powershell`, `pwsh`, `cmd`, `python`, `python3`, `python3.x`, `py`, `node`, `bash`, `sh` (and zsh, dash, ksh,
+fish), `wscript`, `cscript`, `mshta`, `deno`, `bun`, `tsx`, `ts-node`, `ruby`, `perl`, `php`. A script run
+directly (`.\build.cmd`, `./run.sh`, `tools\gen.ps1`), `source x.sh`, `Import-Module x.psm1`, `Start-Process
+powershell -ArgumentList '-File','x.ps1'`, `cd dir && node x.js`, `npx tsx x.ts` and `node -r ./pre.js x.js`
+are resolved the same way.
+
+| What is run | STANDARD | RESTRICTED |
+|---|---|---|
+| Version probe, interactive start, `python -m pytest` and the like | allowed | allowed |
+| A script unchanged from the base commit, clean | allowed (not logged) | allowed |
+| A script an agent wrote or changed, clean | `ALLOW_WITH_AUDIT` (allowed, logged) | `REQUIRE_APPROVAL` |
+| Any script containing a finding below | per finding | per finding (dangerous ones become `DENY`) |
+| Inline code (`python -c`, `node -e`, `deno eval`, `perl -e` ...) | inspected; clean is `ALLOW_WITH_AUDIT`; one that starts processes needs approval | `DENY` |
+| `powershell -Command`, `cmd /c`, `/k`, `bash -c` payload | its commands are judged as if typed directly | `DENY` |
+| `-EncodedCommand` | decoded (UTF-16LE base64) and inspected; power inside is `DENY`; otherwise always approval | `DENY` |
+| A binary or compiled program an agent produced | approval (cannot be inspected) | approval |
+| A script outside the worktree, a path computed at run time, `wscript`/`mshta` | approval | approval |
+
+The table is the 0.7 layer's own result. The 0.2 classifier still asks first when a shell is started on a script
+file (`powershell -File x.ps1`, `bash x.sh`), whatever the file contains; the stricter of the two wins.
+
+Libraries a script loads are followed one level at a time (relative `require`/`import`, Python sibling imports,
+dot-sourced PowerShell, other scripts a shell script calls, up to 40 files): an unchanged entry point that loads
+an agent-written module is judged by that module.
+
+### Package-manager indirection
+
+For `npm`, `pnpm`, `yarn`, `bun` run and the lifecycle (`test`, `start`, `install`/`ci`/`add` and their
+`pre`/`post` hooks, `preinstall`, `install`, `postinstall`, `prepare` ...), `npx`, `pnpm exec`/`dlx`, `npm
+create`: the script text is read from `package.json` (in the working directory, `--prefix`/`--dir`, or every
+workspace package for `-r`/`--filter`), compared with the base commit's `package.json` script by script (the one
+named and its hooks), and the body is judged recursively. The body may call an interpreter, a script file or
+another package script. An unchanged project script stays usable; a changed one is `ALLOW_WITH_AUDIT` when
+clean (`REQUIRE_APPROVAL` in RESTRICTED) and is refused or put to you when it contains a finding. A package that
+is not installed locally and would be downloaded (`npx x`, `dlx`, `create`) needs approval; known developer tools
+(vitest, tsc, eslint, ...) do not.
+
+### What inspection looks for
+
+| Finding | Result |
+|---|---|
+| Power: `shutdown`, `Stop-Computer`, `Restart-Computer`, `ExitWindowsEx`, `InitiateSystemShutdown`, `rundll32 powrprof`, `psshutdown`, `wmic os ... shutdown`, `logoff`, `systemctl poweroff`, a power word next to a process-starting API, in any wrapper or after quote/caret splitting | `DENY`, in both profiles, never approvable |
+| Security tooling (`Set-MpPreference`, `netsh advfirewall`, `bcdedit`, `Set-ExecutionPolicy`), Claude credential stores, NEXUS's database or key files | `DENY` |
+| Registry writes, services (`sc`, `New-Service`), scheduled tasks (`schtasks`, `Register-ScheduledTask`), `setx` and machine/user environment changes, system package installs (`winget`, `choco`, `msiexec`, `npm -g`) | approval (RESTRICTED: `DENY`) |
+| Credential locations (`.ssh`, `.aws`, `cmdkey`, `vaultcmd`, Credential Manager, browser profiles) | approval |
+| Destructive filesystem (`rm -rf /`, `Remove-Item -Recurse` on a root or home, `format`, `diskpart`) | approval |
+| Download and execute (`iwr \| iex`, `curl \| sh`) | approval |
+| Encoded or assembled commands (`-EncodedCommand`, `$env:x + ...`, `%a%%b%`, `& ($a+$b)`, decode-then-eval) | approval |
+| Starting processes (`child_process`, `subprocess`, `os.system`, `Start-Process`, `Invoke-Expression`, `WScript.Shell`), nested shells, network calls | logged; approval for inline code; RESTRICTED turns network use into `DENY` unless web tools are allowed |
+
+`shutdown` as an identifier in program code (`gracefulShutdown()`, `server.shutdown()`) is not a power command.
+
+### The power boundary
+
+Agents never control the operating system's power state. Direct commands, wrappers and the obvious script
+wrappers above are `DENY` with no approval path. Only `WindowsPowerController` does power, and the Overnight
+supervisor is its only caller in the main process (plus the runtime process's composition code). A test scans the
+agent path (`policies`, `agent-runtime`, `orchestrator`, `providers`, `context`, `git`, ...) and the IPC handlers
+and fails if any imports the power controller. This is a boundary in NEXUS's code. It does not stop a program an
+agent runs from calling `shutdown.exe` by a route NEXUS did not see (next section).
+
+### Capabilities
+
+`READ_PROJECT`, `WRITE_WORKTREE`, `GIT_LOCAL`, `RUN_TESTS`, `RUN_BUILD`, `NETWORK`, `PACKAGE_INSTALL`,
+`INTERPRETER_EXEC`, `SYSTEM_CHANGE`.
+
+| Role | Capabilities |
+|---|---|
+| `worker`, `debugger` | all but `SYSTEM_CHANGE` (`NETWORK` is withdrawn in RESTRICTED unless web tools are allowed) |
+| `reviewer`, `verifier` | `READ_PROJECT`, `RUN_TESTS`, `RUN_BUILD`, `PACKAGE_INSTALL`, `INTERPRETER_EXEC`; no `WRITE_WORKTREE`, so agent-authored scripts need approval for them even when clean |
+| `planner`, `architect`, `researcher`, `security_reviewer` | `READ_PROJECT` (plus `NETWORK` when web tools are allowed); no interpreter runs |
+
+`SYSTEM_CHANGE` is granted to no role. The decision consults the set: a role without `INTERPRETER_EXEC` cannot
+run an interpreter, one without `PACKAGE_INSTALL` cannot install, one without `NETWORK` cannot fetch a package.
+
+### Execution profile (Settings, Execution)
+
+`settings.execution.profile`, `STANDARD` (default) or `RESTRICTED`. Old stored settings read as `STANDARD`.
+
+- **STANDARD** keeps developer flows: project tests and builds run, unchanged scripts run, the hardening and the
+  audit trail above apply.
+- **RESTRICTED** refuses inline interpreter code and nested-shell payloads, requires approval for any script an
+  agent wrote and for any package script an agent changed (and refuses dangerous ones), refuses network use unless
+  web tools are allowed, asks before every install, reads only the worktree (and read roots you added; the project
+  root is left out), and asks when a package script cannot be compared with the base commit.
+
+Neither profile is a sandbox. RESTRICTED makes NEXUS ask more and refuse more of what it can see; it does not
+stop a program from doing what the program does.
+
+### Filesystem boundary (0.7 additions)
+
+Paths are compared canonically (resolved through links and 8.3 names, case-insensitively), never by string
+prefix. New in 0.7: drive-relative paths (`C:foo`) and Windows device names (`CON`, `NUL`, `COM1`, `aux.txt`)
+are refused; and a shell word that is relative and has no `..` but resolves outside the worktree through an
+existing junction or symlink (`cat link\secret.txt`) now asks, where it used to pass. Covered by tests with real
+junctions: `..` traversal, junction and symlink escape, UNC (`\\server\share`, `\\?\UNC\`), device (`\\.\`),
+extended-length (`\\?\C:\`) spellings, alternate data streams (`file::$DATA`, `file:stream`,
+`.git::$INDEX_ALLOCATION`), alternate casing, trailing dots and spaces, 8.3 short names (`GIT~1`), a sibling
+directory that shares a name prefix, `.git` pointer rewriting and nested-repository metadata. `src\..\x` is
+resolved lexically, as Windows does. A link that is created or retargeted after the check is not seen (see below).
+
+### The security decision log
+
+Every refusal, approval request and `ALLOW_WITH_AUDIT` is written to `security_decisions` (migration 011):
+timestamp, run, task, agent, a redacted one-line action (the same summary the activity feed uses, with values
+after secret-looking names, bearer tokens, URL credentials and long opaque strings replaced), classification,
+provenance, decision, reason and the policy version. A plain allow of a read-only call is not stored. The log is
+bounded: every 25 inserts the run's rows beyond 2,000 and the table's rows beyond 20,000 are pruned, oldest
+first. The renderer reads it through the read-only `security.decisions` channel (optional run id, limit at most
+200, cursor) and shows it in the "Why was this blocked?" panel. An approval request is logged as
+`REQUIRE_APPROVAL`; whether you then approved is in the approval record, not here.
+
+### Not a full OS sandbox
+
+Can arbitrary agent-authored code still execute a child process outside NEXUS's semantic understanding? **Yes.**
+NEXUS reads text and compares it with patterns. Anything that does not reveal itself to that reading runs as
+your user with your rights. In particular:
+
+- **A compiled or downloaded binary.** An agent can build `tool.exe` (or `go build`, `cargo build`, `dotnet
+  build`) and run it. NEXUS asks about a binary that is new since the base commit, but cannot see what it does,
+  and a build step that produces and runs it inside one command is a build, which the project's own scripts do.
+- **A dynamically built command.** Code that assembles the command from pieces, reads it from a file, an
+  environment variable, a network response or a database, or applies a transformation NEXUS does not know,
+  passes the pattern checks. Decode-then-eval and variable-name tricks are flagged where the pattern is
+  recognisable; a transformation NEXUS has not seen is not.
+- **A test file the legitimate test runner executes.** `pnpm test` is allowed because the project's test script is
+  unchanged, but `vitest`, `pytest` and `jest` execute whatever test files are in the tree, including ones an
+  agent just wrote, and a test may spawn any process. NEXUS does not read test files. The same holds for build
+  configuration (`vite.config.ts`, `jest.config.js`, `conftest.py`, `setup.py`, `build.rs`, `.csproj` targets),
+  git hooks, `node_modules` lifecycle scripts of dependencies, native module builds and anything a plugin loads.
+- **Modules a script imports that are not relative files**, installed packages an agent modified, `PYTHONPATH`
+  and loader hooks.
+- **Check then use.** A script is read when the call is authorised and run afterwards. A file or link changed in
+  between (by another process, or by a command that runs first in the same line) is not seen. A script created
+  by an earlier command in the same line that NEXUS cannot see being created (a `git checkout` of another
+  branch, an archive extraction) is put to you for approval only when the line has several parts.
+- **Program text in languages NEXUS does not read for commands** (the content patterns are language-neutral, but
+  Go, Rust, Java, C# and shell-less scripting hosts are covered by the process-start patterns only).
+- **Anything you approve.** An approved call runs with no further inspection.
+
+The controls that are not static inspection: the folder confinement of the file tools (canonical paths), the
+refusal to let any agent path reach power control, your approval gate, and the separation of NEXUS's own git
+calls from repository configuration. The real fix is an operating-system boundary (a restricted token,
+AppContainer, job object, VM or container); NEXUS does not provide one.
+
 ## Known gaps
 
 - **No OS sandbox.** Native Windows has none for this design. Agents and everything they launch run as
   your user. A forbidden or gated command is stopped by the classifier, not by the OS.
-- **The classifier is heuristic.** It cannot see inside inline interpreter code (`python -c`, `node -e`),
-  script files or programs an agent writes and then runs, nor what a build tool or test runner does. For the
-  `worker` and `debugger` roles such commands are not approval-gated, and a program run this way can read
-  or write anywhere your user can. Restricted roles are denied commands that are not recognised as
-  read-only, verification or install.
+- **The classifier and the 0.7 inspection are heuristic.** Since 0.7 inline interpreter code, script files an
+  agent wrote or changed and package scripts are inspected (see "0.7: execution security"); a clean agent-written
+  script is allowed with an audit entry in STANDARD, and a program run this way can read or write anywhere your
+  user can. They cannot see compiled programs, commands built at run time, or what a build tool or test runner
+  does with files in the tree. Restricted roles are denied commands that are not recognised as read-only,
+  verification or install.
 - **Writes are only controlled for the file tools.** `Edit` and `Write` are confined to the worktree;
   shell commands rely on the classifier's path checks.
 - **NEXUS-run commands skip the policy engine.** The dependency install in new worktrees and the project's

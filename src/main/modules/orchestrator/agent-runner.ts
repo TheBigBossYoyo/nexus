@@ -37,6 +37,8 @@ import {
 import {
   createAuthorizer,
   describeToolRequest,
+  gitBaseReader,
+  ProvenanceTracker,
   summarizeToolInput,
   toolsForRole,
 } from '@main/modules/policies'
@@ -185,6 +187,13 @@ export class AgentRunner {
     private readonly graph: GraphService,
     private readonly routing: ModelRoutingService,
   ) {}
+
+  /** Which files agents wrote, shared by every agent this runner starts (persisted when the repository exists). */
+  private provenanceTracker: ProvenanceTracker | undefined
+  private get provenance(): ProvenanceTracker {
+    this.provenanceTracker ??= new ProvenanceTracker(this.deps.repos.fileProvenance)
+    return this.provenanceTracker
+  }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const { repos, bus } = this.deps
@@ -361,6 +370,17 @@ export class AgentRunner {
       ],
       allowNetworkTools,
       allowedMcpServers: servers.map((s) => s.name),
+      execution: {
+        profile: settings.execution.profile,
+        provenance: this.provenance,
+        // The run's base commit: everything agents produced in this run, including earlier tasks, differs from it.
+        base: run.baseCommit
+          ? gitBaseReader((cwd, args) => this.deps.git.run(cwd, args, { okCodes: [0, 1, 128], timeoutMs: 15_000 }), input.worktreeRoot, run.baseCommit)
+          : undefined,
+        decisions: repos.securityDecisions,
+        runId: run.id,
+        taskId: task?.id ?? null,
+      },
     })
 
     const nexusTools: NexusToolHandlers = {

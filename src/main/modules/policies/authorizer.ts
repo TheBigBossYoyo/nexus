@@ -1,9 +1,16 @@
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
+import { newId, nowIso } from '@shared/ids'
+import { SECURITY_POLICY_VERSION, type ExecutionDecision, type ExecutionProfile, type ProvenanceKind, type TrustClass } from '@shared/security'
 import type { ToolDecision, ToolRequest } from '@main/modules/agent-runtime/types'
+import { capabilitiesForRole } from './capabilities'
 import { classifyCommand } from './command-classifier'
 import type { SegmentKind } from './command-classifier'
+import { collectWriteTargets, evaluateExecution, type ExecutionEnv } from './execution-policy'
 import { canonicalizePath, isInsideGitDir, isPathInside, isSecretPath } from './paths'
+import type { BaseFileReader, ProvenanceTracker } from './provenance'
+import { actionSummary, type SecurityDecisionSink } from './security-log'
+import { tokenize } from './shell-tokenizer'
 import { isInspectionOnlyRole, isWritingRole, toolsForRole } from './tools'
 
 export interface PolicyContext {
@@ -19,6 +26,33 @@ export interface PolicyContext {
   allowedMcpTools?: string[]
   /** Whole MCP servers (the `<server>` part) permitted. */
   allowedMcpServers?: string[]
+  /** 0.7 execution security: profile, provenance, the base commit reader and the decision log. All optional. */
+  execution?: ExecutionContext
+}
+
+export interface ExecutionContext {
+  /** Default STANDARD. Neither profile is an operating-system sandbox. */
+  profile?: ExecutionProfile
+  /** Shared across the authorizers of one process so that a file one agent wrote is known to the next one. */
+  provenance?: ProvenanceTracker
+  /** Reads files as they are in the worktree's base commit; without it only recorded writes identify agent-authored files. */
+  base?: BaseFileReader
+  /** Receives every deny, approval-required and audited decision. */
+  decisions?: SecurityDecisionSink
+  runId?: string | null
+  taskId?: string | null
+}
+
+/** Why a call was decided the way it was, for the decision log. Plain allows carry none. */
+interface AuditInfo {
+  classification: TrustClass
+  provenance: ProvenanceKind
+  decision: ExecutionDecision
+  reason: string
+}
+interface Outcome {
+  tool: ToolDecision
+  audit?: AuditInfo
 }
 
 type Risk = 'low' | 'medium' | 'high'
@@ -142,6 +176,9 @@ export function isPrivateHost(hostname: string): boolean {
 export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Promise<ToolDecision> {
   const tools = new Set(toolsForRole(ctx.role, { allowNetworkTools: ctx.allowNetworkTools }))
   const writing = isWritingRole(ctx.role)
+  const profile: ExecutionProfile = ctx.execution?.profile ?? 'STANDARD'
+  const restrictedProfile = profile === 'RESTRICTED'
+  const caps = capabilitiesForRole(ctx.role, { allowNetworkTools: ctx.allowNetworkTools, profile })
   const toRoot = (r: string): string => {
     try {
       return canonicalizePath(r, r)
@@ -151,8 +188,10 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
   }
   const worktree = toRoot(ctx.worktreeRoot)
   const project = toRoot(ctx.projectRoot)
-  const readRoots = [worktree, project, ...(ctx.extraReadRoots ?? []).map(toRoot)]
-  const shellRoots = writing ? [ctx.worktreeRoot] : [ctx.worktreeRoot, ctx.projectRoot, ...(ctx.extraReadRoots ?? [])]
+  // RESTRICTED keeps reads to the worktree (and read roots the user added); the project root is left out.
+  const readRoots = restrictedProfile ? [worktree, ...(ctx.extraReadRoots ?? []).map(toRoot)] : [worktree, project, ...(ctx.extraReadRoots ?? []).map(toRoot)]
+  const shellRoots = writing ? [ctx.worktreeRoot] : restrictedProfile ? [ctx.worktreeRoot, ...(ctx.extraReadRoots ?? [])] : [ctx.worktreeRoot, ctx.projectRoot, ...(ctx.extraReadRoots ?? [])]
+  const safePrefixes = ctx.safeCommandPrefixes.map((p) => p.trim().toLowerCase().split(/\s+/).filter(Boolean)).filter((p) => p.length > 0)
   const inReadRoots = (c: string): boolean => readRoots.some((r) => isPathInside(r, c))
 
   function authorizeRead(raw: string | null, field: string, base: string = worktree): ToolDecision {
@@ -165,11 +204,13 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     return ALLOW
   }
 
-  function authorizeWrite(raw: string | null, field: string): ToolDecision {
+  function authorizeWrite(raw: string | null, field: string, agentId: string, content?: string): ToolDecision {
     if (raw === null) return deny(`${field} is required`)
     const target = canon(raw, worktree)
     if (isPathInside(worktree, target)) {
       if (isInsideGitDir(worktree, target)) return deny(`Write denied: ${raw} is inside a .git directory, which agents must never modify.`)
+      // Remember who wrote it: running this file later is judged as agent-authored code.
+      ctx.execution?.provenance?.recordWrite(target, worktree, { agentId, taskId: ctx.execution.taskId ?? null, runId: ctx.execution.runId ?? null }, content)
       return ALLOW
     }
     if (isPathInside(project, target)) {
@@ -197,16 +238,84 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     return ALLOW
   }
 
-  function authorizeShell(toolName: 'Bash' | 'PowerShell', input: Record<string, unknown>): ToolDecision {
+  async function authorizeShell(toolName: 'Bash' | 'PowerShell', input: Record<string, unknown>, agentId: string): Promise<Outcome> {
     const command = strField(input, 'command')
-    if (command === null) return deny('command is required')
-    const cls = classifyCommand(command, toolName === 'Bash' ? 'bash' : 'powershell', {
+    if (command === null) return { tool: deny('command is required') }
+    const shell = toolName === 'Bash' ? 'bash' : 'powershell'
+    const cls = classifyCommand(command, shell, {
       roots: shellRoots,
       safeCommandPrefixes: ctx.safeCommandPrefixes,
     })
     if (cls.level === 'forbidden') {
-      return deny(`Command forbidden: ${cls.reasons.join('; ')}. This cannot be approved; choose a different approach.`)
+      const reason = `Command forbidden: ${cls.reasons.join('; ')}. This cannot be approved; choose a different approach.`
+      return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }
     }
+    const base = authorizeShellByClass(input, cls)
+    if (base.behavior === 'deny') {
+      return { tool: base, audit: { classification: 'UNTRUSTED_AGENT_AUTHORED', provenance: 'not_applicable', decision: 'DENY', reason: base.reason } }
+    }
+
+    // 0.7: look through interpreters, scripts and package scripts at what will really run.
+    const env: ExecutionEnv = {
+      role: ctx.role,
+      caps,
+      profile,
+      worktree,
+      projectRoot: project,
+      safeCommandPrefixes: safePrefixes,
+      tracker: ctx.execution?.provenance,
+      base: ctx.execution?.base,
+    }
+    const verdict = await evaluateExecution(command, shell, env)
+    const networkDenied =
+      restrictedProfile && !caps.has('NETWORK') && cls.classes.includes('NETWORK')
+        ? 'network access is not allowed in the RESTRICTED execution profile unless network tools are enabled in Settings'
+        : null
+    if (verdict.decision === 'DENY' || networkDenied !== null) {
+      const reason = [...(networkDenied !== null ? [networkDenied] : []), ...(verdict.decision === 'DENY' ? verdict.reasons : [])].join('; ')
+      return {
+        tool: deny(`Execution denied: ${reason}. This cannot be approved; choose a different approach.`),
+        audit: { classification: verdict.decision === 'DENY' ? verdict.trust : 'SYSTEM_SENSITIVE', provenance: verdict.provenance, decision: 'DENY', reason },
+      }
+    }
+    // The command will run or be put to the user: remember the files it writes so later runs know who wrote them.
+    recordShellWrites(command, shell, agentId)
+
+    if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
+      const reasons = [...(base.behavior === 'ask' ? [base.reason] : []), ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons : [])]
+      const reason = [...new Set(reasons)].join('; ')
+      const baseRisk: Risk = base.behavior === 'ask' ? base.risk : 'low'
+      const risk: Risk = baseRisk === 'high' || (verdict.decision === 'REQUIRE_APPROVAL' && verdict.trust === 'SYSTEM_SENSITIVE') ? 'high' : verdict.decision === 'REQUIRE_APPROVAL' ? 'medium' : baseRisk
+      const classification: TrustClass =
+        verdict.decision === 'REQUIRE_APPROVAL' ? verdict.trust : cls.commandClass === 'SYSTEM_CHANGE' || cls.commandClass === 'DESTRUCTIVE' ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED'
+      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason } }
+    }
+    if (verdict.decision === 'ALLOW_WITH_AUDIT') {
+      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') } }
+    }
+    return { tool: base }
+  }
+
+  function recordShellWrites(command: string, shell: 'bash' | 'powershell', agentId: string): void {
+    const tracker = ctx.execution?.provenance
+    if (tracker === undefined) return
+    try {
+      for (const target of collectWriteTargets(tokenize(command, shell))) {
+        let inside = false
+        try {
+          inside = isPathInside(worktree, canon(target, worktree))
+        } catch {
+          inside = false
+        }
+        if (inside) tracker.recordWrite(target, worktree, { agentId, taskId: ctx.execution?.taskId ?? null, runId: ctx.execution?.runId ?? null })
+      }
+    } catch {
+      // Provenance is best effort; the difference from the base commit still identifies the file.
+    }
+  }
+
+  /** The command-classifier part of the shell policy (0.6 behaviour, unchanged). */
+  function authorizeShellByClass(input: Record<string, unknown>, cls: ReturnType<typeof classifyCommand>): ToolDecision {
 
     const restricted = !writing
     if (restricted) {
@@ -228,13 +337,24 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       risk = 'high'
     }
     if (reasons.length > 0) return ask(reasons.join('; '), risk ?? 'medium')
-    if (restricted && cls.segments.some((s) => s.kind === 'install')) {
-      return ask('installs project dependencies into the worktree', 'low')
+    if (cls.segments.some((s) => s.kind === 'install')) {
+      if (restricted) return ask('installs project dependencies into the worktree', 'low')
+      // RESTRICTED: installing fetches code and runs dependency lifecycle scripts, so it is never silent.
+      if (restrictedProfile) return ask('installs project dependencies (network access and dependency scripts) in the RESTRICTED execution profile', 'medium')
     }
     return ALLOW
   }
 
-  function decide(req: ToolRequest): ToolDecision {
+  async function decide(req: ToolRequest): Promise<Outcome> {
+    const { toolName, input } = req
+    if (toolName === 'Bash' || toolName === 'PowerShell') {
+      if (!tools.has(toolName)) return { tool: deny(`Tool ${toolName} is not available to the ${ctx.role} role. Available tools: ${[...tools].join(', ')}.`) }
+      return authorizeShell(toolName, input, req.agentId)
+    }
+    return { tool: decideOther(req) }
+  }
+
+  function decideOther(req: ToolRequest): ToolDecision {
     const { toolName, input } = req
     if (toolName.startsWith('mcp__')) {
       if (toolName.startsWith('mcp__nexus__')) return ALLOW
@@ -253,9 +373,9 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
         return authorizeRead(strField(input, 'file_path'), 'file_path')
       case 'Edit':
       case 'Write':
-        return authorizeWrite(strField(input, 'file_path'), 'file_path')
+        return authorizeWrite(strField(input, 'file_path'), 'file_path', req.agentId, toolName === 'Write' && typeof input.content === 'string' ? input.content : undefined)
       case 'NotebookEdit':
-        return authorizeWrite(strField(input, 'notebook_path'), 'notebook_path')
+        return authorizeWrite(strField(input, 'notebook_path'), 'notebook_path', req.agentId)
       case 'Glob':
       case 'Grep': {
         const rawBase = strField(input, 'path')
@@ -264,9 +384,6 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
         const base = rawBase === null ? worktree : canon(rawBase, worktree)
         return authorizePattern(strField(input, toolName === 'Glob' ? 'pattern' : 'glob'), base)
       }
-      case 'Bash':
-      case 'PowerShell':
-        return authorizeShell(toolName, input)
       case 'TodoWrite':
         return ALLOW
       case 'WebSearch':
@@ -289,12 +406,52 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     }
   }
 
+  const SENSITIVE = /\.git\b|secret|credential|power|registry|nexus/i
+
+  /** Persists deny, approval-required and audited decisions; a plain allow is not stored. Never throws. */
+  function log(req: ToolRequest, outcome: Outcome): void {
+    const sink = ctx.execution?.decisions
+    if (sink === undefined) return
+    try {
+      let audit = outcome.audit
+      if (audit === undefined) {
+        if (outcome.tool.behavior === 'allow') return
+        const reason = outcome.tool.reason
+        audit = {
+          classification: SENSITIVE.test(reason) ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED',
+          provenance: 'not_applicable',
+          decision: outcome.tool.behavior === 'deny' ? 'DENY' : 'REQUIRE_APPROVAL',
+          reason,
+        }
+      }
+      sink.record({
+        id: newId(),
+        timestamp: nowIso(),
+        runId: ctx.execution?.runId ?? null,
+        taskId: ctx.execution?.taskId ?? null,
+        agentId: req.agentId,
+        action: actionSummary(req.toolName, req.input),
+        classification: audit.classification,
+        provenance: audit.provenance,
+        decision: audit.decision,
+        reason: audit.reason.slice(0, 600),
+        policyVersion: SECURITY_POLICY_VERSION,
+      })
+    } catch {
+      // The log is evidence, not a gate: a failure to write it must not change the decision.
+    }
+  }
+
   return async (req: ToolRequest): Promise<ToolDecision> => {
     try {
-      return decide(req)
+      const outcome = await decide(req)
+      log(req, outcome)
+      return outcome.tool
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return deny(`Denied: the request could not be evaluated safely (${msg}).`)
+      const tool = deny(`Denied: the request could not be evaluated safely (${msg}).`)
+      log(req, { tool })
+      return tool
     }
   }
 }

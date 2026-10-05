@@ -1,6 +1,8 @@
 import { lstatSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 
+const RESERVED_DEVICE = /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i
+
 export class PathBoundaryError extends Error {
   constructor(message: string) {
     super(message)
@@ -22,8 +24,14 @@ export function canonicalizePath(input: string, base: string): string {
   const afterDrive = /^[a-zA-Z]:/.test(p) ? p.slice(2) : p
   if (afterDrive.includes(':')) throw new PathBoundaryError(`alternate data streams are not permitted: ${input}`)
   if (/[?*<>"|]/.test(afterDrive)) throw new PathBoundaryError(`path contains characters invalid on Windows: ${input}`)
+  // `C:foo` means "foo in the current directory of drive C", which depends on process state rather than on `base`.
+  if (process.platform === 'win32' && /^[a-zA-Z]:(?![\\/])/.test(p)) throw new PathBoundaryError(`drive-relative paths are not permitted: ${input}`)
 
   if (process.platform === 'win32') {
+    // CON, NUL, COM1, LPT1, AUX, PRN ... (with any extension) are devices in every directory, not files.
+    for (const seg of p.split(/[\\/]/)) {
+      if (RESERVED_DEVICE.test(seg.replace(/[. ]+$/, ''))) throw new PathBoundaryError(`Windows device names are not permitted: ${input}`)
+    }
     // Windows ignores trailing dots and spaces in a segment, so ".git." is the .git directory.
     p = p
       .split(/[\\/]/)

@@ -536,6 +536,20 @@ function valuesOf(word: string): string[] {
   return out
 }
 
+/**
+ * A relative word with no `..` can still leave the worktree when a directory junction or symlink inside it
+ * points elsewhere (`link\secret.txt`). Resolve existing entries through links before calling them inside.
+ */
+function escapesThroughLink(v: string, base: string, a: Analysis): string | null {
+  if (v === '' || v.startsWith('-') || v.length > 240 || /[\s:*?<>"|\0$%{}()[\]]/.test(v)) return null
+  try {
+    const canonical = canonicalizePath(v, base)
+    return a.roots.some((r) => isPathInside(r, canonical)) ? null : `path resolves outside the worktree through a link: ${v}`
+  } catch (e) {
+    return e instanceof Error && e.message.startsWith('dangling link') ? `path is a link that cannot be resolved: ${v}` : null
+  }
+}
+
 /** Returns a description when `v` refers to a location outside every root, otherwise null. */
 function outsideRoots(v: string, a: Analysis): string | null {
   const base = a.roots[0]
@@ -553,7 +567,7 @@ function outsideRoots(v: string, a: Analysis): string | null {
   let p = v
   const msys = /^\/(?:mnt\/)?([a-zA-Z])(?:\/(.*))?$/.exec(v)
   if (msys?.[1] !== undefined) p = `${msys[1].toUpperCase()}:\\${msys[2] ?? ''}`
-  else if (!/^([a-zA-Z]:|[\\/])/.test(v) && !v.split(/[\\/]/).includes('..')) return null
+  else if (!/^([a-zA-Z]:|[\\/])/.test(v) && !v.split(/[\\/]/).includes('..')) return escapesThroughLink(v, base, a)
   else if (/^\\/.test(v) && !/^\\[A-Za-z0-9_.-]+\\/.test(v)) return null // regex escapes like \d+
 
   const glob = p.search(/[*?[]/)
