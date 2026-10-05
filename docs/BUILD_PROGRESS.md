@@ -83,6 +83,22 @@ Released as `v0.3.0` on 2026-10-05. The release record is `docs/V0_3_RELEASE_REP
 
 Released as `v0.4.0` on 2026-10-05. The release record is `docs/V0_4_RELEASE_REPORT.md`.
 
+## v0.5.0 (2026-10-05)
+
+| Area | What exists |
+|---|---|
+| Workspaces | `WorkspaceEngine`: enrolled repositories, roles, policy (publishing fixed to `never`), memory, decisions |
+| Organization graph | Dependencies from manifests, contracts and the user, with provenance; dependency order and cycles |
+| Contracts | Six kinds read into surfaces, versions, consumers and copies, `compareSurfaces` |
+| Cross-repository missions | Planner session, validated plan always held for approval, one mission per repository in dependency order, context passed between tasks |
+| Global verification and release trains | Checks that ran, contracts against the mission's own base, consumers in step; prepared, never published |
+| Workspace programs, overnight | An ordered series of cross-repository missions; `WorkspaceMissionWorkload` under the overnight supervisor |
+| UI | Workspaces list and page with seven tabs |
+| Persistence | Migration 007 (additive) |
+| Validation | 2606 tests, 22 E2E, 1000-seed stresses, a code audit and a UI review with fixes, two real cross-repository missions (15 of 15 gates each), packaged 0.5.0 verified against 0.1, 0.2.0 and 0.2.1 databases |
+
+Released as `v0.5.0` on 2026-10-05. The release record is `docs/V0_5_RELEASE_REPORT.md`.
+
 ## Known failures and open items (v0.1 record)
 
 - One intermittent scenario failure has no established cause (TEST_STATUS.md, item 3).
