@@ -364,6 +364,23 @@ describe('policy service: mission outcomes', () => {
     return { run, decided }
   }
 
+  it('records who ran each role: another provider is named with its model, Claude stays a bare model', () => {
+    const env = setup()
+    const { run } = seedRun(env)
+    expect(env.service.recordOutcome(run.id)!.models).toEqual({ worker: 'claude-sonnet-4', reviewer: 'claude-opus-4' })
+    const second = seedRun(env)
+    const reviewer = env.repos.agents.listByRun(second.run.id).find((x) => x.role === 'reviewer')!
+    env.repos.agents.update(reviewer.id, { model: 'gpt-5.5' })
+    const at = new Date(NOW).toISOString()
+    env.repos.providerSessions.insert({ id: newId(), runId: second.run.id, agentId: reviewer.id, role: 'reviewer', label: null, requested: 'codex', provider: 'codex', model: 'gpt-5.5', runtimeVersion: '0.130.0', authMode: 'Logged in using ChatGPT', reason: 'Cross-model review', fallbackReason: null, sessionId: 's', outcome: 'completed', error: null, inputTokens: 10, outputTokens: 2, createdAt: at, endedAt: at })
+    expect(env.service.recordOutcome(second.run.id)!.models).toEqual({ worker: 'claude-sonnet-4', reviewer: 'codex:gpt-5.5' })
+    // A review Claude did in the other provider's place is Claude's.
+    const third = seedRun(env)
+    const fallback = env.repos.agents.listByRun(third.run.id).find((x) => x.role === 'reviewer')!
+    env.repos.providerSessions.insert({ id: newId(), runId: third.run.id, agentId: fallback.id, role: 'reviewer', label: null, requested: 'codex', provider: 'claude', model: 'claude-opus-4', runtimeVersion: null, authMode: null, reason: 'Cross-model review', fallbackReason: 'Codex is unavailable; Claude does this instead.', sessionId: 's2', outcome: 'completed', error: null, inputTokens: 0, outputTokens: 0, createdAt: at, endedAt: at })
+    expect(env.service.recordOutcome(third.run.id)!.models.reviewer).toBe('claude-opus-4')
+  })
+
   it('builds the outcome from durable rows', () => {
     const env = setup()
     const { run, decided } = seedRun(env)

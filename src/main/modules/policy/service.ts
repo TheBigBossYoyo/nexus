@@ -584,7 +584,14 @@ export class PolicyService {
     const reported = agents.filter((a) => a.metrics.inputTokens !== null || a.metrics.outputTokens !== null)
     const pauses = repos.quotaPauses.listByRun(run.id)
     const models: Record<string, string> = {}
-    for (const a of agents) if (a.model) models[a.role] = a.model
+    for (const a of agents) {
+      if (!a.model) continue
+      // v0.6: an agent another provider ran is recorded as `<provider>:<model>`. Evidence from a mission with,
+      // say, a Codex reviewer is then never pooled with Claude-only evidence under a bare model name, and the
+      // model-drift weighting treats a change of provider like a change of model.
+      const provider = repos.providerSessions.latestProviderOfAgent(a.id)
+      models[a.role] = provider && provider !== 'claude' ? `${provider}:${a.model}` : a.model
+    }
 
     const resolved = info.resolved
     return {
