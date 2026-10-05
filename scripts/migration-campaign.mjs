@@ -27,7 +27,7 @@ const root = resolve(import.meta.dirname, '..')
 const VERSION = require(join(root, 'package.json')).version
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 // Tables NEXUS itself writes to when it starts on a database; they may gain rows but must not lose any.
-const MAY_GROW = new Set(['schema_migrations', 'settings', 'run_events', 'usage_events', 'policy_versions', 'policy_pointers', 'control_incidents', 'provider_sessions', 'global_work_items', 'checkpoints', 'program_decisions', 'workspace_decisions', 'recoveries'])
+const MAY_GROW = new Set(['arena_cases', 'arena_case_versions', 'schema_migrations', 'settings', 'run_events', 'usage_events', 'policy_versions', 'policy_pointers', 'control_incidents', 'provider_sessions', 'global_work_items', 'checkpoints', 'program_decisions', 'workspace_decisions', 'recoveries'])
 
 function inspect(dbPath) {
   const db = new Database(dbPath, { readonly: true })
