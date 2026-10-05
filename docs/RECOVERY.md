@@ -1,9 +1,23 @@
 # Recovery
 
-NEXUS keeps all orchestration state in SQLite and all work in Git worktrees on disk, so a closed or
+NEXUS keeps all orchestration state in SQLite and all work in Git worktrees on disk, so a stopped or
 crashed application can be recovered. Recovery never silently resumes work: interrupted runs are paused
 and you choose what to do. Code: `Orchestrator.recoverOnStartup`, `listRecoverable`, `recover`,
 `reconcileWorktrees`, `restartOrphans`; `TaskPipeline.resumableSession`.
+
+Since 0.7 (branch `nexus-0.7`, not released) NEXUS is three processes: the window, a persistent **runtime** process that
+owns the database and the work, and worker processes that run the agent sessions (`ARCHITECTURE.md`, "Process
+model (0.7)"). What a "restart" is depends on which process ended:
+
+| What ended | What happens to the work |
+|---|---|
+| The window (closed, or crashed) | Nothing. The runtime and its work continue. Opening NEXUS again connects to the runtime and reads everything again. |
+| One worker | Its lease is revoked and its session ends as `crashed`; the orchestrator's retry rules decide what happens to the task. The runtime and the other workers are not affected (`WORKERS.md`). |
+| The runtime (Stop NEXUS, sign-out, or a crash) | The workers end themselves, because a worker never outlives its runtime. The next runtime start is the recovery described below. |
+| The whole computer (power loss, Windows restart) | As for the runtime; the overnight rules in `OVERNIGHT_MODE.md` apply to an overnight run. |
+
+**Closing the window does not stop anything.** To stop NEXUS choose "Stop NEXUS" (the tray icon, or Runtime
+diagnostics in the Control Center; channel `runtime.stop`). It asks first when work is active.
 
 ## What survives a restart
 
@@ -22,15 +36,32 @@ and you choose what to do. Code: `Orchestrator.recoverOnStartup`, `listRecoverab
 | Task and integration worktrees and their commits | Disk, `worktrees\<run>\...`, plus branches in your repository |
 | Claude session transcripts | Disk, written by the runtime under `~/.claude/projects` |
 
-Lost, because it only exists in memory: running `claude.exe` processes and their open turns, tool
+Since 0.7 these are stored as well, and read again after a restart of the runtime: the global queue, its order, the
+limits and the dispatch pause, schedules and the record of each occurrence that fired (`schedule_firings`), the
+scheduler's decisions, and the worker and lease history (`workers`, `worker_leases`, `worker_events`). Workers and
+leases of an earlier start are marked stale, not resumed (see below).
+
+Lost, because it only exists in memory: running `claude.exe` processes (in their worker processes) and their open turns, tool
 approvals that were waiting on you, the merge lock, the set of "already announced" deferral events, and any
 partially streamed text that was not yet a completed block. The in-memory count of graph proposals per task is
 rebuilt from the stored proposals, so the per-task limit holds across a restart.
 
 ## Startup
 
-`bootstrap()` opens the database (running migrations), builds the orchestrator and calls
-`recoverOnStartup()` before the window is created.
+`startRuntimeCore()` (`src/main/runtime/core.ts`) opens the database (running migrations), builds the worker
+manager and the orchestrator and, before anything can dispatch, does these in this order:
+
+1. `WorkerManager.recoverOnBoot()`: workers recorded as alive by an earlier start of the runtime are marked `STOPPED`
+   and their active leases `EXPIRED`. Nothing is killed by process id (a worker ends itself when its runtime is gone,
+   and a process id from an earlier start may belong to anything by now). The sessions they ran are not judged.
+2. `Orchestrator.recoverOnStartup()`: the steps below.
+
+The runtime then starts its local server and reports the phase `RECOVERING` with counts (interrupted runs, stale
+workers, stale leases) while Arena campaigns, background jobs, programs and workspace missions recover, the control plane
+reads its queue against the workloads (resuming missions when the limits say `resume`; the default is `hold`), and the
+overnight supervisor recovers its run. The window that connects meanwhile shows `RECOVERING` and stays usable. When this
+is done the phase is `READY` and, if anything was reconciled, an incident records the counts. The window is no longer
+part of this: it is created, or not, independently.
 
 For every non-terminal run (`listActive`):
 
@@ -46,9 +77,22 @@ For every non-terminal run (`listActive`):
 Task states are not touched at this point. A task that was `running` stays `running` until the run is
 resumed.
 
-A normal quit (`before-quit`) stops live sessions first (`SessionControl.stop('shutdown')`, then
-`runtime.shutdown()`), then closes the database. Shutdown also sets a closing flag so no scheduler pass launches new work while sessions are being stopped. Runs are not paused on quit; the next startup does it
-through the steps above. Sessions stopped this way end with reason `shutdown`.
+A clean stop of the runtime ("Stop NEXUS", `runtime.stop`, or a sign-out of Windows, which asks nothing) does this, in
+order: a finalization of an overnight run that is in progress finishes first (at most 30 seconds); the control plane,
+the engines and the quota controller stop so that nothing new starts; the orchestrator stops live sessions
+(`SessionControl.stop('shutdown')`); the worker manager stops the workers (it asks, waits up to eight seconds, then ends
+what is left with its process tree); the local server closes and the endpoint file is removed; the database is
+checkpointed and closed. Shutdown also sets a closing flag so no scheduler pass launches new work while sessions are
+being stopped. Runs are not paused on a stop; the next startup does it through the steps above. Sessions stopped this
+way end with reason `shutdown`. An armed Windows shutdown timer of an overnight run is left alone on purpose: it
+belongs to Windows.
+
+If the runtime is ended without this (killed, crashed), none of it happens. The next start finds the same stored state
+and handles it as described above: stale workers and leases, runs paused for recovery, expired tool approvals. The
+workers end themselves when their runtime is gone.
+
+Closing the window is not a stop. The window's process ends and the runtime keeps running with its tray icon; the
+window asks only during an overnight mission (hide to the tray, cancel the mission, or return).
 
 ## Resume, inspect, cancel
 
@@ -134,7 +178,12 @@ never resumes by itself: when your limit resets, resume the run.
 - Leases of tasks without a live pipeline are released on the next tick (`task.lease_expired`).
 - Run-level background work (planning, finalization) that throws fails the run unless it is paused or
   finished; it never crashes the application.
-- A startup failure (database cannot be opened, schema newer than the app) shows an error dialog and exits.
+- A startup failure of the runtime (database cannot be opened, schema newer than the app) ends the runtime process with
+  the error in `<data>/runtime/runtime.log`; the runtime has no window to show it in, and the window does not get a
+  connection. A startup failure of the window itself shows an error dialog and exits.
+- A runtime of another NEXUS version that is still running is asked to stop by a newer window, which then starts its
+  own; its work is recovered by the steps above. A runtime that speaks another protocol version is not talked to
+  (`INCOMPATIBLE`).
 
 ## Overnight runs (0.2.1)
 

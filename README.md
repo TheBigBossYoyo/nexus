@@ -21,7 +21,53 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [PROGRAMS](docs/PROGRAMS.md),
 [LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md),
 [WORKSPACES](docs/WORKSPACES.md), [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md),
-[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md).
+[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md),
+[V0_7_DESIGN](docs/V0_7_DESIGN.md), [CONTROL_PLANE](docs/CONTROL_PLANE.md), [GLOBAL_SCHEDULER](docs/GLOBAL_SCHEDULER.md),
+[WORKERS](docs/WORKERS.md).
+
+## 0.7 (not released yet, branch `nexus-0.7`)
+
+This section describes the branch as it is implemented. It is not a release: what is tested and what is not verified is
+in [V0_7_RELEASE_REPORT](docs/V0_7_RELEASE_REPORT.md). The design is [V0_7_DESIGN](docs/V0_7_DESIGN.md).
+
+Until 0.6 everything NEXUS did lived in one Electron process: the window, the database, the engines and the agent
+sessions. Quitting NEXUS stopped the work. 0.7 splits the one executable into three process roles:
+
+| Process | What it is | Details |
+|---|---|---|
+| Window (`nexus-desktop`) | The user interface. A client: it owns no database and no work, and shows what the runtime tells it | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| Runtime (`nexus-runtime`) | A persistent process without a window. It owns the database, the global queue, the scheduler, schedules, the engines, the overnight supervisor and power control, and the tray icon. The window starts it when none is running | [CONTROL_PLANE](docs/CONTROL_PLANE.md), [GLOBAL_SCHEDULER](docs/GLOBAL_SCHEDULER.md) |
+| Workers (`nexus-worker-N`) | One process per agent session, started and watched by the runtime, each under a lease stored in the database. A worker decides nothing: every tool call is sent back to the runtime for the policy decision | [WORKERS](docs/WORKERS.md) |
+
+What this changes for you:
+
+- **Closing the window does not stop any work.** Missions, programs, campaigns, schedules and overnight runs continue in
+  the runtime. During an overnight mission the window still asks before it closes (hide, cancel the mission, or return).
+- **"Stop NEXUS" stops the runtime**: in the tray icon, or in the Runtime diagnostics of the Control Center. It asks
+  first when work is active. Interrupted runs are paused for recovery at the next start, as before
+  ([RECOVERY](docs/RECOVERY.md)).
+- **The tray icon belongs to the runtime** and exists while the runtime does, with or without a window. Until 0.6 it existed
+  only during an overnight run.
+- **The runtime stops by itself** after two minutes with no window connected, no run working, nothing on the queue and no
+  schedule switched on. It keeps running without a window while a schedule is switched on.
+- **Nothing starts the runtime at Windows sign-in.** Schedules fire only while a runtime runs, so after a reboot or a
+  sign-out nothing fires until NEXUS has been opened once.
+- **The window and the runtime talk over a Windows named pipe**, not over the network: nothing listens on a TCP port.
+  Each side proves that it holds a random token kept in a file in the data directory that only your Windows user (and
+  SYSTEM and administrators) can read. This protects against other Windows users and against a process that squats the
+  pipe name. It does not protect against another program running as you that reads that file: such a program can do
+  what the window can ([ARCHITECTURE](docs/ARCHITECTURE.md), "The local protocol").
+- **Everything that uses agents is one queue** with priorities, aging so that low-priority work is not kept out for good,
+  a dispatch pause, recorded scheduling decisions, durable schedules that fire once per occurrence, and nine health
+  components. See [CONTROL_PLANE](docs/CONTROL_PLANE.md), which also lists what does not exist.
+- **Execution security** is stricter: scripts, inline interpreter code and package scripts are inspected before an agent
+  may run them, and refusals are logged ([SECURITY](docs/SECURITY.md)).
+
+**NEXUS is not a sandbox.** The execution policy classifies and decides what an agent asks to run, including what an
+interpreter or a package script would run and who wrote it. That is a policy layer. Code that NEXUS allows to run,
+runs as your Windows user, with your permissions; processes of the runtime and of the workers are not isolated from your
+files. Operating-system containment is not part of 0.7: see [WINDOWS_EXECUTION_ISOLATION](docs/WINDOWS_EXECUTION_ISOLATION.md)
+and [V0_8_PROPOSAL](docs/V0_8_PROPOSAL.md).
 
 ## What's new in 0.6
 
@@ -121,7 +167,7 @@ The design and its deviations from the implementation are in [V0_3_DESIGN](docs/
 |---|---|---|
 | Overnight Mode | An unattended MISSION run with a wall-clock deadline and an end-of-run power action (shut down, sleep, hibernate or none) that you authorize for that run, in the composer and in a native Windows dialog. NEXUS itself performs the action, from deterministic main-process code, after the agents are stopped and the final report is saved. A Windows shutdown timer is armed as a failsafe before any agent starts. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Power controller | `WindowsPowerController` runs `System32\shutdown.exe` (and Windows PowerShell for sleep) with argument arrays, no shell and fixed messages. Only the overnight supervisor holds it. Agents have no path to it, and power commands in an agent's shell are refused for every role. | [SECURITY](docs/SECURITY.md) |
-| Tray and background | Closing the window during an overnight run asks whether to hide to the tray; the mission continues in the main process. The tray icon exists only while an overnight run is live. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Tray and background | Closing the window during an overnight run asks whether to hide to the tray; the mission continues without the window. In 0.2.1 to 0.6 the work lived in the main process and the tray icon existed only while an overnight run was live; since 0.7 (branch `nexus-0.7`) both belong to the runtime process, which exists with or without a window (see 0.7 above). | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Quota waiting | In an overnight run, a usage limit whose reset time falls inside the mission time is waited out (`QUOTA_PAUSED`) and the run resumes by itself; otherwise the run ends as quota exhausted, which is not a failure. (0.3 adds a probe before the resume and probing when the reset time is unknown.) | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Evidence builder | One `TaskEvidenceBuilder` assembles everything reviewers, verifiers and debuggers are told that the repository cannot show: check results, commits, changed files, reviews, repair history, dependency handoffs, graph revisions, messages sent and received, decisions with their text, and the result the agent reported. Agent-written text is quoted and labelled. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
 | Command classes | Shell commands are classified (`SAFE_READ`, `SAFE_PROJECT_WRITE`, `GIT_LOCAL`, `NETWORK`, `SYSTEM_CHANGE`, `DESTRUCTIVE`, `UNKNOWN`). Heredoc commit messages and `cat > file <<'EOF'` inside the worktree no longer need approval; `git config` of keys that can run code, Git redirected outside the worktree, and the NEXUS database are gated or refused. The project's own package scripts count as verification commands for reviewers and verifiers. | [SECURITY](docs/SECURITY.md) |
@@ -239,8 +285,9 @@ cost beyond that document.
 
 ## Launching and opening a project
 
-1. Start the app (`pnpm dev`, `pnpm start`, or the installed NEXUS shortcut). Only one instance runs;
-   starting a second one focuses the first.
+1. Start the app (`pnpm dev`, `pnpm start`, or the installed NEXUS shortcut). Only one window runs;
+   starting a second one focuses the first. On the `nexus-0.7` branch the window starts the runtime process when none is
+   running and connects to it; closing the window leaves the runtime and its work running (see 0.7 above).
 2. Projects view, "Open Project", and pick a folder. NEXUS resolves the Git root, then profiles the
    project read-only: package managers, languages, frameworks, scripts, and the build, test, lint and
    typecheck commands it will use as automated checks. Nothing in the folder is changed.
@@ -350,6 +397,7 @@ cleaned up. NEXUS does not merge into your branch, push, or delete branches. See
 | Arena trial repositories | `%APPDATA%\NEXUS\arena\<campaign>\<trial>\`; removed by `arena.cleanup` for a finished campaign |
 | Task and integration worktrees | `%APPDATA%\NEXUS\worktrees\<run>\<task>\` |
 | Electron profile data | `%APPDATA%\NEXUS\` |
+| Runtime files (0.7 branch) | `%APPDATA%\NEXUS\runtime\` (`endpoint.json`: the pipe name and token, readable by your user only; `runtime.log`), `%APPDATA%\NEXUS\runtime-profile\` (the runtime's own profile), `%APPDATA%\NEXUS\overnight.key` |
 | Claude session transcripts | Written by the Claude runtime itself under `~\.claude\projects\` |
 
 This is Electron's `userData` directory; the exact path is reported by the app (`app.info` returns
@@ -425,10 +473,10 @@ earlier single-mission acceptance script.
 - No automatic merge into your branch and no approval-gated merge action. The `git` and `merge`
   approval kinds exist in the type definitions but nothing creates them. You run `git merge` yourself.
 - Memory is a keyword index (SQLite FTS5 with bm25). There is no vector or embedding memory.
-- Shell command classification is heuristic. Inline interpreter code (`python -c`, `node -e`) and
-  script files are not inspected, and writing roles can run such commands without approval. There is
-  no OS-level sandbox on native Windows: agents run with your user's permissions. See
-  [SECURITY](docs/SECURITY.md).
+- Shell command classification is heuristic. Up to 0.6, inline interpreter code (`python -c`, `node -e`) and
+  script files were not inspected, and writing roles could run such commands without approval; the `nexus-0.7` branch
+  inspects them, which is still static inspection. There is no OS-level sandbox on native Windows: agents run with
+  your user's permissions, and NEXUS is not a sandbox. See [SECURITY](docs/SECURITY.md).
 - NEXUS itself runs the dependency install (`pnpm install`, `yarn install`, `bun install` or
   `npm ci`) in each new worktree and the project's check commands. These run project code and are
   not passed through the agent policy engine.
@@ -448,7 +496,8 @@ earlier single-mission acceptance script.
 - The planner, reviewer and verifier outputs are schema-checked, but the quality of plans and reviews
   is whatever the model produces. A passing verification means the verifier agent judged the criteria
   met, not that the software is correct.
-- Single window, single instance.
+- Single window, single instance. On the `nexus-0.7` branch there is also one runtime process per data directory, which keeps
+  running after the window closes until you choose "Stop NEXUS" or it has had nothing to do for two minutes.
 
 ### Limitations of 0.3 features
 

@@ -10,12 +10,12 @@ Claude Agent SDK ── agents (planner, workers, reviewer, verifier)
         │
 NEXUS Orchestrator ── plans, schedules, reviews, repairs, verifies
         │  run events
-OvernightSupervisor ── deterministic code in the Electron main process
+OvernightSupervisor ── deterministic code in the NEXUS runtime process (since 0.7; the window is not involved)
         │  the only holder of
 PowerController ── WindowsPowerController → System32\shutdown.exe / powershell.exe
 ```
 
-Agents have no path to the power controller. It is created in `src/main/index.ts` and passed to the
+Agents have no path to the power controller. It is created in `src/main/runtime/core.ts` (until 0.6, `src/main/index.ts`) and passed to the
 supervisor only; no IPC handler, agent tool or MCP server holds it (`tests/unit/power/isolation.test.ts`
 checks this against the source tree). An agent's shell tool cannot run power commands either: they are
 `forbidden` for every role, with no approval path (see SECURITY.md, "Command classes").
@@ -25,19 +25,27 @@ checks this against the source tree). An agent's shell tool cannot run power com
 Mission composer → Mode **OVERNIGHT** → set the policy → tick
 "I authorize NEXUS to control Windows power state for this run." → START OVERNIGHT RUN → confirm.
 
-The confirmation is per run and is asked twice: in the composer, and then by the main process in a native
-Windows dialog that lists the policy. The native dialog is the control: a script in the renderer cannot
-click it. A later change that gives NEXUS more power (another end action, force close, more conditions)
+The confirmation is per run and is asked twice: in the composer, and then in a native Windows dialog that lists
+the policy. Since 0.7 the runtime process asks, and the dialog is shown by the main process of the window that is
+connected to it (the runtime sends one of three fixed question frames over the local pipe; see ARCHITECTURE.md). When no
+window is connected, the Electron host of the runtime shows the dialog itself; where nobody can show it the answer is
+no. The native dialog is the control: a script in the renderer cannot click it. A later change that gives NEXUS more power (another end action, force close, more conditions)
 asks the native dialog again.
 
 `overnight.start` stores, in `overnight_runs`:
 
 - the policy exactly as approved (`authorization.policy`; later changes are appended as amendments),
 - `authorizedAt`, the run id, the confirmation sentence,
-- `authorization.seal`: an HMAC over the authorization and the current policy. The key is held by the main
-  process and kept on disk encrypted for the Windows user (`overnight.key`, DPAPI). Every power decision
+- `authorization.seal`: an HMAC over the authorization and the current policy. The key is held by the runtime
+  process and kept on disk encrypted for the Windows user (`<data>/overnight.key`, Electron `safeStorage`, DPAPI). Every power decision
   verifies the seal first, so a row edited from outside NEXUS is refused: the report is written and no
   power action is taken.
+
+**The signing key and the upgrade from 0.6.** The key is stored per profile directory, and the 0.7 runtime has its own
+profile directory (`<data>/runtime-profile`). A key file written by 0.6 cannot be read by the 0.7 runtime and is
+replaced. That ends the power authorization of an overnight run that was in progress during the upgrade, which is
+the safe direction: the run is not given a power action it was not authorized for under the new key. When the key
+store is not available, the key lives in memory and a restart of the runtime ends the power authorization in the same way.
 
 Order at start: run row → overnight record with the authorization → failsafe timer → state `RUNNING` →
 first agent session. If Windows refuses the failsafe (for example another shutdown is already scheduled),
@@ -151,7 +159,7 @@ was replaced, and CANCEL SHUTDOWN still works.
 - **Watchdog**: no orchestration event for `stallMinutes` → diagnostic snapshot → scheduler reconciliation →
   if still silent after `graceMinutes` → BLOCKED. Check commands that are still running extend the
   allowance by their timeout. Diagnostics are in the report.
-- **Sleep**: NEXUS holds a "prevent app suspension" request while an overnight run is live, so Windows does
+- **Sleep**: the NEXUS runtime holds a "prevent app suspension" request while an overnight run is live, so Windows does
   not put the PC to sleep on idle. If the PC sleeps anyway (lid, manual) and an end-of-run countdown is
   more than five minutes overdue on wake, the action is not executed late.
 - **Checkpoints** (`run_checkpoints`): after planning, each graph revision, each completed task, each merge,
@@ -159,20 +167,35 @@ was replaced, and CANCEL SHUTDOWN still works.
   ids, message and decision counts and the last check results. They are a record for inspection; recovery
   itself reads the live tables.
 
-## Window and tray
+## Window, tray and stopping NEXUS
 
-Closing the window during an overnight run asks: Hide to tray and continue / Cancel mission / Return. The
-mission, the report and the power action belong to the main process and do not need the window. The tray
-icon exists only while an overnight run is live; its menu has Open NEXUS, Pause or Resume, Cancel shutdown,
-Cancel mission. When the run is over and the window is hidden, the window comes back.
+Since 0.7 the mission, the report and the power action belong to the **runtime process**. The window is a client of it.
 
-Quitting NEXUS during an overnight run asks first: quit and leave the Windows timer armed, cancel the
-mission and its shutdown and then quit, or return. A crash leaves the failsafe armed; that is what it is
-for. A project cannot be removed while its overnight run has a timer or a power action pending.
+- **Closing the window ends only the window's process.** The runtime, the mission, its failsafe and its end-of-run power
+  action continue. During an overnight run closing the window still asks first: Hide to tray and continue / Cancel
+  mission / Return. That question is asked by the window (`desktop.ts`), from what the runtime last told it about live
+  overnight runs; it exists so that closing the window is never mistaken for ending the mission. Hide keeps the window
+  process; when the run is over and the window was hidden, the window comes back. Without an overnight run closing the window asks nothing
+  and ends the window's process.
+- **The tray belongs to the runtime** and exists while the runtime does, whether or not a window is open. Before 0.7 it
+  existed only while an overnight run was live. During an overnight run its menu shows that run (state, Pause or Resume,
+  Cancel shutdown, Cancel mission) and, below, the runtime's own entries (Open NEXUS, Open Control Center, Pause or
+  Resume dispatch, Stop NEXUS...). Without an overnight run it shows the runtime's state and those entries.
+- **"Stop NEXUS"** (the tray, or Runtime diagnostics; channel `runtime.stop`) stops the runtime. With an overnight run
+  live it asks first, in a native dialog shown by the connected window or, with none, by the runtime: stop and leave the
+  Windows timer armed (when one is pending), cancel the mission and its shutdown and then stop, or return. With other
+  work active it asks whether to stop the agent sessions. A stop that nobody can be asked about is not carried out.
+  A sign-out of Windows or an operating-system request to quit stops the runtime without a question.
+- A crash of the runtime, like a crash of NEXUS before 0.7, leaves the failsafe armed; that is what it is for. A project
+  cannot be removed while its overnight run has a timer or a power action pending.
+- An overnight run that was active when the runtime stopped resumes without a click when the next runtime starts,
+  under the rules in the next section. A runtime does not stop by itself while an overnight run is active.
 
 ## Restart of NEXUS or Windows
 
-On start the supervisor looks at every live overnight record.
+On start of the runtime (the window opening is not a start) the supervisor looks at every live overnight record. "NEXUS
+was away" below means that no runtime was running. Nothing starts the runtime at Windows sign-in; it starts when NEXUS is
+opened, so after a reboot an overnight run that was interrupted waits for that.
 
 | Situation | What happens |
 |---|---|
@@ -186,7 +209,7 @@ On start the supervisor looks at every live overnight record.
 What Windows holds is never inferred from clocks alone: whenever the record cannot be trusted, NEXUS runs
 `shutdown /a` and records the answer.
 
-A person starts NEXUS, so a launch never powers the machine off for a run that lapsed.
+A person starts NEXUS (and so the runtime), so a launch never powers the machine off for a run that lapsed.
 
 ## Workloads: missions, Arena campaigns (0.3) and programs (0.4)
 
