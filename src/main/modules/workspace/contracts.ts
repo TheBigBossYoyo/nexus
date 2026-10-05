@@ -132,12 +132,29 @@ function firstSchema(content: { [key: string]: Json }): { [key: string]: Json } 
   return null
 }
 
-const squash = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ').trim()
+/**
+ * Removes block comments in one pass. (A lazy regular expression for this is quadratic on a file with many
+ * comment openers and no closer, and contract files are untrusted.)
+ */
+export function stripBlockComments(text: string): string {
+  let out = ''
+  let at = 0
+  for (;;) {
+    const open = text.indexOf('/*', at)
+    if (open === -1) return out + text.slice(at)
+    out += text.slice(at, open)
+    const close = text.indexOf('*/', open + 2)
+    if (close === -1) return out
+    at = close + 2
+  }
+}
+
+const squash = (text: string): string => stripBlockComments(text).replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ').trim()
 
 /** Exported declarations of a TypeScript (or .d.ts) file. A lexical read, not a type check. */
 function typescriptSurface(content: string): SurfaceElement[] {
   const out: SurfaceElement[] = []
-  const source = content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  const source = stripBlockComments(content).replace(/\/\/[^\n]*/g, '')
   const body = (from: number): string => {
     let depth = 0
     for (let i = from; i < source.length; i++) {
@@ -173,7 +190,7 @@ function typescriptSurface(content: string): SurfaceElement[] {
 
 function protobufSurface(content: string): SurfaceElement[] {
   const out: SurfaceElement[] = []
-  const source = content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  const source = stripBlockComments(content).replace(/\/\/[^\n]*/g, '')
   for (const m of source.matchAll(/\bmessage\s+(\w+)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g)) {
     const name = m[1] ?? ''
     out.push({ path: name, shape: 'message', required: true })
@@ -198,7 +215,7 @@ function protobufSurface(content: string): SurfaceElement[] {
 /** Tables and columns of `CREATE TABLE` statements. */
 function databaseSurface(content: string): SurfaceElement[] {
   const out: SurfaceElement[] = []
-  const source = content.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  const source = stripBlockComments(content.replace(/--[^\n]*/g, ''))
   for (const m of source.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([\w.]+)[`"\]]?\s*\(([\s\S]*?)\)\s*(?:;|$|without|engine|strict)/gi)) {
     const table = (m[1] ?? '').toLowerCase()
     out.push({ path: table, shape: 'table', required: true })
@@ -262,8 +279,15 @@ const EXTRACTORS: Record<ContractKind, (content: string) => SurfaceElement[]> = 
   event_schema: eventSurface,
 }
 
+/** Kinds read by lexical patterns. Their readers are bounded by size: such a file is untrusted text. */
+const LEXICAL_KINDS: readonly ContractKind[] = ['typescript_api', 'protobuf', 'database_schema']
+export const MAX_LEXICAL_CONTRACT_CHARS = 512_000
+
 export function extractSurface(kind: ContractKind, content: string): ExtractedSurface {
   const hash = contentHash(content)
+  if (LEXICAL_KINDS.includes(kind) && content.length > MAX_LEXICAL_CONTRACT_CHARS) {
+    return { hash, surface: [], parseError: `The file is larger than ${MAX_LEXICAL_CONTRACT_CHARS / 1000} KB; a ${kind} contract of that size is not read.` }
+  }
   try {
     return { hash, surface: dedupe(EXTRACTORS[kind](content)), parseError: null }
   } catch (e) {

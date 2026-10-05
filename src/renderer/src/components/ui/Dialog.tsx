@@ -54,7 +54,9 @@ export function Dialog({
         <div ref={bodyRef} className="min-h-0 flex-1 overflow-auto p-4">
           {children}
         </div>
-        {footer ? <footer className="flex shrink-0 justify-end gap-2 border-t px-4 py-3">{footer}</footer> : null}
+        {footer ? (
+          <footer className="flex shrink-0 justify-end gap-2 border-t px-4 py-3">{footer}</footer>
+        ) : null}
       </div>
     </div>
   )
@@ -89,12 +91,14 @@ export function ConfirmDialog({
       testId={testId}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose} {...(danger ? { 'data-autofocus': true } : {})}>
+            Cancel
+          </Button>
           <Button
             variant={danger ? 'danger' : 'primary'}
             onClick={onConfirm}
             loading={loading}
-            data-autofocus
+            {...(danger ? {} : { 'data-autofocus': true })}
             data-testid="confirm-dialog-confirm"
           >
             {confirmLabel}
