@@ -238,7 +238,7 @@ async function runSeed(seed: number): Promise<void> {
   const fail = (message: string): never => {
     const p = world.repos.programs.get(world.programId)
     throw new Error(
-      `seed ${seed}: ${message}\n  ops: ${log.join(' | ')}\n  program: ${JSON.stringify(p ? { state: p.state, pause: p.pauseReason, blocked: p.blockedReason, run: p.currentRunKind, missions: p.missions, replans: p.replans, plan: p.planVersion } : null)}\n  milestones: ${world.repos.milestones.listByProgram(world.programId).map((m) => `${m.key}:${m.state}:${m.attempts}`).join(', ')}\n  runs: ${world.created.map((c) => `${c.kind}:${world.repos.runs.require(c.run.id).state}`).join(', ')}`,
+      `seed ${seed}: ${message}\n  decisions (newest first): ${world.repos.programDecisions.listByProgram(world.programId).slice(-16).map((d) => d.kind + ': ' + d.summary.slice(0, 110)).join(' || ')}\n  ops: ${log.join(' | ')}\n  program: ${JSON.stringify(p ? { state: p.state, pause: p.pauseReason, blocked: p.blockedReason, run: p.currentRunKind, missions: p.missions, replans: p.replans, plan: p.planVersion } : null)}\n  milestones: ${world.repos.milestones.listByProgram(world.programId).map((m) => `${m.key}:${m.state}:${m.attempts}`).join(', ')}\n  runs: ${world.created.map((c) => `${c.kind}:${world.repos.runs.require(c.run.id).state}`).join(', ')}`,
     )
   }
 
