@@ -191,7 +191,7 @@ try {
   const runs = {}
   for (const t of tasks.filter((x) => x.runId)) {
     const run = await call('runs.get', { runId: t.runId })
-    runs[t.key] = { state: run.run.state, prompt: run.run.prompt, baseCommit: run.run.baseCommit, agents: run.agents.map((a) => ({ role: a.role, model: a.model, state: a.state })), worktrees: [...new Set(run.tasks.map((x) => x.worktreePath).filter(Boolean))] }
+    runs[t.key] = { state: run.run.state, prompt: run.run.prompt, baseCommit: run.run.baseCommit, agents: run.agents.map((a) => ({ role: a.role, model: a.model, state: a.state })), worktrees: [...new Set(run.worktrees.map((w) => w.path))] }
   }
   // What each repository contains at its task's result, and its own tests there, checked outside NEXUS.
   const results = {}
