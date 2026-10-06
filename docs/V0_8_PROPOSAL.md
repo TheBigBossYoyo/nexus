@@ -22,6 +22,43 @@ today they leave, among other things:
 
 0.7 implements no containment. Its static inspection is not a sandbox.
 
+## What the security review of 0.7 adds (2026-10-06)
+
+Seven independent reviews of the 0.7 branch ran the real authorizer and the real Git service against their own
+fixtures. Every defect they confirmed was fixed on the branch; the list is in `V0_7_PROGRESS.md`. What they showed
+about the design, which no fix inside 0.7 changes, belongs here:
+
+1. **A list of patterns loses to a new spelling.** Each review of the command policy found forms the one before
+   had not: `shutdown/s` without a space, `.git ` with a trailing space, `GIT~1`, `pwsh-preview`, a flag in front
+   of a package script, a path with a variable. Each was closed and each fix is a pattern. The policy layer is
+   worth having, because it turns the obvious and the careless into a question or a refusal and leaves a record.
+   It cannot be the boundary. The boundary has to be what the operating system lets the agent's processes do.
+2. **The runtime's pipe is reachable by what agents run.** In 0.6 nothing outside the window could call the IPC
+   surface. In 0.7 any process of the user can, with the token in the endpoint file, and a test or a build script
+   an agent is allowed to run is such a process. 0.7 keeps the two things that matter out of the pipe's reach
+   (confirmations are shown by the runtime; settings that start a program are confirmed), and refuses obvious
+   access to the file and the pipe. The real answer is that agent processes must not be able to read the file or
+   open the pipe: a restricted token or a separate identity for the worker's children, and an access list on the
+   pipe that names the desktop only.
+3. **An authenticated desktop.** The window calls itself `desktop` in the handshake and nothing verifies it.
+   Candidates: the runtime starts the window itself and hands it a one-time secret over an inherited handle; or the
+   runtime checks the client process of the pipe connection (needs a native helper).
+4. **NEXUS's own git commands must never depend on anything an agent can write.** 0.7 takes the Git directory and
+   the branch of a worktree from NEXUS's record. What is left: filters, text conversion and merge drivers of the
+   repository's own configuration still run inside NEXUS's git commands (an agent needs an approval to write
+   them); attribute files in the worktree select among them. 0.8 should run NEXUS's git with a configuration
+   NEXUS controls (a per-worktree configuration, attributes read from the base commit) and should give each task
+   a clone or a namespace of its own, so that a task cannot name the user's branches at all.
+5. **Confirmation dialogs are not a boundary against the user's own processes.** A process of the same user can
+   operate the desktop. Isolation of agent processes (item 2) is what makes the dialog mean something.
+6. **Provider differences.** Codex sessions are not authorized per tool call by NEXUS; the boundary is the
+   provider's read-only sandbox, which NEXUS has not verified on Windows against power commands. Loading a
+   repository's own Claude configuration runs that repository's hooks outside NEXUS's policy; 0.7 confirms the
+   opt-in and bounds nothing after it.
+
+These move Phase 0 (repository safety) and Phase 2 (token hardening for worker processes) to the front of the
+plan, ahead of process-tree containment.
+
 ## Goals
 
 1. Process-tree ownership. Every process an agent session starts is owned by NEXUS, and is gone when the session ends,
