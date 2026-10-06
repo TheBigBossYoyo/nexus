@@ -1,0 +1,425 @@
+{
+  "kind": "v0.7-control-plane",
+  "startedAt": "2026-10-05T21:45:25.317Z",
+  "executable": "dev build",
+  "dataDir": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-v07-data-9xMl6h",
+  "baseCommit": "915168765c10809f6f77ce996450a231f5a6cecc",
+  "samples": [
+    {
+      "at": "2026-10-05T21:45:29.477Z",
+      "line": "program QUEUED | arena QUEUED | agents 0/3 | workers 0 busy of 0 | health HEALTHY"
+    },
+    {
+      "at": "2026-10-05T21:45:33.487Z",
+      "line": "program RUNNING | arena RUNNING | agents 1/3 | workers 2 busy of 2 | health HEALTHY"
+    },
+    {
+      "at": "2026-10-05T21:51:25.319Z",
+      "line": "program COMPLETED | arena COMPLETED | agents 0/3 | workers 0 busy of 0 | health RECOVERING"
+    },
+    {
+      "at": "2026-10-05T21:51:29.334Z",
+      "line": "program COMPLETED | arena COMPLETED | agents 0/3 | workers 0 busy of 0 | health HEALTHY"
+    }
+  ],
+  "windowClosed": {
+    "before": {
+      "at": "2026-10-05T21:45:33.487Z",
+      "runtime": {
+        "pid": 37944,
+        "bootId": "615ca48d-e5d8-451a-be27-92c7bac41d5c",
+        "pipe": "\\\\.\\pipe\\nexus-runtime-ebc87ac34812-6295a1174f112f3f",
+        "version": "0.6.0",
+        "protocol": 1
+      },
+      "busyWorkers": [
+        {
+          "pid": 37416,
+          "agent": "44f7297e-2f68-4643-99ad-6179ac9839b7",
+          "session": "25ee1361-ee2a-4024-8e3c-4f7953f6aef6"
+        }
+      ],
+      "leases": 2
+    },
+    "closedForMs": 75000,
+    "windowGone": true,
+    "runtimeAliveWithoutWindow": false,
+    "runtimeAliveAfterWait": false,
+    "sameRuntime": false,
+    "eventsWhileClosed": 10,
+    "reopenedAt": "2026-10-05T21:51:25.303Z"
+  },
+  "workerKill": null,
+  "app": {
+    "version": "0.6.0",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "usageBefore": {
+    "capturedAt": "2026-10-05T21:45:29.103Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "AVAILABLE",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 0,
+      "turns": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "durationMs": 0,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "6d9acf66-0a78-48a3-a189-bc232402acf9",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 57,
+        "resetAt": "2026-10-06T00:09:59.692413+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-05T21:45:29.102Z",
+        "updatedAt": "2026-10-05T21:45:29.102Z",
+        "stale": false
+      },
+      {
+        "id": "e57f8a88-f2a2-4e80-9e0c-c8dabb763aa4",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-05T21:45:29.102Z",
+        "updatedAt": "2026-10-05T21:45:29.102Z",
+        "stale": false
+      },
+      {
+        "id": "c09731a2-2966-4b43-b6ee-e8247346180a",
+        "limitType": "seven_day",
+        "status": "allowed",
+        "utilizationPercent": 83,
+        "resetAt": "2026-10-10T03:59:59.692481+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-05T21:45:29.102Z",
+        "updatedAt": "2026-10-05T21:45:29.102Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 83,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-06T00:09:59.692413+00:00",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "runtime": {
+    "pid": 37944,
+    "bootId": "615ca48d-e5d8-451a-be27-92c7bac41d5c",
+    "version": "0.6.0",
+    "protocol": 1,
+    "endpointAcl": "restricted",
+    "endpoint": {
+      "pid": 37944,
+      "bootId": "615ca48d-e5d8-451a-be27-92c7bac41d5c",
+      "pipe": "\\\\.\\pipe\\nexus-runtime-ebc87ac34812-6295a1174f112f3f",
+      "version": "0.6.0",
+      "protocol": 1
+    },
+    "windowPid": 41920
+  },
+  "items": {
+    "program": "8b44956e-b8ed-4f8b-b31a-c70d51e0bc8c",
+    "arena": "d6b03ca6-5e6b-4ad8-aef2-aed8079d6e92"
+  },
+  "result": {
+    "program": {
+      "state": "COMPLETED",
+      "roadmap": [
+        {
+          "key": "format-duration",
+          "state": "COMPLETED",
+          "attempts": 1
+        },
+        {
+          "key": "round-trip",
+          "state": "COMPLETED",
+          "attempts": 1
+        }
+      ],
+      "missions": 2
+    },
+    "arena": {
+      "state": "completed",
+      "trials": [
+        {
+          "state": "passed",
+          "strategy": "SINGLE",
+          "success": null,
+          "score": null
+        }
+      ]
+    },
+    "items": {
+      "program": "COMPLETED",
+      "arena": "COMPLETED"
+    },
+    "seen": {
+      "maxAgents": 1,
+      "maxBusyWorkers": 2,
+      "bothActive": true,
+      "distinctWorkerPids": 2,
+      "distinctSessionIds": 1,
+      "leaseViolations": 0
+    },
+    "decisions": {
+      "program": [
+        {
+          "at": "2026-10-05T21:45:29.680Z",
+          "itemId": "8b44956e-b8ed-4f8b-b31a-c70d51e0bc8c",
+          "decision": "GRANT",
+          "reason": "May hold 2 of 2 agent(s)."
+        },
+        {
+          "at": "2026-10-05T21:45:29.459Z",
+          "itemId": "8b44956e-b8ed-4f8b-b31a-c70d51e0bc8c",
+          "decision": "ADMIT",
+          "reason": "Started with 2 of 2 agent(s) at P1."
+        }
+      ],
+      "arena": [
+        {
+          "at": "2026-10-05T21:45:29.775Z",
+          "itemId": "d6b03ca6-5e6b-4ad8-aef2-aed8079d6e92",
+          "decision": "GRANT",
+          "reason": "May hold 1 of 2 agent(s)."
+        },
+        {
+          "at": "2026-10-05T21:45:29.680Z",
+          "itemId": "d6b03ca6-5e6b-4ad8-aef2-aed8079d6e92",
+          "decision": "ADMIT",
+          "reason": "Started with 1 of 2 agent(s) at P2."
+        }
+      ]
+    },
+    "workers": {
+      "ended": 3,
+      "failed": [],
+      "activeLeases": 0
+    },
+    "security": {
+      "recorded": 8,
+      "byDecision": {
+        "DENY": 8
+      }
+    },
+    "health": {
+      "level": "HEALTHY",
+      "components": [
+        {
+          "component": "database",
+          "level": "HEALTHY",
+          "detail": "The database answers. The runtime is its only writer.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "scheduler",
+          "level": "HEALTHY",
+          "detail": "Passes are running.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "workers",
+          "level": "HEALTHY",
+          "detail": "0 worker processes alive, 0 holding a session.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "providers",
+          "level": "HEALTHY",
+          "detail": "Claude: Claude subscription.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "git",
+          "level": "HEALTHY",
+          "detail": "Git operations go through the Git service.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "usage",
+          "level": "HEALTHY",
+          "detail": "Claude usage: AVAILABLE.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "power_supervisor",
+          "level": "HEALTHY",
+          "detail": "No end-of-run action is armed.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "ipc",
+          "level": "HEALTHY",
+          "detail": "1 window connected over a local pipe (protocol 1, authenticated). Nothing listens on the network.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        },
+        {
+          "component": "schedules",
+          "level": "HEALTHY",
+          "detail": "No schedule is switched on.",
+          "checkedAt": "2026-10-05T21:51:29.326Z"
+        }
+      ]
+    }
+  },
+  "usageAfter": {
+    "capturedAt": "2026-10-05T21:51:31.148Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "AVAILABLE",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 0,
+      "turns": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "durationMs": 0,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "6d9acf66-0a78-48a3-a189-bc232402acf9",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 62,
+        "resetAt": "2026-10-06T00:09:59.731270+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-05T21:51:31.147Z",
+        "updatedAt": "2026-10-05T21:51:31.147Z",
+        "stale": false
+      },
+      {
+        "id": "e57f8a88-f2a2-4e80-9e0c-c8dabb763aa4",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-05T21:51:31.147Z",
+        "updatedAt": "2026-10-05T21:51:31.147Z",
+        "stale": false
+      },
+      {
+        "id": "c09731a2-2966-4b43-b6ee-e8247346180a",
+        "limitType": "seven_day",
+        "status": "allowed",
+        "utilizationPercent": 84,
+        "resetAt": "2026-10-10T03:59:59.731289+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-05T21:51:31.147Z",
+        "updatedAt": "2026-10-05T21:51:31.147Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 84,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-06T00:09:59.731270+00:00",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "persistence": {
+    "stoppedCleanly": true,
+    "newBootId": true,
+    "finished": [
+      {
+        "type": "program",
+        "state": "COMPLETED"
+      },
+      {
+        "type": "arena",
+        "state": "COMPLETED"
+      }
+    ],
+    "programStateAfterRestart": "COMPLETED"
+  },
+  "finishedAt": "2026-10-05T21:51:32.951Z",
+  "ok": false
+}
