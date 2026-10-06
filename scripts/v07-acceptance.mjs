@@ -89,7 +89,6 @@ try {
   const runtime0 = await call('runtime.status')
   evidence.runtime = { pid: runtime0.pid, bootId: runtime0.bootId, version: runtime0.version, protocol: runtime0.protocol, endpointAcl: runtime0.endpointAcl, endpoint: endpoint(), windowPid: app.process().pid }
   log('runtime', JSON.stringify(evidence.runtime), 'connection', connection.phase)
-  let windowPid = app.process().pid
 
   await call('control.setLimits', { limits: { maxAgents: 3, maxActiveItems: 2, resumeOnBoot: 'resume', agingMinutes: 30 } })
   const project = await call('projects.open', { path: repo })
@@ -165,13 +164,11 @@ try {
       const runtimeAliveWithoutWindow = alive(before.runtime.pid)
       await sleep(WINDOW_CLOSED_MS)
       const runtimeAliveAfterWait = alive(before.runtime.pid)
-      const windowPidBefore = child.pid
       ;({ app, call } = await launch())
       const after = await call('runtime.status')
       let eventsWhileClosed = 0
       for (const runId of runIds) eventsWhileClosed += (await call('events.list', { runId, limit: 5000 })).filter((e) => e.seq > seqBefore[runId] && e.createdAt > before.at).length
-      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid: windowPidBefore, reopenedAt: new Date().toISOString() }
-      windowPid = app.process().pid
+      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid: child.pid, reopenedAt: new Date().toISOString() }
       log('window reopened', JSON.stringify({ windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: evidence.windowClosed.sameRuntime, eventsWhileClosed }))
       continue
     }
