@@ -30,6 +30,12 @@ export class WorktreeRepository extends Table<Worktree> {
     super(db, worktreeCodec, 'worktree')
   }
 
+  /** The newest record of a worktree at this path (paths are compared without regard to case or slash direction). */
+  getByPath(path: string): Worktree | null {
+    const key = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    return this.one("WHERE lower(rtrim(replace(path, '\\', '/'), '/')) = ? ORDER BY created_at DESC, rowid DESC", [key])
+  }
+
   listByRun(runId: string): Worktree[] {
     return this.byRun(runId)
   }

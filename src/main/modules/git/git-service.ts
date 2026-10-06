@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
-import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { NexusError } from '@shared/result'
 import { projectCommandEnv, runProcess } from '../process/run-process'
 import type { ProcessResult } from '../process/run-process'
@@ -234,8 +234,6 @@ export function parseWorktreeList(raw: string): WorktreeInfo[] {
  * NEXUS only ever creates branches/worktrees, commits, merges with abort, and removes worktrees. The one
  * hard reset (resetClean) is for NEXUS-owned worktrees only.
  */
-/** Subcommands of NEXUS's own that change a working tree, an index or a branch. */
-const MUTATING = new Set(['add', 'commit', 'merge', 'reset', 'clean', 'checkout', 'switch', 'restore', 'cherry-pick', 'rebase', 'revert', 'stash', 'rm', 'mv', 'apply', 'am'])
 const samePath = (a: string, b: string): boolean => {
   const norm = (p: string): string => {
     const r = resolve(p).replace(/\\/g, '/').replace(/\/+$/, '')
@@ -244,12 +242,35 @@ const samePath = (a: string, b: string): boolean => {
   return norm(a) === norm(b)
 }
 
+const pathKeyOf = (p: string): string => {
+  const r = resolve(p).replace(/\\/g, '/').replace(/\/+$/, '')
+  return process.platform === 'win32' ? r.toLowerCase() : r
+}
+const isWithin = (parent: string, child: string): boolean => {
+  const rel = relative(resolve(parent), resolve(child))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** A worktree NEXUS created, and the Git directory NEXUS itself found for it in the repository. */
+interface TrustedWorktree {
+  root: string
+  gitDir: string
+}
+
 export class GitService {
   private readonly env: NodeJS.ProcessEnv
   /** An empty directory NEXUS owns: its git commands look for hooks there, so they run none. */
   private noHooksDir: string | null = null
   /** Worktree pointer files that were verified, by what identified them then. */
   private readonly verifiedPointers = new Map<string, string>()
+  /**
+   * The worktrees NEXUS created, by path. For these, NEXUS's git commands name the Git directory themselves and
+   * never read the `.git` file in the worktree, which an agent working there can rewrite.
+   */
+  private readonly trusted = new Map<string, TrustedWorktree>()
+  private readonly notOurs = new Set<string>()
+  private worktreesRoot: string | null = null
+  private repositoryOf: ((worktreePath: string) => string | null | Promise<string | null>) | null = null
 
   constructor(private readonly gitPath: string = 'git') {
     // Git needs none of the credentials NEXUS withholds from project commands, and a program that a
@@ -262,6 +283,77 @@ export class GitService {
       }
     }
     this.env = env
+  }
+
+  // ---- the Git directory of a NEXUS worktree ----
+
+  /** The directory under which NEXUS creates its worktrees (`<root>/<run>/<task>`). */
+  setWorktreesRoot(root: string): void {
+    this.worktreesRoot = resolve(root)
+  }
+
+  /**
+   * How a worktree found on disk after a restart is traced back to its repository: from NEXUS's own records,
+   * never from anything inside the worktree. Returns the repository's path, or null when NEXUS does not know
+   * the directory as one of its worktrees.
+   */
+  setWorktreeResolver(resolver: (worktreePath: string) => string | null | Promise<string | null>): void {
+    this.repositoryOf = resolver
+    this.notOurs.clear()
+  }
+
+  /**
+   * Records the Git directory of a worktree, found by asking the repository: the entry under
+   * `<common dir>/worktrees/` whose back-pointer names this worktree. Nothing inside the worktree is read.
+   * False when the repository has no such entry.
+   */
+  async trustWorktree(worktreePath: string, repoRoot: string): Promise<boolean> {
+    const root = resolve(worktreePath)
+    const shown = await runProcess(this.gitPath, ['rev-parse', '--git-common-dir'], { cwd: repoRoot, env: this.env, timeoutMs: 15_000 })
+    if (shown.exitCode !== 0 || shown.stdout.trim() === '') return false
+    const common = resolve(repoRoot, shown.stdout.trim())
+    let names: string[]
+    try {
+      names = await readdir(join(common, 'worktrees'))
+    } catch {
+      return false
+    }
+    for (const name of names) {
+      const gitDir = join(common, 'worktrees', name)
+      let back: string
+      try {
+        back = (await readFile(join(gitDir, 'gitdir'), 'utf8')).trim()
+      } catch {
+        continue
+      }
+      if (!samePath(resolve(gitDir, back), join(root, '.git'))) continue
+      this.trusted.set(pathKeyOf(root), { root, gitDir })
+      this.notOurs.delete(pathKeyOf(root))
+      return true
+    }
+    return false
+  }
+
+  /** The record for `cwd` when it is, or lies inside, a worktree NEXUS created. */
+  private async trustedFor(cwd: string): Promise<TrustedWorktree | null> {
+    const key = pathKeyOf(cwd)
+    for (const [root, entry] of this.trusted) if (key === root || key.startsWith(`${root}/`)) return entry
+    if (!this.worktreesRoot || !this.repositoryOf || !isWithin(this.worktreesRoot, cwd)) return null
+    // Under the root a worktree is `<root>/<run>/<task>`.
+    const parts = relative(this.worktreesRoot, resolve(cwd)).split(/[\\/]/).filter((p) => p !== '')
+    if (parts.length < 2) return null
+    const candidate = join(this.worktreesRoot, parts[0] as string, parts[1] as string)
+    const candidateKey = pathKeyOf(candidate)
+    if (this.notOurs.has(candidateKey)) return null
+    const repoRoot = await this.repositoryOf(candidate)
+    if (repoRoot && (await this.trustWorktree(candidate, repoRoot))) return this.trusted.get(candidateKey) ?? null
+    if (repoRoot) {
+      // NEXUS knows this directory as a worktree of that repository, and the repository has no entry for it:
+      // nothing git finds from inside it can be the right Git directory.
+      throw new NexusError('invalid_state', `The repository at ${repoRoot} no longer has a worktree entry for ${candidate}. NEXUS will not run git there.`, { cwd })
+    }
+    this.notOurs.add(candidateKey)
+    return null
   }
 
   // ---- plumbing ----
@@ -300,6 +392,18 @@ export class GitService {
       refuse('the Git directory it names is not a worktree directory')
     }
     if (!samePath(resolve(gitDir, back), dotGit)) refuse('the Git directory it names belongs to another working tree')
+    // The back-pointer alone proves nothing when whoever rewrote the pointer also wrote the directory it names.
+    // A real worktree directory lives in its repository, at `<common dir>/worktrees/<name>`, and never inside
+    // the working tree itself.
+    if (isWithin(cwd, gitDir)) refuse('the Git directory it names lies inside the working tree')
+    let common = ''
+    try {
+      common = resolve(gitDir, (await readFile(join(gitDir, 'commondir'), 'utf8')).trim())
+    } catch {
+      refuse('the Git directory it names has no common directory')
+    }
+    if (isWithin(cwd, common)) refuse('the repository it names lies inside the working tree')
+    if (basename(dirname(gitDir)).toLowerCase() !== 'worktrees' || !samePath(dirname(dirname(gitDir)), common)) refuse('the Git directory it names is not a worktree directory of its repository')
     this.verifiedPointers.set(cwd, stamp)
   }
 
@@ -309,11 +413,20 @@ export class GitService {
     // system monitor, no hooks, no pager, no `ext::` transport. Agents work in these repositories; a
     // configuration key or a hook one of them left behind must not execute in NEXUS's process context.
     this.noHooksDir ??= mkdtempSync(join(tmpdir(), 'nexus-no-hooks-'))
-    const fullArgs = ['-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...args]
-    if (MUTATING.has(args[0] ?? '')) await this.assertOwnGitDir(cwd)
+    // In a worktree NEXUS created, the Git directory is the one NEXUS found in the repository, named explicitly:
+    // the `.git` file in the worktree is not read, so rewriting it redirects nothing, for any command. Replacement
+    // objects are never used: a ref an agent could write must not stand in for a commit NEXUS names.
+    const own = await this.trustedFor(cwd)
+    const scope = own ? [`--git-dir=${own.gitDir}`, `--work-tree=${own.root}`] : []
+    const fullArgs = ['--no-replace-objects', ...scope, '-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...args]
+    // Anywhere else a linked worktree's pointer is verified before every command, not only before a write: a
+    // read runs the filters and drivers of whatever repository the pointer names.
+    if (!own) await this.assertOwnGitDir(cwd)
+    // Under the worktrees root git never looks further up than that root for a repository.
+    const ceiling = this.worktreesRoot && isWithin(this.worktreesRoot, cwd) ? { GIT_CEILING_DIRECTORIES: this.worktreesRoot } : {}
     const result = await runProcess(this.gitPath, fullArgs, {
       cwd,
-      env: opts.env ? { ...this.env, ...opts.env } : this.env,
+      env: { ...this.env, ...ceiling, ...(opts.env ?? {}) },
       timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxOutputBytes: opts.maxOutputBytes,
       keep: opts.keep,
@@ -494,6 +607,8 @@ export class GitService {
       }
       throw e
     }
+    // From here on NEXUS's git commands in this worktree use the Git directory the repository has for it.
+    if (!(await this.trustWorktree(abs, repo))) throw new NexusError('git_failed', `git created the worktree at ${abs} but the repository has no entry for it`, { path: abs })
     return sha
   }
 
@@ -525,6 +640,7 @@ export class GitService {
     for (let attempt = 1; ; attempt++) {
       try {
         await this.run(repo, args)
+        this.trusted.delete(pathKeyOf(abs))
         return
       } catch (e) {
         const stderr = e instanceof NexusError ? String(e.detail?.['stderr'] ?? '') : ''

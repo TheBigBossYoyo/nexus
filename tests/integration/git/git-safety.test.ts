@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -122,39 +123,186 @@ const replacePointer = async (path: string, content: string): Promise<void> => {
 }
 
 describe('NEXUS does not write through a worktree whose .git pointer was changed, and runs nothing a repository configures', () => {
-  it('refuses to commit, reset or clean through a rewritten .git pointer; the user\'s checkout and the other worktree are untouched', async () => {
+  it('ignores a rewritten .git pointer in a worktree NEXUS created: commits stay on the worktree\'s own branch, the user\'s checkout and the other worktree are untouched', async () => {
     const repo = await makeRepo()
     const manager = new WorktreeManager(git, join(base, `wt-${newId()}`))
     const a = await manager.createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
     const b = await manager.createForTask({ repoRoot: repo, runId: newId(), taskKey: 'b', startPoint: 'main' })
     const userHead = await sh(repo, 'rev-parse', 'HEAD')
     const bHead = await sh(b.path, 'rev-parse', 'HEAD')
+    const branchOfA = (): Promise<string> => sh(repo, 'rev-parse', `refs/heads/${a.branch}`)
     await writeFile(join(a.path, 'agent.txt'), 'work\n')
-    // Intact: NEXUS commits in the worktree as always.
     await git.addAll(a.path)
-    await git.commitAll(a.path, 'work of a', AUTHOR)
+    const first = await git.commitAll(a.path, 'work of a', AUTHOR)
+    expect(await branchOfA()).toBe(first)
     const original = await readFile(join(a.path, '.git'), 'utf8')
+    const untouched = async (): Promise<void> => {
+      expect(await sh(repo, 'rev-parse', 'HEAD')).toBe(userHead)
+      expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
+      expect(await sh(repo, 'status', '--porcelain')).toBe('')
+      expect(await sh(repo, 'rev-parse', `refs/heads/${b.branch}`)).toBe(bHead)
+    }
+    let n = 0
+    /** One more commit of NEXUS's in worktree a: it must land on a's branch whatever the pointer says. */
+    const commitInA = async (): Promise<void> => {
+      n += 1
+      await writeFile(join(a.path, `file-${n}.txt`), `${n}\n`)
+      expect((await git.status(a.path)).clean).toBe(false)
+      await git.addAll(a.path)
+      const sha = await git.commitAll(a.path, `commit ${n}`, AUTHOR)
+      expect(await branchOfA()).toBe(sha)
+      expect((await git.status(a.path)).clean).toBe(true)
+      await untouched()
+    }
 
     // The agent points the worktree at the user's repository.
     await replacePointer(join(a.path, '.git'), `gitdir: ${join(repo, '.git').replace(/\\/g, '/')}\n`)
-    await writeFile(join(a.path, 'evil.txt'), 'x\n')
-    await expect(git.addAll(a.path)).rejects.toThrow(/no longer points at its own Git directory/)
-    await expect(git.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/no longer points at its own Git directory/)
-    await expect(git.resetClean(a.path)).rejects.toThrow(/no longer points at its own Git directory/)
-    expect(await sh(repo, 'rev-parse', 'HEAD')).toBe(userHead)
-    expect(await sh(repo, 'status', '--porcelain')).toBe('')
+    await commitInA()
 
-    // The agent points it at another task's worktree directory.
+    // At another task's worktree directory.
     const otherGitDir = (await sh(b.path, 'rev-parse', '--absolute-git-dir')).replace(/\\/g, '/')
     await replacePointer(join(a.path, '.git'), `gitdir: ${otherGitDir}\n`)
-    await expect(git.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/belongs to another working tree/)
-    expect(await sh(b.path, 'rev-parse', 'HEAD')).toBe(bHead)
+    await commitInA()
 
-    // Restored, it works again.
-    await replacePointer(join(a.path, '.git'), original)
+    // At a Git directory the agent made itself inside the worktree, whose back-pointer names the worktree and
+    // whose common directory is the user's repository: the form that passed the check of 0.6.
+    const fake = join(a.path, '.nxfake')
+    await mkdir(fake, { recursive: true })
+    await writeFile(join(fake, 'HEAD'), 'ref: refs/heads/main\n')
+    await writeFile(join(fake, 'commondir'), `${join(repo, '.git').replace(/\\/g, '/')}\n`)
+    await writeFile(join(fake, 'gitdir'), `${join(a.path, '.git').replace(/\\/g, '/')}\n`)
+    await replacePointer(join(a.path, '.git'), `gitdir: ${fake.replace(/\\/g, '/')}\n`)
+    await commitInA()
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
+
+    // The pointer is gone altogether: git would look further up for a repository.
+    await rm(join(a.path, '.git'), { force: true })
+    await commitInA()
+
+    // A reset and clean of NEXUS's stays in the worktree too.
+    await writeFile(join(a.path, 'junk.txt'), 'x\n')
+    await git.resetClean(a.path)
+    await untouched()
+
+    // Restored, nothing has changed for NEXUS.
+    await writeFile(join(a.path, '.git'), original)
+    await commitInA()
+    expect(await sh(a.path, 'log', '--oneline', '-1')).toContain(`commit ${n}`)
+  })
+
+  it('runs no filter of a private repository an agent put behind the pointer, also for a read', async () => {
+    const repo = await makeRepo()
+    const manager = new WorktreeManager(git, join(base, `wt-${newId()}`))
+    const a = await manager.createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
+    const marker = join(base, `filter-${newId()}.txt`).replace(/\\/g, '/')
+    // A repository of the agent's own inside the worktree, with a clean filter that leaves a mark, and the
+    // worktree's pointer turned towards it.
+    const priv = join(a.path, 'priv')
+    await mkdir(priv, { recursive: true })
+    await sh(priv, 'init', '-q', '-b', 'main')
+    await sh(priv, 'config', 'filter.x.clean', `sh -c 'echo ran >> "${marker}"; cat'`)
+    await writeFile(join(a.path, '.gitattributes'), '* filter=x\n')
+    // The private repository itself is not content of the worktree.
+    await writeFile(join(a.path, '.gitignore'), 'ignored/\npriv/\n')
+    await writeFile(join(a.path, 'tracked.txt'), 'changed\n')
+    await replacePointer(join(a.path, '.git'), `gitdir: ${join(priv, '.git').replace(/\\/g, '/')}\n`)
+
+    expect((await git.status(a.path)).clean).toBe(false)
+    await git.workingState(a.path)
     await git.addAll(a.path)
-    await git.commitAll(a.path, 'more work of a', AUTHOR)
-    expect(await sh(a.path, 'log', '--oneline', '-1')).toContain('more work of a')
+    await git.commitAll(a.path, 'with attributes', AUTHOR)
+    expect(existsSync(marker)).toBe(false)
+
+    // A Git service that has no record of the worktree (another process) refuses it instead, for a read as for a write.
+    const stranger = new GitService()
+    await expect(stranger.status(a.path)).rejects.toThrow(/no longer points at its own Git directory/)
+    await expect(stranger.addAll(a.path)).rejects.toThrow(/no longer points at its own Git directory/)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('a Git service without a record refuses the self-made Git directory that passed the check of 0.6', async () => {
+    const repo = await makeRepo()
+    const manager = new WorktreeManager(git, join(base, `wt-${newId()}`))
+    const a = await manager.createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
+    const userHead = await sh(repo, 'rev-parse', 'refs/heads/main')
+    const stranger = new GitService()
+    // Intact, a stranger may work there: the pointer names a worktree directory of its repository.
+    expect((await stranger.status(a.path)).clean).toBe(true)
+
+    const fake = join(a.path, '.nxfake')
+    await mkdir(fake, { recursive: true })
+    await writeFile(join(fake, 'HEAD'), 'ref: refs/heads/main\n')
+    await writeFile(join(fake, 'commondir'), `${join(repo, '.git').replace(/\\/g, '/')}\n`)
+    await writeFile(join(fake, 'gitdir'), `${join(a.path, '.git').replace(/\\/g, '/')}\n`)
+    await replacePointer(join(a.path, '.git'), `gitdir: ${fake.replace(/\\/g, '/')}\n`)
+    await writeFile(join(a.path, 'evil.txt'), 'x\n')
+    await expect(stranger.addAll(a.path)).rejects.toThrow(/lies inside the working tree/)
+    await expect(stranger.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/lies inside the working tree/)
+    await expect(stranger.status(a.path)).rejects.toThrow(/lies inside the working tree/)
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
+
+    // The same directory outside the worktree is not a worktree directory of the repository either.
+    const outside = join(base, `nxfake-${newId()}`)
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(outside, 'HEAD'), 'ref: refs/heads/main\n')
+    await writeFile(join(outside, 'commondir'), `${join(repo, '.git').replace(/\\/g, '/')}\n`)
+    await writeFile(join(outside, 'gitdir'), `${join(a.path, '.git').replace(/\\/g, '/')}\n`)
+    await replacePointer(join(a.path, '.git'), `gitdir: ${outside.replace(/\\/g, '/')}\n`)
+    await expect(stranger.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/not a worktree directory of its repository/)
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
+  })
+
+  it('after a restart finds the Git directory of a worktree through NEXUS\'s own record of its repository, and refuses a worktree the repository no longer has', async () => {
+    const repo = await makeRepo()
+    const root = join(base, `wt-${newId()}`)
+    const a = await new WorktreeManager(git, root).createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
+    const userHead = await sh(repo, 'rev-parse', 'refs/heads/main')
+    const original = await readFile(join(a.path, '.git'), 'utf8')
+    // The agent turned the pointer towards the user's repository while NEXUS was not running.
+    await replacePointer(join(a.path, '.git'), `gitdir: ${join(repo, '.git').replace(/\\/g, '/')}\n`)
+
+    const restarted = new GitService()
+    restarted.setWorktreesRoot(root)
+    const asked: string[] = []
+    restarted.setWorktreeResolver((path) => {
+      asked.push(path)
+      return path.toLowerCase() === a.path.toLowerCase() ? repo : null
+    })
+    await writeFile(join(a.path, 'after.txt'), 'x\n')
+    await restarted.addAll(a.path)
+    const sha = await restarted.commitAll(a.path, 'after the restart', AUTHOR)
+    expect(await sh(repo, 'rev-parse', `refs/heads/${a.branch}`)).toBe(sha)
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
+    // Asked once, then remembered.
+    await restarted.status(a.path)
+    expect(asked).toHaveLength(1)
+
+    // The repository's entry for the worktree is gone: nothing found from inside the directory can be right.
+    await rm(join(a.path, '.git'), { force: true })
+    await writeFile(join(a.path, '.git'), original)
+    await sh(repo, 'worktree', 'remove', '--force', a.path)
+    await mkdir(a.path, { recursive: true })
+    await writeFile(join(a.path, '.git'), `gitdir: ${join(repo, '.git').replace(/\\/g, '/')}\n`)
+    const later = new GitService()
+    later.setWorktreesRoot(root)
+    later.setWorktreeResolver(() => repo)
+    await expect(later.status(a.path)).rejects.toThrow(/no longer has a worktree entry/)
+    await expect(later.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/no longer has a worktree entry/)
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
+  })
+
+  it('reads the commit it names, not a replacement an agent registered for it', async () => {
+    const repo = await makeRepo()
+    const a = await new WorktreeManager(git, join(base, `wt-${newId()}`)).createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
+    const baseCommit = await sh(repo, 'rev-parse', 'main')
+    await writeFile(join(a.path, 'tracked.txt'), 'the agent\'s own content\n')
+    await sh(a.path, 'commit', '-q', '-am', 'agent', '--author', 'A <a@example.invalid>')
+    const agentCommit = await sh(a.path, 'rev-parse', 'HEAD')
+    await sh(a.path, 'replace', baseCommit, agentCommit)
+    // Plain git now shows the agent's content under the base commit's name.
+    expect((await sh(a.path, 'show', `${baseCommit}:tracked.txt`)).trim()).toBe('the agent\'s own content')
+    // NEXUS does not.
+    expect((await git.run(a.path, ['show', `${baseCommit}:tracked.txt`])).stdout.trim()).toBe('original')
   })
 
   it('runs no hook, no file system monitor and no pager that the repository configures, and hands git no Claude credential', async () => {

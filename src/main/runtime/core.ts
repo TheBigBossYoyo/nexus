@@ -115,6 +115,14 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const repos = createRepositories(db)
   const bus = new EventBus(repos.events, repos.transaction)
   const git = new GitService()
+  // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
+  // Git directory comes from the repository NEXUS's own record names for the worktree.
+  git.setWorktreesRoot(worktreesDir)
+  git.setWorktreeResolver((worktreePath) => {
+    const record = repos.worktrees.getByPath(worktreePath)
+    const run = record ? repos.runs.get(record.runId) : null
+    return run ? (repos.projects.get(run.projectId)?.rootPath ?? null) : null
+  })
   const settings = repos.settings.get()
 
   let server: RuntimeServer | null = null
