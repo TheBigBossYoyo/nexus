@@ -3,7 +3,9 @@
  * works out what each invocation runs: a script file, inline code, a module, or nothing inspectable.
  */
 
-export type InterpreterFamily = 'powershell' | 'cmd' | 'python' | 'node' | 'posix_shell' | 'wsh' | 'mshta' | 'deno' | 'bun' | 'ts_runner' | 'ruby' | 'perl' | 'php'
+export type InterpreterFamily =
+  | 'powershell' | 'cmd' | 'python' | 'node' | 'posix_shell' | 'wsh' | 'mshta' | 'deno' | 'bun' | 'ts_runner' | 'ruby' | 'perl' | 'php'
+  | 'lua' | 'r' | 'tcl' | 'groovy' | 'julia' | 'java' | 'go' | 'dotnet' | 'wsl'
 
 /** What one interpreter invocation executes. */
 export type InterpreterTarget =
@@ -13,6 +15,8 @@ export type InterpreterTarget =
   | { kind: 'module'; name: string }
   | { kind: 'encoded'; payload: string }
   | { kind: 'version' }
+  /** The program text arrives on standard input (`python -`, `bash -s`, `powershell -Command -`, or a pipe/heredoc into a bare interpreter). */
+  | { kind: 'stdin' }
   | { kind: 'interactive' }
   | { kind: 'none' }
 
@@ -26,7 +30,8 @@ const EXT = /\.(exe|cmd|bat|com)$/i
 
 /** Lowercase base name of a command word with a Windows executable extension removed. */
 export function executableName(word: string): string {
-  const base = (word.split(/[\\/]/).pop() ?? word).toLowerCase().replace(EXT, '')
+  // Windows ignores trailing dots and spaces in a name, so `powershell.exe.` is powershell.exe.
+  const base = (word.split(/[\\/]/).pop() ?? word).toLowerCase().replace(/[. ]+$/, '').replace(EXT, '')
   return base
 }
 
@@ -44,6 +49,8 @@ const TABLE: Record<string, InterpreterFamily> = {
   ruby: 'ruby',
   perl: 'perl',
   php: 'php',
+  lua: 'lua', luajit: 'lua', rscript: 'r', tclsh: 'tcl', wish: 'tcl', groovy: 'groovy', julia: 'julia',
+  java: 'java', go: 'go', dotnet: 'dotnet', wsl: 'wsl', 'wsl-ubuntu': 'wsl',
 }
 
 /** The interpreter a command word names, or null. Handles full paths, `.exe` suffixes, case and `python3.11`. */
@@ -54,11 +61,15 @@ export function interpreterFor(word: string): Interpreter | null {
     if (direct !== undefined) return { family: direct, name }
     if (/^python3?(\.\d+)*$/.test(name) || /^pypy3?(\.\d+)*$/.test(name)) return { family: 'python', name }
     if (/^node(\d+)?$/.test(name)) return { family: 'node', name }
+    // pwsh-preview, pwsh-lts, powershell7, powershell_ise ...: any variant of the two PowerShell hosts.
+    if (/^(?:pwsh|powershell)(?:[-_.]?\w+)*$/.test(name)) return { family: 'powershell', name }
+    if (/^(?:lua|luajit)[-\d.]*$/.test(name)) return { family: 'lua', name }
+    if (/^java(?:w|\d+)?$/.test(name)) return { family: 'java', name }
   }
   return null
 }
 
-export const SCRIPT_EXTENSIONS = /\.(ps1|psm1|cmd|bat|sh|bash|py|pyw|js|mjs|cjs|ts|mts|cts|vbs|vbe|wsf|wsh|hta|rb|pl|php|jar)$/i
+export const SCRIPT_EXTENSIONS = /\.(ps1|psm1|cmd|bat|sh|bash|py|pyw|js|mjs|cjs|ts|mts|cts|vbs|vbe|wsf|wsh|hta|rb|pl|php|jar|lua|groovy|java|go|csx)$/i
 
 /** Script type implied by the file extension, for scripts run directly (`.\build.cmd`, `./run.sh`). */
 export function familyForScriptPath(p: string): InterpreterFamily | null {
@@ -75,6 +86,11 @@ export function familyForScriptPath(p: string): InterpreterFamily | null {
     case 'rb': return 'ruby'
     case 'pl': return 'perl'
     case 'php': return 'php'
+    case 'lua': return 'lua'
+    case 'groovy': return 'groovy'
+    case 'java': return 'java'
+    case 'go': return 'go'
+    case 'csx': return 'dotnet'
     default: return null
   }
 }
@@ -106,7 +122,7 @@ function parsePython(args: string[]): InterpreterTarget {
     if (l === '-m') return { kind: 'module', name: lc[i + 1] ?? '' }
     if (l.startsWith('-m') && l.length > 2 && !l.startsWith('--')) return { kind: 'module', name: l.slice(2) }
     if (l === '-v' || l === '--version' || l === '-vv') return { kind: 'version' }
-    if (l === '-') return { kind: 'interactive' }
+    if (l === '-') return { kind: 'stdin' }
     if (a.startsWith('-')) {
       if (VALUE.has(l)) i++
       continue
@@ -128,6 +144,7 @@ function parseNode(args: string[]): InterpreterTarget {
     if (['-e', '--eval', '-p', '--print', '-pe'].includes(l)) return { kind: 'inline', code: args.slice(i + 1).join(' '), flag: a }
     if (/^--(?:eval|print)=/.test(l)) return { kind: 'inline', code: a.slice(a.indexOf('=') + 1), flag: a.split('=')[0] ?? a }
     if (l === '-v' || l === '--version') return { kind: 'version' }
+    if (l === '-') return { kind: 'stdin' }
     if (l === '--test' || l === '--watch') return { kind: 'module', name: 'node:test' }
     if (PRELOAD.has(l)) {
       if (args[i + 1] !== undefined) extra.push(args[i + 1] ?? '')
@@ -156,7 +173,7 @@ function parsePowerShell(args: string[]): InterpreterTarget {
     const flag = l.slice(1)
     const isFlag = (full: string): boolean => /^-[a-z]+$/.test(l) && flag.length > 0 && full.startsWith(flag)
     if (l === '-ec' || (isFlag('encodedcommand') && flag.startsWith('e'))) return { kind: 'encoded', payload: args[i + 1] ?? '' }
-    if (isFlag('command')) return { kind: 'inline', code: args.slice(i + 1).join(' '), flag: '-Command' }
+    if (isFlag('command')) return args[i + 1] === '-' ? { kind: 'stdin' } : { kind: 'inline', code: args.slice(i + 1).join(' '), flag: '-Command' }
     if (isFlag('file')) return { kind: 'script', path: args[i + 1] ?? '', extraPaths: [] }
     if (l.startsWith('-')) {
       if (VALUE.has(l)) i++
@@ -189,6 +206,7 @@ function parsePosixShell(args: string[]): InterpreterTarget {
     const l = lc[i] ?? ''
     if (l === '--version') return { kind: 'version' }
     if (/^-[a-z]*c[a-z]*$/.test(a)) return { kind: 'inline', code: args.slice(i + 1).join(' '), flag: a }
+    if (/^-[a-z]*s[a-z]*$/.test(a)) return { kind: 'stdin' }
     if (a === '-o' || a === '+o' || a === '--rcfile' || a === '--init-file') {
       i++
       continue
@@ -243,6 +261,49 @@ export function parseInterpreter(it: Interpreter, args: string[]): InterpreterTa
       return parseFlagInline(args, ['-e'], new Set(['-i', '-i.bak', '-i0', '-i1', '-x']))
     case 'php':
       return parseFlagInline(args, ['-r'], new Set(['-d', '-c']))
+    case 'lua':
+    case 'groovy':
+    case 'julia':
+      return parseFlagInline(args, ['-e', '--eval', '-E'], new Set(['-l', '-i', '-p', '-cp', '--classpath']))
+    case 'r':
+      return parseFlagInline(args, ['-e'], new Set())
+    case 'tcl': {
+      const i = firstPositional(args, new Set())
+      return i < 0 ? none : { kind: 'script', path: args[i] ?? '', extraPaths: [] }
+    }
+    case 'java': {
+      const lc = lower(args)
+      if (lc.includes('-version') || lc.includes('--version')) return { kind: 'version' }
+      const jar = lc.indexOf('-jar')
+      if (jar >= 0) return { kind: 'script', path: args[jar + 1] ?? '', extraPaths: [] }
+      // Source-file mode: `java Foo.java` compiles and runs the file.
+      const src = args.find((a) => /\.java$/i.test(a))
+      return src !== undefined ? { kind: 'script', path: src, extraPaths: [] } : { kind: 'module', name: 'class' }
+    }
+    case 'go': {
+      const lc = lower(args)
+      const sub = lc.find((x) => !x.startsWith('-'))
+      if (sub === 'run') {
+        const files = args.filter((a) => /\.go$/i.test(a))
+        return files.length > 0 ? { kind: 'script', path: files[0] ?? '', extraPaths: files.slice(1) } : { kind: 'module', name: 'run' }
+      }
+      return sub === undefined ? { kind: 'version' } : { kind: 'module', name: sub }
+    }
+    case 'dotnet': {
+      const lc = lower(args)
+      const sub = lc.find((x) => !x.startsWith('-'))
+      if (sub === 'script') {
+        const f = args.find((a, k) => k > lc.indexOf('script') && !a.startsWith('-'))
+        return f === undefined ? none : { kind: 'script', path: f, extraPaths: [] }
+      }
+      if (sub !== undefined && /\.dll$/i.test(sub)) return { kind: 'script', path: args[lc.indexOf(sub)] ?? '', extraPaths: [] }
+      return sub === undefined ? { kind: 'version' } : { kind: 'module', name: sub }
+    }
+    case 'wsl': {
+      // wsl [options] [--] command: the rest is a Linux command line.
+      const k = args.findIndex((a) => !a.startsWith('-') && !['-d', '-u', '--distribution', '--user'].includes(args[args.indexOf(a) - 1] ?? ''))
+      return k < 0 ? { kind: 'interactive' } : { kind: 'inline', code: args.slice(k).join(' '), flag: 'wsl' }
+    }
     case 'ts_runner':
       return parseFlagInline(args, ['-e', '--eval', '-p', '--print'], new Set(['-r', '--require', '--import', '--tsconfig', '-p', '--project']))
     case 'deno': {

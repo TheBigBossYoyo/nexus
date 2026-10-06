@@ -9,6 +9,7 @@ import type { SegmentKind } from './command-classifier'
 import { collectWriteTargets, evaluateExecution, type ExecutionEnv } from './execution-policy'
 import { canonicalizePath, isInsideGitDir, isPathInside, isSecretPath } from './paths'
 import type { BaseFileReader, ProvenanceTracker } from './provenance'
+import { NEXUS_DATA_TEXT } from './power-patterns'
 import { actionSummary, type SecurityDecisionSink } from './security-log'
 import { tokenize } from './shell-tokenizer'
 import { isInspectionOnlyRole, isWritingRole, toolsForRole } from './tools'
@@ -56,6 +57,7 @@ interface Outcome {
 }
 
 type Risk = 'low' | 'medium' | 'high'
+const NEXUS_DATA_DENY = "Denied: NEXUS's own database, key files and runtime endpoint (named pipe, endpoint.json, runtime.log) are not available to agents."
 const deny = (reason: string): ToolDecision => ({ behavior: 'deny', reason })
 const ask = (reason: string, risk: Risk): ToolDecision => ({ behavior: 'ask', reason, risk })
 const ALLOW: ToolDecision = { behavior: 'allow' }
@@ -197,6 +199,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
   function authorizeRead(raw: string | null, field: string, base: string = worktree): ToolDecision {
     if (raw === null) return deny(`${field} is required`)
     const target = canon(raw, base)
+    if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return deny(NEXUS_DATA_DENY)
     if (!inReadRoots(target)) {
       return deny(`Read denied: ${raw} is outside the worktree, project and approved read locations. Use paths inside ${worktree}.`)
     }
@@ -207,6 +210,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
   function authorizeWrite(raw: string | null, field: string, agentId: string, content?: string): ToolDecision {
     if (raw === null) return deny(`${field} is required`)
     const target = canon(raw, worktree)
+    if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return deny(NEXUS_DATA_DENY)
     if (isPathInside(worktree, target)) {
       if (isInsideGitDir(worktree, target)) return deny(`Write denied: ${raw} is inside a .git directory, which agents must never modify.`)
       // Remember who wrote it: running this file later is judged as agent-authored code.
@@ -226,6 +230,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
   /** Glob patterns and grep globs can climb out of the search root with `..` or absolute prefixes. */
   function authorizePattern(pattern: string | null, base: string): ToolDecision {
     if (pattern === null) return ALLOW
+    if (NEXUS_DATA_TEXT.test(pattern)) return deny(NEXUS_DATA_DENY)
     const segs = pattern.split(/[\\/]/)
     const escapes = segs.includes('..') || /^([a-zA-Z]:|[\\/]|~)/.test(pattern)
     if (!escapes) return ALLOW

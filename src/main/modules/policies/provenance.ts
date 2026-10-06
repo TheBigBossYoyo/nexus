@@ -37,6 +37,8 @@ export interface ProvenanceStore {
 
 /** Reads a file as it is in the base commit. null: it does not exist there. Throws when the base cannot be read at all. */
 export interface BaseFileReader {
+  /** Identifies the worktree and base commit this reader reads, so cached base content is never shared across runs or projects. */
+  readonly key?: string
   show(relPath: string): Promise<string | null>
 }
 
@@ -63,6 +65,22 @@ export class ProvenanceTracker {
   private readonly byKey = new Map<string, FileProvenanceRecord>()
   private readonly loaded = new Set<string>()
   private readonly baseCache = new Map<string, string | null | undefined>()
+  private readonly readerIds = new WeakMap<object, number>()
+  private nextReaderId = 1
+
+  /** Cache key for a base file: worktree root + base commit (or a per-reader id) + path. */
+  private cacheKey(base: BaseFileReader, rel: string): string {
+    let id = base.key
+    if (id === undefined) {
+      let n = this.readerIds.get(base)
+      if (n === undefined) {
+        n = this.nextReaderId++
+        this.readerIds.set(base, n)
+      }
+      id = `reader-${n}`
+    }
+    return `${id}|${rel}`
+  }
 
   constructor(
     private readonly store?: ProvenanceStore,
@@ -150,9 +168,10 @@ export class ProvenanceTracker {
     }
     let atBase: string | null
     try {
-      const cached = this.baseCache.get(rel)
+      const ck = this.cacheKey(base, rel)
+      const cached = this.baseCache.get(ck)
       atBase = cached !== undefined ? cached : await base.show(rel)
-      this.baseCache.set(rel, atBase)
+      this.baseCache.set(ck, atBase)
     } catch {
       return 'unknown'
     }
@@ -164,10 +183,11 @@ export class ProvenanceTracker {
   async baseContent(rel: string, base: BaseFileReader | undefined): Promise<string | null | undefined> {
     if (base === undefined) return undefined
     const key = rel.replace(/\\/g, '/')
-    if (this.baseCache.has(key)) return this.baseCache.get(key)
+    const ck = this.cacheKey(base, key)
+    if (this.baseCache.has(ck)) return this.baseCache.get(ck)
     try {
       const v = await base.show(key)
-      this.baseCache.set(key, v)
+      this.baseCache.set(ck, v)
       return v
     } catch {
       return undefined
@@ -204,6 +224,7 @@ export function gitBaseReader(
   baseRef: string,
 ): BaseFileReader {
   return {
+    key: `${cwd}|${baseRef}`,
     async show(relPath: string): Promise<string | null> {
       if (relPath.startsWith('-') || /[\0\r\n]/.test(relPath)) throw new Error('unsafe path')
       const exists = await runGit(cwd, ['cat-file', '-e', `${baseRef}:${relPath}`])

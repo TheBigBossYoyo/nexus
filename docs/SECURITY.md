@@ -358,12 +358,30 @@ A tool call's record is made when the call is authorised, before it runs.
 
 ### Interpreter policy
 
-Interpreters are recognised by resolved executable name, so `.exe` suffixes, full paths and case do not matter:
-`powershell`, `pwsh`, `cmd`, `python`, `python3`, `python3.x`, `py`, `node`, `bash`, `sh` (and zsh, dash, ksh,
-fish), `wscript`, `cscript`, `mshta`, `deno`, `bun`, `tsx`, `ts-node`, `ruby`, `perl`, `php`. A script run
-directly (`.\build.cmd`, `./run.sh`, `tools\gen.ps1`), `source x.sh`, `Import-Module x.psm1`, `Start-Process
-powershell -ArgumentList '-File','x.ps1'`, `cd dir && node x.js`, `npx tsx x.ts` and `node -r ./pre.js x.js`
-are resolved the same way.
+Interpreters are recognised by resolved executable name, so `.exe` suffixes, full paths, case and trailing dots
+do not matter: `powershell`, `pwsh` and any variant of them (`pwsh-preview`, `powershell7`, `pwsh_lts` ...),
+`cmd`, `python`, `python3`, `python3.x`, `py`, `node`, `bash`, `sh` (and zsh, dash, ksh, fish), `wscript`,
+`cscript`, `mshta`, `deno`, `bun`, `tsx`, `ts-node`, `ruby`, `perl`, `php`, `lua`, `Rscript`, `tclsh`, `groovy`,
+`julia`, `java`, `go`, `dotnet`, `wsl`. A script run directly (`.\build.cmd`, `./run.sh`, `tools\gen.ps1`),
+`source x.sh`, `Import-Module x.psm1`, `Start-Process powershell -ArgumentList '-File','x.ps1'`, `cd dir && node
+x.js`, `npx tsx x.ts` and `node -r ./pre.js x.js` are resolved the same way.
+
+Words are read the way Windows reads them before they are judged: quotes removed, trailing dots and spaces
+dropped (`evil.cmd.`), an alternate data stream suffix removed (`evil.cmd::$DATA`, `evil.ps1:zone`), and a
+missing extension resolved through PATHEXT against the worktree (`.\evil2` is `evil2.bat`; `cmd /c foo` is
+`foo.cmd`). There is also a general rule for launchers NEXUS has no model of (`explorer`, `Invoke-Item`,
+`Start-Job -FilePath`, `forfiles /c`, `git bisect run`, `git rebase --exec`, `mystery-tool x`): any argument that
+names an existing script or executable file inside the worktree is evaluated like a script reference, and an
+executable-type file (`.cmd .bat .ps1 .exe .vbs .sh ...`) that an agent wrote or changed and passed to such a
+launcher always needs approval, because NEXUS cannot know what the launcher does with it. Arguments of commands
+that only read, search, format or copy files (`git`, `rg`, `cat`, `eslint`, `vitest`, `cp` ...) are not treated
+as launches, so `git add foo.cmd` and `eslint foo.js` are unaffected. An unrecognised program given inline-code
+looking flags (`-c`, `-e`, `-Command`, `/c`) has that text inspected, and RESTRICTED asks.
+
+The whole text of every shell tool call is also inspected, minus the same exemptions the classifier makes (git
+commit messages, inert heredocs) and minus commands that only print or search their arguments (`echo`, `rg`,
+`grep`, `git`, `cat` ...): a power command with no recognised wrapper around it (`[scriptblock]::Create('shutdown
+/s').Invoke()`) is `DENY`, and the other system-sensitive categories below get their usual outcome.
 
 | What is run | STANDARD | RESTRICTED |
 |---|---|---|
@@ -374,15 +392,21 @@ are resolved the same way.
 | Inline code (`python -c`, `node -e`, `deno eval`, `perl -e` ...) | inspected; clean is `ALLOW_WITH_AUDIT`; one that starts processes needs approval | `DENY` |
 | `powershell -Command`, `cmd /c`, `/k`, `bash -c` payload | its commands are judged as if typed directly | `DENY` |
 | `-EncodedCommand` | decoded (UTF-16LE base64) and inspected; power inside is `DENY`; otherwise always approval | `DENY` |
+| Program text from standard input (`python -`, `bash -s`, `powershell -Command -`, a pipe or heredoc into a bare interpreter) | a heredoc or `echo`/`printf` pipe is inspected with the command and logged; `< file` judges the file; anything else asks | `DENY` |
+| `java Foo.java`, `go run x.go`, `dotnet script x.csx` | the named source file is read and judged like a script | same, agent-written files need approval |
 | A binary or compiled program an agent produced | approval (cannot be inspected) | approval |
 | A script outside the worktree, a path computed at run time, `wscript`/`mshta` | approval | approval |
+| A script too large to inspect (over 2 MB; 1 MB for the pattern scan), or one that references more than 10 files to follow | approval | approval |
 
 The table is the 0.7 layer's own result. The 0.2 classifier still asks first when a shell is started on a script
 file (`powershell -File x.ps1`, `bash x.sh`), whatever the file contains; the stricter of the two wins.
 
 Libraries a script loads are followed one level at a time (relative `require`/`import`, Python sibling imports,
 dot-sourced PowerShell, other scripts a shell script calls, up to 40 files): an unchanged entry point that loads
-an agent-written module is judged by that module.
+an agent-written module is judged by that module. When a script references more than 10 relative files, only 10
+are followed and the call needs approval rather than being passed with the rest unread. Large files inside
+`node_modules` that are not recorded as written by an agent (a bundled `tsc.js`) are installed dependency code and
+are not read.
 
 ### Package-manager indirection
 
@@ -392,24 +416,56 @@ create`: the script text is read from `package.json` (in the working directory, 
 workspace package for `-r`/`--filter`), compared with the base commit's `package.json` script by script (the one
 named and its hooks), and the body is judged recursively. The body may call an interpreter, a script file or
 another package script. An unchanged project script stays usable; a changed one is `ALLOW_WITH_AUDIT` when
-clean (`REQUIRE_APPROVAL` in RESTRICTED) and is refused or put to you when it contains a finding. A package that
-is not installed locally and would be downloaded (`npx x`, `dlx`, `create`) needs approval; known developer tools
-(vitest, tsc, eslint, ...) do not.
+clean (`REQUIRE_APPROVAL` in RESTRICTED, and for roles without `WRITE_WORKTREE`) and is refused or put to you
+when it contains a finding. A package that is not installed locally and would be downloaded (`npx x`, `dlx`,
+`create`) needs approval; known developer tools (vitest, tsc, eslint, ...) do not.
+
+The sub-command is found with a known list of flags. A flag the parser does not know (`--otp 1`,
+`--use-node-version 20`) may or may not take the next word, so the sub-command is found by scanning for a known
+one (`run`, `test`, `install` ...); when none can be found the call needs approval (`pnpm --new-flag x lint`).
+Unknown flags after the script name belong to the script and are ignored (`pnpm lint --fix`).
+
+`--script-shell`, `script-shell` in a config file, `npm config set script-shell` and an `npm_config_script_shell`
+environment prefix name a program every script runs through: that file is read and judged as a script and the
+call needs approval. Any other `npm_config_*`, `pnpm_config_*`, `yarn_*` or `bun_config_*` environment setting on
+a command line needs approval. A package-manager configuration file (`.npmrc`, `.pnpmfile.cjs`, `.yarnrc.yml`,
+`.yarnrc`, `bunfig.toml`) that an agent wrote or changed makes the next package-manager run need approval (and
+the files it points at, such as `yarnPath` and plugin paths, and a `.pnpmfile`, are judged as scripts and refused
+when they contain a power command). An unchanged `.npmrc` whose `script-shell` names a file in the worktree has
+that file judged too.
 
 ### What inspection looks for
 
 | Finding | Result |
 |---|---|
-| Power: `shutdown`, `Stop-Computer`, `Restart-Computer`, `ExitWindowsEx`, `InitiateSystemShutdown`, `rundll32 powrprof`, `psshutdown`, `wmic os ... shutdown`, `logoff`, `systemctl poweroff`, a power word next to a process-starting API, in any wrapper or after quote/caret splitting | `DENY`, in both profiles, never approvable |
-| Security tooling (`Set-MpPreference`, `netsh advfirewall`, `bcdedit`, `Set-ExecutionPolicy`), Claude credential stores, NEXUS's database or key files | `DENY` |
+| Power: `shutdown`, `Stop-Computer`, `Restart-Computer`, `ExitWindowsEx`/`SHExitWindowsEx`, any `InitiateSystemShutdown*`/`InitiateShutdown*` spelling (`...ExW`), `NtShutdownSystem`, `NtSetSystemPowerState`, `SetSystemPowerState`, `rundll32` with a `powrprof` export or a power export of user32/shell32/advapi32, `psshutdown`, `wmic os ... shutdown`, `.Shutdown()`/`.Reboot()`/`.Win32Shutdown()` on a WMI/CIM operating-system object, `logoff`, `tsdiscon`, `shutdown -l`, `systemctl poweroff`, a power word next to a process-starting API (including `ctypes`, `Add-Type`, `[scriptblock]::Create`), in any wrapper or after quote/caret splitting | `DENY`, in both profiles, never approvable |
+| Security tooling (`Set-MpPreference`, `netsh advfirewall`, `bcdedit`, `Set-ExecutionPolicy`), Claude credential stores, NEXUS's database, key files and runtime endpoint (see below) | `DENY` |
 | Registry writes, services (`sc`, `New-Service`), scheduled tasks (`schtasks`, `Register-ScheduledTask`), `setx` and machine/user environment changes, system package installs (`winget`, `choco`, `msiexec`, `npm -g`) | approval (RESTRICTED: `DENY`) |
 | Credential locations (`.ssh`, `.aws`, `cmdkey`, `vaultcmd`, Credential Manager, browser profiles) | approval |
 | Destructive filesystem (`rm -rf /`, `Remove-Item -Recurse` on a root or home, `format`, `diskpart`) | approval |
 | Download and execute (`iwr \| iex`, `curl \| sh`) | approval |
-| Encoded or assembled commands (`-EncodedCommand`, `$env:x + ...`, `%a%%b%`, `& ($a+$b)`, decode-then-eval) | approval |
+| Encoded or assembled commands (`-EncodedCommand`, `$env:x + ...`, `%a%%b%`, `!a!` delayed expansion in command position, `& ($a+$b)`, decode-then-eval) | approval |
 | Starting processes (`child_process`, `subprocess`, `os.system`, `Start-Process`, `Invoke-Expression`, `WScript.Shell`), nested shells, network calls | logged; approval for inline code; RESTRICTED turns network use into `DENY` unless web tools are allowed |
 
 `shutdown` as an identifier in program code (`gracefulShutdown()`, `server.shutdown()`) is not a power command.
+The power patterns have one source (`power-patterns.ts`) that both the command classifier and the content
+inspector use.
+
+### NEXUS's runtime endpoint
+
+NEXUS's own database, overnight key and runtime endpoint are refused to agents: `nexus.db`, `overnight.key`,
+`runtime\endpoint.json`, the `runtime` directory under the NEXUS data directory, `runtime.log`, the named pipe
+`\\.\pipe\nexus-runtime-*` (connecting to it, reading it, or listing pipes with a nexus filter), and the data
+directory spelled `%APPDATA%\NEXUS`, `%LOCALAPPDATA%\NEXUS`, `$env:APPDATA\NEXUS` or `${env:APPDATA}\NEXUS`. The
+refusal applies in shell command text (the classifier and the whole-text inspection), in scripts and inline code
+(the content inspector), and in the paths and patterns of `Read`, `Write`, `Edit`, `Grep` and `Glob`. A worktree
+below the data directory is not NEXUS data. This is a deny-list for obvious access. Code that NEXUS allows to run
+can still read that file: it is the same user, and a program can compute the path or read it in a way no pattern
+sees. That is why operating-system isolation is a requirement for 0.8, not an improvement.
+
+Codex sessions are not covered by any of this per tool call. NEXUS does not authorise their tool calls
+(`codex-runtime.ts`): the boundary is the Codex CLI's own read-only sandbox (`-s read-only`) and NEXUS's after-the-fact
+check that the working directory did not change. Power commands from a Codex session are **not verified by NEXUS**.
 
 ### The power boundary
 
@@ -464,7 +520,10 @@ resolved lexically, as Windows does. A link that is created or retargeted after 
 
 Every refusal, approval request and `ALLOW_WITH_AUDIT` is written to `security_decisions` (migration 011):
 timestamp, run, task, agent, a redacted one-line action (the same summary the activity feed uses, with values
-after secret-looking names, bearer tokens, URL credentials and long opaque strings replaced), classification,
+after secret-looking names, `--password`/`--token` options, `curl -u user:pass`, `sshpass -p`, `mysql -pX`,
+authorization and cookie headers, bearer tokens, URL credentials, secret-named query values (`sig=`, `token=`,
+`key=`) and long opaque strings replaced; the command is redacted first and only then shortened to 300
+characters, so a cut token leaves no fragment), classification,
 provenance, decision, reason and the policy version. A plain allow of a read-only call is not stored. The log is
 bounded: every 25 inserts the run's rows beyond 2,000 and the table's rows beyond 20,000 are pruned, oldest
 first. The renderer reads it through the read-only `security.decisions` channel (optional run id, limit at most
@@ -478,8 +537,13 @@ NEXUS reads text and compares it with patterns. Anything that does not reveal it
 your user with your rights. In particular:
 
 - **A compiled or downloaded binary.** An agent can build `tool.exe` (or `go build`, `cargo build`, `dotnet
-  build`) and run it. NEXUS asks about a binary that is new since the base commit, but cannot see what it does,
-  and a build step that produces and runs it inside one command is a build, which the project's own scripts do.
+  build`) and run it. NEXUS asks about an executable that is new since the base commit and is named in the
+  command (by path, through PATHEXT, or as an argument to a launcher), but cannot see what it does, and a build
+  step that produces and runs it inside one command is a build, which the project's own scripts do.
+- **Compiled-language launchers.** Only the source file named on the command line is read, and only for
+  `go run x.go`, `java Foo.java` (source-file mode), `dotnet script x.csx` and the like, and only for the process
+  and power patterns. Nothing reads the sources behind `go run .`, `cargo run`, `dotnet run`, `mvn`, `gradle`,
+  `make` or a `build.rs`, nor the classes a `java Foo` loads.
 - **A dynamically built command.** Code that assembles the command from pieces, reads it from a file, an
   environment variable, a network response or a database, or applies a transformation NEXUS does not know,
   passes the pattern checks. Decode-then-eval and variable-name tricks are flagged where the pattern is
@@ -495,8 +559,12 @@ your user with your rights. In particular:
   between (by another process, or by a command that runs first in the same line) is not seen. A script created
   by an earlier command in the same line that NEXUS cannot see being created (a `git checkout` of another
   branch, an archive extraction) is put to you for approval only when the line has several parts.
-- **Program text in languages NEXUS does not read for commands** (the content patterns are language-neutral, but
-  Go, Rust, Java, C# and shell-less scripting hosts are covered by the process-start patterns only).
+- **Program text in languages NEXUS does not read for commands.** The content patterns are language-neutral
+  (process-start names and power names), so Go, Rust, Java and C# files are only as well covered as those names.
+- **Unrecognised programs.** A launcher NEXUS has no model of is judged only by the files it names among its
+  arguments. A program that reads a script path from somewhere else (a config file, an environment variable, its
+  own defaults) is not seen.
+- **Codex sessions** are not authorised per tool call (see "NEXUS's runtime endpoint" above).
 - **Anything you approve.** An approved call runs with no further inspection.
 
 The controls that are not static inspection: the folder confinement of the file tools (canonical paths), the

@@ -1,4 +1,5 @@
 import { canonicalizePath, isPathInside, isSecretPath } from './paths'
+import { EXEC_API, hasPowerApiText, NEXUS_DATA_TEXT, POWER_COMMAND_NAMES, POWER_WORDS } from './power-patterns'
 import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
 import type { Segment, Shell } from './shell-tokenizer'
 
@@ -133,13 +134,6 @@ const DANGEROUS_ENV_ASSIGN = new RegExp(`(?:\\$\\{?env:|\\benv:)${DANGEROUS_ENV_
 const DANGEROUS_ENV_WORD = new RegExp(`^${DANGEROUS_ENV_NAME}=`, 'i')
 const ENV_ASSIGN_REASON = 'sets an environment variable that makes tools run programs (GIT_*, PAGER, EDITOR, LD_*, PATH, ...)'
 const POWER_REASON = 'shutting down, restarting, suspending or powering off the machine is forbidden for every role'
-/** Power-state APIs and WMI/CIM methods; plain command names are matched per segment instead. */
-const POWER_TEXT =
-  /\b(shutdownwindows|win32shutdown|win32shutdowntracker|setsuspendstate|exitwindowsex|initiatesystemshutdown(?:ex)?|ntshutdownsystem|ntinitiatepoweraction|ntsetsystempowerstate)\b|powrprof(?:\.dll)?\s*,|\binvoke-(?:wmi|cim)method\b[^|;&\n]*-(?:method)?name\s+['"]?(?:win32)?(?:shutdown|reboot)\b|\bsystemctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)\b|\bloginctl\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate)\b/i
-/** Executables that power off, restart or suspend the machine. Matched on the normalised base name. */
-const POWER_CMDS = new Set([
-  'shutdown', 'psshutdown', 'psshutdown64', 'stop-computer', 'restart-computer', 'poweroff', 'halt', 'reboot', 'slidetoshutdown', 'telinit', 'tsshutdn',
-])
 /** Commands that launch or schedule another program: their arguments may name a power command. */
 const LAUNCHER_CMDS = new Set([
   'start-process', 'saps', 'start', 'invoke-item', 'ii', 'invoke-expression', 'iex', 'eval', 'invoke-command', 'icm', 'start-job', 'start-threadjob',
@@ -165,7 +159,7 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
   if (SECURITY_TOOLING.test(text)) {
     a.add('forbidden', 'high', 'disabling or modifying security tooling is not permitted', 'SYSTEM_CHANGE')
   }
-  if (POWER_TEXT.test(text) || POWER_TEXT.test(squash(text)) || powerViaExecApi(text) || scriptWriteRunsPower(rawText)) {
+  if (hasPowerApiText(text) || hasPowerApiText(squash(text)) || powerViaExecApi(text) || scriptWriteRunsPower(rawText)) {
     a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
   }
   if (DANGEROUS_ENV_SET.test(text)) a.ask('high', ENV_ASSIGN_REASON)
@@ -215,14 +209,9 @@ function squash(text: string): string {
   return t.replace(/[\^`"']/g, '')
 }
 
-const NEXUS_DATA = /nexus\.db(?:-wal|-shm|-journal)?|overnight\.key/i
-const NEXUS_DATA_REASON = 'NEXUS application data (its database and overnight key) must never be accessed from an agent shell'
+const NEXUS_DATA = NEXUS_DATA_TEXT
+const NEXUS_DATA_REASON = 'NEXUS application data (its database, overnight key and runtime endpoint) must never be accessed from an agent shell'
 const DYNAMIC_REASON = 'the command name is computed at run time (variable or command substitution) and cannot be inspected'
-const POWER_WORDS =
-  /\b(?:shutdown(?:\.exe)?|poweroff|reboot|stop-computer|restart-computer|psshutdown\w*|tsshutdn|slidetoshutdown|setsuspendstate|exitwindowsex|initiatesystemshutdown\w*|shutdownwindows|win32shutdown\w*|ntshutdownsystem)\b|powrprof/i
-/** APIs and cmdlets that start another program; combined with a power word anywhere in the same text they are forbidden. */
-const EXEC_API =
-  /start-process|\bsaps\b|\binvoke-expression\b|\biex\b|invoke-command|diagnostics\.process|processstartinfo|wscript\.shell|shell\.application|shellexecute|new-object\s+-com|\.run\s*\(|child_process|\bos\.(?:system|popen|exec\w*|spawn\w*)|subprocess|\bpopen\b|\bexec(?:sync|file|filesync)?\s*\(|\bspawn(?:sync)?\s*\(|\bsystem\s*\(|\bgettype\s*\(|\bproc_open|\bshell_exec|\bpassthru/i
 /** Interpreter flags whose argument is program text. */
 const INLINE_FLAGS: Record<string, string[]> = {
   node: ['-e', '--eval', '-p', '--print'],
@@ -264,7 +253,7 @@ function runnerLaunchesPower(cmd: string, args: string[]): boolean {
     const k = lc.findIndex((x) => x === 'exec' || x === 'dlx' || x === 'x')
     if (k >= 0) target = firstReal(args.slice(k + 1))
   }
-  return target !== undefined && commandNameCandidates(target).some((n) => POWER_CMDS.has(n))
+  return target !== undefined && commandNameCandidates(target).some((n) => POWER_COMMAND_NAMES.has(n))
 }
 
 const SCRIPT_NAME = /[^\s"'<>|&;()=,]{1,200}\.(?:bat|cmd|ps1|sh)\b/gi
@@ -368,7 +357,7 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     if (normalizeName(nameWord) !== 'cmd') a.ask('high', DYNAMIC_REASON)
   }
   const program = inlineProgram(cmd, args)
-  if (program !== null && (POWER_WORDS.test(squash(program)) || POWER_TEXT.test(squash(program)))) {
+  if (program !== null && (POWER_WORDS.test(squash(program)) || hasPowerApiText(squash(program)))) {
     a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
   }
   if (runnerLaunchesPower(cmd, args)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
@@ -380,7 +369,7 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
     a.ask('high', 'piping into Invoke-Expression executes arbitrary text')
   }
 
-  if (cands.some((c) => POWER_CMDS.has(c))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+  if (cands.some((c) => POWER_COMMAND_NAMES.has(c))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
   else if (LAUNCHER_CMDS.has(cmd) && launchesPowerCommand(args)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
 
   const handledNested = analyzeNestedShell(cmd, args, a, depth)
@@ -443,8 +432,8 @@ function textRunsPowerCommand(text: string, depth = 0): boolean {
       const words = seg.words.filter((w) => w !== '&' && w !== '.')
       const names = commandNameCandidates(words[0] ?? '')
       const first = names.find((n) => POWER_WRAPPERS.has(n)) ?? names[0] ?? ''
-      if (names.some((n) => POWER_CMDS.has(n))) return true
-      if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => !w.startsWith('-') && !w.startsWith('/') && commandNameCandidates(w).some((n) => POWER_CMDS.has(n)))) return true
+      if (names.some((n) => POWER_COMMAND_NAMES.has(n))) return true
+      if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => !w.startsWith('-') && !w.startsWith('/') && commandNameCandidates(w).some((n) => POWER_COMMAND_NAMES.has(n)))) return true
       if (POWER_WRAPPERS.has(first) && words.slice(1).some((w) => /\s/.test(w) && textRunsPowerCommand(w, depth + 1))) return true
     }
   }
@@ -460,7 +449,7 @@ function launchesPowerCommand(args: string[]): boolean {
       if (m?.[1] !== undefined) values.push(m[1])
     }
     for (const v of values) {
-      if (/\s/.test(v) ? textRunsPowerCommand(v) : commandNameCandidates(v).some((n) => POWER_CMDS.has(n))) return true
+      if (/\s/.test(v) ? textRunsPowerCommand(v) : commandNameCandidates(v).some((n) => POWER_COMMAND_NAMES.has(n))) return true
     }
   }
   return false
@@ -879,7 +868,7 @@ function analyzeFind(args: string[], lc: string[], a: Analysis): void {
   const e = lc.findIndex((x) => x === '-exec' || x === '-execdir' || x === '-ok' || x === '-okdir')
   if (e >= 0) {
     const payload = normalizeName(args[e + 1] ?? '')
-    if (POWER_CMDS.has(payload)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+    if (POWER_COMMAND_NAMES.has(payload)) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
     else if (DELETE_CMDS.has(payload) || MOVE_CMDS.has(payload)) a.ask('high', `find -exec ${payload} deletes or moves files`, 'DESTRUCTIVE')
     else a.ask('medium', 'find -exec runs commands for each match')
   }

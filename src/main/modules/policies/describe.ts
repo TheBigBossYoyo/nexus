@@ -20,35 +20,36 @@ function safeJson(v: unknown): string {
 }
 
 /** Short single-line summary for event streams: the command, the path, or the query. */
-export function summarizeToolInput(toolName: string, input: unknown): string {
+export function summarizeToolInput(toolName: string, input: unknown, max = MAX_SUMMARY): string {
+  const one = (s: string): string => oneLine(s, max)
   try {
-    if (!isRecord(input)) return oneLine(safeJson(input))
+    if (!isRecord(input)) return one(safeJson(input))
     switch (toolName) {
       case 'Bash':
       case 'PowerShell':
-        return oneLine(str(input.command) ?? '')
+        return one(str(input.command) ?? '')
       case 'Read':
       case 'Write':
       case 'Edit':
-        return oneLine(str(input.file_path) ?? '')
+        return one(str(input.file_path) ?? '')
       case 'NotebookEdit':
-        return oneLine(str(input.notebook_path) ?? '')
+        return one(str(input.notebook_path) ?? '')
       case 'Glob': {
         const path = str(input.path)
-        return oneLine(`${str(input.pattern) ?? ''}${path ? ` in ${path}` : ''}`)
+        return one(`${str(input.pattern) ?? ''}${path ? ` in ${path}` : ''}`)
       }
       case 'Grep': {
         const path = str(input.path)
-        return oneLine(`${str(input.pattern) ?? ''}${path ? ` in ${path}` : ''}`)
+        return one(`${str(input.pattern) ?? ''}${path ? ` in ${path}` : ''}`)
       }
       case 'WebFetch':
-        return oneLine(str(input.url) ?? '')
+        return one(str(input.url) ?? '')
       case 'WebSearch':
-        return oneLine(str(input.query) ?? '')
+        return one(str(input.query) ?? '')
       case 'TodoWrite':
         return Array.isArray(input.todos) ? `${input.todos.length} todo items` : 'todo list'
       default:
-        return oneLine(safeJson(input))
+        return one(safeJson(input))
     }
   } catch {
     return ''

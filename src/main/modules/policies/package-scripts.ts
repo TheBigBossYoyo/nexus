@@ -30,7 +30,7 @@ const NPM_BUILTINS = new Set([
 const VALUE_FLAGS = new Set(['--filter', '-f', '--prefix', '-c', '--dir', '-c', '--workspace', '-w', '--cwd', '--registry', '--loglevel', '--reporter', '--workspace-concurrency', '--filter-prod', '--userconfig', '--cache'])
 const DIR_FLAGS = new Set(['--prefix', '-c', '--dir', '--cwd'])
 
-export interface PmParse {
+export interface PmCore {
   invocation: PmInvocation
   /** Directory the manager is told to work in (--prefix, -C, --dir, --cwd), relative or absolute; null when not set. */
   dir: string | null
@@ -38,7 +38,63 @@ export interface PmParse {
   workspaces: boolean
 }
 
+export interface PmParse extends PmCore {
+  /** The value of --script-shell (or null): a program NEXUS must treat as executed. */
+  scriptShell: string | null
+  /** An unknown flag made the sub-command uncertain and no known sub-command could settle it. */
+  ambiguous: boolean
+}
+
+const SUBCOMMANDS = new Set(['run', 'run-script', 'rum', 'urn', 'test', 't', 'tst', 'start', 'stop', 'restart', 'install', 'i', 'ci', 'add', 'rebuild', 'rb', 'update', 'up', 'upgrade', 'link', 'exec', 'x', 'dlx', 'create', 'init', 'workspace', 'workspaces'])
+
+/** Flags that take no value. Anything else that starts with a dash and has no `=` might swallow the next word. */
+const BOOLEAN_FLAGS = new Set([
+  '--silent', '-s', '--if-present', '--no-color', '--color', '--ignore-scripts', '--prefer-offline', '--offline', '--frozen-lockfile', '--no-frozen-lockfile', '--prefer-frozen-lockfile', '--force', '--verbose',
+  '--quiet', '-q', '--production', '--prod', '--dev', '-d', '--save-dev', '--save', '--no-save', '--legacy-peer-deps', '--no-audit', '--no-fund', '--audit', '--fund', '--recursive', '-r', '--workspaces', '-ws',
+  '--workspace-root', '-w', '--include-workspace-root', '--parallel', '--stream', '--no-bail', '--bail', '--yes', '-y', '--global', '-g', '--json', '--long', '--dry-run', '--no-progress', '--frozen', '--immutable',
+  '--check-files', '--no-install', '--no', '--', '--ignore-workspace', '--ignore-workspace-root-check', '--shamefully-hoist', '--strict-peer-dependencies', '--fail-if-no-match', '--no-sort', '--reverse',
+])
+
+/**
+ * Parses a package-manager command line. A flag the parser does not know (`--otp 1`, `--use-node-version 20`)
+ * may or may not take the next word, so the sub-command is then found by scanning for a known one; when none
+ * is found the result is `ambiguous` and the caller must not assume anything about which script runs.
+ */
 export function parsePackageManager(pm: PackageManager | 'npx' | 'bunx', args: string[]): PmParse {
+  let ambiguous = false
+  let scriptShell: string | null = null
+  const recognised: string[] = []
+  let seenBare = false
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? ''
+    if (!a.startsWith('-') || a === '-') {
+      seenBare = true
+      continue
+    }
+    const l = a.toLowerCase()
+    const eq = l.indexOf('=')
+    const name = eq > 0 ? l.slice(0, eq) : l
+    if (name === '--script-shell') {
+      scriptShell = eq > 0 ? a.slice(eq + 1) : (args[i + 1] ?? '')
+      if (eq < 0) i++
+      continue
+    }
+    const takesValue = VALUE_FLAGS.has(name) && !(pm === 'npx' && (name === '-c' || name === '--call')) && !(name === '-w' && pm !== 'npm') && !(name === '-f' && a !== '-F')
+    if (takesValue || eq > 0 || BOOLEAN_FLAGS.has(name) || (pm === 'npx' && ['-p', '--package', '-c', '--call'].includes(name))) {
+      recognised.push(a)
+      if (takesValue && eq < 0 && args[i + 1] !== undefined) recognised.push(args[++i] ?? '')
+      continue
+    }
+    // After the first bare word, unknown flags belong to the script or tool being run.
+    if (!seenBare) ambiguous = true
+  }
+  if (!ambiguous) return { ...parseCore(pm, args), scriptShell, ambiguous: false }
+  const k = pm === 'npx' || pm === 'bunx' ? -1 : args.findIndex((x) => !x.startsWith('-') && SUBCOMMANDS.has(x.toLowerCase()))
+  if (k < 0) return { invocation: { kind: 'other' }, dir: null, workspaces: false, scriptShell, ambiguous: true }
+  return { ...parseCore(pm, [...recognised, ...args.slice(k)]), scriptShell, ambiguous: false }
+}
+
+function parseCore(pm: PackageManager | 'npx' | 'bunx', args: string[]): PmCore {
   let dir: string | null = null
   let workspaces = false
   const words: string[] = []
@@ -50,7 +106,7 @@ export function parsePackageManager(pm: PackageManager | 'npx' | 'bunx', args: s
       const name = eq > 0 ? l.slice(0, eq) : l
       if (['--filter', '-f', '--workspace', '-w', '--recursive', '-r', '--workspaces', '--filter-prod'].includes(name)) workspaces = true
       if (DIR_FLAGS.has(name)) dir = eq > 0 ? a.slice(eq + 1) : (args[i + 1] ?? null)
-      if (eq < 0 && VALUE_FLAGS.has(name) && !(pm === 'npx' && (name === '-c' || name === '--call'))) i++
+      if (eq < 0 && VALUE_FLAGS.has(name) && !(pm === 'npx' && (name === '-c' || name === '--call')) && !(name === '-w' && pm !== 'npm') && !(name === '-f' && a !== '-F')) i++
       // yarn/npx: after the tool name everything belongs to the tool, but flags before it belong to the manager.
       continue
     }
@@ -113,7 +169,7 @@ export function parsePackageManager(pm: PackageManager | 'npx' | 'bunx', args: s
     case 'workspaces': {
       // yarn workspace <name> <script...>; yarn workspaces foreach ... run <script>
       const inner = rest.slice(1)
-      return { ...parsePackageManager(pm, inner.length > 0 ? inner : []), dir, workspaces: true }
+      return { ...parseCore(pm, inner.length > 0 ? inner : []), dir, workspaces: true }
     }
     default:
       break

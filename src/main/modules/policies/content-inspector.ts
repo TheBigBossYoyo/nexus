@@ -1,4 +1,5 @@
 import type { TrustClass } from '@shared/security'
+import { EXEC_API, hasPowerApiText, NEXUS_DATA_TEXT, POWER_COMMAND_FORMS, POWER_WORDS } from './power-patterns'
 
 /**
  * Static inspection of script and command text. This is a defence layer that makes the obvious things
@@ -54,29 +55,13 @@ interface Rule {
 
 const SYS: TrustClass = 'SYSTEM_SENSITIVE'
 
-/** Unambiguous power commands, APIs and wrappers. Matched on the squashed text. */
-const POWER_STRONG = [
-  /\b(?:stop-computer|restart-computer|exitwindowsex|initiatesystemshutdown(?:ex)?|ntshutdownsystem|ntinitiatepoweraction|ntsetsystempowerstate|setsuspendstate|shutdownwindows|win32shutdown\w*|slidetoshutdown|psshutdown\w*|tsshutdn)\b/i,
-  /powrprof(?:\.dll)?\s*,|\brundll32(?:\.exe)?\b[^\n;|&]*\bpowrprof/i,
-  /\bshutdown(?:\.exe)?\s+(?:[/-][a-z]\b|--?(?:poweroff|reboot|halt|hibernate)\b|now\b)/i,
-  /\b(?:systemctl|loginctl)\s+(?:--?\S+\s+)*(?:poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)\b/i,
-  /\bwmic(?:\.exe)?\b[^\n;|&]*\bos\b[^\n;|&]*\b(?:call\s+)?(?:win32)?(?:shutdown|reboot)\b/i,
-  /\binvoke-(?:wmi|cim)method\b[^\n|;&]*-(?:method)?name\s+['"]?(?:win32)?(?:shutdown|reboot)\b/i,
-  // A line that is a bare power command (a batch or shell script), not an identifier in program code.
-  /^\s*(?:logoff|shutdown|poweroff|reboot)(?:\.exe)?(?:\s|$)/im,
-]
-/** A power word that is only unambiguous next to something that starts a process. */
-const POWER_WORD = /\b(?:shutdown(?:\.exe)?|poweroff|reboot|restart-computer|logoff)\b/i
-const EXEC_API =
-  /start-process|\bsaps\b|\binvoke-expression\b|\biex\b|invoke-command|diagnostics\.process|processstartinfo|wscript\.shell|shell\.application|shellexecute|new-object\s+-com|\.run\s*\(|child_process|\bos\.(?:system|popen|exec\w*|spawn\w*)|subprocess|\bpopen\b|\bexec(?:sync|file|filesync)?\s*\(|\bspawn(?:sync)?\s*\(|\bsystem\s*\(|\bproc_open|\bshell_exec|\bpassthru|runtime\.getruntime\(\)\.exec|\bexecvp?e?\s*\(|\bdeno\.(?:command|run)\b|\bexec\.command\(|\bprocessbuilder\b|\bprocess\.start\s*\(|\bwinexec\b|\bcreateprocess\w*\b|std::process::command|\bcommand::new\b/i
-
 const RULES: Rule[] = [
   { category: 'registry', severity: 'approval', trust: SYS, reason: 'modifies the Windows registry', pattern: /\breg(?:\.exe)?\s+(?:add|delete|import|load|unload|copy|save|restore|flags)\b|\bregedit(?:32)?\b|\b(?:set|new|remove|clear|rename)-itemproperty\b[^\n;|&]*\b(?:hklm|hkcu|hkcr|hku|hkcc|registry::)|\bwinreg\.(?:setvalue|createkey|deletekey|deletevalue|setvalueex)|\bregsetvalue|\bregcreatekey|\bregdeletekey|\[microsoft\.win32\.registry\]::(?:setvalue|openbasekey)/i },
   { category: 'service', severity: 'approval', trust: SYS, reason: 'creates, changes or controls Windows services', pattern: /\bsc(?:\.exe)?\s+(?:\\\\\S+\s+)?(?:create|config|delete|start|stop|failure|sdset)\b|\b(?:new|set|remove|stop|restart|start|suspend)-service\b|\bnet1?\s+(?:start|stop|pause|continue)\b|\bnssm\b|\bsystemctl\s+(?:enable|disable|start|stop|restart|mask)\b/i },
   { category: 'scheduled_task', severity: 'approval', trust: SYS, reason: 'creates or changes scheduled tasks', pattern: /\bschtasks(?:\.exe)?\b|\b(?:register|unregister|set|new|start)-scheduledtask\b|\bnew-scheduledtask\w*\b|\bcrontab\b|\bat(?:\.exe)?\s+\d{1,2}:\d{2}\b/i },
   { category: 'credentials', severity: 'approval', trust: SYS, reason: 'reads credential stores or secret-bearing locations', pattern: /[\\/]\.ssh\b|[\\/]\.aws\b|\.git-credentials|[\\/]\.netrc\b|[\\/]\.npmrc\b|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\bcmdkey\b|\bvaultcmd\b|credential\s*manager|\bcredread\b|\bcredwrite\b|windows\.security\.credentials|\bpasswordvault\b|google[\\/]+chrome[\\/]+user\s*data|microsoft[\\/]+edge[\\/]+user\s*data|mozilla[\\/]+firefox[\\/]+profiles|\blogin\s*data\b|\bmimikatz\b|\blsass\b|\bconvertfrom-securestring\b/i },
   { category: 'credentials', severity: 'deny', trust: SYS, reason: 'Claude credential stores must never be read or printed', pattern: /\.claude[\\/]+\.?credentials|\.credentials\.json/i },
-  { category: 'nexus_data', severity: 'deny', trust: SYS, reason: "NEXUS's own database and key files must never be accessed from agent-run code", pattern: /nexus\.db(?:-wal|-shm|-journal)?|overnight\.key|appdata[\\/]+(?:roaming[\\/]+)?nexus\b/i },
+  { category: 'nexus_data', severity: 'deny', trust: SYS, reason: "NEXUS's own database, key files and runtime endpoint (named pipe, endpoint.json, runtime.log) must never be accessed from agent-run code", pattern: NEXUS_DATA_TEXT },
   { category: 'security_config', severity: 'deny', trust: SYS, reason: 'disabling or modifying security tooling is not permitted', pattern: /\b(?:set|add)-mppreference\b|disablerealtimemonitoring|disableantispyware|\bwindefend\b|\bmpssvc\b|\bwdnissvc\b|netsh\s+advfirewall|disable-netfirewallrule|set-netfirewallprofile|\bbcdedit\b|uninstall-windowsdefender|mpcmdrun[^;|&\n]*-remove|\bset-executionpolicy\b/i },
   { category: 'global_env', severity: 'approval', trust: SYS, reason: 'changes persistent or machine-wide environment variables', pattern: /\bsetx(?:\.exe)?\s+\S|setenvironmentvariable\s*\([^)]*\b(?:machine|user)\b|\[environment\]::setenvironmentvariable\([^)]*,[^)]*,\s*\[?(?:system\.)?(?:environmentvariabletarget\]::)?(?:machine|user)/i },
   { category: 'system_install', severity: 'approval', trust: SYS, reason: 'installs or removes system-wide software', pattern: /\b(?:winget|choco|scoop|brew|apt|apt-get|dnf|yum|pacman)\s+(?:install|upgrade|uninstall|remove|update)\b|\bmsiexec(?:\.exe)?\b|\b(?:install|uninstall)-(?:module|package|script|windowsfeature)\b|\b(?:add|remove)-appxpackage\b|\b(?:npm|pnpm|yarn)\s+(?:(?:i|install|add|remove|uninstall|update|upgrade|link)\s+)?(?:[^\n;|&]*\s)?(?:-g|--global)\b|\byarn\s+global\b|\bpip3?\s+install\b[^\n;|&]*--(?:user|break-system-packages)/i },
@@ -85,7 +70,7 @@ const RULES: Rule[] = [
   { category: 'download', severity: 'audit', trust: 'UNTRUSTED_AGENT_AUTHORED', reason: 'network access', pattern: /\b(?:invoke-webrequest|iwr|invoke-restmethod|irm|curl|wget|start-bitstransfer|downloadfile|downloadstring)\b|net\.webclient|system\.net\.http|urllib\.request|\brequests\.(?:get|post|put)\b|\bhttps?\.(?:get|request)\(|\bfetch\s*\(\s*['"]https?:|\baxios\b/i },
   { category: 'process_spawn', severity: 'audit', trust: 'UNTRUSTED_AGENT_AUTHORED', reason: 'starts other processes', pattern: EXEC_API },
   { category: 'shell_recursion', severity: 'audit', trust: 'UNTRUSTED_AGENT_AUTHORED', reason: 'starts a nested shell', pattern: /\b(?:cmd(?:\.exe)?\s+\/[ck]|(?:powershell|pwsh)(?:\.exe)?\s+(?:-\w+\s+)*-(?:c|command|file|e|ec|enc|encodedcommand)\b|(?:ba|z|da|k)?sh\s+-c\b)/i },
-  { category: 'obfuscation', severity: 'approval', trust: 'UNTRUSTED_AGENT_AUTHORED', reason: 'builds a command from environment variables or string pieces at run time', pattern: /\$env:\w+\s*\+\s*['"$]|%\w+%%\w+%|&\s*\(\s*\$\w+\s*\+|&\s*\(\s*['"][^'"]*['"]\s*\+|\bset\s+\w+=[^\n]*\n[^\n]*%\w+:~\d+,\d+%|%\w+:~-?\d+,-?\d+%%\w+:~|\[char\]\s*\d+\s*\+\s*\[char\]|\[string\]::join\([^)]*\[char\]|\bfrombase64string\b[^\n]*\b(?:iex|invoke-expression|start-process|assembly)\b/i },
+  { category: 'obfuscation', severity: 'approval', trust: 'UNTRUSTED_AGENT_AUTHORED', reason: 'builds a command from environment variables or string pieces at run time', pattern: /\$env:\w+\s*\+\s*['"$]|%\w+%%\w+%|(?:^|[\s&|(])(?:![a-z_]\w*!)+[\s/-]|&\s*\(\s*\$\w+\s*\+|&\s*\(\s*['"][^'"]*['"]\s*\+|\bset\s+\w+=[^\n]*\n[^\n]*%\w+:~\d+,\d+%|%\w+:~-?\d+,-?\d+%%\w+:~|\[char\]\s*\d+\s*\+\s*\[char\]|\[string\]::join\([^)]*\[char\]|\bfrombase64string\b[^\n]*\b(?:iex|invoke-expression|start-process|assembly)\b/i },
 ]
 
 const DECODE_PRIMITIVE = /\batob\s*\(|buffer\.from\([^)]*['"]base64['"]|fromcharcode|b64decode|base64\.(?:b64)?decode|frombase64string|\bchr\s*\(\s*\d+\s*\)\s*\+|\bunhexlify\b|\bbytes\.fromhex\b/i
@@ -136,11 +121,11 @@ export function inspectContent(text: string, depth = 0): ContentFinding[] {
   const variants = squashed === text ? [text] : [text, squashed]
 
   for (const t of variants) {
-    for (const p of POWER_STRONG) {
-      if (p.test(t)) mark(out, { category: 'power', severity: 'deny', trust: SYS, reason: 'controls the machine power state (shutdown, restart, suspend, logoff); only NEXUS power control may do that' })
+    if (hasPowerApiText(t) || POWER_COMMAND_FORMS.some((p) => p.test(t))) {
+      mark(out, { category: 'power', severity: 'deny', trust: SYS, reason: 'controls the machine power state (shutdown, restart, suspend, logoff); only NEXUS power control may do that' })
     }
   }
-  if (POWER_WORD.test(squashed) && EXEC_API.test(squashed)) {
+  if (POWER_WORDS.test(squashed) && EXEC_API.test(squashed)) {
     mark(out, { category: 'power', severity: 'deny', trust: SYS, reason: 'starts a process next to a power command (shutdown, reboot, logoff)' })
   }
   for (const rule of RULES) {

@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import type { Capability, ExecutionDecision, ExecutionProfile, ProvenanceKind, TrustClass } from '@shared/security'
 import { classifyCommand } from './command-classifier'
-import { decodeScript, inspectContent, looksBinary, type ContentFinding } from './content-inspector'
+import { decodeScript, inspectContent, looksBinary, MAX_INSPECT_CHARS, type ContentFinding } from './content-inspector'
 import {
   executableName,
   familyForScriptPath,
@@ -16,7 +16,7 @@ import {
 import { parsePackageManager, readManifest, scriptNamesFor, scriptsOf, workspaceManifests, type Manifest, type PackageManager } from './package-scripts'
 import { canonicalizePath, isPathInside } from './paths'
 import { originOf, type BaseFileReader, type FileOrigin, type ProvenanceTracker } from './provenance'
-import { tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
 import type { Redirect, Segment, Shell } from './shell-tokenizer'
 
 /**
@@ -75,6 +75,7 @@ export function summarizeVerdict(items: VerdictItem[]): ExecutionVerdict {
 
 const MAX_DEPTH = 5
 const MAX_FILES = 40
+const MAX_REFERENCES = 10
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024
 const CLASSIFIER_CAP = 200_000
 
@@ -106,6 +107,33 @@ function insideWorktree(env: ExecutionEnv, p: string): boolean {
 // Entry point
 // ---------------------------------------------------------------------------------------------
 
+/** Commands whose arguments are text or file names to read, search or copy, not something to run. */
+const TEXT_ONLY_CMDS = new Set([
+  'git', 'echo', 'write-host', 'write-output', 'printf', 'rg', 'grep', 'egrep', 'fgrep', 'findstr', 'select-string', 'sls', 'cat', 'type', 'get-content', 'gc', 'head', 'tail', 'ls', 'dir', 'wc',
+])
+
+/**
+ * The command text with the parts that are only text removed: git commit messages and inert heredocs (the same
+ * exemptions the classifier makes) and segments of commands that merely print or search their arguments.
+ * What is left is inspected as a whole, so a literal power command with no recognised wrapper around it
+ * ([scriptblock]::Create('shutdown /s').Invoke()) is still seen.
+ */
+function inspectableText(command: string, shell: Shell, segs: Segment[]): string {
+  let text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(command)) : command
+  const all = shell === 'bash' && text !== command ? tokenize(text, shell) : segs
+  all.forEach((seg, i) => {
+    const n = executableName(seg.words[0] ?? '')
+    const writes = seg.redirects.some((r) => !r.op.startsWith('<') && r.target !== '' && !['/dev/null', 'nul', '$null'].includes(r.target.toLowerCase()))
+    const feedsNext = all[i + 1]?.sep === '|'
+    if (TEXT_ONLY_CMDS.has(n) && !writes && !feedsNext && seg.raw !== '') text = text.replace(seg.raw, ' ')
+  })
+  return text
+}
+
+/** `npm_config_*`, `pnpm_config_*`, yarn and script-shell settings smuggled in through the environment or `config set`. */
+const PM_ENV = /\b(?:npm_config_\w+|pnpm_config_\w+|yarn_\w+|bun_config_\w+|pnpm_script_src_dir)\s*=/i
+const SCRIPT_SHELL = /script[-_]shell(?:\s*=\s*|\s+)['"]?([^\s'";&|]+)/gi
+
 /** Evaluates every interpreter, script and package-manager invocation in a shell command line. */
 export async function evaluateExecution(command: string, shell: Shell, env: ExecutionEnv): Promise<ExecutionVerdict> {
   const segs = tokenize(command, shell)
@@ -117,6 +145,25 @@ export async function evaluateExecution(command: string, shell: Shell, env: Exec
     commandText: command,
     multiSegment: segs.length > 1,
   }
+  // The whole command text, minus what is only text: power and the other system-sensitive categories at their usual outcome.
+  const text = inspectableText(command, shell, segs)
+  applyFindings(
+    st,
+    inspectContent(text).filter((f) => f.severity !== 'audit' && f.category !== 'encoded' && f.category !== 'uninspectable'),
+    'not_applicable',
+    env,
+    'this command',
+  )
+  if (/\bcmd(?:\.exe)?\b/i.test(text) && /(?:^|[\s&|(])(?:!\w+!)+[\s/-]/.test(text)) {
+    add(st, 'REQUIRE_APPROVAL', 'runs a command whose name is assembled from variables at run time (!var! with delayed expansion)', 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+  }
+  if (PM_ENV.test(command)) add(st, 'REQUIRE_APPROVAL', 'changes package manager behaviour through npm_config_* style settings', 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+  for (const m of command.matchAll(SCRIPT_SHELL)) {
+    const target = m[1] ?? ''
+    if (target === '' || /^(?:true|false)$/i.test(target)) continue
+    await evalScriptFile(target, 'cmd', env, st, env.worktree, 0)
+    add(st, 'REQUIRE_APPROVAL', 'sets the program package managers run scripts with (script-shell)', 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+  }
   await evalSegments(segs, shell, env, st, env.worktree, 0)
   return summarizeVerdict(st.items)
 }
@@ -125,15 +172,29 @@ function resolveLexical(cwd: string, p: string): string {
   return lcKey(path.resolve(cwd, p))
 }
 
+/** What feeds a command's standard input, when anything visible does. */
+interface Fed {
+  kind: 'literal' | 'file' | 'unknown'
+  target?: string
+}
+
+const LITERAL_PRODUCERS = new Set(['echo', 'printf', 'write-output', 'write-host'])
+
+function stdinFeed(seg: Segment, prev: Segment | undefined): Fed | null {
+  const redirect = seg.redirects.find((r) => r.op.startsWith('<'))
+  if (redirect !== undefined) return redirect.op.startsWith('<<') ? { kind: 'literal' } : { kind: 'file', target: redirect.target }
+  if (seg.sep === '|') return LITERAL_PRODUCERS.has(executableName(prev?.words[0] ?? '')) ? { kind: 'literal' } : { kind: 'unknown' }
+  return null
+}
+
 async function evalSegments(segs: Segment[], shell: Shell, env: ExecutionEnv, st: State, cwd: string, depth: number): Promise<void> {
   let here = cwd
+  let prev: Segment | undefined
   for (const seg of segs) {
     const next = cdTarget(seg.words, shell)
-    if (next !== null) {
-      here = path.resolve(here, next)
-      continue
-    }
-    await evalSegment(seg, shell, env, st, here, depth)
+    if (next !== null) here = path.resolve(here, next)
+    else await evalSegment(seg, shell, env, st, here, depth, stdinFeed(seg, prev))
+    prev = seg
   }
 }
 
@@ -146,12 +207,107 @@ function cdTarget(words: string[], shell: Shell): string | null {
 }
 
 // ---------------------------------------------------------------------------------------------
+// File words: what a word names once Windows' own reading of it is applied
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A word as Windows reads it: quotes removed, trailing dots and spaces dropped from the last name (`evil.cmd.`
+ * is evil.cmd) and an alternate data stream suffix removed (`evil.cmd::$DATA`, `evil.cmd:stream`).
+ */
+export function normalizeWord(w: string): string {
+  const x = w.trim().replace(/^["']+|["']+$/g, '')
+  const cut = Math.max(x.lastIndexOf('\\'), x.lastIndexOf('/')) + 1
+  const head = x.slice(0, cut)
+  let base = x.slice(cut)
+  const skip = cut === 0 && /^[a-zA-Z]:/.test(base) ? 2 : 0
+  const colon = base.indexOf(':', skip)
+  if (colon > 0) base = base.slice(0, colon)
+  const trimmed = base.replace(/[. ]+$/, '')
+  return head + (trimmed === '' ? base : trimmed)
+}
+
+const PATHEXT = ['.com', '.exe', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.js', '.wsf']
+/** Extensions that mean "run this", whatever launches it. */
+const EXEC_TYPES = /\.(cmd|bat|com|exe|ps1|psm1|vbs|vbe|wsf|wsh|hta|scr|msi|sh|bash|lnk)$/i
+/** Extensions a launcher we do not know may be asked to run. */
+const ARG_SCAN_EXT = /\.(cmd|bat|com|exe|ps1|psm1|vbs|vbe|wsf|wsh|hta|scr|msi|sh|bash|lnk|py|pyw|js|mjs|cjs|ts|mts|cts|rb|pl|php|lua|jar)$/i
+
+/** The existing file a word names inside `cwd`, resolving a missing extension through PATHEXT; null when there is none. */
+function resolveFileWord(word: string, cwd: string): string | null {
+  const n = normalizeWord(word)
+  if (n === '' || n.startsWith('-') || hasDynamicPart(n) || n.length > 240) return null
+  const candidates = [n, ...PATHEXT.map((e) => n + e)]
+  for (const c of candidates) {
+    try {
+      const abs = canonicalizePath(c, cwd)
+      if (existsSync(abs) && statSync(abs).isFile()) return abs
+    } catch {
+      // not a usable path: not a file word
+    }
+  }
+  return null
+}
+
+/** Dev tools and file utilities whose file arguments are read, searched, formatted or copied rather than launched. */
+const SAFE_ARG_CMDS = new Set([
+  ...TEXT_ONLY_CMDS, 'gh', 'less', 'more', 'ag', 'cp', 'copy', 'mv', 'move', 'rm', 'del', 'erase', 'rmdir', 'rd', 'mkdir', 'md', 'touch', 'xcopy', 'robocopy', 'ren', 'rename', 'attrib', 'sort', 'uniq',
+  'find', 'fc', 'comp', 'diff', 'cmp', 'sed', 'awk', 'tar', 'zip', 'unzip', '7z', 'gzip', 'file', 'stat', 'tree', 'test-path', 'get-item', 'gi', 'get-childitem', 'gci', 'get-filehash', 'resolve-path',
+  'set-content', 'add-content', 'out-file', 'tee', 'tee-object', 'copy-item', 'cpi', 'move-item', 'mi', 'remove-item', 'ri', 'rename-item', 'rni', 'new-item', 'ni', 'select-object', 'format-hex',
+  'tsc', 'eslint', 'prettier', 'vitest', 'jest', 'playwright', 'pytest', 'mypy', 'ruff', 'black', 'flake8', 'isort', 'pylint', 'pyright', 'biome', 'stylelint', 'mocha', 'ava', 'vite', 'webpack',
+  'rollup', 'esbuild', 'tsup', 'electron-vite', 'electron-builder', 'cargo', 'rustc', 'gofmt', 'make', 'code', 'cursor', 'notepad', 'sha256sum', 'md5sum', 'certutil', 'wsl-ls',
+])
+
+/** Launchers whose argument is a command line to run, with the argument that holds it. */
+const INLINE_LIKE_FLAGS = new Set(['-c', '-e', '-command', '-encodedcommand', '-ec', '-enc', '--eval', '-eval', '/c', '/k'])
+
+async function evalFileByPath(abs: string, raw: string, env: ExecutionEnv, st: State, depth: number, unknownLauncher: boolean): Promise<void> {
+  if (/\.(exe|com|scr|msi)$/i.test(abs)) {
+    await evalProgramFile(abs, env, st, path.dirname(abs))
+    return
+  }
+  const fam = familyForScriptPath(abs) ?? 'cmd'
+  const before = st.items.length
+  await evalResolvedFile(abs, raw, fam, env, st, depth, true)
+  if (unknownLauncher && EXEC_TYPES.test(abs) && insideWorktree(env, abs)) {
+    const origin = inNodeModules(abs) ? null : await originOf(abs, env.worktree, env.tracker, env.base)
+    if (origin !== null && (origin.kind === 'agent_authored' || origin.kind === 'agent_modified')) {
+      add(st, 'REQUIRE_APPROVAL', `${path.relative(env.worktree, abs).replace(/\\/g, '/')} was written or changed by an agent and is passed to a program NEXUS does not recognise, which may run it`, 'UNTRUSTED_AGENT_AUTHORED', origin.kind)
+    }
+  }
+  void before
+}
+
+/** Arguments of an unrecognised command that name an executable-type file, or inline program text. */
+async function scanArgs(exe: string, args: string[], env: ExecutionEnv, st: State, cwd: string, depth: number): Promise<void> {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? ''
+    const l = a.toLowerCase()
+    if (INLINE_LIKE_FLAGS.has(l) && args[i + 1] !== undefined) {
+      const code = args.slice(i + 1).join(' ')
+      if (env.profile === 'RESTRICTED') add(st, 'REQUIRE_APPROVAL', `${exe} is given inline program text (${a}) and is not a program NEXUS recognises`, 'UNTRUSTED_AGENT_AUTHORED', 'inline_code')
+      applyFindings(st, inspectContent(code), 'inline_code', env, `inline text passed to ${exe}`)
+    }
+    let value = a
+    if (a.startsWith('-') || (a.startsWith('/') && a.length > 1 && /^\/[a-z]+[:=]/i.test(a))) {
+      const m = /^[-/][\w-]+[:=](.+)$/.exec(a)
+      if (m?.[1] === undefined) continue
+      value = m[1]
+    }
+    for (const word of /\s/.test(value) ? value.split(/\s+/) : [value]) {
+      const abs = resolveFileWord(word, cwd)
+      if (abs === null || !ARG_SCAN_EXT.test(abs) || !insideWorktree(env, abs)) continue
+      await evalFileByPath(abs, word, env, st, depth, true)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // One simple command
 // ---------------------------------------------------------------------------------------------
 
 const WRAPPERS = new Set(['sudo', 'doas', 'gsudo', 'env', 'command', 'exec', 'nohup', 'time', 'nice', 'call', 'builtin', 'stdbuf', 'timeout', 'xargs', 'cross-env', 'cross-env-shell', 'dotenv', 'env-cmd', 'start', 'start-process', 'saps', 'wait-on'])
 
-async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: State, cwd: string, depth: number): Promise<void> {
+async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: State, cwd: string, depth: number, fed: Fed | null = null): Promise<void> {
   let words = [...seg.words]
   if (depth > MAX_DEPTH) {
     add(st, 'REQUIRE_APPROVAL', 'commands are nested too deeply to inspect', 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
@@ -179,14 +335,14 @@ async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: St
     } else while (j < words.length && (words[j] ?? '').startsWith('-')) j++
     words = words.slice(j)
   }
-  const name = words[0]
+  const name = words[0] === undefined ? undefined : normalizeWord(words[0])
   if (name === undefined) return
 
   const exe = executableName(name)
   const args = words.slice(1)
 
-  if (exe === 'logoff') {
-    add(st, 'DENY', 'logging the user off is controlling the machine power state, which only NEXUS power control may do', 'SYSTEM_SENSITIVE', 'not_applicable')
+  if (exe === 'logoff' || exe === 'tsdiscon') {
+    add(st, 'DENY', 'logging the user off or disconnecting the session is controlling the machine power state, which only NEXUS power control may do', 'SYSTEM_SENSITIVE', 'not_applicable')
     return
   }
 
@@ -204,14 +360,14 @@ async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: St
     const it = interpreterFor(name)
     const target = it === null ? null : parseInterpreter(it, args)
     if (it !== null && target !== null && (target.kind === 'script' || target.kind === 'inline')) {
-      await evalInterpreter(it, args, shell, env, st, cwd, depth)
+      await evalInterpreter(it, args, shell, env, st, cwd, depth, fed)
     } else await evalPackageManager('bun', args, shell, env, st, cwd, depth)
     return
   }
 
   const it = interpreterFor(name)
   if (it !== null) {
-    await evalInterpreter(it, args, shell, env, st, cwd, depth)
+    await evalInterpreter(it, args, shell, env, st, cwd, depth, fed)
     return
   }
 
@@ -221,28 +377,41 @@ async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: St
     return
   }
   if (exe === 'import-module' || exe === 'ipmo') {
-    const target = args.find((a) => !a.startsWith('-') && (SCRIPT_EXTENSIONS.test(a) || /\.dll$/i.test(a)))
+    const target = args.find((a) => !a.startsWith('-') && (SCRIPT_EXTENSIONS.test(normalizeWord(a)) || /\.dll$/i.test(a)))
     if (target !== undefined) await evalScriptFile(target, 'powershell', env, st, cwd, depth)
     return
   }
-
-  // cmd.exe runs `foo` as foo.cmd or foo.bat in the current directory (PATHEXT), so a bare name can be a script.
-  if (/^[\w-]+$/.test(name)) {
-    for (const ext of ['.cmd', '.bat']) {
-      if (existsSync(path.join(cwd, name + ext))) {
-        await evalScriptFile(name + ext, 'cmd', env, st, cwd, depth)
-        return
-      }
-    }
+  // git runs a command for `bisect run`, `rebase --exec`, `submodule foreach`.
+  if (exe === 'git') {
+    const lc = args.map((x) => x.toLowerCase())
+    const k = lc.indexOf('bisect') >= 0 && lc.indexOf('run') > lc.indexOf('bisect') ? lc.indexOf('run') : -1
+    if (k >= 0 && args.length > k + 1) await evalSegment({ words: args.slice(k + 1), redirects: [], sep: '', raw: args.slice(k + 1).join(' ') }, shell, env, st, cwd, depth + 1)
+    const x = lc.findIndex((v) => v === '--exec' || v === '-x' || v.startsWith('--exec='))
+    if (x >= 0) await evalCommandText(lc[x]?.includes('=') ? (args[x] ?? '').slice((args[x] ?? '').indexOf('=') + 1) : (args[x + 1] ?? ''), 'bash', env, st, cwd, depth + 1)
+    const fe = lc.indexOf('foreach')
+    if (fe >= 0 && lc.includes('submodule')) await evalCommandText(args.slice(fe + 1).filter((v) => !v.startsWith('-')).join(' '), 'bash', env, st, cwd, depth + 1)
+    return
   }
 
-  // A script (or program) run directly by path: .\build.cmd, ./run.sh, tools\gen.ps1, .\agent-built.exe
+  // A file run directly: .\build.cmd, ./run.sh, `evil.cmd.`, `evil.cmd::$DATA`, or `evil2` that Windows resolves to evil2.bat.
+  const direct = resolveFileWord(name, cwd)
+  if (direct !== null) {
+    await evalFileByPath(direct, name, env, st, depth, false)
+    return
+  }
   if (SCRIPT_EXTENSIONS.test(name)) {
+    // Named like a script but not found here (or outside the worktree): judge the path as given.
     const fam = familyForScriptPath(name)
     if (fam !== null) await evalScriptFile(name, fam, env, st, cwd, depth)
     return
   }
-  if (/[\\/]/.test(name) && /\.(exe|com|scr|msi)$/i.test(name)) await evalProgramFile(name, env, st, cwd)
+  if (/[\\/]/.test(name) && /\.(exe|com|scr|msi)$/i.test(name)) {
+    await evalProgramFile(name, env, st, cwd)
+    return
+  }
+
+  // An unrecognised launcher (explorer, Invoke-Item, Start-Job, forfiles ...): any executable-type file among its arguments is run, as far as we know.
+  if (!SAFE_ARG_CMDS.has(exe)) await scanArgs(exe, args, env, st, cwd, depth)
 }
 
 /** Words of `Start-Process FilePath -ArgumentList a,b` as a plain command line. */
@@ -292,9 +461,11 @@ async function evalCommandText(text: string, shell: Shell, env: ExecutionEnv, st
 const SHELL_FAMILIES = new Set<InterpreterFamily>(['powershell', 'cmd', 'posix_shell'])
 const KNOWN_PY_MODULES = new Set(['pytest', 'unittest', 'mypy', 'pip', 'venv', 'ensurepip', 'black', 'ruff', 'flake8', 'pylint', 'coverage', 'tox', 'build', 'twine', 'json.tool', 'http.server', 'compileall', 'doctest', 'pydoc', 'timeit', 'nose', 'isort', 'pyright', 'poetry', 'pipenv', 'uv', 'virtualenv', 'django', 'flask', 'uvicorn', 'gunicorn', 'sphinx', 'alembic'])
 
-async function evalInterpreter(it: Interpreter, args: string[], shell: Shell, env: ExecutionEnv, st: State, cwd: string, depth: number): Promise<void> {
-  const t = parseInterpreter(it, args)
+async function evalInterpreter(it: Interpreter, args: string[], shell: Shell, env: ExecutionEnv, st: State, cwd: string, depth: number, fed: Fed | null = null): Promise<void> {
+  let t = parseInterpreter(it, args)
   const restricted = env.profile === 'RESTRICTED'
+  // A bare interpreter with something piped or redirected into it reads its program from standard input.
+  if ((t.kind === 'interactive' || t.kind === 'none') && fed !== null) t = { kind: 'stdin' }
   if (t.kind === 'version' || t.kind === 'interactive' || t.kind === 'none') return
   if (!env.caps.has('INTERPRETER_EXEC')) {
     add(st, 'DENY', `the ${env.role} role has no INTERPRETER_EXEC capability, so it cannot run ${it.name}`, 'UNTRUSTED_AGENT_AUTHORED', 'not_applicable')
@@ -325,8 +496,20 @@ async function evalInterpreter(it: Interpreter, args: string[], shell: Shell, en
       }
       return
     }
+    case 'stdin': {
+      if (restricted) {
+        add(st, 'DENY', `${it.name} reading its program from standard input is inline code, which the RESTRICTED execution profile does not allow`, 'UNTRUSTED_AGENT_AUTHORED', 'inline_code')
+      } else if (fed?.kind === 'file' && fed.target !== undefined) {
+        await evalScriptFile(fed.target, it.family, env, st, cwd, depth)
+      } else if (fed?.kind === 'literal') {
+        add(st, 'ALLOW_WITH_AUDIT', `${it.name} reads its program from standard input; the literal text is part of this command and was inspected with it`, 'UNTRUSTED_AGENT_AUTHORED', 'inline_code')
+      } else {
+        add(st, 'REQUIRE_APPROVAL', `${it.name} reads its program from standard input, which NEXUS cannot see`, 'UNTRUSTED_AGENT_AUTHORED', 'inline_code')
+      }
+      return
+    }
     case 'inline': {
-      const isShell = SHELL_FAMILIES.has(it.family)
+      const isShell = SHELL_FAMILIES.has(it.family) || it.family === 'wsl'
       // Inline code that starts processes cannot be reviewed as a file can: it is put to the user.
       const findings = inspectContent(t.code).map((f): ContentFinding => (!isShell && (f.category === 'process_spawn' || f.category === 'shell_recursion') ? { ...f, severity: 'approval' } : f))
       if (restricted) {
@@ -346,7 +529,11 @@ async function evalInterpreter(it: Interpreter, args: string[], shell: Shell, en
       if (it.family === 'wsh' || it.family === 'mshta') {
         add(st, 'REQUIRE_APPROVAL', `${it.name} is the legacy Windows script host`, 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
       }
-      if (t.path === '' || t.path === '-') return
+      if (t.path === '') return
+      if (t.path === '-') {
+        await evalInterpreter(it, [], shell, env, st, cwd, depth, fed ?? { kind: 'unknown' })
+        return
+      }
       await evalScriptFile(t.path, it.family, env, st, cwd, depth)
       for (const extra of t.extraPaths) await evalScriptFile(extra, it.family, env, st, cwd, depth)
       return
@@ -399,7 +586,7 @@ function resolveScript(raw: string, cwd: string, family: InterpreterFamily): { a
 }
 
 async function evalScriptFile(raw: string, family: InterpreterFamily, env: ExecutionEnv, st: State, cwd: string, depth: number): Promise<void> {
-  const r = resolveScript(raw, cwd, family)
+  const r = resolveScript(normalizeWord(raw), cwd, family)
   if ('error' in r) {
     add(st, 'REQUIRE_APPROVAL', r.error, 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
     return
@@ -443,6 +630,18 @@ async function evalResolvedFile(abs: string, raw: string, family: InterpreterFam
     return
   }
 
+  // A script too large to read is never waved through: an executed script-type file that cannot be inspected is put to the user.
+  const installed = inNodeModules(abs) && env.tracker?.recorded(abs, env.worktree) == null
+  try {
+    if (installed && statSync(abs).size > MAX_INSPECT_CHARS) return // a large bundled dependency (tsc.js, a vendored release): not read
+    if (!installed && statSync(abs).size > MAX_SCRIPT_BYTES) {
+      add(st, 'REQUIRE_APPROVAL', `${label} is too large to inspect`, 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+      return
+    }
+  } catch {
+    // handled when the file is read below
+  }
+
   let origin: FileOrigin
   if (inNodeModules(abs) && env.tracker?.recorded(abs, env.worktree) == null) origin = { kind: 'repository_unmodified', evidence: 'installed dependency' }
   else origin = await originOf(abs, env.worktree, env.tracker, env.base)
@@ -452,10 +651,6 @@ async function evalResolvedFile(abs: string, raw: string, family: InterpreterFam
 
   let buf: Buffer
   try {
-    if (statSync(abs).size > MAX_SCRIPT_BYTES) {
-      add(st, agentMade ? 'REQUIRE_APPROVAL' : 'ALLOW', `${label} is too large to inspect`, trust, prov)
-      return
-    }
     buf = readFileSync(abs)
   } catch {
     add(st, 'REQUIRE_APPROVAL', `${label} cannot be read for inspection`, trust, prov)
@@ -495,7 +690,9 @@ async function evalResolvedFile(abs: string, raw: string, family: InterpreterFam
   }
   // Libraries a script loads are code that runs too: an unmodified entry point must not load an agent-written module.
   if (depth < MAX_DEPTH) {
-    for (const ref of relativeReferences(text, fam, path.dirname(abs))) {
+    const { refs, truncated } = relativeReferences(text, fam, path.dirname(abs))
+    if (truncated) add(st, 'REQUIRE_APPROVAL', `${label} references too many files to inspect them all`, trust, prov)
+    for (const ref of refs) {
       await evalResolvedFile(ref, ref, fam, env, st, depth + 1, false)
     }
   }
@@ -521,7 +718,7 @@ async function evalProgramFile(raw: string, env: ExecutionEnv, st: State, cwd: s
 }
 
 /** Relative `require('./x')`, `import './x'`, Python sibling imports and PowerShell dot-sourcing, resolved to existing files. */
-function relativeReferences(text: string, family: InterpreterFamily, dir: string): string[] {
+function relativeReferences(text: string, family: InterpreterFamily, dir: string): { refs: string[]; truncated: boolean } {
   const out = new Set<string>()
   const addIf = (c: string): void => {
     try {
@@ -547,7 +744,8 @@ function relativeReferences(text: string, family: InterpreterFamily, dir: string
   } else if (family === 'powershell') {
     for (const m of text.matchAll(/(?:^|[;\n]\s*)(?:\.|&)\s+['"]?(\.{0,2}[\\/][^'"\s;]+\.(?:ps1|psm1))['"]?/gi)) addIf(m[1] ?? '')
   }
-  return [...out].slice(0, 10)
+  const all = [...out]
+  return { refs: all.slice(0, MAX_REFERENCES), truncated: all.length > MAX_REFERENCES }
 }
 
 /** What the command classifier makes of a script body; only forbidden findings count unless `strict`. */
@@ -598,6 +796,38 @@ function hasLocalBin(tool: string, cwd: string, stop: string): boolean {
   return false
 }
 
+/** Package-manager configuration files: a change to one of them changes what the next `pnpm test` runs. */
+const PM_CONFIG_FILES = ['.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs', '.yarnrc.yml', '.yarnrc', 'bunfig.toml']
+
+async function evalPmConfig(env: ExecutionEnv, st: State, start: string, depth: number): Promise<void> {
+  let dir = start
+  for (let i = 0; i < 12; i++) {
+    for (const f of PM_CONFIG_FILES) {
+      const abs = path.join(dir, f)
+      try {
+        if (!statSync(abs).isFile() || statSync(abs).size > 256 * 1024) continue
+      } catch {
+        continue
+      }
+      const origin = await originOf(abs, env.worktree, env.tracker, env.base)
+      const changed = origin.kind === 'agent_authored' || origin.kind === 'agent_modified'
+      const text = decodeScript(readFileSync(abs))
+      const label = path.relative(env.worktree, abs).replace(/\\/g, '/')
+      // The program scripts run with, and the files Yarn loads, are executed whenever the manager runs a script.
+      for (const m of text.matchAll(/^\s*script-shell\s*=\s*['"]?(.+?)['"]?\s*$/gim)) await evalScriptFile(m[1] ?? '', 'cmd', env, st, dir, depth)
+      if (changed) {
+        for (const m of text.matchAll(/^\s*yarnPath:\s*['"]?(.+?)['"]?\s*$/gm)) await evalScriptFile(m[1] ?? '', 'node', env, st, dir, depth)
+        for (const m of text.matchAll(/^\s*-?\s*path:\s*['"]?(\S+?)['"]?\s*$/gm)) await evalScriptFile(m[1] ?? '', 'node', env, st, dir, depth)
+        if (/^\.pnpmfile\./.test(f)) await evalResolvedFile(abs, f, 'node', env, st, depth, true)
+        add(st, 'REQUIRE_APPROVAL', `${label} (package manager configuration) was written or changed by an agent; it can change which programs the next package script runs`, 'UNTRUSTED_AGENT_AUTHORED', origin.kind)
+      }
+    }
+    const up = path.dirname(dir)
+    if (up === dir || lcKey(dir) === lcKey(env.worktree) || !isPathInside(env.worktree, up)) return
+    dir = up
+  }
+}
+
 async function evalPackageManager(pm: PackageManager | 'npx' | 'bunx', args: string[], shell: Shell, env: ExecutionEnv, st: State, cwd: string, depth: number): Promise<void> {
   const parsed = parsePackageManager(pm, args)
   let workDir = cwd
@@ -613,8 +843,18 @@ async function evalPackageManager(pm: PackageManager | 'npx' | 'bunx', args: str
       return
     }
   }
+  if (parsed.ambiguous) {
+    add(st, 'REQUIRE_APPROVAL', `${pm} is given a flag NEXUS does not know, so it cannot tell which script or tool this runs`, 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+    return
+  }
+  if (parsed.scriptShell !== null) {
+    // The program every script is run through: it is executed, so it is inspected like a script.
+    await evalScriptFile(parsed.scriptShell, 'cmd', env, st, cwd, depth)
+    add(st, 'REQUIRE_APPROVAL', 'sets the program package scripts are run with (--script-shell)', 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+  }
   const inv = parsed.invocation
   if (inv.kind === 'other') return
+  await evalPmConfig(env, st, workDir, depth)
 
   if (inv.kind === 'exec') {
     await evalExecTool(inv.tool, inv.args, inv.download, inv.forced, shell, env, st, workDir, depth)
@@ -707,7 +947,7 @@ async function evalScriptBody(m: Manifest, name: string, env: ExecutionEnv, st: 
   if (!known && env.profile === 'RESTRICTED') {
     add(st, 'REQUIRE_APPROVAL', `${label} cannot be compared with the base commit`, trust, prov)
   } else if (modified && clean) {
-    add(st, env.profile === 'RESTRICTED' ? 'REQUIRE_APPROVAL' : 'ALLOW_WITH_AUDIT', `${label} was changed by an agent since the base commit`, trust, prov)
+    add(st, env.profile === 'RESTRICTED' || !env.caps.has('WRITE_WORKTREE') ? 'REQUIRE_APPROVAL' : 'ALLOW_WITH_AUDIT', `${label} was changed by an agent since the base commit`, trust, prov)
   } else if (modified && env.profile === 'RESTRICTED') {
     add(st, 'REQUIRE_APPROVAL', `${label} was changed by an agent since the base commit`, trust, prov)
   }

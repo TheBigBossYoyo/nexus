@@ -40,6 +40,7 @@ export const BASE_FILES: Record<string, string> = {
   'tools/check.py': "print('ok')\n",
   'tools/clean.ps1': 'Remove-Item -Recurse .\\dist -ErrorAction SilentlyContinue\n',
   'run.cmd': '@echo off\r\necho hi\r\n',
+  '.npmrc': 'registry=https://registry.npmjs.org/\n',
   'packages/a/package.json': JSON.stringify({ name: 'a', scripts: { test: 'vitest run' } }),
   'packages/b/package.json': JSON.stringify({ name: 'b', scripts: { test: 'vitest run' } }),
 }
