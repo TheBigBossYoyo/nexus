@@ -909,10 +909,18 @@ export function ControlView() {
   const now = useNow(true, 10_000)
   const o = overview.data ?? null
   const health = o ? HEALTH_LABEL[o.health.level] : null
+  // A load that failed stays a failed load while it is tried again. Without data the query goes back to
+  // "pending" on every retry, and the queue is refreshed every few seconds: the error and its Retry button
+  // would be taken away and put back each time, under the pointer of whoever tries to press it.
+  const [lastError, setLastError] = useState<unknown>(null)
+  useEffect(() => {
+    if (overview.isError) setLastError(overview.error ?? new Error('The Control Center could not be loaded.'))
+    else if (overview.data !== undefined) setLastError(null)
+  }, [overview.isError, overview.error, overview.data])
   const state = loadState({
     hasData: o !== null,
-    isError: overview.isError,
-    error: overview.error,
+    isError: overview.isError || lastError !== null,
+    error: overview.error ?? lastError,
   })
   const [inspectedId, setInspectedId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
