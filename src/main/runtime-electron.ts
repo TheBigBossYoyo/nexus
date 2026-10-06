@@ -111,7 +111,7 @@ function logToFile(dataDir: string): void {
 let dialogOwner: BrowserWindow | null = null
 function ownerWindow(): BrowserWindow {
   if (!dialogOwner || dialogOwner.isDestroyed()) {
-    dialogOwner = new BrowserWindow({ width: 1, height: 1, show: false, frame: false, skipTaskbar: true, alwaysOnTop: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+    dialogOwner = new BrowserWindow({ width: 1, height: 1, center: true, show: false, frame: false, skipTaskbar: true, alwaysOnTop: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
     dialogOwner.setAlwaysOnTop(true, 'screen-saver')
   }
   return dialogOwner
@@ -124,8 +124,7 @@ function ownerWindow(): BrowserWindow {
 async function askNatively(request: UiRequest, dataDir: string): Promise<UiResponse> {
   if (request.kind === 'confirm') {
     const options = { type: request.level, title: request.title, message: request.message, detail: request.detail, buttons: request.buttons, defaultId: request.defaultId, cancelId: request.cancelId, noLink: true }
-    // An automated run keeps everything off the screen; its question has no owner to bring it forward.
-    const { response } = process.env['NEXUS_WINDOW_OFFSCREEN'] === '1' ? await dialog.showMessageBox(options) : await dialog.showMessageBox(ownerWindow(), options)
+    const { response } = await dialog.showMessageBox(ownerWindow(), options)
     return { response }
   }
   if (request.kind === 'pickDirectory') {
