@@ -329,6 +329,19 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
     const sha = await git.commitAll(a.path, 'work', AUTHOR)
     expect(await sh(repo, 'rev-parse', `refs/heads/${a.branch}`)).toBe(sha)
 
+    // The branch itself turned into a reference to the user's branch (what code an agent runs could do): HEAD
+    // still names the task branch, and a commit "on" it would advance main.
+    const tip = await sh(repo, 'rev-parse', `refs/heads/${a.branch}`)
+    await sh(a.path, 'symbolic-ref', `refs/heads/${a.branch}`, 'refs/heads/main')
+    await writeFile(join(a.path, 'symref.txt'), 'x\n')
+    await git.addAll(a.path)
+    await expect(git.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/turned into a reference to refs\/heads\/main/)
+    await expect(git.run(a.path, ['merge', '--no-ff', '-m', 'm', 'user-work'])).rejects.toThrow(/turned into a reference/)
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(main)
+    await sh(repo, 'symbolic-ref', '--delete', `refs/heads/${a.branch}`)
+    await sh(repo, 'update-ref', `refs/heads/${a.branch}`, tip)
+    await sh(a.path, 'reset', '-q', '--hard')
+
     // After a restart the branch comes from NEXUS's record of the worktree.
     const restarted = new GitService()
     restarted.setWorktreesRoot(root)

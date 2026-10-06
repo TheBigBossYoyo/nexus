@@ -1334,6 +1334,8 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
     else break
   }
   const sub = lc[i]
+  // A subcommand that is computed (`git $(echo checkout) main`, `git $x`, `git %x%`) cannot be judged by name.
+  if (sub !== undefined && /[$`%]/.test(sub)) a.ask('medium', 'the git subcommand is computed at run time and cannot be inspected', 'GIT_LOCAL')
   const rest = args.slice(i + 1)
   const rlc = lc.slice(i + 1)
   const rpos = rest.filter((x) => !x.startsWith('-'))

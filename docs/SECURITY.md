@@ -593,6 +593,19 @@ own prompts tell agents to run after a conflict, and it is unaffected. NEXUS its
 worktree whose HEAD is not its recorded task branch (see the git service), so the guard is two-sided: this one stops the
 command, that one stops the consequence if a command got through some other way (a script, an approved call).
 
+NEXUS's own side of the invariant (`GitService.assertOnOwnBranch`): a worktree NEXUS created is recorded with its
+branch. Before a commit, merge or any other command of NEXUS's that adds to or rewrites the current branch, HEAD is
+read from the worktree's Git directory in the repository and must name that branch, and the branch must not have
+been turned into a symbolic reference to another one. Otherwise NEXUS refuses. A reset of NEXUS's, which discards
+everything anyway, first puts the worktree back on its branch. So a HEAD that code an agent ran has moved (the
+classifier does not see inside a test or a build script) stops NEXUS from committing there; it does not stop that
+code from writing the user's branch itself, which is the limit described under "Not a full OS sandbox".
+
+Known gaps of the classifier's side, both LOW because of NEXUS's side: a command substitution in the subcommand
+position (`git $(echo checkout) main`) is taken out by the tokenizer before the git rule sees it and is allowed
+(a variable there, `git $sub main`, asks); an alias that already exists in the repository's configuration
+(`git co main`) is not expanded (creating one asks).
+
 ### Reaching Git's own entry indirectly
 
 A write, move or delete in a write position also asks when the path is a glob that can match `.git` (`.gi?`, `.g*`,

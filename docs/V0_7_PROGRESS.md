@@ -102,9 +102,51 @@ See the release report for the counts. New suites:
 - Security: `tests/unit/policies/adversarial-corpus.test.ts`, `filesystem-boundary.test.ts`,
   `execution-units.test.ts`, `tests/integration/security/`.
 
+## Phase 17: real acceptance (2026-10-06)
+
+- `scripts/v07-acceptance.mjs`: a small program and a one-trial Arena campaign through the global queue with real
+  Claude sessions in worker processes; the window is closed in the middle and opened again; one worker that holds
+  a real session is ended from outside.
+- Run 1: 9 of 14 gates. The run itself completed, but the script closed the window with Playwright's `close`,
+  which waits for the output streams of the process it launched; the runtime that process started holds them
+  open, so `close` returned only when the runtime had stopped by itself, minutes later. Nothing of NEXUS was
+  wrong; the script could not observe what it was written to observe. The script now closes the window as a user
+  does. Evidence kept: `docs/acceptance/v07-acceptance-2026-10-05T21-51-32-951Z.json`.
+- Run 2: 13 of 14 gates. Both workloads active at once, never more than the limit of 3 agents, 10 real sessions
+  in 3 worker processes, the runtime alive and working for 40 s without a window (19 run events in that time),
+  the new window on the same runtime, a verifier's worker ended and its lease revoked, the task verified again
+  by a new session, both workloads completed, clean stop, finished work found by a new runtime. The failed gate
+  ("the window process ended") was the script's liveness check answering "alive" for a process that had ended
+  (a signal check on a handle the script still held). The check now asks Windows' process list.
+  Evidence: `docs/acceptance/v07-acceptance-2026-10-06T21-12-14-919Z.json`.
+- A third run on the final code is in the release report.
+
+## Phases 18 and 20: independent security review and fixes (2026-10-06)
+
+Seven read-only reviews by reviewers that had not written the code. Each ran the real authorizer or the real Git
+service on its own fixtures. What they confirmed, and what was done:
+
+| Review | Confirmed | Fix |
+|---|---|---|
+| Execution policy | HIGH x5: a literal power command in shell text without a known wrapper passed; `pwsh-preview`; a value-taking package-manager flag hid the script; trailing dot, data stream, extensionless and unknown-launcher routes to a script; power API names with a suffix | `a09e2c9` |
+| Process boundary | HIGH x3: a pipe client that calls itself the window answered its own power confirmation; `settings.update` could name a program to start; the token is readable by code agents may run | `b087386`: confirmations are shown by the runtime and never travel over the pipe; settings that start a program are confirmed. The third is the documented limit (allowed code runs as the user); the endpoint file and pipe are on the agent deny list |
+| Providers and tools | no HIGH; MEDIUM x2 (project Claude configuration opt-in unconfirmed; agent-to-agent text unbounded and unfenced) | `9da95ce` |
+| Power boundary | HIGH: `cmd /c shutdown/s` (no space before the switch); MEDIUM: assembled names; recovery requested a shutdown for a record without verifying its seal | `e4fba3a`, `9da95ce` |
+| Filesystem and Git | HIGH x3, **all present in released 0.6.0**: the pointer check accepted a Git directory the agent made itself, and NEXUS's commit then moved the user's branch; `.git` with a trailing space or dot or as `GIT~1` passed the shell guard; read-only git commands ran the filters of the repository the pointer named. MEDIUM: a replacement ref stood in for the base commit; writes through paths with variables; git commands writing shared configuration | `5fe39ba` (NEXUS names the Git directory of its worktrees itself), `e4fba3a` |
+| Verification of the fixes | five of six areas closed; HIGH: an allowed `git symbolic-ref HEAD refs/heads/main` or `git checkout main` turned the worktree to the user's branch and the next commit advanced it | `137f2bb` (NEXUS refuses to commit or merge off the recorded branch), and the branch invariant in the classifier |
+| Verification of the branch invariant | see the release report | |
+
+The README's release history now says that 0.6.0 has these defects.
+
+Other findings of the day, outside the reviews:
+
+- The built-in Arena case test for `performance-optimization` failed in every full run and passed alone: its
+  slow fixture needs most of the evaluator's 120 s. The built-in cases now run in a group of their own after the
+  parallel suites.
+- `commitAll` passes `-c user.name=...` before the subcommand, so a check keyed on the first argument never saw
+  `commit`. The subcommand is now found behind global options.
+
 ## Open points
 
-- `performance-optimization` Arena case test: load-sensitive on this machine; to be run alone in the final
-  regression.
 - Remaining phases: full end-to-end run, real acceptance, independent security and UI audits, fixes, final
   regression, package, release report.

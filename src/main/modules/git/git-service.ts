@@ -389,7 +389,13 @@ export class GitService {
   private async assertOnOwnBranch(own: TrustedWorktree): Promise<void> {
     if (own.branch === null) return
     const head = await readFile(join(own.gitDir, 'HEAD'), 'utf8').then((text) => text.trim()).catch(() => '')
-    if (head === `ref: refs/heads/${own.branch}`) return
+    if (head === `ref: refs/heads/${own.branch}`) {
+      // The branch itself must be a branch: as a symbolic ref to another branch, a commit "on" it would advance
+      // that one. A loose ref file holds a commit id; only a symbolic ref begins with `ref:`.
+      const loose = await readFile(join(dirname(dirname(own.gitDir)), 'refs', 'heads', ...own.branch.split('/')), 'utf8').then((text) => text.trim()).catch(() => '')
+      if (!loose.startsWith('ref:')) return
+      throw new NexusError('invalid_state', `The branch ${own.branch} of the working tree at ${own.root} was turned into a reference to ${loose.slice(4).trim()}. NEXUS will not commit or merge there.`, { cwd: own.root, branch: own.branch })
+    }
     const now = head.startsWith('ref: ') ? head.slice(5) : head === '' ? 'nothing readable' : `the commit ${head.slice(0, 12)}`
     throw new NexusError('invalid_state', `The working tree at ${own.root} is no longer on its branch ${own.branch} (its HEAD names ${now}). NEXUS will not commit or merge there.`, { cwd: own.root, branch: own.branch })
   }
