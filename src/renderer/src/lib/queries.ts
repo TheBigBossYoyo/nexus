@@ -213,12 +213,20 @@ export const useMemory = (filter: MemoryFilter = {}) => {
 
 type AfterSuccess<C extends IpcChannel> = (qc: QueryClient, output: IpcOutputs[C], input: IpcInput<C>) => void
 
-/** Errors surface as toasts through the QueryClient's MutationCache (see queryClient.ts). */
-export function useWrite<C extends IpcChannel>(channel: C, after?: AfterSuccess<C>) {
+export interface WriteOptions {
+  /** The view shows the error itself: no toast for it. */
+  silent?: boolean
+  onError?: (error: IpcError, qc: QueryClient) => void
+}
+
+/** Errors surface as toasts through the QueryClient's MutationCache (see queryClient.ts), unless `silent`. */
+export function useWrite<C extends IpcChannel>(channel: C, after?: AfterSuccess<C>, options?: WriteOptions) {
   const qc = useQueryClient()
   return useMutation<IpcOutputs[C], IpcError, IpcInput<C>>({
     mutationFn: (input) => api.invoke(channel, input),
     onSuccess: (output, input) => after?.(qc, output, input),
+    onError: (error) => options?.onError?.(error, qc),
+    ...(options?.silent ? { meta: { silent: true } } : {}),
   })
 }
 

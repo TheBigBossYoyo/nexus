@@ -89,7 +89,9 @@ describe('runtime strip, dispatch and long lists', () => {
     expect(dispatchView(false)).toMatchObject({ state: 'Running', button: 'Pause dispatch', notice: null, next: true })
     const paused = dispatchView(true)
     expect(paused).toMatchObject({ state: 'Paused', button: 'Resume dispatch', next: false })
-    expect(paused.notice).toContain('nothing new starts')
+    expect(paused.notice).toContain('Nothing new starts')
+    // The notice has its own title in the page; its body does not say it again.
+    expect(paused.notice).not.toMatch(/dispatch is paused/i)
     expect(paused.notice).toContain('running continues')
   })
 

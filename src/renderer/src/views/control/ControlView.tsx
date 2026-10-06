@@ -8,7 +8,10 @@ import type {
   Schedule,
 } from '@shared/control-plane'
 import { api } from '../../lib/bridge'
-import { useRead, useWrite } from '../../lib/queries'
+import { useRead, useWrite, type WriteOptions } from '../../lib/queries'
+import { useUiStore } from '../../store/ui'
+import { useConnectionRecovering, useConnectionStale } from '../../store/connection'
+import { formatWhen } from '../../lib/dates'
 import { qkControl, qkRuntime, useControlOverview, useItemDecisions } from '../../lib/queries-v7'
 import { RuntimeDiagnostics } from './RuntimeDiagnostics'
 import { SecurityDecisions } from '../security/SecurityDecisions'
@@ -38,7 +41,6 @@ import {
   capacityLine,
   COMPONENT_LABEL,
   EMPTY_SCHEDULE_FORM,
-  HEALTH_LABEL,
   HOLD_LABEL,
   inspectorOf,
   itemActions,
@@ -47,7 +49,6 @@ import {
   loadState,
   PRIORITY_OPTIONS,
   queueAnnouncement,
-  RELEASE_LABEL,
   SCHEDULE_ACTION_OPTIONS,
   scheduleDeleteConfirmation,
   scheduleInput,
@@ -58,14 +59,52 @@ import {
   type Emphasis,
   type ScheduleForm,
   AGING_HINT,
+  friendlyError,
+  headerBadge,
+  holdHelp,
+  ownPage,
+  resumeLabel,
+  ROW_LIMIT,
+  runtimeIndicator,
+  UNKNOWN_VALUE,
   AGING_OPTIONS,
   claudeLine,
   describeDecision,
   dispatchView,
-  RUNTIME_LEVEL_LABEL,
   visibleRows,
   workersLine,
 } from './controlModel'
+
+/** Errors of this page are shown next to the action, in plain words, and not as a toast as well. */
+const WRITE: WriteOptions = {
+  silent: true,
+  onError: (error, qc) => {
+    if (friendlyError(error).refetch) refresh(qc)
+  },
+}
+
+/** An error in a sentence a person can use: the channel name never shows. */
+function Fault({ error }: { error: unknown }) {
+  return <ErrorNote error={new Error(friendlyError(error).message)} />
+}
+
+/** Opens the page where a blocked or failed workload is dealt with, on the workload when that page can show it. */
+function OpenOwnPage({ item, testId, onDone }: { item: ControlItem; testId: string; onDone?: () => void }) {
+  const target = ownPage(item)
+  const open = (): void => {
+    const ui = useUiStore.getState()
+    if (target.opens === 'program' && target.refId) ui.openProgram(target.refId)
+    else if (target.opens === 'campaign' && target.refId) ui.openCampaign(target.refId)
+    else if (target.opens === 'run' && target.refId) ui.openRun(target.refId)
+    else ui.setView(target.view)
+    onDone?.()
+  }
+  return (
+    <Button size="sm" onClick={open} data-testid={testId}>
+      {target.label}
+    </Button>
+  )
+}
 
 const refresh = (qc: {
   invalidateQueries(options: { queryKey: readonly unknown[] }): unknown
@@ -108,7 +147,7 @@ function ConfirmBody({ confirmation, error }: { confirmation: Confirmation; erro
           ))}
         </ul>
       </div>
-      {error ? <ErrorNote error={error} /> : null}
+      {error ? <Fault error={error} /> : null}
     </div>
   )
 }
@@ -119,6 +158,7 @@ function ItemRow({
   first,
   last,
   now,
+  frozen = false,
   onInspect,
 }: {
   item: ControlItem
@@ -126,19 +166,22 @@ function ItemRow({
   first?: boolean
   last?: boolean
   now: number
+  /** The last refresh failed a while ago: the actions wait until the queue can be read again. */
+  frozen?: boolean
   onInspect: (id: string) => void
 }) {
-  const setPriority = useWrite('control.setPriority', refresh)
-  const move = useWrite('control.move', refresh)
-  const pause = useWrite('control.pause', refresh)
-  const resume = useWrite('control.resume', refresh)
-  const cancel = useWrite('control.cancel', refresh)
+  const setPriority = useWrite('control.setPriority', refresh, WRITE)
+  const move = useWrite('control.move', refresh, WRITE)
+  const pause = useWrite('control.pause', refresh, WRITE)
+  const resume = useWrite('control.resume', refresh, WRITE)
+  const cancel = useWrite('control.cancel', refresh, WRITE)
   const [confirming, setConfirming] = useState(false)
   const actions = itemActions(item)
   const shown: ControlItem = reason ? { ...item, reason } : item
   const view = itemPresentation(shown)
   const confirmation = cancelConfirmation(item)
-  const busy = pause.isPending || resume.isPending || cancel.isPending
+  const busy = pause.isPending || resume.isPending || cancel.isPending || frozen
+  const frozenTitle = frozen ? 'The queue could not be refreshed for a while, so this may be out of date. Retry first.' : undefined
   const error = pause.error ?? resume.error ?? cancel.error ?? setPriority.error ?? move.error
   const runCancel = (): void =>
     cancel.mutate({ itemId: item.id }, { onSuccess: () => setConfirming(false) })
@@ -165,11 +208,11 @@ function ItemRow({
         >
           {item.title}
         </button>
-        <div className="w-36 shrink-0">
+        <div className="w-36 shrink-0" title={frozenTitle}>
           <Select
             value={item.priority}
             options={PRIORITY_OPTIONS}
-            disabled={!actions.cancel || setPriority.isPending}
+            disabled={!actions.cancel || setPriority.isPending || frozen}
             onChange={(priority: Priority) => setPriority.mutate({ itemId: item.id, priority })}
             aria-label={`Priority of ${item.title}`}
             data-testid={`work-item-priority-${item.id}`}
@@ -180,7 +223,8 @@ function ItemRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={first || move.isPending}
+              disabled={first || move.isPending || frozen}
+              title={frozenTitle}
               onClick={() => move.mutate({ itemId: item.id, where: 'up' })}
               aria-label={`Move ${item.title} up`}
               data-testid={`work-item-up-${item.id}`}
@@ -190,7 +234,8 @@ function ItemRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={last || move.isPending}
+              disabled={last || move.isPending || frozen}
+              title={frozenTitle}
               onClick={() => move.mutate({ itemId: item.id, where: 'down' })}
               aria-label={`Move ${item.title} down`}
               data-testid={`work-item-down-${item.id}`}
@@ -206,6 +251,7 @@ function ItemRow({
             disabled={busy}
             onClick={() => pause.mutate({ itemId: item.id })}
             aria-label={`${HOLD_LABEL} ${item.title}`}
+            title={frozenTitle ?? holdHelp(item)}
             data-testid={`work-item-pause-${item.id}`}
           >
             {HOLD_LABEL}
@@ -218,10 +264,11 @@ function ItemRow({
             loading={resume.isPending}
             disabled={busy}
             onClick={() => resume.mutate({ itemId: item.id })}
-            aria-label={`${RELEASE_LABEL} ${item.title}`}
+            aria-label={`${resumeLabel(item)} ${item.title}`}
+            title={frozenTitle}
             data-testid={`work-item-resume-${item.id}`}
           >
-            {RELEASE_LABEL}
+            {resumeLabel(item)}
           </Button>
         ) : null}
         {actions.cancel ? (
@@ -232,6 +279,7 @@ function ItemRow({
             disabled={busy}
             onClick={() => (confirmation ? (cancel.reset(), setConfirming(true)) : runCancel())}
             aria-label={`${cancelLabel(item)} ${item.title}`}
+            title={frozenTitle}
             data-testid={`work-item-cancel-${item.id}`}
           >
             {cancelLabel(item)}
@@ -242,6 +290,11 @@ function ItemRow({
         {itemLine(item, now)}
         {view.reasonLabel ? '' : view.reasonText ? ` · ${view.reasonText}` : ''}
       </p>
+      {actions.pause && (item.state === 'RUNNING' || item.state === 'QUOTA_WAIT') ? (
+        <p className="m-0 text-caption text-text-muted" data-testid={`work-item-hold-help-${item.id}`}>
+          {holdHelp(item)}
+        </p>
+      ) : null}
       {view.reasonLabel ? (
         <p
           className="m-0 text-small text-text-primary"
@@ -251,7 +304,12 @@ function ItemRow({
           {view.hint ? <span className="text-text-secondary"> {view.hint}</span> : null}
         </p>
       ) : null}
-      {error && !confirming ? <ErrorNote error={error} /> : null}
+      {item.state === 'BLOCKED' ? (
+        <div>
+          <OpenOwnPage item={item} testId={`work-item-open-page-${item.id}`} />
+        </div>
+      ) : null}
+      {error && !confirming ? <Fault error={error} /> : null}
       {confirmation ? (
         <ConfirmDialog
           open={confirming}
@@ -342,6 +400,9 @@ function Inspector({
               data-testid="inspector-reason"
             >
               {info.presentation.reasonText} {info.presentation.hint}
+              <div className="mt-2">
+                <OpenOwnPage item={item} testId="inspector-open-page" onDone={onClose} />
+              </div>
             </Notice>
           ) : info.why ? (
             <div data-testid="inspector-why">
@@ -352,7 +413,7 @@ function Inspector({
           <KeyValue rows={info.facts} labelWidth="7rem" />
           <div data-testid="inspector-decisions">
             <h3 className="m-0 mb-1 text-heading font-semibold">Scheduler decisions</h3>
-            {decisions.error ? <ErrorNote error={decisions.error} /> : null}
+            {decisions.error ? <Fault error={decisions.error} /> : null}
             {decisions.data && decisions.data.length === 0 ? (
               <p className="m-0 text-small text-text-muted">The scheduler has not decided anything about this item yet.</p>
             ) : null}
@@ -402,7 +463,7 @@ function Inspector({
 
 
 function LimitsCard({ overview }: { overview: ControlPlaneOverview }) {
-  const save = useWrite('control.setLimits', refresh)
+  const save = useWrite('control.setLimits', refresh, WRITE)
   const limits = overview.limits
   const set = (patch: Partial<ControlLimits>): void =>
     save.mutate({ limits: { ...limits, ...patch } })
@@ -482,7 +543,7 @@ function LimitsCard({ overview }: { overview: ControlPlaneOverview }) {
           description="Off: a mission that was running when NEXUS stopped stays paused until you resume it. Programs, workspace missions and Arena campaigns continue by their own recovery rules either way."
           data-testid="control-resume-on-boot"
         />
-        {save.error ? <ErrorNote error={save.error} /> : null}
+        {save.error ? <Fault error={save.error} /> : null}
       </div>
     </Card>
   )
@@ -490,7 +551,7 @@ function LimitsCard({ overview }: { overview: ControlPlaneOverview }) {
 
 function QueueProgram() {
   const programs = useRead(['programs', 'control-options'], 'program.list', { limit: 100 })
-  const enqueue = useWrite('control.enqueue', refresh)
+  const enqueue = useWrite('control.enqueue', refresh, WRITE)
   const [programId, setProgramId] = useState('')
   const [priority, setPriority] = useState<Priority>('P2')
   const options = (programs.data?.programs ?? [])
@@ -550,45 +611,81 @@ function QueueProgram() {
           Add to queue
         </Button>
       </div>
-      {enqueue.error ? <ErrorNote error={enqueue.error} /> : null}
+      {enqueue.error ? <Fault error={enqueue.error} /> : null}
     </div>
   )
 }
 
 type Option = { value: string; label: string }
 
+/** Lookups for the workload a schedule points at, so a row says its name and not an id. */
+interface ScheduleNames {
+  program: (id: string) => string | null
+  campaign: (id: string) => string | null
+  project: (id: string) => string | null
+  mission: (id: string) => string | null
+}
+
+function scheduleNameOf(action: Schedule['action'], names: ScheduleNames) {
+  switch (action.type) {
+    case 'program':
+      return { program: names.program(action.programId) }
+    case 'arena':
+      return { campaign: names.campaign(action.campaignId) }
+    case 'workspace_mission':
+      return { mission: names.mission(action.missionId) }
+    case 'scheduled_audit':
+      return { project: names.project(action.projectId) }
+  }
+}
+
 /** What a schedule of the chosen kind can point at. Only the list for the chosen kind is read. */
-function useScheduleTargets(actionType: ScheduleForm['actionType']): {
+function useScheduleTargets(
+  actionType: ScheduleForm['actionType'],
+  /** Kinds that existing schedules use: their lists are read too, to show names instead of ids. */
+  used: ReadonlySet<ScheduleForm['actionType']>,
+): {
   options: Option[]
-  nameOfProgram: (id: string) => string | null
+  names: ScheduleNames
 } {
+  const wants = (t: ScheduleForm['actionType']): boolean => actionType === t || used.has(t)
   const programs = useRead(['programs', 'control-options'], 'program.list', { limit: 100 })
   const campaigns = useRead(
     ['control', 'targets', 'arena'],
     'arena.campaigns',
     { limit: 100 },
-    actionType === 'arena',
+    wants('arena'),
   )
   const projects = useRead(
     ['control', 'targets', 'projects'],
     'projects.list',
     {},
-    actionType === 'scheduled_audit',
+    wants('scheduled_audit'),
   )
   const workspaces = useRead(
     ['control', 'targets', 'workspaces'],
     'workspace.list',
     {},
-    actionType === 'workspace_mission',
+    wants('workspace_mission'),
   )
   const details = useQueries({
-    queries: (actionType === 'workspace_mission' ? (workspaces.data ?? []) : []).map((w) => ({
+    queries: (wants('workspace_mission') ? (workspaces.data ?? []) : []).map((w) => ({
       queryKey: ['control', 'targets', 'workspace', w.workspace.id],
       queryFn: () => api.invoke('workspace.get', { workspaceId: w.workspace.id }),
     })),
   })
-  const nameOfProgram = (id: string): string | null =>
-    programs.data?.programs.find((p) => p.program.id === id)?.program.name ?? null
+  const names: ScheduleNames = {
+    program: (id) => programs.data?.programs.find((p) => p.program.id === id)?.program.name ?? null,
+    campaign: (id) => campaigns.data?.campaigns.find((c) => c.campaign.id === id)?.campaign.name ?? null,
+    project: (id) => projects.data?.find((x) => x.id === id)?.name ?? null,
+    mission: (id) => {
+      for (const d of details) {
+        const m = d.data?.missions.find((x) => x.id === id)
+        if (m) return m.goal.replace(/\s+/g, ' ').slice(0, 60)
+      }
+      return null
+    },
+  }
   let options: Option[]
   if (actionType === 'program')
     options = (programs.data?.programs ?? [])
@@ -609,18 +706,19 @@ function useScheduleTargets(actionType: ScheduleForm['actionType']): {
           label: `${d.data?.workspace.name ?? 'Workspace'}: ${m.goal.replace(/\s+/g, ' ').slice(0, 60)}`,
         })),
     )
-  return { options, nameOfProgram }
+  return { options, names }
 }
 
 function SchedulesCard({ overview, now }: { overview: ControlPlaneOverview; now: number }) {
-  const create = useWrite('control.createSchedule', refresh)
-  const setEnabled = useWrite('control.setScheduleEnabled', refresh)
-  const remove = useWrite('control.removeSchedule', refresh)
+  const create = useWrite('control.createSchedule', refresh, WRITE)
+  const setEnabled = useWrite('control.setScheduleEnabled', refresh, WRITE)
+  const remove = useWrite('control.removeSchedule', refresh, WRITE)
   const [form, setForm] = useState<ScheduleForm>(EMPTY_SCHEDULE_FORM)
   const [touched, setTouched] = useState(false)
   const [deleting, setDeleting] = useState<Schedule | null>(null)
   const check = validateScheduleForm(form)
-  const { options, nameOfProgram } = useScheduleTargets(form.actionType)
+  const used = new Set(overview.schedules.map((x) => x.action.type))
+  const { options, names } = useScheduleTargets(form.actionType, used)
   const targetLabel =
     SCHEDULE_ACTION_OPTIONS.find((o) => o.value === form.actionType)?.target ?? 'Target'
   const allItems: GlobalWorkItem[] = [
@@ -652,10 +750,7 @@ function SchedulesCard({ overview, now }: { overview: ControlPlaneOverview; now:
                 <div className="min-w-0 flex-1">
                   <p className="m-0 truncate font-medium">{s.name}</p>
                   <p className="m-0 text-small text-text-secondary">
-                    {actionLine(s.action, {
-                      program:
-                        s.action.type === 'program' ? nameOfProgram(s.action.programId) : null,
-                    })}{' '}
+                    {actionLine(s.action, scheduleNameOf(s.action, names))}{' '}
                     · {PRIORITY_OPTIONS.find((p) => p.value === s.priority)?.label ?? s.priority} ·{' '}
                     {scheduleLine(s, new Date(now))}
                   </p>
@@ -683,7 +778,7 @@ function SchedulesCard({ overview, now }: { overview: ControlPlaneOverview; now:
             ))}
           </ul>
         )}
-        {setEnabled.error ? <ErrorNote error={setEnabled.error} /> : null}
+        {setEnabled.error ? <Fault error={setEnabled.error} /> : null}
         <form
           className="grid gap-3 border-t pt-3 sm:grid-cols-2 lg:grid-cols-6"
           onSubmit={(e) => {
@@ -820,7 +915,7 @@ function SchedulesCard({ overview, now }: { overview: ControlPlaneOverview; now:
             </Button>
           </div>
         </form>
-        {create.error ? <ErrorNote error={create.error} /> : null}
+        {create.error ? <Fault error={create.error} /> : null}
       </div>
       {confirmation && deleting ? (
         <ConfirmDialog
@@ -844,29 +939,33 @@ function SchedulesCard({ overview, now }: { overview: ControlPlaneOverview; now:
 }
 
 /** The runtime at a glance, and the one control that stops new work from starting. */
-function RuntimeStrip({ overview }: { overview: ControlPlaneOverview }) {
-  const setPaused = useWrite('runtime.setDispatchPaused', (qc) => {
-    void qc.invalidateQueries({ queryKey: qkControl.root() })
-    void qc.invalidateQueries({ queryKey: qkRuntime.root() })
-  })
+function RuntimeStrip({ overview, stale, recovering }: { overview: ControlPlaneOverview; stale: boolean; recovering: boolean }) {
+  const setPaused = useWrite(
+    'runtime.setDispatchPaused',
+    (qc) => {
+      void qc.invalidateQueries({ queryKey: qkControl.root() })
+      void qc.invalidateQueries({ queryKey: qkRuntime.root() })
+    },
+    WRITE,
+  )
   const dispatch = dispatchView(overview.dispatchPaused)
   const workers = workersLine(overview.workers)
-  const level = overview.health.level
+  const runtime = runtimeIndicator(overview.health.level, { stale, recovering })
   const cell = (label: string, value: string, detail?: string, testId?: string) => (
     <div className="min-w-0" data-testid={testId}>
       <p className="m-0 text-caption text-text-muted">{label}</p>
-      <p className="m-0 font-medium">{value}</p>
-      {detail ? <p className="m-0 text-small text-text-muted">{detail}</p> : null}
+      <p className="m-0 font-medium">{stale ? UNKNOWN_VALUE : value}</p>
+      {detail && !stale ? <p className="m-0 text-small text-text-muted">{detail}</p> : null}
     </div>
   )
   return (
     <div className="flex flex-col gap-3" data-testid="control-status">
-      <div className="grid gap-x-6 gap-y-3 rounded-lg border bg-surface px-4 py-3 sm:grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
+      <div data-stale={stale || undefined} className="grid gap-x-6 gap-y-3 rounded-lg border bg-surface px-4 py-3 sm:grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
         <div className="min-w-0" data-testid="control-runtime">
           <p className="m-0 text-caption text-text-muted">Runtime</p>
           <p className="m-0 flex items-center gap-1.5 font-medium">
-            <StatusDot tone={HEALTH_TONE[level]} />
-            {RUNTIME_LEVEL_LABEL[level]}
+            <StatusDot tone={stale ? 'neutral' : recovering ? 'waiting' : HEALTH_TONE[overview.health.level]} />
+            {runtime.label}
           </p>
         </div>
         {cell('Workers', workers.value, workers.detail, 'control-workers')}
@@ -875,6 +974,7 @@ function RuntimeStrip({ overview }: { overview: ControlPlaneOverview }) {
         <div className="flex items-center">
           <Button
             variant={overview.dispatchPaused ? 'primary' : 'default'}
+            disabled={stale}
             loading={setPaused.isPending}
             onClick={() => setPaused.mutate({ paused: dispatch.next })}
             data-testid="dispatch-toggle"
@@ -883,8 +983,8 @@ function RuntimeStrip({ overview }: { overview: ControlPlaneOverview }) {
           </Button>
         </div>
       </div>
-      {setPaused.error ? <ErrorNote error={setPaused.error} /> : null}
-      {dispatch.notice ? (
+      {setPaused.error ? <Fault error={setPaused.error} /> : null}
+      {dispatch.notice && !stale ? (
         <Notice tone="warning" title="Dispatch is paused" data-testid="control-dispatch-paused">
           {dispatch.notice}
         </Notice>
@@ -894,21 +994,26 @@ function RuntimeStrip({ overview }: { overview: ControlPlaneOverview }) {
 }
 
 /** Cuts a long list and says how many are hidden. */
-function ShowMore({ hidden, onClick, testId }: { hidden: number; onClick: () => void; testId: string }) {
+function ShowMore({ hidden, noun, onClick, testId }: { hidden: number; noun: string; onClick: () => void; testId: string }) {
   if (hidden <= 0) return null
   return (
-    <Button size="sm" onClick={onClick} data-testid={testId}>
+    <Button size="sm" onClick={onClick} aria-label={`Show ${hidden} more ${noun}`} data-testid={testId}>
       Show {hidden} more
     </Button>
   )
 }
+
+/** A refresh that has been failing this long makes the row actions wait. */
+const FREEZE_AFTER_MS = 30_000
 
 /** Control Center: runtime health, the global queue, capacity, schedules and recent incidents. */
 export function ControlView() {
   const overview = useControlOverview()
   const now = useNow(true, 10_000)
   const o = overview.data ?? null
-  const health = o ? HEALTH_LABEL[o.health.level] : null
+  const stale0 = useConnectionStale()
+  const recovering0 = useConnectionRecovering()
+  const health = o ? headerBadge(o.health.level, { stale: stale0, recovering: recovering0 }) : null
   // A load that failed stays a failed load while it is tried again. Without data the query goes back to
   // "pending" on every retry, and the queue is refreshed every few seconds: the error and its Retry button
   // would be taken away and put back each time, under the pointer of whoever tries to press it.
@@ -917,15 +1022,28 @@ export function ControlView() {
     if (overview.isError) setLastError(overview.error ?? new Error('The Control Center could not be loaded.'))
     else if (overview.data !== undefined) setLastError(null)
   }, [overview.isError, overview.error, overview.data])
+  const stale = stale0
+  const recovering = recovering0
   const state = loadState({
     hasData: o !== null,
     isError: overview.isError || lastError !== null,
     error: overview.error ?? lastError,
   })
+  // A failed refresh with data kept: how long it has been failing decides whether the actions wait.
+  const [failingSince, setFailingSince] = useState<number | null>(null)
+  const refreshFailing = state.kind === 'ready' && state.stale !== null
+  useEffect(() => {
+    setFailingSince((since) => (refreshFailing ? (since ?? Date.now()) : null))
+  }, [refreshFailing])
+  const frozen = failingSince !== null && now - failingSince > FREEZE_AFTER_MS
   const [inspectedId, setInspectedId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const expand = (key: string) => () => setExpanded((e) => ({ ...e, [key]: true }))
+  // Showing more moves focus to the first row that was not there before, so a keyboard user continues where the list was cut.
+  const expand = (key: string) => () => {
+    setExpanded((e) => ({ ...e, [key]: true }))
+    setTimeout(() => document.querySelector<HTMLElement>(`[data-list="${key}"] > li:nth-child(${ROW_LIMIT + 1}) button`)?.focus(), 0)
+  }
   const seen = useRef<Map<string, GlobalWorkItem['state']> | null>(null)
   useEffect(() => {
     if (!o) return
@@ -947,7 +1065,7 @@ export function ControlView() {
         context="System"
         actions={
           health ? (
-            <Badge tone={health.tone} data-testid="control-health">
+            <Badge tone={health.tone} data-testid="control-health" data-stale={stale0 || undefined}>
               {health.label}
             </Badge>
           ) : null
@@ -959,35 +1077,49 @@ export function ControlView() {
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-6 py-5">
           {state.kind === 'error' ? (
-            <div
-              className="flex flex-col items-start gap-3 rounded-lg border border-danger/30 bg-danger-subtle p-4"
-              role="alert"
-              data-testid="control-load-error"
-            >
-              <div>
-                <p className="m-0 font-semibold text-danger">The Control Center could not load.</p>
-                <p className="m-0 text-text-primary" data-testid="control-load-error-text">
-                  {state.message}
-                </p>
-              </div>
-              <Button
-                variant="primary"
-                loading={overview.isFetching}
-                onClick={() => void overview.refetch()}
-                data-testid="control-retry"
+            <>
+              <div
+                className="flex flex-col items-start gap-3 rounded-lg border border-danger/30 bg-danger-subtle p-4"
+                role="alert"
+                data-testid="control-load-error"
               >
-                Retry
-              </Button>
-            </div>
+                <div className="flex flex-col gap-1">
+                  <p className="m-0 font-semibold text-danger">The Control Center could not load.</p>
+                  <p className="m-0 text-text-primary" data-testid="control-load-error-sentence">
+                    {state.sentence} You did nothing wrong; trying again often helps.
+                  </p>
+                  <details className="text-small text-text-secondary">
+                    <summary className="cursor-pointer">Details</summary>
+                    <p className="m-0 mt-1 break-words font-mono text-code" data-testid="control-load-error-text">
+                      {state.message}
+                    </p>
+                  </details>
+                </div>
+                <Button
+                  variant="primary"
+                  loading={overview.isFetching}
+                  onClick={() => void overview.refetch()}
+                  data-testid="control-retry"
+                >
+                  Retry
+                </Button>
+              </div>
+              <RuntimeDiagnostics />
+            </>
           ) : null}
           {state.kind === 'ready' && state.stale ? (
             <div
-              className="flex flex-wrap items-center gap-3 rounded-md border border-warning/30 bg-warning-subtle px-3 py-2"
+              className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning-subtle px-3 py-2 shadow-elevated"
               role="alert"
               data-testid="control-stale"
+              data-frozen={frozen}
             >
               <span className="min-w-0 flex-1 text-text-primary">
-                The queue could not be refreshed, so this may be out of date: {state.stale}
+                The queue could not be refreshed, so this may be out of date. Last updated{' '}
+                <span data-testid="control-last-updated">
+                  <TimeAgo iso={new Date(overview.dataUpdatedAt).toISOString()} />
+                </span>
+                .{frozen ? ' The row actions wait until it can be read again.' : ''} {friendlyError(state.stale).message}
               </span>
               <Button
                 size="sm"
@@ -1016,32 +1148,33 @@ export function ControlView() {
                   after the reset.
                 </Notice>
               ) : null}
-              <RuntimeStrip overview={o} />
+              <RuntimeStrip overview={o} stale={stale} recovering={recovering} />
               {blocked.length > 0 ? (
                 <Card
                   title={`Needs attention (${blocked.length})`}
                   description="Blocked work does not start by itself. Each item says why."
                   data-testid="control-attention"
                 >
-                  <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                  <ul data-list="blocked" className="m-0 flex list-none flex-col gap-1.5 p-0">
                     {blockedRows.rows.map((i) => (
                       <ItemRow
                         key={i.id}
                         item={i}
                         reason={i.reason}
                         now={now}
+                        frozen={frozen}
                         onInspect={setInspectedId}
                       />
                     ))}
                   </ul>
-                  <ShowMore hidden={blockedRows.hidden} onClick={expand('blocked')} testId="blocked-show-more" />
+                  <ShowMore hidden={blockedRows.hidden} noun="blocked items" onClick={expand('blocked')} testId="blocked-show-more" />
                 </Card>
               ) : null}
               <div className="grid gap-4 lg:grid-cols-2">
                 <LimitsCard overview={o} />
                 <Card
                   title="Runtime health"
-                  description={`Started ${new Date(o.bootedAt).toLocaleString()}. The runtime is as healthy as its worst part.`}
+                  description={`Started ${formatWhen(o.bootedAt)}. The runtime is as healthy as its worst part.`}
                   data-testid="control-health-card"
                 >
                   <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -1073,12 +1206,12 @@ export function ControlView() {
                   </p>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                    <ul data-list="active" className="m-0 flex list-none flex-col gap-1.5 p-0">
                       {activeRows.rows.map((i) => (
-                        <ItemRow key={i.id} item={i} now={now} onInspect={setInspectedId} />
+                        <ItemRow key={i.id} item={i} now={now} frozen={frozen} onInspect={setInspectedId} />
                       ))}
                     </ul>
-                    <ShowMore hidden={activeRows.hidden} onClick={expand('active')} testId="active-show-more" />
+                    <ShowMore hidden={activeRows.hidden} noun="active items" onClick={expand('active')} testId="active-show-more" />
                   </div>
                 )}
               </Card>
@@ -1096,7 +1229,7 @@ export function ControlView() {
                       The queue is empty.
                     </p>
                   ) : (
-                    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                    <ul data-list="waiting" className="m-0 flex list-none flex-col gap-1.5 p-0">
                       {waitingRows.rows.map((i, index) => (
                         <ItemRow
                           key={i.id}
@@ -1105,12 +1238,13 @@ export function ControlView() {
                           first={index === 0}
                           last={index === waiting.length - 1}
                           now={now}
+                        frozen={frozen}
                           onInspect={setInspectedId}
                         />
                       ))}
                     </ul>
                   )}
-                  <ShowMore hidden={waitingRows.hidden} onClick={expand('waiting')} testId="waiting-show-more" />
+                  <ShowMore hidden={waitingRows.hidden} noun="waiting items" onClick={expand('waiting')} testId="waiting-show-more" />
                   {o.scheduled.length > 0 ? (
                     <div data-testid="control-scheduled">
                       <p className="m-0 mb-1 text-small font-medium text-text-primary">
@@ -1118,7 +1252,7 @@ export function ControlView() {
                       </p>
                       <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
                         {o.scheduled.map((i) => (
-                          <ItemRow key={i.id} item={i} now={now} onInspect={setInspectedId} />
+                          <ItemRow key={i.id} item={i} now={now} frozen={frozen} onInspect={setInspectedId} />
                         ))}
                       </ul>
                     </div>

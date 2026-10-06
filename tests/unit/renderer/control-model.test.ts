@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONTROL_LIMITS, ScheduleInputSchema, type GlobalWorkItem, type Schedule } from '@shared/control-plane'
-import { actionLine, cancelConfirmation, cancelLabel, CANCEL_PRESERVATION, capacityLine, describeError, EMPTY_SCHEDULE_FORM, hasStarted, HEALTH_LABEL, HOLD_LABEL, inspectorOf, isStarting, itemActions, itemLine, itemPresentation, loadState, queueAnnouncement, RELEASE_LABEL, scheduleDeleteConfirmation, scheduleInput, scheduleLine, STARTING_WINDOW_MS, STATE_LABEL, validateScheduleForm } from '../../../src/renderer/src/views/control/controlModel'
+import { friendlyError, headerBadge, holdHelp, ownPage, resumeLabel, runtimeIndicator, stateLabel, WAITING_FALLBACK, loadSentence, actionLine, cancelConfirmation, cancelLabel, CANCEL_PRESERVATION, capacityLine, describeError, EMPTY_SCHEDULE_FORM, hasStarted, HEALTH_LABEL, HOLD_LABEL, inspectorOf, isStarting, itemActions, itemLine, itemPresentation, loadState, queueAnnouncement, RELEASE_LABEL, scheduleDeleteConfirmation, scheduleInput, scheduleLine, STARTING_WINDOW_MS, STATE_LABEL, validateScheduleForm } from '../../../src/renderer/src/views/control/controlModel'
 
 const item = (over: Partial<GlobalWorkItem> = {}): GlobalWorkItem => ({ id: 'i', type: 'program', refId: 'p', title: 'Program', priority: 'P2', position: 1, state: 'QUEUED', requestedAgents: 2, deadlineAt: null, notBefore: null, scheduleId: null, heldByUser: false, payload: null, detail: null, createdAt: '', updatedAt: '', startedAt: null, finishedAt: null, ...over })
 
@@ -157,7 +157,7 @@ describe('control center model', () => {
   describe('load and mutation errors', () => {
     it('is never a permanent loading state', () => {
       expect(loadState({ hasData: false, isError: false, error: null })).toEqual({ kind: 'loading' })
-      expect(loadState({ hasData: false, isError: true, error: new Error('Database is locked') })).toEqual({ kind: 'error', message: 'Database is locked' })
+      expect(loadState({ hasData: false, isError: true, error: new Error('Database is locked') })).toEqual({ kind: 'error', message: 'Database is locked', sentence: 'NEXUS could not read the queue from its background runtime.' })
       expect(loadState({ hasData: true, isError: false, error: null })).toEqual({ kind: 'ready', stale: null })
       expect(loadState({ hasData: true, isError: true, error: new Error('timeout') })).toEqual({ kind: 'ready', stale: 'timeout' })
     })
@@ -205,5 +205,94 @@ describe('control center model', () => {
     const running = inspectorOf({ ...item({ state: 'RUNNING' }), activeAgents: 2, allowance: 3 }, overview)
     expect(running.why).toBeNull()
     expect(Object.fromEntries(running.facts.map((f) => [f.label, f.value])).Agents).toBe('2 running · 3 granted · 2 requested')
+  })
+
+  describe('review follow-ups', () => {
+    it('shows Unknown for the runtime while the connection is lost, and Recovering while it recovers', () => {
+      expect(runtimeIndicator('HEALTHY', { stale: true, recovering: false })).toEqual({ label: 'Unknown', tone: 'neutral' })
+      // Stale wins over everything else, including a recovering flag.
+      expect(runtimeIndicator('BLOCKED', { stale: true, recovering: true }).label).toBe('Unknown')
+      expect(runtimeIndicator('HEALTHY', { stale: false, recovering: true })).toEqual({ label: 'Recovering', tone: 'waiting' })
+      expect(runtimeIndicator('DEGRADED', { stale: false, recovering: false })).toEqual({ label: 'Degraded', tone: 'warning' })
+      expect(headerBadge('HEALTHY', { stale: true, recovering: false })).toEqual({ label: 'Runtime unknown', tone: 'neutral' })
+      expect(headerBadge('HEALTHY', { stale: false, recovering: true })).toEqual({ label: 'Runtime recovering', tone: 'waiting' })
+      expect(headerBadge('HEALTHY', { stale: false, recovering: false }).label).toBe('Runtime healthy')
+    })
+
+    it('a scheduled row says when it starts, in one explicit date format', () => {
+      const line = itemLine(item({ state: 'SCHEDULED', type: 'scheduled_audit', notBefore: '2026-10-07T03:30:00' }))
+      expect(line).toMatch(/^Scheduled audit · Starts 7 October 2026.*03:30$/)
+      expect(itemLine(item({ state: 'SCHEDULED', notBefore: null }))).toBe('Program')
+    })
+
+    it('a waiting item always has a reason, in the row and in the inspector', () => {
+      const queued = item({ state: 'QUEUED' })
+      expect(itemPresentation(queued).reasonText).toBe(WAITING_FALLBACK['QUEUED'])
+      expect(WAITING_FALLBACK['QUEUED']).toBe('Waiting for its turn in the queue.')
+      expect(itemPresentation({ ...queued, reason: 'Waiting for a workload slot (4 run at once).' }).reasonText).toContain('workload slot')
+      const info = inspectorOf(queued, { schedules: [], incidents: [] })
+      expect(info.why).toBe('Waiting for its turn in the queue.')
+      for (const state of ['QUEUED', 'READY', 'PAUSED', 'QUOTA_WAIT', 'BLOCKED', 'SCHEDULED'] as const)
+        expect(inspectorOf(item({ state }), { schedules: [], incidents: [] }).why, state).toEqual(expect.any(String))
+      expect(inspectorOf(item({ state: 'RUNNING' }), { schedules: [], incidents: [] }).why).toBeNull()
+    })
+
+    it('says what Hold does, from what the engines do', () => {
+      expect(holdHelp(item({ type: 'program', state: 'RUNNING' }))).toContain('stops its running agent sessions now')
+      expect(holdHelp(item({ type: 'mission', state: 'RUNNING' }))).toContain('Release continues it')
+      expect(holdHelp(item({ type: 'arena', state: 'RUNNING' }))).toContain('trials in progress finish')
+      expect(holdHelp(item({ type: 'arena', state: 'RUNNING' }))).not.toContain('stops its running')
+      expect(holdHelp(item({ state: 'QUEUED' }))).toContain('from starting')
+    })
+
+    it('a pause the user did not ask for is "Paused by NEXUS" with Resume; a hold is Held with Release', () => {
+      expect(stateLabel(item({ state: 'PAUSED', heldByUser: false }))).toBe('Paused by NEXUS')
+      expect(resumeLabel(item({ state: 'PAUSED', heldByUser: false }))).toBe('Resume')
+      expect(stateLabel(item({ state: 'PAUSED', heldByUser: true }))).toBe('Held')
+      expect(resumeLabel(item({ state: 'PAUSED', heldByUser: true }))).toBe('Release')
+      expect(resumeLabel(item({ state: 'QUEUED', heldByUser: true }))).toBe('Release')
+      expect(itemPresentation(item({ state: 'PAUSED', heldByUser: false })).label).toBe('Paused by NEXUS')
+    })
+
+    it('a blocked item can be opened on its own page, on the workload when that page can show it', () => {
+      expect(ownPage(item({ type: 'program', refId: 'p1' }))).toMatchObject({ label: 'Open the Programs page', view: 'programs', opens: 'program', refId: 'p1' })
+      expect(ownPage(item({ type: 'program', refId: null }))).toMatchObject({ view: 'programs', opens: null })
+      expect(ownPage(item({ type: 'arena', refId: 'c1' }))).toMatchObject({ label: 'Open the Arena page', view: 'arena', opens: 'campaign', refId: 'c1' })
+      expect(ownPage(item({ type: 'mission', refId: 'r1' }))).toMatchObject({ view: 'run', opens: 'run', refId: 'r1' })
+      expect(ownPage(item({ type: 'workspace_mission', refId: 'm1' }))).toMatchObject({ label: 'Open the Workspaces page', view: 'workspaces', opens: null })
+    })
+
+    it('maps known errors to plain sentences, refetches when the list is out of date, and never shows a channel', () => {
+      const gone = friendlyError(Object.assign(new Error('control.cancel: Work item abc does not exist'), { code: 'not_found', channel: 'control.cancel' }))
+      expect(gone).toEqual({ message: 'That item is no longer in the queue; the list was refreshed.', refetch: true })
+      expect(friendlyError(new Error('The item no longer exists.')).refetch).toBe(true)
+      const away = friendlyError(Object.assign(new Error('x'), { code: 'runtime_unavailable' }))
+      expect(away.message).toContain('cannot reach its background runtime')
+      expect(away.refetch).toBe(false)
+      const state = friendlyError(Object.assign(new Error('control.pause failed: The item is COMPLETED.'), { code: 'invalid_state' }))
+      expect(state.refetch).toBe(true)
+      expect(state.message).toContain('The item is COMPLETED.')
+      for (const e of [gone, away, state, friendlyError(new Error('control.move: Something odd happened'))]) expect(e.message).not.toMatch(/control\.\w+/)
+      expect(friendlyError(new Error('control.move: Something odd happened')).message).toBe('Something odd happened')
+      expect(friendlyError(null).message.length).toBeGreaterThan(0)
+    })
+
+    it('puts a plain sentence above the technical text of a failed load', () => {
+      expect(loadSentence(new Error('boom'))).toContain('could not read the queue')
+      expect(loadSentence(Object.assign(new Error('x'), { code: 'runtime_unavailable' }))).toContain('cannot reach')
+    })
+
+    it('names the workload of a schedule when it is known, and falls back without it', () => {
+      expect(actionLine({ type: 'arena', campaignId: 'c' }, { campaign: 'Nightly' })).toBe('Run the Arena campaign "Nightly"')
+      expect(actionLine({ type: 'arena', campaignId: 'c' }, {})).toBe('Run the Arena campaign')
+      expect(actionLine({ type: 'workspace_mission', missionId: 'm' }, { mission: 'Migrate auth' })).toBe('Continue the workspace mission "Migrate auth"')
+      expect(actionLine({ type: 'scheduled_audit', projectId: 'p', kind: 'dependency_audit' }, { project: 'web' })).toBe('Run a dependency audit of web')
+    })
+
+    it('writes weekdays and dates in English whatever the computer language is', () => {
+      const now = new Date(2026, 9, 5, 21, 0, 0)
+      const schedule: Schedule = { id: 's', name: 'N', rule: { kind: 'daily', time: '22:00' }, action: { type: 'program', programId: 'p' }, priority: 'P2', enabled: true, nextRunAt: new Date(2026, 9, 7, 22, 0, 0).toISOString(), lastRunAt: null, lastResult: null, createdAt: '', updatedAt: '' }
+      expect(scheduleLine(schedule, now)).toContain('next Wednesday 22:00')
+    })
   })
 })

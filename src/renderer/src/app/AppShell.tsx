@@ -13,6 +13,7 @@ import { QuotaBanner } from './QuotaBanner'
 import { Sidebar } from './Sidebar'
 import { Toasts } from './Toasts'
 import { ViewRouter } from './ViewRouter'
+import { useConnectionStale } from '../store/connection'
 import { ConnectionAnnouncer, ConnectionBanner, ConnectionContent, StartupState } from './ConnectionGate'
 
 function Banners() {
@@ -30,20 +31,27 @@ export function AppShell() {
   useHotkeys()
   useApplySavedAppearance()
   useAutoOpenApprovals()
+  const stale = useConnectionStale()
   const slots = useMemo(
     () => ({
-      status: (
+      // While the connection to the runtime is lost nothing here may look live: no Claude, agent or run status
+      // and no quota or approval banner, only a plain statement that the state is unknown.
+      status: stale ? (
+        <span className="text-small text-text-muted" data-testid="status-unknown" data-stale="true">
+          Status unknown
+        </span>
+      ) : (
         <ErrorBoundary label="Status failed">
           <GlobalStatus />
         </ErrorBoundary>
       ),
-      banners: (
+      banners: stale ? null : (
         <ErrorBoundary label="Banners failed">
           <Banners />
         </ErrorBoundary>
       ),
     }),
-    [],
+    [stale],
   )
   return (
     <div className="flex h-full bg-background" data-testid="app-shell">

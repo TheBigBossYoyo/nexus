@@ -31,7 +31,7 @@ describe('what the window shows for each connection phase', () => {
 
   it('marks the data stale and offers Retry when the connection was lost', () => {
     const lost = connectionView(state('DISCONNECTED'), true)
-    expect(lost).toMatchObject({ screen: 'lost', stale: true, canRetry: true, retrying: true, title: 'CONTROL PLANE DISCONNECTED', detail: 'NEXUS is attempting to reconnect.' })
+    expect(lost).toMatchObject({ screen: 'lost', stale: true, canRetry: true, retrying: true, kicker: 'Control plane disconnected', title: 'NEXUS lost contact with its background runtime', detail: 'NEXUS is attempting to reconnect.', cause: 'detail of DISCONNECTED' })
     // After a READY, starting or connecting again is a lost connection, not a startup.
     expect(connectionView(state('CONNECTING'), true)).toMatchObject({ screen: 'lost', stale: true })
     expect(connectionView(state('STARTING_RUNTIME'), true)).toMatchObject({ screen: 'lost', stale: true })
@@ -39,7 +39,8 @@ describe('what the window shows for each connection phase', () => {
 
   it('treats an incompatible runtime as stale, with its own detail and no promise to reconnect', () => {
     const v = connectionView(state('INCOMPATIBLE', { detail: 'The runtime speaks protocol 2; this window speaks 1.' }), true)
-    expect(v).toMatchObject({ screen: 'lost', stale: true, canRetry: true, retrying: false, title: 'CONTROL PLANE INCOMPATIBLE', detail: 'The runtime speaks protocol 2; this window speaks 1.' })
+    expect(v).toMatchObject({ screen: 'lost', stale: true, canRetry: true, retrying: false, kicker: 'Control plane incompatible', cause: 'The runtime speaks protocol 2; this window speaks 1.' })
+    expect(v.title).toContain('cannot work with')
     expect(connectionView(state('INCOMPATIBLE'), false).stale).toBe(true)
   })
 
@@ -64,7 +65,8 @@ describe('when everything is read again', () => {
   })
 
   it('announces the loss, and the return with a refresh', () => {
-    expect(connectionAnnouncement(state('DISCONNECTED'), true, false)).toContain('CONTROL PLANE DISCONNECTED')
+    expect(connectionAnnouncement(state('DISCONNECTED'), true, false)).toContain('NEXUS lost contact with its background runtime')
+    expect(connectionAnnouncement(state('DISCONNECTED', { detail: 'The pipe closed.' }), true, false)).toContain('The pipe closed.')
     expect(connectionAnnouncement(state('READY'), true, true)).toContain('Reconnected')
     expect(connectionAnnouncement(state('READY'), true, false)).toBe('')
     expect(connectionAnnouncement(null, false, false)).toBe('')

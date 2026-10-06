@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { qkControl, qkRuntime, useRuntimeStatus, useRuntimeWorkers } from '../../lib/queries-v7'
+import { qkControl, qkRuntime, useControlOverview, useRuntimeStatus, useRuntimeWorkers } from '../../lib/queries-v7'
 import { useWrite } from '../../lib/queries'
 import { useNow } from '../../lib/useNow'
+import { friendlyError } from './controlModel'
 import { Badge, Button, Card, ConfirmDialog, ErrorNote, KeyValue, TimeAgo } from '../../components/ui'
 import {
   identityRows,
   leaseRow,
   shortId,
+  shutdownLines,
   SHUTDOWN_CONFIRMATION,
   workerRow,
   type WorkerRow,
@@ -82,14 +84,19 @@ function Body() {
   const workers = useRuntimeWorkers()
   const [confirming, setConfirming] = useState(false)
   const [stopped, setStopped] = useState<string | null>(null)
-  const shutdown = useWrite('runtime.stop', (qc) => {
-    void qc.invalidateQueries({ queryKey: qkRuntime.root() })
-    void qc.invalidateQueries({ queryKey: qkControl.root() })
-  })
+  const running = useControlOverview().data?.active.length ?? null
+  const shutdown = useWrite(
+    'runtime.stop',
+    (qc) => {
+      void qc.invalidateQueries({ queryKey: qkRuntime.root() })
+      void qc.invalidateQueries({ queryKey: qkControl.root() })
+    },
+    { silent: true },
+  )
   const w = workers.data
   return (
     <div className="flex flex-col gap-4" data-testid="runtime-diagnostics-body">
-      {status.error ? <ErrorNote error={status.error} /> : null}
+      {status.error ? <ErrorNote error={new Error(friendlyError(status.error).message)} /> : null}
       {status.data ? (
         <KeyValue rows={identityRows(status.data)} labelWidth="11rem" />
       ) : status.error ? null : (
@@ -99,7 +106,7 @@ function Body() {
       )}
       <div>
         <h3 className="m-0 mb-1 text-heading font-semibold">Workers</h3>
-        {workers.error ? <ErrorNote error={workers.error} /> : null}
+        {workers.error ? <ErrorNote error={new Error(friendlyError(workers.error).message)} /> : null}
         {w && !w.enabled ? (
           <p className="m-0 text-small text-text-muted" data-testid="workers-disabled">
             Agent sessions run inside the runtime process; there are no worker processes to show.
@@ -208,11 +215,11 @@ function Body() {
         testId="runtime-shutdown-dialog"
       >
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {SHUTDOWN_CONFIRMATION.lines.map((l) => (
+          {shutdownLines(running).map((l) => (
             <li key={l}>{l}</li>
           ))}
         </ul>
-        {shutdown.error ? <ErrorNote className="mt-3" error={shutdown.error} /> : null}
+        {shutdown.error ? <ErrorNote className="mt-3" error={new Error(friendlyError(shutdown.error).message)} /> : null}
       </ConfirmDialog>
     </div>
   )

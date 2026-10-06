@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ConnectionState } from '@shared/runtime-protocol'
-import { needsResync } from '../lib/connectionModel'
+import { connectionView, needsResync } from '../lib/connectionModel'
 
 interface ConnectionStore {
   state: ConnectionState | null
@@ -23,3 +23,11 @@ export const useConnectionStore = create<ConnectionStore>()((set, get) => ({
     return resync
   },
 }))
+
+/** True while the connection to the runtime is lost: nothing outside the banner may look live. */
+export const useConnectionStale = (): boolean =>
+  useConnectionStore((s) => connectionView(s.state, s.everReady).stale)
+
+/** True while the runtime recovers: usable, but not "healthy" yet. */
+export const useConnectionRecovering = (): boolean =>
+  useConnectionStore((s) => connectionView(s.state, s.everReady).screen === 'recovering')

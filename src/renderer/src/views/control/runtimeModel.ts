@@ -1,6 +1,7 @@
 import type { RuntimeStatus } from '@shared/runtime-protocol'
 import type { LeaseState, WorkerLease, WorkerRecord, WorkerState } from '@shared/workers'
 import { LIVE_WORKER_STATES } from '@shared/workers'
+import { formatWhen } from '../../lib/dates'
 import type { Tone } from '../../lib/status'
 
 /** DOM-free model of the runtime diagnostics: the worker table, the leases and the runtime's identity. */
@@ -169,7 +170,7 @@ export function identityRows(s: RuntimeStatus): { label: string; value: string }
   const r = s.recovery
   return [
     { label: 'Process', value: String(s.pid) },
-    { label: 'Started', value: new Date(s.startedAt).toLocaleString() },
+    { label: 'Started', value: formatWhen(s.startedAt) },
     { label: 'Version', value: s.version },
     { label: 'Protocol', value: String(s.protocol) },
     {
@@ -189,7 +190,7 @@ export function identityRows(s: RuntimeStatus): { label: string; value: string }
     },
     {
       label: 'Last recovery',
-      value: `${plural(r.workloads, 'workload')}, ${plural(r.workers, 'worker')}, ${plural(r.leases, 'lease')}${r.finishedAt ? `, finished ${new Date(r.finishedAt).toLocaleString()}` : ', still in progress'}`,
+      value: `${plural(r.workloads, 'workload')}, ${plural(r.workers, 'worker')}, ${plural(r.leases, 'lease')}${r.finishedAt ? `, finished ${formatWhen(r.finishedAt)}` : ', still in progress'}`,
     },
   ]
 }
@@ -204,3 +205,14 @@ export const SHUTDOWN_CONFIRMATION = {
   confirmLabel: 'Stop runtime',
   keepLabel: 'Keep it running',
 } as const
+
+/** The lines of the stop dialog: what stops, how much work is running, and what this window shows afterwards. */
+export function shutdownLines(running: number | null): string[] {
+  const work =
+    running === null
+      ? 'It is not known how many workloads are running.'
+      : running === 0
+        ? 'No workload is running now.'
+        : `${running} workload${running === 1 ? ' is' : 's are'} running now and will be paused.`
+  return [...SHUTDOWN_CONFIRMATION.lines, work, 'This window will then show the disconnected state until the runtime is started again.']
+}

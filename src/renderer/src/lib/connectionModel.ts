@@ -1,4 +1,5 @@
 import type { ConnectionState, ConnectionPhase } from '@shared/runtime-protocol'
+import { formatWhen } from './dates'
 
 /** DOM-free model of the window's connection to the runtime: what is shown for each phase, and when to re-sync. */
 
@@ -15,9 +16,14 @@ export type ConnectionScreen =
 export interface ConnectionView {
   screen: ConnectionScreen
   phase: ConnectionPhase | null
-  /** Short heading. */
+  /** Small line above the title: the name of the condition. */
+  kicker: string
+  /** The sentence that says what happened. */
   title: string
+  /** What NEXUS does about it. */
   detail: string
+  /** Why it happened, as the runtime client reported it; empty when it has nothing to add. */
+  cause: string
   /** The content region must be dimmed and inert: it would show old state as if it were live. */
   stale: boolean
   /** Whether Retry is offered. */
@@ -31,7 +37,7 @@ export const STARTUP_TITLE: Record<'STARTING_RUNTIME' | 'CONNECTING', string> = 
   CONNECTING: 'Connecting to the NEXUS runtime',
 }
 
-const NONE: ConnectionView = { screen: 'none', phase: null, title: '', detail: '', stale: false, canRetry: false, retrying: false }
+const NONE: ConnectionView = { screen: 'none', phase: null, kicker: '', title: '', detail: '', cause: '', stale: false, canRetry: false, retrying: false }
 
 /**
  * `everReady` is true once this window has seen READY. Before that, STARTING_RUNTIME and CONNECTING are startup;
@@ -43,15 +49,15 @@ export function connectionView(state: ConnectionState | null, everReady: boolean
     case 'READY':
       return { ...NONE, phase: 'READY' }
     case 'RECOVERING':
-      return { screen: 'recovering', phase: state.phase, title: 'Runtime recovering', detail: state.detail, stale: false, canRetry: false, retrying: false }
+      return { screen: 'recovering', phase: state.phase, kicker: 'Runtime recovering', title: 'The NEXUS runtime is recovering', detail: state.detail, cause: '', stale: false, canRetry: false, retrying: false }
     case 'STARTING_RUNTIME':
     case 'CONNECTING':
-      if (!everReady) return { screen: 'startup', phase: state.phase, title: STARTUP_TITLE[state.phase], detail: state.detail, stale: false, canRetry: false, retrying: false }
-      return { screen: 'lost', phase: state.phase, title: 'CONTROL PLANE RECONNECTING', detail: state.detail || 'NEXUS is attempting to reconnect.', stale: true, canRetry: true, retrying: true }
+      if (!everReady) return { screen: 'startup', phase: state.phase, kicker: 'Starting', title: STARTUP_TITLE[state.phase], detail: state.detail, cause: '', stale: false, canRetry: false, retrying: false }
+      return { screen: 'lost', phase: state.phase, kicker: 'Control plane reconnecting', title: 'NEXUS is reconnecting to its background runtime', detail: 'NEXUS is attempting to reconnect.', cause: state.detail, stale: true, canRetry: true, retrying: true }
     case 'DISCONNECTED':
-      return { screen: 'lost', phase: state.phase, title: 'CONTROL PLANE DISCONNECTED', detail: 'NEXUS is attempting to reconnect.', stale: true, canRetry: true, retrying: true }
+      return { screen: 'lost', phase: state.phase, kicker: 'Control plane disconnected', title: 'NEXUS lost contact with its background runtime', detail: 'NEXUS is attempting to reconnect.', cause: state.detail, stale: true, canRetry: true, retrying: true }
     case 'INCOMPATIBLE':
-      return { screen: 'lost', phase: state.phase, title: 'CONTROL PLANE INCOMPATIBLE', detail: state.detail, stale: true, canRetry: true, retrying: false }
+      return { screen: 'lost', phase: state.phase, kicker: 'Control plane incompatible', title: 'This window cannot work with the NEXUS background runtime', detail: 'NEXUS does not reconnect by itself: the window and the runtime have to be the same version.', cause: state.detail, stale: true, canRetry: true, retrying: false }
   }
 }
 
@@ -71,7 +77,7 @@ export function connectionAnnouncement(state: ConnectionState | null, everReady:
   if (resynced && state.phase === 'READY') return 'Reconnected to the NEXUS runtime. The data was refreshed.'
   const v = connectionView(state, everReady)
   if (v.screen === 'none') return ''
-  return `${v.title}. ${v.detail}`.trim()
+  return [v.title, v.cause, v.detail].filter(Boolean).join('. ')
 }
 
 export interface DiagnosticRow {
@@ -79,7 +85,7 @@ export interface DiagnosticRow {
   value: string
 }
 
-const when = (iso: string | null | undefined): string => (iso && Number.isFinite(Date.parse(iso)) ? new Date(iso).toLocaleString() : '—')
+const when = (iso: string | null | undefined): string => formatWhen(iso)
 
 export function connectionDiagnostics(state: ConnectionState): DiagnosticRow[] {
   const r = state.runtime

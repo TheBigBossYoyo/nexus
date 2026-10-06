@@ -13,6 +13,7 @@ import {
 } from '@shared/control-plane'
 import { BACKGROUND_JOB_KINDS, type BackgroundJobKind } from '@shared/program'
 import type { Tone } from '../../lib/status'
+import { formatClock, formatWeekday, formatWhen } from '../../lib/dates'
 
 /** DOM-free model of the Control Center: every label and every enabled/disabled decision is made here and tested. */
 
@@ -77,6 +78,7 @@ export const STARTING_WINDOW_MS = 60_000
 
 export function itemLine(item: ControlItem, nowMs?: number): string {
   const type = WORK_ITEM_TYPE_LABEL[item.type]
+  if (item.state === 'SCHEDULED' && item.notBefore) return `${type} · Starts ${formatWhen(item.notBefore)}`
   if (item.activeAgents === undefined || item.allowance === undefined) return type
   if (item.activeAgents === 0 && isStarting(item, nowMs)) return `${type} · Starting…`
   return `${type} · ${item.activeAgents} agent${item.activeAgents === 1 ? '' : 's'} running, may hold ${item.allowance}`
@@ -273,6 +275,62 @@ const OWN_PAGE: Record<WorkItemType, string> = {
   scheduled_audit: 'its own page',
 }
 
+/** What is said about a waiting item that came with no reason: the field is never left out. */
+export const WAITING_FALLBACK: Partial<Record<WorkItemState, string>> = {
+  QUEUED: 'Waiting for its turn in the queue.',
+  READY: 'Waiting for its turn in the queue.',
+  QUOTA_WAIT: 'Waiting for the Claude usage limit to reset.',
+  PAUSED: 'Paused.',
+}
+
+/** The state word: a hold is the user's, any other pause is NEXUS's own (a restart, a usage wait, a work window). */
+export function stateLabel(item: Pick<GlobalWorkItem, 'state' | 'heldByUser'>): string {
+  if (item.state === 'RUNNING') return STATE_LABEL.RUNNING.label
+  if (item.heldByUser) return 'Held'
+  if (item.state === 'PAUSED') return 'Paused by NEXUS'
+  return STATE_LABEL[item.state].label
+}
+
+/** Release gives back what the user held; Resume continues what NEXUS paused. */
+export function resumeLabel(item: Pick<GlobalWorkItem, 'state' | 'heldByUser'>): string {
+  return item.state === 'PAUSED' && !item.heldByUser ? 'Resume' : RELEASE_LABEL
+}
+
+/**
+ * What Hold does, from the engines (`ControlPlane.pause`): the workload is paused through its own engine. A mission,
+ * a program and a workspace mission pause their runs, which stops their agent sessions now; an Arena campaign
+ * starts no new trial and lets the trials in progress finish. An item that has not started is kept from starting.
+ */
+export function holdHelp(item: Pick<GlobalWorkItem, 'type' | 'state' | 'startedAt'>): string {
+  const live = item.state === 'RUNNING' || item.state === 'QUOTA_WAIT'
+  if (!live) return 'Hold keeps it from starting until you release it.'
+  if (item.type === 'arena') return 'Hold starts no new trial; trials in progress finish. Release continues the campaign.'
+  return 'Hold stops its running agent sessions now and keeps its place. Release continues it.'
+}
+
+/** Where an item is dealt with: the page, and which part of it the item opens on. */
+export function ownPage(item: Pick<GlobalWorkItem, 'type' | 'refId'>): {
+  label: string
+  view: 'run' | 'programs' | 'arena' | 'workspaces'
+  opens: 'run' | 'program' | 'campaign' | null
+  refId: string | null
+} {
+  switch (item.type) {
+    case 'mission':
+      return { label: 'Open the run page', view: 'run', opens: item.refId ? 'run' : null, refId: item.refId }
+    case 'program':
+      return { label: 'Open the Programs page', view: 'programs', opens: item.refId ? 'program' : null, refId: item.refId }
+    case 'arena':
+      return { label: 'Open the Arena page', view: 'arena', opens: item.refId ? 'campaign' : null, refId: item.refId }
+    case 'workspace_mission':
+      // The page opens on a workspace; the item only knows its mission.
+      return { label: 'Open the Workspaces page', view: 'workspaces', opens: null, refId: null }
+    case 'background_job':
+    case 'scheduled_audit':
+      return { label: 'Open the Programs page', view: 'programs', opens: null, refId: null }
+  }
+}
+
 /** How an item is shown: BLOCKED and FAILED are never styled like an ordinary queued job. */
 export function itemPresentation(item: ControlItem): ItemPresentation {
   const base = STATE_LABEL[item.state]
@@ -300,9 +358,9 @@ export function itemPresentation(item: ControlItem): ItemPresentation {
   return {
     emphasis: 'normal',
     tone: base.tone,
-    label: item.heldByUser && item.state !== 'RUNNING' ? 'Held' : base.label,
+    label: stateLabel(item),
     reasonLabel: null,
-    reasonText: reason || null,
+    reasonText: reason || WAITING_FALLBACK[item.state] || null,
     hint: null,
   }
 }
@@ -319,17 +377,23 @@ export function describeError(error: unknown): string {
   return 'Something went wrong and no reason was given.'
 }
 
+/** The plain sentence above the technical text of a failed load. */
+export function loadSentence(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : ''
+  return code === 'runtime_unavailable' ? 'NEXUS cannot reach its background runtime.' : 'NEXUS could not read the queue from its background runtime.'
+}
+
 export type LoadState =
   | { kind: 'loading' }
   /** Nothing to show: say why and offer Retry. */
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; sentence: string }
   /** `stale` is set when a refresh failed and the page shows the last data it had. */
   | { kind: 'ready'; stale: string | null }
 
 /** Never a permanent "Loading…": a failed first load is an error state, a failed refresh is a notice above the data. */
 export function loadState(q: { hasData: boolean; isError: boolean; error: unknown }): LoadState {
   if (q.hasData) return { kind: 'ready', stale: q.isError ? describeError(q.error) : null }
-  if (q.isError) return { kind: 'error', message: describeError(q.error) }
+  if (q.isError) return { kind: 'error', message: describeError(q.error), sentence: loadSentence(q.error) }
   return { kind: 'loading' }
 }
 
@@ -365,7 +429,7 @@ export interface Inspector {
 }
 
 const iso = (value: string | null): string | null =>
-  value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : null
+  value && Number.isFinite(Date.parse(value)) ? formatWhen(value) : null
 
 /**
  * What the inspector shows, from the data the overview already holds. Fields the overview does not carry (the
@@ -387,7 +451,7 @@ export function inspectorOf(
         ? `Scheduled for ${iso(item.notBefore)}.`
         : item.heldByUser
           ? 'Held by you.'
-          : (item.detail ?? null))
+          : (item.detail || WAITING_FALLBACK[item.state] || 'Waiting for its turn in the queue.'))
   const agents =
     item.activeAgents === undefined
       ? `${item.requestedAgents} requested`
@@ -428,25 +492,28 @@ export function inspectorOf(
 export function scheduleLine(schedule: Schedule, now: Date): string {
   const rule =
     schedule.rule.kind === 'once'
-      ? `Once on ${new Date(schedule.rule.at).toLocaleString()}`
+      ? `Once on ${formatWhen(schedule.rule.at)}`
       : describeRule(schedule.rule)
   if (!schedule.enabled) return `${rule} · off`
   if (!schedule.nextRunAt) return `${rule} · no further run`
   const next = new Date(schedule.nextRunAt)
   const sameDay = next.toDateString() === now.toDateString()
-  return `${rule} · next ${sameDay ? 'today' : next.toLocaleDateString(undefined, { weekday: 'long' })} ${next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+  return `${rule} · next ${sameDay ? 'today' : formatWeekday(next)} ${formatClock(next)}`
 }
 
-export function actionLine(action: ScheduleAction, names: { program?: string | null }): string {
+export function actionLine(
+  action: ScheduleAction,
+  names: { program?: string | null; campaign?: string | null; mission?: string | null; project?: string | null },
+): string {
   switch (action.type) {
     case 'program':
       return `Continue the program ${names.program ? `"${names.program}"` : action.programId}`
     case 'arena':
-      return 'Run the Arena campaign'
+      return names.campaign ? `Run the Arena campaign "${names.campaign}"` : 'Run the Arena campaign'
     case 'workspace_mission':
-      return 'Continue the workspace mission'
+      return names.mission ? `Continue the workspace mission "${names.mission}"` : 'Continue the workspace mission'
     case 'scheduled_audit':
-      return `Run a ${action.kind.replace(/_/g, ' ')}`
+      return `Run a ${action.kind.replace(/_/g, ' ')}${names.project ? ` of ${names.project}` : ''}`
   }
 }
 
@@ -554,8 +621,7 @@ export interface DispatchView {
   next: boolean
 }
 
-export const DISPATCH_PAUSED_NOTICE =
-  'Dispatch is paused: nothing new starts and no capacity is granted. Work that is running continues.'
+export const DISPATCH_PAUSED_NOTICE = 'Nothing new starts and no capacity is granted. Work that is running continues.'
 
 export function dispatchView(paused: boolean): DispatchView {
   return paused
@@ -592,3 +658,53 @@ export function describeDecision(d: { at: string; decision: string; reason: stri
     reason: d.reason,
   }
 }
+
+// ───────────────────────────── plain errors ─────────────────────────────
+
+export interface FriendlyError {
+  message: string
+  /** The list the user is looking at is probably out of date: read it again. */
+  refetch: boolean
+}
+
+/**
+ * Known error shapes in plain sentences. The channel name never appears: the raw text of an unknown error is kept,
+ * but a leading "channel.name:" or "channel.name failed:" is removed.
+ */
+export function friendlyError(error: unknown): FriendlyError {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : ''
+  const raw = describeError(error)
+  if (code === 'runtime_unavailable')
+    return { message: 'NEXUS cannot reach its background runtime right now. Try again when the connection is back.', refetch: false }
+  if (code === 'not_found' || /no longer exists|does not exist|not found|unknown item/i.test(raw))
+    return { message: 'That item is no longer in the queue; the list was refreshed.', refetch: true }
+  if (code === 'invalid_state') {
+    const text = raw.replace(/^[a-z]+(\.[A-Za-z]+)+:?\s*(failed:?\s*)?/, '')
+    return { message: `That cannot be done to the item in its current state. ${text}`.trim(), refetch: true }
+  }
+  if (code === 'invalid_input') return { message: raw.replace(/^[a-z]+(\.[A-Za-z]+)+:?\s*(failed:?\s*)?/, ''), refetch: false }
+  return { message: raw.replace(/^[a-z]+(\.[A-Za-z]+)+:?\s*(failed:?\s*)?/, ''), refetch: false }
+}
+
+// ───────────────────────────── connection: nothing live-looking while stale ─────────────────────────────
+
+export interface RuntimeIndicator {
+  label: string
+  tone: Tone
+}
+
+/** The runtime's state as the header and the strip show it: unknown while the connection is lost, recovering while it recovers. */
+export function runtimeIndicator(level: HealthLevel, connection: { stale: boolean; recovering: boolean }): RuntimeIndicator {
+  if (connection.stale) return { label: 'Unknown', tone: 'neutral' }
+  if (connection.recovering) return { label: 'Recovering', tone: 'waiting' }
+  return { label: RUNTIME_LEVEL_LABEL[level], tone: HEALTH_LABEL[level].tone }
+}
+
+/** The header badge keeps its sentence form ("Runtime healthy"). */
+export function headerBadge(level: HealthLevel, connection: { stale: boolean; recovering: boolean }): RuntimeIndicator {
+  if (connection.stale) return { label: 'Runtime unknown', tone: 'neutral' }
+  if (connection.recovering) return { label: 'Runtime recovering', tone: 'waiting' }
+  return { label: HEALTH_LABEL[level].label, tone: HEALTH_LABEL[level].tone }
+}
+
+export const UNKNOWN_VALUE = 'Unknown'
