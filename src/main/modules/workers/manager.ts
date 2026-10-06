@@ -344,8 +344,14 @@ export class WorkerManager {
     for (const queued of session.queued.splice(0)) this.sendToSession(session, queued.op, queued.text)
   }
 
-  private onMessage(worker: Live, message: WorkerToRuntime): void {
+  private onMessage(worker: Live, raw: WorkerToRuntime): void {
     if (worker.exited) return
+    // A worker hosts a provider's process and parses its output; what it sends is checked before it is used.
+    const message = checkedWorkerMessage(raw)
+    if (!message) {
+      this.log(`worker ${worker.record.id} sent a message that is not part of the protocol; ignored`)
+      return
+    }
     worker.record.heartbeatAt = this.iso()
     switch (message.t) {
       case 'ready':
@@ -359,7 +365,7 @@ export class WorkerManager {
         this.renew(worker)
         return
       case 'log':
-        this.log(message.line)
+        this.log(`worker ${worker.record.id}: ${message.line.replace(/\s+/g, ' ').slice(0, 500)}`)
         return
       case 'cmdResult': {
         const pending = worker.commands.get(message.id)
@@ -408,8 +414,9 @@ export class WorkerManager {
       if (method === 'authorize') return reply(true, await spec.authorize(args[0] as ToolRequest))
       if (method === 'requestApproval') return reply(true, await spec.requestApproval(args[0] as ToolRequest, String(args[1]), args[2] as 'low' | 'medium' | 'high'))
       const tools = spec.nexusTools
-      const handler = tools?.[method] as ((input: unknown) => Promise<string>) | undefined
-      if (!handler) return reply(false, undefined, `The session has no ${method} tool.`)
+      // Only the NEXUS tools by name, and only what the session's own object defines: no inherited property is callable.
+      const handler = tools && NEXUS_TOOL_METHODS.includes(method) && Object.hasOwn(tools, method) ? (tools[method as keyof typeof tools] as ((input: unknown) => Promise<string>) | undefined) : undefined
+      if (typeof handler !== 'function') return reply(false, undefined, 'The session has no such tool.')
       return reply(true, await handler.call(tools, args[0]))
     } catch (e) {
       reply(false, undefined, errorMessage(e))
@@ -616,6 +623,40 @@ export class WorkerManager {
     const until = Date.now() + 8000
     while (workers.some((w) => !w.exited) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50))
     await Promise.allSettled(workers.filter((w) => !w.exited).map((w) => w.process.kill()))
+  }
+}
+
+const NEXUS_TOOL_METHODS: readonly string[] = ['sendMessage', 'reportBlocker', 'recordDecision', 'proposeMemory', 'proposeGraphChange']
+const CALL_METHODS: readonly string[] = ['authorize', 'requestApproval', ...NEXUS_TOOL_METHODS]
+const isText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max
+
+/** The message if it has the shape the protocol gives its kind, else null. */
+export function checkedWorkerMessage(raw: unknown): WorkerToRuntime | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const m = raw as Record<string, unknown>
+  switch (m['t']) {
+    case 'ready':
+      return Number.isInteger(m['pid']) && Array.isArray(m['capabilities']) && m['capabilities'].length <= 16 && m['capabilities'].every((c) => isText(c, 32)) ? (raw as WorkerToRuntime) : null
+    case 'hb':
+      return m['leaseId'] === null || isText(m['leaseId'], 64) ? (raw as WorkerToRuntime) : null
+    case 'log':
+      return typeof m['line'] === 'string' ? (raw as WorkerToRuntime) : null
+    case 'cmdResult':
+      return Number.isInteger(m['id']) && typeof m['ok'] === 'boolean' ? (raw as WorkerToRuntime) : null
+    case 'ended':
+      return isText(m['leaseId'], 64) ? (raw as WorkerToRuntime) : null
+    case 'call':
+      return Number.isInteger(m['id']) && isText(m['leaseId'], 64) && typeof m['method'] === 'string' && CALL_METHODS.includes(m['method']) && Array.isArray(m['args']) && m['args'].length <= 4 ? (raw as WorkerToRuntime) : null
+    case 'event': {
+      const event = m['event'] as Record<string, unknown> | null
+      if (!isText(m['leaseId'], 64) || typeof event !== 'object' || event === null || typeof event['type'] !== 'string') return null
+      // The session id is stored and used to resume: it is a short token, nothing else.
+      if (event['type'] === 'session.started' && !(isText(event['sessionId'], 200) && /^[\w.:-]+$/.test(event['sessionId']))) return null
+      if (event['type'] === 'session.ended' && !['completed', 'stopped', 'crashed'].includes(String(event['reason']))) return null
+      return raw as WorkerToRuntime
+    }
+    default:
+      return null
   }
 }
 

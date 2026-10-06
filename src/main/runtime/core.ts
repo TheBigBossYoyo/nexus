@@ -32,7 +32,7 @@ import { FakePowerController, WindowsPowerController, type PowerController } fro
 import { killProcessTree } from '../modules/process'
 import { BackgroundEngineering, ProgramEngine } from '../modules/program'
 import { ClaudeAgentRuntimeProvider, CODEX_CAPABILITIES, CodexRuntimeProvider, FakeRuntimeProvider, GeminiRuntimeProvider, ProviderService } from '../modules/providers'
-import { newPipeName, newToken, removeEndpoint, writeEndpoint } from '../modules/runtime/endpoint'
+import { newPipeName, newToken, pipeAnswers, readEndpoint, removeEndpoint, writeEndpoint } from '../modules/runtime/endpoint'
 import { RuntimeServer } from '../modules/runtime/server'
 import { buildRuntimeTrayModel, type RuntimeTrayAction, type TraySnapshot } from '../modules/runtime/tray-model'
 import { QuotaRecoveryController, RuntimeAvailabilityProbe, UsageIntelligenceService } from '../modules/usage'
@@ -106,6 +106,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   let phase: RuntimeStatus['phase'] = 'RECOVERING'
   const recoveryRecord: RuntimeStatus['recovery'] = { workloads: 0, workers: 0, leases: 0, finishedAt: null }
 
+  // One runtime per data directory. The Electron host also holds a lock; this is what every host has.
+  const left = readEndpoint(dataDir)
+  if (left && (await pipeAnswers(left.pipe))) throw new Error(`A NEXUS runtime is already running for ${dataDir} (process ${left.pid}).`)
+
   // The runtime is the only writer of the database. Windows read through it.
   const db = openDatabase(dbPath)
   const repos = createRepositories(db)
@@ -141,8 +145,21 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     stateChanged()
   })
 
-  /** A question to the user: through the connected window, or natively when there is none. */
+  // UI tests answer confirmations through the window they drive. Only with the scripted runtime, never in a package.
+  const confirmThroughWindow = !host.isPackaged && env['NEXUS_FAKE_RUNTIME'] === '1' && env['NEXUS_FAKE_CONFIRM'] === 'window'
+  /**
+   * A question to the user. A confirmation (power control, trusting a case, a settings change that starts a
+   * program, stopping while work runs) is shown by the runtime process itself and never travels over the pipe:
+   * a client of the pipe, which only has to hold the token, must not be able to answer the question it caused.
+   * Without a way to show it, the answer is no. A folder picker carries no authority (a path can be given
+   * directly) and is shown by the connected window.
+   */
   const ask = (request: UiRequest): Promise<UiResponse> => {
+    if (request.kind === 'confirm') {
+      if (confirmThroughWindow && server && server.clientCount('desktop') > 0) return server.requestUi(request)
+      if (host.ask) return host.ask(request)
+      return Promise.reject(new Error('This runtime has no way to ask the user, so the answer is no.'))
+    }
     if (server && server.clientCount('desktop') > 0) return server.requestUi(request)
     if (host.ask) return host.ask(request)
     return Promise.reject(new Error('No NEXUS window is connected to answer this.'))
@@ -713,6 +730,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     // Shown by the window's main process (or natively by the runtime when no window is connected), never by
     // page script: a script in the page cannot click it. Without anyone to ask, the answer is no.
     confirmPower: (message, detail) => confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
+    confirmSettings: (changes) => confirm('NEXUS Settings', changes.length === 1 ? 'Allow this change to the NEXUS settings?' : `Allow these ${changes.length} changes to the NEXUS settings?`, changes.map((change) => `• ${change}`).join('\n').slice(0, 6000), 'Allow').catch(() => false),
     pickDirectory: () => pickDirectory('Open Project'),
     openDataDir: async () => {
       await ask({ kind: 'openDataDir' })

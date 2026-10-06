@@ -11,6 +11,7 @@ import {
 } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { MIN_ROUTING_SAMPLES } from '@shared/v2'
+import { sensitiveSettingsChanges } from '@shared/settings'
 import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
@@ -46,6 +47,12 @@ export interface IpcContext {
    * in the renderer cannot click it.
    */
   confirmPower?: (message: string, detail: string) => Promise<boolean>
+  /**
+   * Native confirmation before a settings change that lets NEXUS start another program or widens what agents
+   * may do unasked (see `sensitiveSettingsChanges`). Absent: such a change is stored without a question, as
+   * before 0.7 (tests of the handlers).
+   */
+  confirmSettings?: (changes: string[]) => Promise<boolean>
   /** Native folder picker; resolves null when cancelled. Lives in main, never in the renderer. */
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
@@ -90,8 +97,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'auth.models': async () => (await runtime.getCapabilities().catch(() => ({ models: [] }))).models,
 
     'settings.get': () => repos.settings.get(),
-    'settings.update': ({ settings }) => {
+    'settings.update': async ({ settings }) => {
       const before = repos.settings.get()
+      const changes = sensitiveSettingsChanges(before, settings)
+      if (changes.length > 0 && ctx.confirmSettings && !(await ctx.confirmSettings(changes))) throw new NexusError('invalid_state', 'The change was not confirmed, so the settings are as they were.')
       const saved = repos.settings.set(settings)
       if (before.claude.subscriptionMode !== saved.claude.subscriptionMode) {
         authCache = null

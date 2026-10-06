@@ -53,6 +53,8 @@ export async function launchApp(dataDir: string, pickPath: string | null, extraE
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
   env['NEXUS_DATA_DIR'] = dataDir
   env['NEXUS_FAKE_RUNTIME'] = '1'
+  // Confirmations are shown by the runtime process itself; with the scripted runtime they come to this window, where the stubs below answer them.
+  env['NEXUS_FAKE_CONFIRM'] = 'window'
   // Off-screen and never focused: a test run must not put windows in front of whoever is using the machine.
   if (process.env['NEXUS_E2E_SHOW'] !== '1') env['NEXUS_WINDOW_OFFSCREEN'] = '1'
   // The scripted runtime always comes with the fake power controller; a faster supervisor pass keeps the tests short.
@@ -156,7 +158,12 @@ export async function closeApp(app: ElectronApplication): Promise<void> {
 /** Closes the window's process and leaves the runtime running. The caller stops it later (`killRuntime`, or a relaunch and `closeApp`). */
 export async function closeWindowOnly(app: ElectronApplication): Promise<void> {
   launchedDataDirs.delete(app)
-  await app.close().catch(() => undefined)
+  // Not `app.close()`: Playwright waits for the launched process's output streams to close, and the runtime it
+  // started holds them open for as long as it lives. The window is closed as a user closes it.
+  const child = app.process()
+  const exited = new Promise<void>((resolveExit) => (child.exitCode !== null ? resolveExit() : child.once('exit', () => resolveExit())))
+  void app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((window) => window.close())).catch(() => undefined)
+  await Promise.race([exited, new Promise((resolveLate) => setTimeout(resolveLate, 20_000))])
 }
 
 /** Calls an IPC channel through the real preload bridge and returns the unwrapped value. */

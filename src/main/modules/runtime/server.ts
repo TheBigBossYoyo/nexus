@@ -21,6 +21,9 @@ import { handshakeProof, proofsEqual } from './endpoint'
 
 /** A client that does not read is dropped once this much is waiting for it; the runtime never blocks on a window. */
 const MAX_PENDING_BYTES = 64 * 1024 * 1024
+/** Connections that have not completed the handshake, and connections in all. Beyond these a new one is closed at once. */
+const MAX_UNAUTHENTICATED = 16
+const MAX_CONNECTIONS = 64
 
 export interface RuntimeServerOptions {
   pipe: string
@@ -88,7 +91,10 @@ export class RuntimeServer {
   }
 
   private accept(socket: Socket): void {
-    if (this.closing) {
+    let unauthenticated = 0
+    for (const c of this.connections.values()) if (!c.authenticated) unauthenticated += 1
+    // Anyone who can open the pipe can open it often; what that costs the runtime is bounded.
+    if (this.closing || unauthenticated >= MAX_UNAUTHENTICATED || this.connections.size >= MAX_CONNECTIONS) {
       socket.destroy()
       return
     }

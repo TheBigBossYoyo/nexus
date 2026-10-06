@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { ControlPlaneOverview } from '@shared/control-plane'
 import type { RunDetail } from '@shared/ipc'
 import type { ConnectionState, RuntimeStatus } from '@shared/runtime-protocol'
+import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT } from '@shared/overnight'
+import type { Settings } from '@shared/settings'
 import type { WorkersOverview } from '@shared/workers'
 import { buildRuntime, call, connect, processAlive, readEndpoint, removeDir, startRuntime, tempDataDir, until, type RuntimeProcess } from '../../helpers/runtime-process'
 import type { RuntimeClient } from '@main/modules/runtime/client'
@@ -407,4 +409,64 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
     const again = await call<ControlPlaneOverview>(second.c, 'control.overview')
     expect([...again.active, ...again.waiting, ...again.scheduled, ...again.finished].filter((i) => i.scheduleId === schedule.id)).toHaveLength(1)
   }, 300_000)
+})
+
+describe('what a holder of the runtime token cannot do', () => {
+  it('cannot answer its own confirmation: power control, a program in the settings, and trust are asked by the runtime itself', async () => {
+    const dir = dataDir()
+    const repo = createRepo()
+    dirs.push(repo)
+    await runtime(dir)
+    const asked: string[] = []
+    // A client that claims to be the window and says yes to everything it is asked.
+    const c = await client(dir, {
+      kind: 'desktop',
+      onUiRequest: async (request) => {
+        asked.push(request.kind)
+        if (request.kind === 'confirm') return { response: 0 }
+        if (request.kind === 'pickDirectory') return { path: repo }
+        return { done: true }
+      },
+    })
+    await until(
+      () => call<RuntimeStatus>(c, 'runtime.status'),
+      (s) => s.phase === 'READY',
+    )
+
+    // A folder picker carries no authority and is still shown by the window.
+    const project = await call<{ id: string }>(c, 'projects.open', {})
+    expect(asked).toEqual(['pickDirectory'])
+
+    // Power control: the question never reaches the client, and without anyone to ask the answer is no.
+    const overnight = await c.invoke('overnight.start', { projectId: project.id, preset: 'balanced', prompt: 'Build the modules.', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT, planningMode: 'single' })
+    expect(overnight).toMatchObject({ ok: false, error: { code: 'invalid_state', message: 'The overnight run was not authorized.' } })
+    expect(await call<unknown[]>(c, 'overnight.active')).toEqual([])
+    expect(existsSync(join(dir, 'fake-power.log'))).toBe(false)
+
+    // A program in the settings: the same.
+    const settings = await call<Settings>(c, 'settings.get')
+    for (const changed of [
+      { ...settings, claude: { ...settings.claude, executablePath: 'C:\\Temp\\not-claude.exe' } },
+      { ...settings, mcp: { servers: [{ name: 'x', type: 'stdio' as const, command: 'C:\\Temp\\server.exe', args: ['--all'], enabled: true, roles: ['worker' as const] }] } },
+      { ...settings, permissions: { ...settings.permissions, safeCommandPrefixes: [...settings.permissions.safeCommandPrefixes, 'powershell'] } },
+    ]) {
+      expect(await c.invoke('settings.update', { settings: changed })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    }
+    expect(await call<Settings>(c, 'settings.get')).toEqual(settings)
+    // A change that starts nothing and widens nothing needs no question.
+    const harmless = { ...settings, execution: { ...settings.execution, maxParallelAgents: 2, profile: 'RESTRICTED' as const } }
+    expect((await call<Settings>(c, 'settings.update', { settings: harmless })).execution).toMatchObject({ maxParallelAgents: 2, profile: 'RESTRICTED' })
+    // Lowering the profile again is a widening.
+    expect(await c.invoke('settings.update', { settings })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+
+    expect(asked.filter((kind) => kind === 'confirm')).toEqual([])
+  }, 120_000)
+
+  it('cannot start a second runtime on the same data while one is running', async () => {
+    const dir = dataDir()
+    const first = await runtime(dir)
+    await expect(startRuntime(dir)).rejects.toThrow(/already running/)
+    expect(processAlive(first.child.pid as number)).toBe(true)
+    expect(readEndpoint(dir)?.bootId).toBe(first.bootId)
+  }, 120_000)
 })

@@ -191,3 +191,24 @@ export function buildRunConfig(
     ...overrides,
   }
 }
+
+/**
+ * The changes to the settings that let NEXUS start another program, or widen what agents may do without being
+ * asked. Each is one sentence shown to the user in a native confirmation before the change is stored. A change
+ * that only narrows (a program removed, a prefix removed, a stricter profile) is not listed.
+ */
+export function sensitiveSettingsChanges(before: Settings, after: Settings): string[] {
+  const changes: string[] = []
+  const short = (text: string): string => (text.length > 160 ? `${text.slice(0, 159)}…` : text)
+  if (after.claude.executablePath.trim() !== '' && after.claude.executablePath !== before.claude.executablePath) changes.push(short(`Run this program as the Claude runtime: ${after.claude.executablePath}`))
+  const known = new Map(before.mcp.servers.map((server) => [server.name, JSON.stringify(server)]))
+  for (const server of after.mcp.servers) {
+    if (!server.enabled || known.get(server.name) === JSON.stringify(server)) continue
+    changes.push(short(server.type === 'stdio' ? `Start this program as the MCP server "${server.name}": ${[server.command ?? '', ...(server.args ?? [])].join(' ')}` : `Connect agents to the MCP server "${server.name}" at ${server.url ?? ''}`))
+  }
+  const prefixes = new Set(before.permissions.safeCommandPrefixes)
+  for (const prefix of after.permissions.safeCommandPrefixes) if (!prefixes.has(prefix)) changes.push(short(`Let agents run commands that begin with "${prefix}" without asking`))
+  if (after.permissions.allowNetworkTools && !before.permissions.allowNetworkTools) changes.push('Let read-only agents fetch pages from the web')
+  if (before.execution.profile === 'RESTRICTED' && after.execution.profile === 'STANDARD') changes.push('Lower the execution profile from RESTRICTED to STANDARD')
+  return changes
+}

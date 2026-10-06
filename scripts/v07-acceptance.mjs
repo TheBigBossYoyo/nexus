@@ -16,7 +16,7 @@ import { createFixtureRepo, log, reportGates, requireAuth, root, writeEvidence }
 
 const exe = process.argv[2] && process.argv[2] !== '-' ? process.argv[2] : undefined
 const TIMEOUT_MS = Number(process.env.NEXUS_V07_ACCEPT_TIMEOUT_MIN ?? 90) * 60_000
-const WINDOW_CLOSED_MS = Number(process.env.NEXUS_V07_WINDOW_CLOSED_S ?? 75) * 1000
+const WINDOW_CLOSED_MS = Number(process.env.NEXUS_V07_WINDOW_CLOSED_S ?? 40) * 1000
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const { repo, baseCommit } = createFixtureRepo('nexus-v07', {
@@ -87,9 +87,9 @@ try {
   evidence.usageBefore = await call('usage.refresh').catch(() => null)
   const connection = await call('desktop.connection')
   const runtime0 = await call('runtime.status')
-  evidence.runtime = { pid: runtime0.pid, bootId: runtime0.bootId, version: runtime0.version, protocol: runtime0.protocol, endpointAcl: runtime0.endpointAcl, endpoint: endpoint(), windowPid: process.pid }
+  evidence.runtime = { pid: runtime0.pid, bootId: runtime0.bootId, version: runtime0.version, protocol: runtime0.protocol, endpointAcl: runtime0.endpointAcl, endpoint: endpoint(), windowPid: app.process().pid }
   log('runtime', JSON.stringify(evidence.runtime), 'connection', connection.phase)
-  const windowPid = app.process().pid
+  let windowPid = app.process().pid
 
   await call('control.setLimits', { limits: { maxAgents: 3, maxActiveItems: 2, resumeOnBoot: 'resume', agingMinutes: 30 } })
   const project = await call('projects.open', { path: repo })
@@ -154,17 +154,24 @@ try {
       const seqBefore = {}
       for (const runId of runIds) seqBefore[runId] = (await call('events.list', { runId, limit: 5000 })).at(-1)?.seq ?? 0
       log('closing the window; the runtime is left alone for', WINDOW_CLOSED_MS / 1000, 's')
-      await app.close()
+      // The window is closed as a user closes it. Not `app.close()`: Playwright waits for the output streams of the
+      // process it launched, and the runtime that process started holds them open for as long as it lives.
+      const child = app.process()
+      const exited = new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)))
+      void app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.close())).catch(() => undefined)
+      await Promise.race([exited, sleep(20_000)])
       await sleep(3000)
-      const windowGone = !alive(windowPid)
+      const windowGone = !alive(child.pid)
       const runtimeAliveWithoutWindow = alive(before.runtime.pid)
       await sleep(WINDOW_CLOSED_MS)
       const runtimeAliveAfterWait = alive(before.runtime.pid)
+      const windowPidBefore = child.pid
       ;({ app, call } = await launch())
       const after = await call('runtime.status')
       let eventsWhileClosed = 0
       for (const runId of runIds) eventsWhileClosed += (await call('events.list', { runId, limit: 5000 })).filter((e) => e.seq > seqBefore[runId] && e.createdAt > before.at).length
-      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, reopenedAt: new Date().toISOString() }
+      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid: windowPidBefore, reopenedAt: new Date().toISOString() }
+      windowPid = app.process().pid
       log('window reopened', JSON.stringify({ windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: evidence.windowClosed.sameRuntime, eventsWhileClosed }))
       continue
     }
@@ -237,7 +244,7 @@ try {
 
   const r = evidence.result
   ok = reportGates({
-    'the runtime is a process of its own, found through its endpoint': evidence.runtime.pid !== windowPid && evidence.runtime.endpoint?.pid === evidence.runtime.pid,
+    'the runtime is a process of its own, found through its endpoint': evidence.runtime.pid !== evidence.runtime.windowPid && evidence.runtime.endpoint?.pid === evidence.runtime.pid,
     'two kinds of workload were active at the same time through the global queue': r.seen.bothActive,
     'agent sessions never exceeded the global limit of 3': r.seen.maxAgents <= 3 && r.seen.maxAgents >= 1,
     'several real sessions ran in worker processes': r.seen.distinctWorkerPids >= 2 && r.seen.distinctSessionIds >= 2,

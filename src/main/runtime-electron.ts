@@ -3,7 +3,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { app, dialog, Notification, powerSaveBlocker, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, Notification, powerSaveBlocker, safeStorage, shell } from 'electron'
 import { errorMessage } from '@shared/result'
 import type { UiRequest, UiResponse } from '@shared/runtime-protocol'
 import { startRuntimeCore, type RuntimeCore } from './runtime/core'
@@ -70,10 +70,17 @@ function logToFile(dataDir: string): void {
   } catch {
     return
   }
+  let written = 0
   const write = (level: string, args: unknown[]): void => {
     try {
-      appendFileSync(file, `${new Date().toISOString()} ${level} ${args.map((a) => (typeof a === 'string' ? a : a instanceof Error ? (a.stack ?? a.message) : JSON.stringify(a))).join(' ')}
-`)
+      // Bounded while running too: a long-lived runtime starts a new file every 5 MB and keeps one earlier file.
+      if (written > 5 * 1024 * 1024) {
+        renameSync(file, `${file}.1`)
+        written = 0
+      }
+      const line = args.map((a) => (typeof a === 'string' ? a : a instanceof Error ? (a.stack ?? a.message) : JSON.stringify(a))).join(' ')
+      written += line.length + 32
+      appendFileSync(file, `${new Date().toISOString()} ${level} ${line.slice(0, 4000)}\n`)
     } catch {
       // Logging must never be the reason the runtime fails.
     }
@@ -96,10 +103,29 @@ function logToFile(dataDir: string): void {
   })
 }
 
-/** A question asked by the runtime itself, when no window is connected (a click in the tray). */
+/**
+ * The owner of the runtime's own dialogs: a window that is never shown and stays above the others, so a
+ * confirmation asked by this background process appears in front of whatever the user is looking at instead of
+ * behind it.
+ */
+let dialogOwner: BrowserWindow | null = null
+function ownerWindow(): BrowserWindow {
+  if (!dialogOwner || dialogOwner.isDestroyed()) {
+    dialogOwner = new BrowserWindow({ width: 1, height: 1, show: false, frame: false, skipTaskbar: true, alwaysOnTop: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+    dialogOwner.setAlwaysOnTop(true, 'screen-saver')
+  }
+  return dialogOwner
+}
+
+/**
+ * A question asked by the runtime itself. Every confirmation is asked here (see `ask` in the runtime core), and
+ * so is anything asked while no window is connected (a click in the tray).
+ */
 async function askNatively(request: UiRequest, dataDir: string): Promise<UiResponse> {
   if (request.kind === 'confirm') {
-    const { response } = await dialog.showMessageBox({ type: request.level, title: request.title, message: request.message, detail: request.detail, buttons: request.buttons, defaultId: request.defaultId, cancelId: request.cancelId, noLink: true })
+    const options = { type: request.level, title: request.title, message: request.message, detail: request.detail, buttons: request.buttons, defaultId: request.defaultId, cancelId: request.cancelId, noLink: true }
+    // An automated run keeps everything off the screen; its question has no owner to bring it forward.
+    const { response } = process.env['NEXUS_WINDOW_OFFSCREEN'] === '1' ? await dialog.showMessageBox(options) : await dialog.showMessageBox(ownerWindow(), options)
     return { response }
   }
   if (request.kind === 'pickDirectory') {
@@ -193,6 +219,8 @@ export async function runRuntime(): Promise<void> {
     event.preventDefault()
     void core?.shutdown()
   })
+  // The runtime has no window of its own; the hidden owner of its dialogs must not end it when it goes.
+  app.on('window-all-closed', () => undefined)
   // A second start of the runtime for the same data directory means a window is looking for it; nothing to do.
   app.on('second-instance', () => undefined)
 }

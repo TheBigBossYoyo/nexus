@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { userInfo } from 'node:os'
-import { join } from 'node:path'
+import { connect } from 'node:net'
+import { homedir, userInfo } from 'node:os'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { EndpointFileSchema, type EndpointFile } from '@shared/runtime-protocol'
 
 /** Where the runtime leaves the file through which clients find it. */
@@ -65,11 +66,38 @@ export function restrictToUser(file: string): Promise<boolean> {
 export async function writeEndpoint(dataDir: string, endpoint: EndpointFile): Promise<{ file: string; restricted: boolean }> {
   const file = endpointPath(dataDir)
   mkdirSync(join(dataDir, 'runtime'), { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  writeFileSync(temp, JSON.stringify(endpoint), { mode: 0o600 })
+  // An unpredictable name, created exclusively: a file or link somebody put there first is an error, not a target.
+  const temp = `${file}.${randomBytes(8).toString('hex')}.tmp`
+  writeFileSync(temp, JSON.stringify(endpoint), { mode: 0o600, flag: 'wx' })
   const restricted = await restrictToUser(temp)
+  // Inside the user's profile the inherited access list already keeps other users out. Anywhere else the
+  // narrowing is the only protection the token has, so without it the runtime does not start.
+  if (!restricted && !isInside(homedir(), dataDir)) {
+    rmSync(temp, { force: true })
+    throw new Error(`The runtime's endpoint file could not be restricted to the current user, and the data directory ${dataDir} is outside the user's profile.`)
+  }
   renameSync(temp, file)
   return { file, restricted }
+}
+
+function isInside(parent: string, child: string): boolean {
+  const rel = relative(resolve(parent), resolve(child))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** Whether something accepts connections on the pipe. It says nothing about what answers there. */
+export function pipeAnswers(pipe: string, timeoutMs = 1000): Promise<boolean> {
+  return new Promise((done) => {
+    const socket = connect({ path: pipe })
+    const finish = (answer: boolean): void => {
+      clearTimeout(timer)
+      socket.destroy()
+      done(answer)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+  })
 }
 
 /** The endpoint a runtime left, or null when there is none or it cannot be read. */
