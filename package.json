@@ -15,7 +15,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
+    "test:integration": "vitest run --project integration --project arena-cases",
     "test:e2e": "electron-vite build && playwright test",
     "smoke:claude": "vitest run -c vitest.smoke.config.ts",
     "smoke:power": "vitest run -c vitest.power-smoke.config.ts",

@@ -39,12 +39,29 @@ export default defineConfig({
             'tests/stress/program-*.test.ts',
             'tests/stress/workspace-*.test.ts',
           ],
+          // The built-in Arena cases run by themselves afterwards (see the next project).
+          exclude: ['tests/integration/arena/builtin-cases.test.ts'],
           // Scenario tests drive real git and SQLite; leave headroom for a loaded machine.
           // Generous on purpose: these waits bound a hang, they are not performance assertions, and the machine may be busy.
           testTimeout: 240_000,
           // Scenario files each drive several git processes; too many at once starve one another.
           maxWorkers: 6,
           sequence: { groupOrder: 1 },
+          hookTimeout: 60_000,
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          // The hidden evaluator of the performance case runs the unoptimized fixture, which by design needs most of
+          // its 120 s limit. Next to six other workers it runs out of time; alone it does not. This group starts when
+          // the others have finished.
+          name: 'arena-cases',
+          environment: 'node',
+          include: ['tests/integration/arena/builtin-cases.test.ts'],
+          testTimeout: 480_000,
+          maxWorkers: 1,
+          sequence: { groupOrder: 2 },
           hookTimeout: 60_000,
         },
       },
