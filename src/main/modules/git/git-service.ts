@@ -255,7 +255,28 @@ const isWithin = (parent: string, child: string): boolean => {
 interface TrustedWorktree {
   root: string
   gitDir: string
+  /** The branch NEXUS created the worktree on (`nexus/<run>/<task>`); null when the record does not say. */
+  branch: string | null
 }
+
+/** A worktree's repository and branch, as NEXUS's own record has them. */
+export interface WorktreeOrigin {
+  repoRoot: string
+  branch: string | null
+}
+
+/** The git subcommand of an argument list: the first word that is not a global option (`-c name=value` takes a value). */
+function subcommandOf(args: readonly string[]): string {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? ''
+    if (arg === '-c' || arg === '-C' || arg === '--git-dir' || arg === '--work-tree' || arg === '--namespace') i += 1
+    else if (!arg.startsWith('-')) return arg
+  }
+  return ''
+}
+
+/** Subcommands of NEXUS's own that add to or rewrite the branch a working tree is on. */
+const WRITES_BRANCH = new Set(['commit', 'merge', 'reset', 'cherry-pick', 'rebase', 'revert', 'am', 'stash', 'checkout', 'switch'])
 
 export class GitService {
   private readonly env: NodeJS.ProcessEnv
@@ -270,7 +291,7 @@ export class GitService {
   private readonly trusted = new Map<string, TrustedWorktree>()
   private readonly notOurs = new Set<string>()
   private worktreesRoot: string | null = null
-  private repositoryOf: ((worktreePath: string) => string | null | Promise<string | null>) | null = null
+  private repositoryOf: ((worktreePath: string) => WorktreeOrigin | string | null | Promise<WorktreeOrigin | string | null>) | null = null
 
   constructor(private readonly gitPath: string = 'git') {
     // Git needs none of the credentials NEXUS withholds from project commands, and a program that a
@@ -297,7 +318,7 @@ export class GitService {
    * never from anything inside the worktree. Returns the repository's path, or null when NEXUS does not know
    * the directory as one of its worktrees.
    */
-  setWorktreeResolver(resolver: (worktreePath: string) => string | null | Promise<string | null>): void {
+  setWorktreeResolver(resolver: (worktreePath: string) => WorktreeOrigin | string | null | Promise<WorktreeOrigin | string | null>): void {
     this.repositoryOf = resolver
     this.notOurs.clear()
   }
@@ -307,7 +328,7 @@ export class GitService {
    * `<common dir>/worktrees/` whose back-pointer names this worktree. Nothing inside the worktree is read.
    * False when the repository has no such entry.
    */
-  async trustWorktree(worktreePath: string, repoRoot: string): Promise<boolean> {
+  async trustWorktree(worktreePath: string, repoRoot: string, branch: string | null = null): Promise<boolean> {
     const root = resolve(worktreePath)
     const shown = await runProcess(this.gitPath, ['rev-parse', '--git-common-dir'], { cwd: repoRoot, env: this.env, timeoutMs: 15_000 })
     if (shown.exitCode !== 0 || shown.stdout.trim() === '') return false
@@ -327,7 +348,7 @@ export class GitService {
         continue
       }
       if (!samePath(resolve(gitDir, back), join(root, '.git'))) continue
-      this.trusted.set(pathKeyOf(root), { root, gitDir })
+      this.trusted.set(pathKeyOf(root), { root, gitDir, branch })
       this.notOurs.delete(pathKeyOf(root))
       return true
     }
@@ -345,8 +366,10 @@ export class GitService {
     const candidate = join(this.worktreesRoot, parts[0] as string, parts[1] as string)
     const candidateKey = pathKeyOf(candidate)
     if (this.notOurs.has(candidateKey)) return null
-    const repoRoot = await this.repositoryOf(candidate)
-    if (repoRoot && (await this.trustWorktree(candidate, repoRoot))) return this.trusted.get(candidateKey) ?? null
+    const origin = await this.repositoryOf(candidate)
+    const repoRoot = typeof origin === 'string' ? origin : (origin?.repoRoot ?? null)
+    const branch = typeof origin === 'string' ? null : (origin?.branch ?? null)
+    if (repoRoot && (await this.trustWorktree(candidate, repoRoot, branch))) return this.trusted.get(candidateKey) ?? null
     if (repoRoot) {
       // NEXUS knows this directory as a worktree of that repository, and the repository has no entry for it:
       // nothing git finds from inside it can be the right Git directory.
@@ -354,6 +377,41 @@ export class GitService {
     }
     this.notOurs.add(candidateKey)
     return null
+  }
+
+  /**
+   * A worktree NEXUS created stays on the branch NEXUS created it on. An agent working there can turn its HEAD
+   * to another branch with an ordinary git command (`git symbolic-ref HEAD refs/heads/main`, `git checkout main`);
+   * a commit of NEXUS's would then advance that branch, which may be the user's. Before a command that adds to
+   * or rewrites the current branch, HEAD is read from the worktree's Git directory in the repository and must
+   * name the recorded branch.
+   */
+  private async assertOnOwnBranch(own: TrustedWorktree): Promise<void> {
+    if (own.branch === null) return
+    let head = ''
+    try {
+      head = (await readFile(join(own.gitDir, 'HEAD'), 'utf8')).trim()
+    } catch {
+      head = ''
+    }
+    if (head === `ref: refs/heads/${own.branch}`) return
+    const now = head.startsWith('ref: ') ? head.slice(5) : head === '' ? 'nothing readable' : `the commit ${head.slice(0, 12)}`
+    throw new NexusError('invalid_state', `The working tree at ${own.root} is no longer on its branch ${own.branch} (its HEAD names ${now}). NEXUS will not commit or merge there.`, { cwd: own.root, branch: own.branch })
+  }
+
+  /** Puts a worktree NEXUS created back on its own branch. Only before a reset that discards everything anyway. */
+  private async restoreOwnBranch(worktree: string): Promise<void> {
+    const own = await this.trustedFor(worktree)
+    if (!own || own.branch === null) return
+    let head = ''
+    try {
+      head = (await readFile(join(own.gitDir, 'HEAD'), 'utf8')).trim()
+    } catch {
+      head = ''
+    }
+    if (head === `ref: refs/heads/${own.branch}`) return
+    // `symbolic-ref` moves no branch and touches no file; the reset that follows makes the tree match.
+    await this.run(worktree, ['symbolic-ref', 'HEAD', `refs/heads/${own.branch}`])
   }
 
   // ---- plumbing ----
@@ -422,6 +480,7 @@ export class GitService {
     // Anywhere else a linked worktree's pointer is verified before every command, not only before a write: a
     // read runs the filters and drivers of whatever repository the pointer names.
     if (!own) await this.assertOwnGitDir(cwd)
+    else if (WRITES_BRANCH.has(subcommandOf(args))) await this.assertOnOwnBranch(own)
     // Under the worktrees root git never looks further up than that root for a repository.
     const ceiling = this.worktreesRoot && isWithin(this.worktreesRoot, cwd) ? { GIT_CEILING_DIRECTORIES: this.worktreesRoot } : {}
     const result = await runProcess(this.gitPath, fullArgs, {
@@ -608,7 +667,7 @@ export class GitService {
       throw e
     }
     // From here on NEXUS's git commands in this worktree use the Git directory the repository has for it.
-    if (!(await this.trustWorktree(abs, repo))) throw new NexusError('git_failed', `git created the worktree at ${abs} but the repository has no entry for it`, { path: abs })
+    if (!(await this.trustWorktree(abs, repo, branch))) throw new NexusError('git_failed', `git created the worktree at ${abs} but the repository has no entry for it`, { path: abs })
     return sha
   }
 
@@ -619,6 +678,7 @@ export class GitService {
    * enforces that).
    */
   async resetClean(worktree: string): Promise<void> {
+    await this.restoreOwnBranch(worktree)
     await this.run(worktree, ['reset', '--hard', '--quiet', 'HEAD'])
     await this.run(worktree, ['clean', '-f', '-d', '--quiet'])
   }

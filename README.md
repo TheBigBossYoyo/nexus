@@ -190,8 +190,10 @@ The design and its deviations from the implementation are in [V0_2_DESIGN](docs/
 
 ## Release history and supported versions
 
-Use 0.6.0 or later. 0.6.0 is the minimum recommended line. Earlier tags are kept as they are, for history; no tag
-has been rewritten or deleted. Dates are those of the tagged commit (+01:00).
+Use 0.6.0 or later. 0.6.0 is the minimum recommended line and the newest release. It is not free of known
+defects: the security review of the 0.7 branch found that two of its protections can be bypassed (see "Known
+defects of 0.6.0" below). Earlier tags are kept as they are, for history; no tag has been rewritten or deleted.
+Dates are those of the tagged commit (+01:00).
 
 | Version | Tag | Date | Status | Note |
 |---|---|---|---|---|
@@ -200,7 +202,7 @@ has been rewritten or deleted. Dates are those of the tagged commit (+01:00).
 | 0.3.0 | `v0.3.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
 | 0.4.0 | `v0.4.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
 | 0.5.0 | `v0.5.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0. The tag also lacks the 0.5.0 entries of `docs/TEST_STATUS.md` and `docs/BUILD_PROGRESS.md` (see below) |
-| 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended | Contains the fixes. Report: `docs/V0_6_RELEASE_REPORT.md` |
+| 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended; has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
 | 0.7 | none | not released | Branch `nexus-0.7`, not merged, not tagged | See `docs/V0_7_RELEASE_REPORT.md` |
 
 Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
@@ -217,6 +219,27 @@ record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
 passes no `core.fsmonitor`, `core.hooksPath`, `core.pager` or `protocol.ext.allow` setting to git, and the command
 classifier tests only the first positional word of `git config` as a key and has no rule for non-git commands that
 name a `.git` path. This is a reading of the source; the defects were not reproduced on a build of 0.2.1.
+
+Known defects of 0.6.0. The independent security review of the `nexus-0.7` branch (2026-10-06) reproduced these
+against code that 0.6.0 also has. They are fixed on `nexus-0.7`; no fixed release exists yet.
+
+1. The worktree pointer check of 0.6.0 compares only Git's back-pointer. A Git directory that an agent creates
+   itself inside its worktree, with a back-pointer to the worktree and the user's repository as its common
+   directory, passes the check, and NEXUS's next commit then moves the user's branch.
+2. The rule that a non-git command naming a `.git` path asks first compares the name literally. `.git` followed by
+   a space or a dot, and the short name `GIT~1`, are the same file to Windows and pass without a question, so the
+   pointer can be rewritten with an ordinary shell command.
+3. NEXUS's own read-only git commands (status, diff) do not verify the pointer, and they run the `filter` and
+   `textconv` programs of whatever repository the pointer names.
+4. A power command written without a space before its switch (`cmd /c shutdown/s`) passed the command classifier
+   of the 0.7 branch. The classifier of 0.6.0 matches a command's name the same way (a reading of its source; this
+   one was not reproduced on a build of 0.6.0).
+
+Items 1 to 3 are in the source of tag `v0.6.0` (`git-service.ts` and `command-classifier.ts` as of commit
+`42a88ea`); they were reproduced on the 0.7 branch before the fix, not on a build of 0.6.0.
+
+Until a release with the fixes exists, do not run 0.6.0 on a repository whose content you do not trust, and review
+what agents changed before you rely on a branch.
 
 The 0.5.0 tag gap. Tag `v0.5.0` points at commit `389d95f` (2026-10-05 05:17:26). The test status and build
 progress for 0.5.0 were committed 28 seconds later, as `f8e5a67`, which is not in the history of `v0.5.0`. At that

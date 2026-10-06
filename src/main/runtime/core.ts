@@ -121,7 +121,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   git.setWorktreeResolver((worktreePath) => {
     const record = repos.worktrees.getByPath(worktreePath)
     const run = record ? repos.runs.get(record.runId) : null
-    return run ? (repos.projects.get(run.projectId)?.rootPath ?? null) : null
+    const repoRoot = run ? (repos.projects.get(run.projectId)?.rootPath ?? null) : null
+    return repoRoot && record ? { repoRoot, branch: record.branch } : null
   })
   const settings = repos.settings.get()
 

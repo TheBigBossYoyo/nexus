@@ -291,6 +291,55 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
     expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
   })
 
+  it('does not commit or merge in a worktree whose HEAD an agent turned to another branch, and puts it back before a reset', async () => {
+    const repo = await makeRepo()
+    // The user works on a branch of their own, so `main` is free to be checked out elsewhere.
+    await sh(repo, 'checkout', '-q', '-b', 'user-work')
+    const root = join(base, `wt-${newId()}`)
+    const a = await new WorktreeManager(git, root).createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
+    const main = await sh(repo, 'rev-parse', 'refs/heads/main')
+    const own = await sh(repo, 'rev-parse', `refs/heads/${a.branch}`)
+
+    for (const turn of [
+      ['symbolic-ref', 'HEAD', 'refs/heads/main'],
+      ['checkout', '-q', 'main'],
+      ['checkout', '-q', '--detach'],
+      ['checkout', '-q', '-b', 'side'],
+    ]) {
+      await sh(a.path, 'symbolic-ref', 'HEAD', `refs/heads/${a.branch}`)
+      await sh(a.path, 'reset', '-q', '--hard')
+      // What an agent's own git command does in its worktree.
+      await sh(a.path, ...turn)
+      await writeFile(join(a.path, 'evil.txt'), 'x\n')
+      await git.addAll(a.path)
+      await expect(git.commitAll(a.path, 'evil', AUTHOR), turn.join(' ')).rejects.toThrow(/no longer on its branch/)
+      await expect(git.run(a.path, ['merge', '--no-ff', '-m', 'm', 'main']), turn.join(' ')).rejects.toThrow(/no longer on its branch/)
+      expect(await sh(repo, 'rev-parse', 'refs/heads/main'), turn.join(' ')).toBe(main)
+      expect(await sh(repo, 'rev-parse', `refs/heads/${a.branch}`)).toBe(own)
+      // A reset of NEXUS's discards everything anyway: it first puts the worktree back on its branch.
+      await git.resetClean(a.path)
+      expect(await sh(a.path, 'symbolic-ref', 'HEAD')).toBe(`refs/heads/${a.branch}`)
+      expect((await git.status(a.path)).clean).toBe(true)
+    }
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(main)
+
+    // Back on its branch NEXUS commits as always.
+    await writeFile(join(a.path, 'work.txt'), 'x\n')
+    await git.addAll(a.path)
+    const sha = await git.commitAll(a.path, 'work', AUTHOR)
+    expect(await sh(repo, 'rev-parse', `refs/heads/${a.branch}`)).toBe(sha)
+
+    // After a restart the branch comes from NEXUS's record of the worktree.
+    const restarted = new GitService()
+    restarted.setWorktreesRoot(root)
+    restarted.setWorktreeResolver(() => ({ repoRoot: repo, branch: a.branch }))
+    await sh(a.path, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+    await writeFile(join(a.path, 'late.txt'), 'x\n')
+    await restarted.addAll(a.path)
+    await expect(restarted.commitAll(a.path, 'evil', AUTHOR)).rejects.toThrow(/no longer on its branch/)
+    expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(main)
+  })
+
   it('reads the commit it names, not a replacement an agent registered for it', async () => {
     const repo = await makeRepo()
     const a = await new WorktreeManager(git, join(base, `wt-${newId()}`)).createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
