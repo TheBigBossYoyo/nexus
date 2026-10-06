@@ -314,10 +314,11 @@ async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: St
     return
   }
   // Leading assignments (FOO=1 cmd) and the call operators of PowerShell.
-  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || words[0] === '&' || words[0] === '.')) {
+  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || /^\$\{?[\w:]+\}?=/.test(words[0] ?? '') || words[0] === '&' || words[0] === '.')) {
     if (words[0] === '.' && words.length > 1 && shell === 'bash') break
     words = words.slice(1)
   }
+  let called: string | undefined
   for (let guard = 0; guard < 6 && words.length > 0; guard++) {
     const n = executableName(words[0] ?? '')
     if (!WRAPPERS.has(n)) break
@@ -333,7 +334,16 @@ async function evalSegment(seg: Segment, shell: Shell, env: ExecutionEnv, st: St
     else if (n === 'env' || n === 'cross-env' || n === 'dotenv' || n === 'env-cmd') {
       while (j < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[j] ?? '') || (words[j] ?? '').startsWith('-') || words[j] === '--')) j++
     } else while (j < words.length && (words[j] ?? '').startsWith('-')) j++
+    if (n === 'call') called = words[j]
     words = words.slice(j)
+  }
+  // `call file` makes cmd.exe run any file as a batch, whatever its extension: the file is a script reference.
+  if (called !== undefined && !ARG_SCAN_EXT.test(normalizeWord(called))) {
+    const abs = resolveFileWord(called, cwd)
+    if (abs !== null && insideWorktree(env, abs)) {
+      add(st, 'REQUIRE_APPROVAL', `cmd runs ${path.relative(env.worktree, abs).replace(/\\/g, '/')} as a batch file although it is not named like a script`, 'UNTRUSTED_AGENT_AUTHORED', 'unknown')
+      await evalResolvedFile(abs, called, 'cmd', env, st, depth, true)
+    }
   }
   const name = words[0] === undefined ? undefined : normalizeWord(words[0])
   if (name === undefined) return

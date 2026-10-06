@@ -148,7 +148,7 @@ describe('destructive git (bash and PowerShell syntax)', () => {
     'git reset --soft HEAD~1',
     'git clean -n',
     'git stash',
-    'git config user.email x@y.z',
+    'git config --get user.email',
     'git branch -d merged',
     'git merge feature',
     'git cherry-pick abc123',

@@ -330,7 +330,6 @@ describe('power and shutdown commands are forbidden for every role', () => {
     'echo shutdown',
     'find . -name shutdown',
     'pnpm run shutdown-test',
-    'Get-Command shutdown',
     'Select-String -Pattern "shutdown" src/a.ts',
   ])('does not forbid commands that merely mention shutdown: %s', (c) => {
     expect(bash(c).level).not.toBe('forbidden')

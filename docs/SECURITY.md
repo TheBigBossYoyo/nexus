@@ -111,6 +111,8 @@ Read-only status is decided per command, not by name alone: options that run a p
 arguments) make a segment non-read-only, and a `GIT_*`/`PAGER`/`EDITOR`/`LD_*`/`PATH` assignment needs approval.
 WebFetch treats loopback, private, link-local, CGNAT and unspecified addresses as private in every literal
 spelling (trailing dot, IPv6 and IPv4-mapped forms, decimal/octal/hex IPv4) and single-label intranet names.
+The check is lexical, on the host name in the URL: a public name that resolves to a private address, a DNS
+rebinding answer, and a redirect from a public URL to a private one are not seen.
 
 Needs approval (examples, the full list is in `command-classifier.ts`): elevation (`sudo`, `gsudo`, `-Verb
 RunAs`); download-and-execute pipes; encoded PowerShell; shells without an inspectable command or running a
@@ -199,7 +201,9 @@ repository's configuration: project settings can carry their own hooks and permi
 NEXUS policy does not review.
 
 External MCP servers (Settings, MCP) are configured by you, run with your privileges, and are available only
-to the roles you tick. NEXUS applies no per-tool policy to them.
+to the roles you tick. NEXUS gates them by server and role only (`allowedMcpServers` and `allowedMcpTools` in the
+authorizer, and the per-run server list): a server you enabled for a role can be called with any of its tools and
+any arguments, and NEXUS does not review what those tools do.
 
 ## Agent-to-NEXUS tools (v0.2)
 
@@ -288,18 +292,34 @@ Limits of these measures:
 
 Found by an adversarial review of the boundaries and fixed, each with a test that fails without the fix:
 
-- **NEXUS's own git commands run nothing a repository configures.** Every git call passes
-  `core.fsmonitor=false`, `core.hooksPath=<an empty directory NEXUS owns>`, `core.pager=cat` and
-  `protocol.ext.allow=never`, and runs without the Claude credentials and Node options NEXUS withholds from
-  project commands. Before this, a hook or an exec-capable configuration key that an agent left in the shared
-  repository ran inside NEXUS's own git calls, with NEXUS's environment.
-- **NEXUS does not write through a worktree whose `.git` pointer was changed.** Before any git command that
-  changes something, the worktree's `.git` file is checked against Git's own back-pointer in the repository. A
-  pointer that names the user's repository or another task's worktree is refused.
+- **NEXUS's own git commands are not driven by what a repository configures for hooks, pager and fsmonitor.**
+  NEXUS overrides fsmonitor, hooks, pager and the ext transport, takes the git directory of its worktrees from its
+  own record instead of the worktree's `.git` file, and reads no replacement objects; filter, textconv and merge
+  drivers are taken from the repository's own configuration, which agents cannot write without approval.
+  They run without the Claude credentials and Node options NEXUS withholds from project commands.
+  Before 0.6, a hook or an exec-capable configuration key that an agent left in the shared repository ran inside
+  NEXUS's own git calls, with NEXUS's environment.
+- **In its own worktrees NEXUS does not read the `.git` pointer at all** (0.7). For a worktree NEXUS created, every
+  git command of NEXUS's names the Git directory explicitly (`--git-dir`, `--work-tree`): the entry the repository
+  has for that worktree, found from NEXUS's own record of which repository the worktree belongs to. Rewriting,
+  replacing or removing the `.git` file in the worktree therefore redirects nothing, for a read as for a write.
+  A worktree NEXUS knows whose repository has no entry for it is refused. A Git service that has no record (the
+  worker process that snapshots a working directory for another provider) verifies the pointer before every
+  command and refuses a Git directory that lies inside the working tree, that is not at
+  `<common dir>/worktrees/<name>` of its repository, or whose back-pointer names another worktree.
+  The check of 0.6 compared only the back-pointer, and only before a command that changes something. The
+  independent review of 0.7 showed that a Git directory an agent made itself inside the worktree passed it, and
+  NEXUS's own commit then moved the user's branch. **0.6.0 has this defect.**
 - **`git config` is checked word by word.** A dangerous key behind an option that takes a value
   (`git config --type bool core.fsmonitor ...`) used to pass.
-- **Any command but git that names a `.git` path asks first**, in bash and PowerShell: the worktree pointer,
-  the repository's configuration and its hooks.
+- **A command but git that names a `.git` path in a form the classifier recognises asks first, and one that writes,
+  moves or deletes the worktree's own top-level `.git` entry is refused** (0.7). "Names" means: a path segment that
+  Windows reads as `.git` (any case, trailing dots and spaces, `::$DATA`/`:stream`, the 8.3 name `GIT~1`), as a
+  word of the command or as a redirect target, for the commands the classifier knows write (`Set-Content`,
+  `Out-File`, `Copy-Item`, `Move-Item`, `Rename-Item`, `New-Item`, `Remove-Item`, `cp`, `mv`, `rm`, `tee`, `dd`,
+  `mklink`, `>` ...). Reading it, or touching something inside it (`.git\hooks`, `.git\config`), asks. It is not
+  caught when the path is built at run time inside a program (`node -e`, a script), which is judged by what the
+  script text shows; see "0.7: execution security".
 - **A provider's command line tool is found on PATH only** and started by its absolute path (see PROVIDERS.md).
 
 Open findings of the same review, by severity:
@@ -438,7 +458,7 @@ that file judged too.
 
 | Finding | Result |
 |---|---|
-| Power: `shutdown`, `Stop-Computer`, `Restart-Computer`, `ExitWindowsEx`/`SHExitWindowsEx`, any `InitiateSystemShutdown*`/`InitiateShutdown*` spelling (`...ExW`), `NtShutdownSystem`, `NtSetSystemPowerState`, `SetSystemPowerState`, `rundll32` with a `powrprof` export or a power export of user32/shell32/advapi32, `psshutdown`, `wmic os ... shutdown`, `.Shutdown()`/`.Reboot()`/`.Win32Shutdown()` on a WMI/CIM operating-system object, `logoff`, `tsdiscon`, `shutdown -l`, `systemctl poweroff`, a power word next to a process-starting API (including `ctypes`, `Add-Type`, `[scriptblock]::Create`), in any wrapper or after quote/caret splitting | `DENY`, in both profiles, never approvable |
+| Power: `shutdown`, `Stop-Computer`, `Restart-Computer`, `ExitWindowsEx`/`SHExitWindowsEx`, any `InitiateSystemShutdown*`/`InitiateShutdown*` spelling (`...ExW`), `NtShutdownSystem`, `NtSetSystemPowerState`, `SetSystemPowerState`, `rundll32` with a `powrprof` export or a power export of user32/shell32/advapi32, `psshutdown`, `wmic os ... shutdown`, `.Shutdown()`/`.Reboot()`/`.Win32Shutdown()` on a WMI/CIM operating-system object, `logoff`, `tsdiscon`, `rwinsta`, `reset session`, `WTSShutdownSystem`/`WTSLogoffSession`/`NtRaiseHardError`, `nircmd exitwin`, `init 0|6`, `shutdown -l`, `shutdown/s` and the other forms in which cmd.exe ends a command name at `/`, `,`, `=`, `;` or a quote (`shutdown.exe/r/t 0`, `shutdown"/s"`, `call shutdown/s`), `.InvokeMethod('Reboot')`, `where shutdown`/`Get-Command shutdown`, `systemctl poweroff`, a power word next to a process-starting API (including `ctypes`, `Add-Type`, `[scriptblock]::Create`), in any wrapper or after quote/caret splitting | `DENY`, in both profiles, never approvable |
 | Security tooling (`Set-MpPreference`, `netsh advfirewall`, `bcdedit`, `Set-ExecutionPolicy`), Claude credential stores, NEXUS's database, key files and runtime endpoint (see below) | `DENY` |
 | Registry writes, services (`sc`, `New-Service`), scheduled tasks (`schtasks`, `Register-ScheduledTask`), `setx` and machine/user environment changes, system package installs (`winget`, `choco`, `msiexec`, `npm -g`) | approval (RESTRICTED: `DENY`) |
 | Credential locations (`.ssh`, `.aws`, `cmdkey`, `vaultcmd`, Credential Manager, browser profiles) | approval |
@@ -449,7 +469,10 @@ that file judged too.
 
 `shutdown` as an identifier in program code (`gracefulShutdown()`, `server.shutdown()`) is not a power command.
 The power patterns have one source (`power-patterns.ts`) that both the command classifier and the content
-inspector use.
+inspector use, and the classifier's per-word name match applies the same cmd.exe rule (`cmdCommandName`: a name ends
+at `/`, `,`, `=`, `;` or a quote when a short switch follows, so `shutdown/index.ts` is not a power command).
+`cmd /c call file` runs any file as a batch whatever its extension, so a `call` of a file that is not named like a
+script is judged as a script and needs approval. `regsvr32` (a DLL or a remote scriptlet with `/i:http://...`) asks.
 
 ### NEXUS's runtime endpoint
 
@@ -496,10 +519,14 @@ run an interpreter, one without `PACKAGE_INSTALL` cannot install, one without `N
 
 - **STANDARD** keeps developer flows: project tests and builds run, unchanged scripts run, the hardening and the
   audit trail above apply.
-- **RESTRICTED** refuses inline interpreter code and nested-shell payloads, requires approval for any script an
-  agent wrote and for any package script an agent changed (and refuses dangerous ones), refuses network use unless
-  web tools are allowed, asks before every install, reads only the worktree (and read roots you added; the project
-  root is left out), and asks when a package script cannot be compared with the base commit.
+- **RESTRICTED** refuses inline interpreter code, nested-shell payloads and programs read from standard input,
+  requires approval for any script an agent wrote and for any package script an agent changed (and refuses
+  dangerous ones), refuses network use unless web tools are allowed, asks before every install, and asks when a
+  package script cannot be compared with the base commit. Its filesystem narrowing is exactly this: the `Read`,
+  `Glob` and `Grep` tools may read the worktree and read roots you added but not the project root, and the shell
+  scope of roles that cannot write (reviewer, verifier, planner ...) is the worktree plus those read roots. For
+  roles that write, the shell scope is the worktree in both profiles, so RESTRICTED does not narrow what a
+  writing agent's shell commands may name; it only asks or refuses more of what it can see.
 
 Neither profile is a sandbox. RESTRICTED makes NEXUS ask more and refuse more of what it can see; it does not
 stop a program from doing what the program does.
@@ -515,6 +542,30 @@ extended-length (`\\?\C:\`) spellings, alternate data streams (`file::$DATA`, `f
 `.git::$INDEX_ALLOCATION`), alternate casing, trailing dots and spaces, 8.3 short names (`GIT~1`), a sibling
 directory that shares a name prefix, `.git` pointer rewriting and nested-repository metadata. `src\..\x` is
 resolved lexically, as Windows does. A link that is created or retargeted after the check is not seen (see below).
+
+### Shell paths with variables
+
+In a write position (a redirect target, `dd of=`, the path of `Set-Content`/`Out-File`/`Copy-Item`/`Move-Item`/`New-Item`/`cp`/
+`mv`/`rm` ..., the path argument of `[IO.File]::Write*`/`Copy`/`Move`/`Delete`, `[IO.Directory]::*`, `StreamWriter`)
+a word with a variable is expanded where that can be done statically (`$PWD`, `.`, the home directory, TEMP, and
+literals assigned in the same command such as `$f = 'src\x.ts'`) and then checked like any other path. A word that
+stays unknown (any other variable, `$(...)`, a backtick, `$PROFILE`, `$PSScriptRoot`, a provider prefix such as
+`FileSystem::` or `Registry::`) asks. Reads with an unexpanded variable keep today's behaviour in both profiles.
+Content arguments (`Set-Content a.txt "total $total"`) are not paths and are not affected.
+
+### Git commands that write shared state
+
+A linked worktree shares its repository's configuration, remotes, refs, notes and object store with the user's
+original repository, so a command that writes them changes the user's repository. These ask for every role: any
+`git config` write (set, unset, add, rename/remove-section, edit; `--worktree` is not shared and stays allowed),
+`git remote add|remove|rename|set-url|set-head|prune`, `git branch -m|-M|-c|-C|-u|--set-upstream-to|--unset-upstream|
+--edit-description`, `git notes add|append|edit|copy|merge|remove|prune`, `git replace`, `git gc`, `repack`,
+`pack-refs`, `commit-graph`, `maintenance`, `reflog expire|delete`, `lfs install|uninstall|update|migrate|track`,
+`daemon`, `instaweb`, `difftool`, `mergetool`, `hook`, `submodule add|update|init|sync|foreach|deinit` and `worktree
+lock|unlock|repair`. Reads stay allowed: `git config --get|--list`, `git config <key>`, `git remote -v`, `git branch
+--list|--show-current|-vv`, `git notes list|show`, `git worktree list`, and the everyday commit/diff/log/status/add/
+restore/stash/switch/merge/cherry-pick commands. Nothing the role prompts tell agents to run is affected: NEXUS sets
+the commit identity itself, so an agent has no reason to run `git config user.*`.
 
 ### The security decision log
 
@@ -582,8 +633,13 @@ AppContainer, job object, VM or container); NEXUS does not provide one.
   user can. They cannot see compiled programs, commands built at run time, or what a build tool or test runner
   does with files in the tree. Restricted roles are denied commands that are not recognised as read-only,
   verification or install.
-- **Writes are only controlled for the file tools.** `Edit` and `Write` are confined to the worktree;
-  shell commands rely on the classifier's path checks.
+- **Writes are only controlled for the file tools.** `Edit` and `Write` are confined to the worktree by
+  canonical path. Shell commands rely on the classifier's path checks: a path word that is outside the worktree,
+  resolves outside through a junction, or contains a variable that cannot be expanded (`$PROFILE`, `$env:X`,
+  `$(...)`, a provider path such as `FileSystem::`) asks when it is in a write position of a command or redirect the
+  classifier knows writes, and the .NET file APIs (`[IO.File]::Write*`, `[IO.Directory]::*`, `StreamWriter`) are
+  checked the same way. A program that computes the path itself (a script, `node -e`) can still write anywhere
+  your user can.
 - **NEXUS-run commands skip the policy engine.** The dependency install in new worktrees and the project's
   check commands are executed by NEXUS itself (`runCommandLine`, no shell, with a timeout and output cap).
   They come from the project's lockfile and scripts, but install scripts and tests are project code. Since 0.3 they run
