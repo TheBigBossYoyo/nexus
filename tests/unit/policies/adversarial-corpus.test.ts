@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { BASE_FILES, CORPUS, type CorpusCase, type Expect } from '../../fixtures/adversarial-corpus'
 import { REVIEW_CASES } from '../../fixtures/adversarial-corpus-review'
 import { REVIEW2_CASES } from '../../fixtures/adversarial-corpus-review2'
+import { REVIEW3_CASES } from '../../fixtures/adversarial-corpus-review3'
 import { createFixtureRepo, git, type FixtureRepo } from '../../fixtures/malicious-repos'
 
 // 0.7 regression corpus: what the authorizer decides for direct, indirect, inline, package-manager and
@@ -34,7 +35,7 @@ async function decide(c: CorpusCase) {
 }
 
 describe('adversarial corpus', () => {
-  for (const c of [...CORPUS, ...REVIEW_CASES, ...REVIEW2_CASES]) {
+  for (const c of [...CORPUS, ...REVIEW_CASES, ...REVIEW2_CASES, ...REVIEW3_CASES]) {
     it(`[${c.group}] ${c.id}`, async () => {
       const d = await decide(c)
       expect(matches(d.behavior, c.expect), `${c.command} -> ${JSON.stringify(d)}`).toBe(true)

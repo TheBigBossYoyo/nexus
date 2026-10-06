@@ -567,6 +567,44 @@ lock|unlock|repair`. Reads stay allowed: `git config --get|--list`, `git config 
 restore/stash/switch/merge/cherry-pick commands. Nothing the role prompts tell agents to run is affected: NEXUS sets
 the commit identity itself, so an agent has no reason to run `git config user.*`.
 
+### The branch invariant
+
+For every agent role: **an agent's git commands never change which branch the worktree is on, and never write a ref
+other than by committing on the branch it is on.** A task worktree is on its own `nexus/<run>/<task>` branch; if an
+agent moved it onto the user's branch, the next commit would advance the user's branch. These ask (reason: "changes
+which branch this worktree is on or writes a branch or ref directly"):
+
+| Command | Asks | Stays allowed |
+|---|---|---|
+| `symbolic-ref` | two arguments, `-d`, `-m` | `symbolic-ref HEAD`, `--short` |
+| `switch` | every form | |
+| `checkout` | `<branch>`, `<sha>`, `-`, `@{-1}`, `-b -B -c -C --orphan --detach -t --track`, any word that is not an existing path | `checkout -- <paths>`, `checkout <tree-ish> -- <paths>`, `-p ... --`, `checkout <existing file>` (the 0.2 rule still asks before a path restore discards uncommitted changes) |
+| `fetch`, `pull` | a refspec with a destination (`src:dst`), `--update-head-ok` | plain `fetch`/`pull` (network policy as before) |
+| `push` | every form (a push to `.` or a local path says so) | |
+| `branch` | create, copy, force, delete (`x`, `-f`, `-d -D`, `-c -C`, `-m`) | `--show-current`, `-a`, `-r`, `--list`, `-v`, `--contains` |
+| `tag` | create, `-a`, `-f`, `-d` | `tag -l`, `--list` |
+| `update-ref` | every form except one ref under `refs/heads/nexus/` (NEXUS's namespace, which cannot name the user's branches) | |
+| `reset` | a commit-ish that is not HEAD-relative (`--soft main`, `--hard origin/main`, `--mixed <sha>`) | `reset HEAD file`, `reset -- file`, `reset --soft HEAD~1`, `HEAD^`, `@~n`, `ORIG_HEAD` (`reset --hard` still asks under the 0.2 rule that it discards uncommitted work) |
+| `rebase`, `am`, `fast-import`, `filter-branch`, `filter-repo`, `bisect` (except `log`), `stash branch`, `worktree add` | always | |
+
+`commit` (including `commit --amend`), `reset` to a HEAD-relative commit, `cherry-pick`, `revert` and `merge` stay
+allowed because they only move the worktree's own branch. `git merge <integration branch>` is what the orchestrator's
+own prompts tell agents to run after a conflict, and it is unaffected. NEXUS itself also refuses to commit or merge in a
+worktree whose HEAD is not its recorded task branch (see the git service), so the guard is two-sided: this one stops the
+command, that one stops the consequence if a command got through some other way (a script, an approved call).
+
+### Reaching Git's own entry indirectly
+
+A write, move or delete in a write position also asks when the path is a glob that can match `.git` (`.gi?`, `.g*`,
+`[.]git`, `.*`, `.[!.]*`; a bare `*` where hidden entries are matched: `-Force`, `-Hidden`, `dotglob`), when a hidden listing
+is piped into a writer (`Get-ChildItem -Hidden | Remove-Item`), and when a variable assigned a literal in the same command
+expands to it (`d=.git; echo x > $d`, `$n='.g'+'it'; Set-Content $n x`); a spelling made of joined literals
+(`'.gi'+'t'`) or a bash backslash escape (`.g\it`) is read as the name it makes. When the path resolves to exactly the
+top-level `.git` entry and the command writes, moves or deletes, it is refused as before. `tar -x`, `bsdtar -x`, `unzip`,
+`Expand-Archive` and `7z x` ask when they extract into the worktree root (no destination, `.`, or one that is computed),
+because an archive can carry a `.git`; extraction into a named subdirectory (`-C vendor`, `-d vendor`) is allowed, and so is
+listing (`tar -t`, `unzip -l`). NEXUS does not look inside the archive. `wininit` asks.
+
 ### The security decision log
 
 Every refusal, approval request and `ALLOW_WITH_AUDIT` is written to `security_decisions` (migration 011):

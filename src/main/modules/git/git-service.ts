@@ -388,12 +388,7 @@ export class GitService {
    */
   private async assertOnOwnBranch(own: TrustedWorktree): Promise<void> {
     if (own.branch === null) return
-    let head = ''
-    try {
-      head = (await readFile(join(own.gitDir, 'HEAD'), 'utf8')).trim()
-    } catch {
-      head = ''
-    }
+    const head = await readFile(join(own.gitDir, 'HEAD'), 'utf8').then((text) => text.trim()).catch(() => '')
     if (head === `ref: refs/heads/${own.branch}`) return
     const now = head.startsWith('ref: ') ? head.slice(5) : head === '' ? 'nothing readable' : `the commit ${head.slice(0, 12)}`
     throw new NexusError('invalid_state', `The working tree at ${own.root} is no longer on its branch ${own.branch} (its HEAD names ${now}). NEXUS will not commit or merge there.`, { cwd: own.root, branch: own.branch })
@@ -403,12 +398,7 @@ export class GitService {
   private async restoreOwnBranch(worktree: string): Promise<void> {
     const own = await this.trustedFor(worktree)
     if (!own || own.branch === null) return
-    let head = ''
-    try {
-      head = (await readFile(join(own.gitDir, 'HEAD'), 'utf8')).trim()
-    } catch {
-      head = ''
-    }
+    const head = await readFile(join(own.gitDir, 'HEAD'), 'utf8').then((text) => text.trim()).catch(() => '')
     if (head === `ref: refs/heads/${own.branch}`) return
     // `symbolic-ref` moves no branch and touches no file; the reset that follows makes the tree match.
     await this.run(worktree, ['symbolic-ref', 'HEAD', `refs/heads/${own.branch}`])

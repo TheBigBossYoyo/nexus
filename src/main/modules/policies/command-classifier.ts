@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
+import path from 'node:path'
 import { canonicalizePath, isPathInside, isSecretPath, isTopLevelGit, pathNamesGit } from './paths'
 import { EXEC_API, hasPowerApiText, NEXUS_DATA_TEXT, POWER_COMMAND_NAMES, POWER_WORDS } from './power-patterns'
 import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
@@ -72,6 +74,8 @@ class Analysis {
   readonly roots: string[]
   readonly prefixes: string[][]
   venv = false
+  /** The command text matches hidden entries (-Force, -Hidden, dotglob), so a bare `*` can match `.git`. */
+  hiddenGlob = false
   /** Literal variable assignments found in the command text, lowercase name to value. */
   readonly vars = new Map<string, string>()
 
@@ -101,6 +105,8 @@ export function classifyCommand(command: string, shell: Shell, opts: ClassifyOpt
   const a = new Analysis(opts)
   a.venv = /(^|[\\/\s])\.?(venv|virtualenv|env)[\\/](scripts|bin)[\\/]|\bactivate\b|VIRTUAL_ENV/i.test(command)
   collectAssignments(command, a.vars)
+  collectAssignments(squash(command), a.vars)
+  a.hiddenGlob = HIDDEN_FLAGS.test(command)
   try {
     analyzeText(command, shell, a, 0)
   } catch (e) {
@@ -178,7 +184,22 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
     a.ask('medium', 'network operation (.NET web client / BITS transfer)', 'NETWORK')
   }
   checkDotNetFileWrites(text, a)
-  for (const seg of tokenize(text, shell)) analyzeSegment(seg, shell, a, depth)
+  const segs = tokenize(text, shell)
+  segs.forEach((seg, i) => {
+    const next = segs[i + 1]
+    if (['get-childitem', 'gci', 'ls', 'dir'].includes(normalizeName(seg.words[0] ?? '')) && seg.words.some((w) => /^-(hidden|force|attributes|h)$/i.test(w)) && next?.sep === '|' && GIT_ENTRY_WRITERS.has(normalizeName(next.words[0] ?? ''))) {
+      a.ask('high', "a listing of hidden entries is piped into a command that writes or deletes: it would reach Git's own .git entry", 'SYSTEM_CHANGE')
+    }
+  })
+  for (const seg of segs) analyzeSegment(seg, shell, a, depth)
+  // Adjacent literals joined ('.gi'+'t') are read as one word by the shell: look at that text too.
+  const joined = squash(text)
+  if (joined !== text && /(["'])\s*\+\s*(["'])|(["'])(["'])/.test(text)) {
+    for (const seg of tokenize(joined, shell)) {
+      const n = normalizeName(seg.words[0] ?? '')
+      checkWords(seg, seg.words, a, DELETE_CMDS.has(n) || MOVE_CMDS.has(n), n === 'git')
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -530,6 +551,7 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
   for (const w of candidates) {
     if (w === '') continue
     if ((writePositions.has(w) || /^of=/.test(w)) && !HARMLESS_REDIRECT_TARGET.has(w.toLowerCase())) {
+      if (globCanMatchGit(w.replace(/^of=/, ''), a.hiddenGlob)) a.ask('high', `a path pattern that can match Git's own .git entry: ${w}`, 'SYSTEM_CHANGE')
       const risk = variablePathRisk(w.replace(/^of=/, ''), a)
       if (risk !== null) a.ask('medium', `writes to a path that is not shown to stay inside the worktree: ${risk}`)
     }
@@ -537,8 +559,9 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
       if (!/\s/.test(v) || /[\\/]/.test(v)) {
         if (isSecretPath(v)) a.ask('high', `accessing secrets: ${v}`)
       }
-      const namesGit = pathNamesGit(v, a.roots[0])
-      const topGit = namesGit && a.roots[0] !== undefined && isTopLevelGit(v, a.roots[0])
+      const variants = gitVariants(v, a)
+      const namesGit = variants.some((x) => pathNamesGit(x, a.roots[0]))
+      const topGit = namesGit && a.roots[0] !== undefined && variants.some((x) => isTopLevelGit(x, a.roots[0] ?? ''))
       if (topGit && !isGit && (writer || destructive || redirectTargets.has(w))) {
         a.add('forbidden', 'high', GIT_ENTRY_REASON, 'SYSTEM_CHANGE')
       } else if (destructive && namesGit) {
@@ -566,6 +589,7 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
 /** Simple literal assignments in the command text (`$f = 'dir\x'`, `d=/tmp/x`), so `$f` and `$d` can be resolved. */
 function collectAssignments(text: string, vars: Map<string, string>): void {
   for (const m of text.matchAll(/\$([A-Za-z_]\w*)\s*=\s*(?:'([^']*)'|"([^"$`]*)")/g)) vars.set((m[1] ?? '').toLowerCase(), m[2] ?? m[3] ?? '')
+  for (const m of text.matchAll(/\$([A-Za-z_]\w*)\s*=\s*([^\s;|&"'$`()]+)(?=\s*(?:[;\r\n]|$))/g)) vars.set((m[1] ?? '').toLowerCase(), m[2] ?? '')
   for (const m of text.matchAll(/(?:^|[;&|\s])([A-Za-z_]\w*)=(?:'([^']*)'|"([^"$`]*)"|([^\s;&|"'$`]+))/g)) vars.set((m[1] ?? '').toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '')
 }
 
@@ -625,6 +649,78 @@ function checkDotNetFileWrites(text: string, a: Analysis): void {
     const risk = variablePathRisk(t, a) ?? outsideRoots(t, a)
     if (risk !== null) a.ask('medium', `writes through a .NET file API: ${risk}`)
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Git's own entry reached indirectly: globs, variables, concatenations, archives
+// ---------------------------------------------------------------------------------------------
+
+/** Spellings of one word the shell or Windows may read as something else: concatenated literals, bash backslash escapes, expanded variables. */
+function gitVariants(v: string, a: Analysis): string[] {
+  const out = [v]
+  if (v.includes('+')) out.push(v.replace(/\+/g, ''))
+  if (/\\[A-Za-z]/.test(v)) out.push(v.replace(/\\(?=[A-Za-z])/g, ''))
+  if (/[$%]/.test(v)) {
+    const e = expandPathVars(v, a)
+    if (e !== null && e !== v) out.push(e)
+  }
+  return out
+}
+
+/** True when a glob segment can match `.git`. A bare `*` only does so where hidden entries are matched (-Force, -Hidden, dotglob). */
+function globCanMatchGit(v: string, hidden: boolean): boolean {
+  const segs = v.split(/[\\/]/).filter((s) => s !== '')
+  return segs.some((seg) => {
+    if (!/[*?[]/.test(seg)) return false
+    if (/^\*+$/.test(seg)) return hidden && segs.length === 1
+    if (!/^[.[]/.test(seg)) return false
+    try {
+      const re = seg
+        .replace(/[.+^${}()|\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.')
+        .replace(/\[!/g, '[^')
+      return new RegExp(`^${re}$`, 'i').test('.git')
+    } catch {
+      return false
+    }
+  })
+}
+
+const HIDDEN_FLAGS = /-force\b|-hidden\b|dotglob|-attributes\s+hidden|\bls\s+-\w*a/i
+
+/** `tar -xf`, `unzip`, `Expand-Archive`, `7z x` into the worktree root can create a `.git` from the archive. */
+function analyzeExtract(cmd: string, args: string[], lc: string[], a: Analysis): void {
+  const base = a.roots[0]
+  let extracting: boolean
+  let dest: string | undefined
+  if (cmd === 'tar' || cmd === 'bsdtar') {
+    extracting = lc.some((x) => x === '--extract' || x === '--get' || /^-[a-z]*x[a-z]*$/.test(x)) || /^x/.test(lc[0] ?? '')
+    const c = lc.findIndex((x) => x === '-c' || x === '--directory')
+    dest = c >= 0 ? args[c + 1] : args.find((x) => /^--directory=/i.test(x))?.slice(12)
+  } else if (cmd === 'unzip') {
+    extracting = !lc.some((x) => x === '-l' || x === '-v' || x === '-t' || x === '-z')
+    const d = lc.indexOf('-d')
+    dest = d >= 0 ? args[d + 1] : undefined
+  } else if (cmd === 'expand-archive') {
+    extracting = true
+    const d = lc.findIndex((x) => x === '-destinationpath' || x === '-dp')
+    dest = d >= 0 ? args[d + 1] : undefined
+  } else {
+    // 7z / 7za / 7zr: `7z x archive -oDIR`
+    extracting = ['x', 'e'].includes(lc.find((x) => !x.startsWith('-')) ?? '')
+    dest = args.find((x) => /^-o./i.test(x))?.slice(2)
+  }
+  if (!extracting) return
+  let intoRoot = dest === undefined || dest === '' || dest === '.' || dest === './' || dest === '.\\'
+  if (!intoRoot && base !== undefined && !/[$%`]/.test(dest ?? '')) {
+    try {
+      intoRoot = path.relative(base, path.resolve(base, dest ?? '')) === ''
+    } catch {
+      intoRoot = false
+    }
+  } else if (!intoRoot) intoRoot = true // a computed destination cannot be shown to be below the root
+  if (intoRoot) a.ask('high', `${cmd} extracts into the worktree root, and an archive can carry its own .git`, 'SYSTEM_CHANGE')
 }
 
 function valuesOf(word: string): string[] {
@@ -735,6 +831,7 @@ const HIGH_ALWAYS: Record<string, string> = {
   setx: 'setx changes persistent environment variables',
   schtasks: 'schtasks manages scheduled tasks',
   rundll32: 'rundll32 runs arbitrary DLL entry points',
+  wininit: 'wininit is a Windows session and power process',
   regsvr32: 'regsvr32 loads and runs DLLs and remote scriptlets (/i:http://...)',
   powercfg: 'powercfg changes power and sleep configuration',
   format: 'format erases a volume',
@@ -910,6 +1007,15 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
       if (['install', 'upgrade', 'uninstall', 'remove', 'update', 'import', 'source', 'add', 'sync'].includes(pos[0] ?? '')) {
         a.ask('high', `system software change (${cmd} ${pos[0]})`, 'SYSTEM_CHANGE')
       }
+      break
+    case 'tar':
+    case 'bsdtar':
+    case 'unzip':
+    case 'expand-archive':
+    case '7z':
+    case '7za':
+    case '7zr':
+      analyzeExtract(cmd, args, lc, a)
       break
     case 'nircmd':
     case 'nircmdc':
@@ -1110,6 +1216,103 @@ function sharedGitState(sub: string, rest: string[], rlc: string[], rpos: string
   }
 }
 
+const BRANCH_REASON = 'changes which branch this worktree is on or writes a branch or ref directly'
+/** HEAD-relative commit-ishes: the worktree's own history. */
+const HEAD_RELATIVE = /^(?:HEAD|@|ORIG_HEAD)(?:[~^]\d*)*(?:@\{[^}]*\})?$|^@\{[^}]*\}$/i
+
+/** True when `word` is an existing file or directory in the worktree and has no ref syntax: a path, not a branch. */
+function isExistingPath(word: string, a: Analysis): boolean {
+  const base = a.roots[0]
+  if (base === undefined || /[@^~:]|\.\./.test(word)) return false
+  try {
+    return existsSync(path.resolve(base, word))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The invariant for every agent role: git commands never change which branch the worktree is on, and never write a
+ * ref other than by committing on the branch it is on. Path restores (`checkout -- file`, `restore`, `reset HEAD
+ * file`) and anything that only adds to or rewrites the tip of the worktree's own branch (`commit`, `commit
+ * --amend`, `reset` to a HEAD-relative commit, `cherry-pick`, `merge`) stay allowed.
+ */
+function branchInvariant(sub: string, rest: string[], rlc: string[], rpos: string[], a: Analysis): void {
+  const ask = (what: string): void => a.ask('high', `git ${what} ${BRANCH_REASON}`, 'DESTRUCTIVE')
+  const hasFlag = (...names: string[]): boolean => rlc.some((x) => names.includes(x) || names.some((n) => n.startsWith('--') && x.startsWith(n + '=')))
+  const dashdash = rest.includes('--')
+  switch (sub) {
+    case 'symbolic-ref':
+      if (rpos.length >= 2 || hasFlag('-d', '--delete', '-m')) ask('symbolic-ref')
+      break
+    case 'switch':
+      ask('switch')
+      break
+    case 'checkout': {
+      const moving = hasFlag('-b', '-B', '-c', '-C', '--orphan', '--detach', '-d', '-t', '--track', '--no-track', '--merge', '-m', '--conflict') || rest.some((x) => /^-[a-zA-Z]*[bBtd]$/.test(x))
+      if (moving || rest.includes('-')) ask('checkout')
+      else if (dashdash) break // checkout [<tree-ish>] -- <paths>, with or without -p
+      else if (rpos.length > 0 && !rpos.every((w) => isExistingPath(w, a))) ask('checkout of a branch or commit')
+      break
+    }
+    case 'fetch':
+    case 'pull': {
+      const refspecs = rpos.slice(1).filter((w) => w.includes(':') && !/^[a-z][a-z0-9+.-]*:\/\//i.test(w))
+      if (hasFlag('--update-head-ok', '-u') || refspecs.length > 0) ask(`${sub} with a destination ref`)
+      break
+    }
+    case 'push':
+      // Any push asks (see below); one that targets a local repository (`git push . HEAD:main`) writes a branch directly.
+      if (rpos[0] === '.' || (rpos[0] !== undefined && /^(?:[a-z]:|[\\/.])/i.test(rpos[0]) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(rpos[0]))) ask('push to a local path')
+      break
+    case 'branch': {
+      const listing = hasFlag('--list', '-l', '--show-current', '-a', '--all', '-r', '--remotes', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--sort', '--format', '-v', '-vv', '--verbose')
+      if (hasFlag('-d', '-D', '-f', '--force', '-c', '-C', '--copy', '--delete') || rlc.some((x) => /^-[a-z]*[dDfcC][a-z]*$/.test(x) && !x.startsWith('--')) || (rpos.length > 0 && !listing)) ask('branch create/copy/force/delete')
+      break
+    }
+    case 'tag': {
+      const listing = hasFlag('-l', '--list', '-n', '--contains', '--no-contains', '--points-at', '--merged', '--no-merged', '--sort', '--format', '-v', '--verify')
+      if (hasFlag('-f', '--force', '-d', '--delete', '-a', '-s', '-m', '-u') || (rpos.length > 0 && !listing)) ask('tag create/force/delete')
+      break
+    }
+    case 'update-ref': {
+      // Only NEXUS's own branch namespace was free in 0.6; HEAD and every other ref ask.
+      const ref = rpos[0]
+      if (hasFlag('--stdin', '-d', '--no-deref') || ref === undefined || !ref.startsWith('refs/heads/nexus/')) ask('update-ref')
+      break
+    }
+    case 'reset': {
+      const modes = hasFlag('--soft', '--mixed', '--hard', '--keep', '--merge')
+      const commit = rpos[0]
+      if (commit === undefined || dashdash && rest.indexOf('--') <= rest.indexOf(commit)) break // no commit given, or a path reset after `--`
+      if (HEAD_RELATIVE.test(commit)) break
+      if (!modes && isExistingPath(commit, a)) break // `git reset file`
+      ask('reset to another branch or commit')
+      break
+    }
+    case 'rebase':
+      ask('rebase')
+      break
+    case 'am':
+    case 'fast-import':
+    case 'filter-branch':
+    case 'filter-repo':
+      ask(sub)
+      break
+    case 'bisect':
+      if (!['log', 'visualize', 'view', 'terms'].includes(rpos[0]?.toLowerCase() ?? '')) ask('bisect')
+      break
+    case 'stash':
+      if (rpos[0]?.toLowerCase() === 'branch') ask('stash branch')
+      break
+    case 'worktree':
+      if (rpos[0]?.toLowerCase() === 'add') ask('worktree add')
+      break
+    default:
+      break
+  }
+}
+
 function analyzeGit(args: string[], lc: string[], a: Analysis): void {
   let i = 0
   while (i < args.length) {
@@ -1138,6 +1341,7 @@ function analyzeGit(args: string[], lc: string[], a: Analysis): void {
   if (sub === undefined) return
   const hasFlag = (...names: string[]): boolean => rlc.some((x) => names.includes(x))
   sharedGitState(sub, rest, rlc, rpos, rshort, a)
+  branchInvariant(sub, rest, rlc, rpos, a)
 
   switch (sub) {
     case 'push': {

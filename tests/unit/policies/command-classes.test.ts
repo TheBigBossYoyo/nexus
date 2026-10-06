@@ -48,17 +48,10 @@ describe('command classes: local Git is GIT_LOCAL and needs no approval for writ
     'git commit --amend -m "reworded"',
     'git commit -F msg.txt',
     'git commit -F - < msg.txt',
-    'git branch feature/x',
     'git worktree list',
-    'git worktree add wt2',
     'git stash',
     'git stash pop',
-    'git switch main',
-    'git switch -c feature/y',
-    'git checkout main',
-    'git checkout -b feature/z',
     'git merge feature',
-    'git tag v1.0.0',
     'git add -A && git commit -m "x" && git status',
   ])('bash: %s', (c) => {
     const r = bash(c)
@@ -66,7 +59,7 @@ describe('command classes: local Git is GIT_LOCAL and needs no approval for writ
     expect(r.commandClass).toBe('GIT_LOCAL')
   })
 
-  it.each(['git add .', 'git commit -m "msg"', 'git commit --amend --no-edit', 'git worktree list', 'git stash', 'git switch main'])(
+  it.each(['git add .', 'git commit -m "msg"', 'git commit --amend --no-edit', 'git worktree list', 'git stash'])(
     'powershell: %s',
     (c) => {
       const r = ps(c)
