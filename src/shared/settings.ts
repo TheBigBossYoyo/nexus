@@ -210,5 +210,8 @@ export function sensitiveSettingsChanges(before: Settings, after: Settings): str
   for (const prefix of after.permissions.safeCommandPrefixes) if (!prefixes.has(prefix)) changes.push(short(`Let agents run commands that begin with "${prefix}" without asking`))
   if (after.permissions.allowNetworkTools && !before.permissions.allowNetworkTools) changes.push('Let read-only agents fetch pages from the web')
   if (before.execution.profile === 'RESTRICTED' && after.execution.profile === 'STANDARD') changes.push('Lower the execution profile from RESTRICTED to STANDARD')
+  if (after.memory.autoApproveVerifierMemory && !before.memory.autoApproveVerifierMemory) changes.push('Keep what verifier agents propose for the project memory without your review')
+  if (!after.claude.subscriptionMode && before.claude.subscriptionMode) changes.push('Let API keys from the environment reach the agent sessions')
+  if (after.advanced.debugSdk && !before.advanced.debugSdk) changes.push('Write the debug output of the Claude runtime to the NEXUS log (it can contain prompts and tool input)')
   return changes
 }

@@ -116,8 +116,16 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     },
     'projects.get': ({ projectId }) => repos.projects.require(projectId),
     'projects.reprofile': ({ projectId }) => projects.reprofile(projectId),
-    'projects.update': ({ projectId, respectProjectClaudeConfig }) =>
-      repos.projects.update(projectId, { respectProjectClaudeConfig }),
+    'projects.update': async ({ projectId, respectProjectClaudeConfig }) => {
+      const project = repos.projects.require(projectId)
+      // Loading a repository's own Claude configuration lets that repository run its hooks and set the session's
+      // environment, outside NEXUS's policy. Switching it on is confirmed like a program in the settings.
+      if (respectProjectClaudeConfig && !project.respectProjectClaudeConfig && ctx.confirmSettings) {
+        const ok = await ctx.confirmSettings([`Load the Claude configuration of the repository "${project.name}" (.claude/settings.json, CLAUDE.md). Its hooks are programs that run on this computer outside NEXUS's policy, and it can set the environment of the agent sessions, including where they send their credentials. Do this only for a repository you trust.`])
+        if (!ok) throw new NexusError('invalid_state', 'The change was not confirmed, so the project is as it was.')
+      }
+      return repos.projects.update(projectId, { respectProjectClaudeConfig })
+    },
     'projects.remove': ({ projectId }) => {
       const active = repos.runs.listByProject(projectId).filter((r) => !TERMINAL_RUN_STATES.includes(r.state))
       if (active.length > 0) {

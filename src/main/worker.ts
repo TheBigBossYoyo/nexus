@@ -34,8 +34,31 @@ function call(leaseId: string, method: WorkerCallMethod, args: unknown[]): Promi
   return new Promise((resolve, reject) => {
     const id = nextCall++
     calls.set(id, { resolve, reject })
+    // The policy answers at once; only a human approval may take as long as the human does. A decision that
+    // does not come is a refusal, not a session that hangs.
+    if (method !== 'requestApproval') {
+      const timer = setTimeout(() => {
+        if (calls.delete(id)) reject(new Error('The runtime did not answer in time.'))
+      }, DECISION_TIMEOUT_MS)
+      timer.unref()
+    }
     send({ t: 'call', id, leaseId, method, args })
   })
+}
+
+const DECISION_TIMEOUT_MS = 60_000
+
+/**
+ * The environment of the processes a session starts (the provider's own process and, through it, the agent's
+ * shells): this worker's environment without what belongs to the worker itself. With those variables an
+ * Electron program an agent starts would run as plain Node and inherit the channel to the runtime's name.
+ */
+function sessionEnvironment(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env }
+  for (const name of Object.keys(env)) {
+    if (name === 'ELECTRON_RUN_AS_NODE' || name === 'NEXUS_WORKER_ID' || name.startsWith('NODE_CHANNEL_')) delete env[name]
+  }
+  return env
 }
 
 function buildRuntimes(config: WorkerConfig): Map<string, AgentRuntime> {
@@ -55,6 +78,7 @@ function buildRuntimes(config: WorkerConfig): Map<string, AgentRuntime> {
         ...(claude.executablePath ? { executablePath: claude.executablePath } : {}),
         resolveExecutable: () => resolveClaudeExecutable(claude.resourcesPath ? { resourcesPath: claude.resourcesPath } : {}),
         debug: claude.debug,
+        processEnv: sessionEnvironment(),
         ...(claude.debug ? { logger: (line: string) => send({ t: 'log', line: `[claude] ${line}` }) } : {}),
       }),
     )

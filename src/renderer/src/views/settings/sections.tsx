@@ -168,23 +168,6 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
           />
         )}
       </Field>
-      <Field
-        label="Execution profile"
-        hint="STANDARD gates agent commands and scripts as before. RESTRICTED gates them more strictly. Neither is a sandbox."
-      >
-        {(id) => (
-          <Select
-            id={id}
-            value={e.profile}
-            onChange={(v) => set('execution', { profile: v })}
-            options={[
-              { value: 'STANDARD', label: 'STANDARD' },
-              { value: 'RESTRICTED', label: 'RESTRICTED' },
-            ]}
-            data-testid="exec-profile"
-          />
-        )}
-      </Field>
       <div className="grid grid-cols-2 gap-3">
         {num('Max parallel agents (BALANCED)', 'maxParallelAgents', 1, 16, 'BALANCED uses at most 4')}
         {num('Max agents (MAXIMUM)', 'maximumPresetAgents', 1, 16)}

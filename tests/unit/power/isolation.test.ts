@@ -19,7 +19,7 @@ function sources(dir: string): string[] {
 }
 
 const files = sources(SRC).map((path) => ({ path: relative(ROOT, path).replace(/\\/g, '/'), text: readFileSync(path, 'utf8') }))
-const importsOf = (text: string): string[] => [...text.matchAll(/(?:from|import\()\s*['"]([^'"]+)['"]/g)].map((m) => m[1] ?? '')
+const importsOf = (text: string): string[] => [...text.matchAll(/(?:from|import\(|require\()\s*['"]([^'"]+)['"]/g)].map((m) => m[1] ?? '')
 
 /**
  * The power boundary, checked against the source tree: who can reach the power controller, and that no
@@ -29,7 +29,8 @@ describe('power control isolation', () => {
   it('only the overnight supervisor and the runtime core import the power module', () => {
     const importers = files
       .filter((f) => !f.path.startsWith('src/main/modules/power/'))
-      .filter((f) => importsOf(f.text).some((i) => /(^|\/)modules\/power(\/|$)|^\.\/power$|^\.\.\/power$/.test(i)))
+      // Any path whose last or middle segment is the power module, however it is reached (`../power`, `../../power/index`, `./power/windows-power-controller`).
+      .filter((f) => importsOf(f.text).some((i) => /(^|\/)power(\/|$)/.test(i)))
       .map((f) => f.path)
       .sort()
     // 0.7: the runtime core is where the controller is constructed. The window's process, the workers and the

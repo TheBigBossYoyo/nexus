@@ -47,10 +47,11 @@ const endpoint = () => {
     return null
   }
 }
+// Asked of Windows, not of a process handle this script may still hold: a process that has ended but whose handle
+// is open somewhere answers a signal check as if it were alive.
 const alive = (pid) => {
   try {
-    process.kill(pid, 0)
-    return true
+    return execFileSync('tasklist', ['/FI', `PID eq ${Number(pid)}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true }).includes(`"${Number(pid)}"`)
   } catch {
     return false
   }
@@ -158,7 +159,7 @@ try {
       const child = app.process()
       const exited = new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)))
       void app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.close())).catch(() => undefined)
-      await Promise.race([exited, sleep(20_000)])
+      const sawExit = await Promise.race([exited.then(() => true), sleep(20_000).then(() => false)])
       await sleep(3000)
       const windowGone = !alive(child.pid)
       const runtimeAliveWithoutWindow = alive(before.runtime.pid)
@@ -168,7 +169,7 @@ try {
       const after = await call('runtime.status')
       let eventsWhileClosed = 0
       for (const runId of runIds) eventsWhileClosed += (await call('events.list', { runId, limit: 5000 })).filter((e) => e.seq > seqBefore[runId] && e.createdAt > before.at).length
-      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid: child.pid, reopenedAt: new Date().toISOString() }
+      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid: child.pid, windowExitSeen: sawExit, windowExitCode: child.exitCode, reopenedAt: new Date().toISOString() }
       log('window reopened', JSON.stringify({ windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: evidence.windowClosed.sameRuntime, eventsWhileClosed }))
       continue
     }

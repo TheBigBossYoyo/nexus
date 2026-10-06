@@ -26,10 +26,10 @@ Mission composer → Mode **OVERNIGHT** → set the policy → tick
 "I authorize NEXUS to control Windows power state for this run." → START OVERNIGHT RUN → confirm.
 
 The confirmation is per run and is asked twice: in the composer, and then in a native Windows dialog that lists
-the policy. Since 0.7 the runtime process asks, and the dialog is shown by the main process of the window that is
-connected to it (the runtime sends one of three fixed question frames over the local pipe; see ARCHITECTURE.md). When no
-window is connected, the Electron host of the runtime shows the dialog itself; where nobody can show it the answer is
-no. The native dialog is the control: a script in the renderer cannot click it. A later change that gives NEXUS more power (another end action, force close, more conditions)
+the policy. Since 0.7 the runtime process asks and shows the dialog itself; the question never travels over the local pipe, so
+neither a script in the renderer nor another client of the pipe can answer it. Where nobody can show it the answer is
+no. (A program running as the same Windows user could still operate the desktop and click the dialog; the dialog is not
+a boundary against that.) A later change that gives NEXUS more power (another end action, force close, more conditions)
 asks the native dialog again.
 
 `overnight.start` stores, in `overnight_runs`:
@@ -182,7 +182,7 @@ Since 0.7 the mission, the report and the power action belong to the **runtime p
   Cancel shutdown, Cancel mission) and, below, the runtime's own entries (Open NEXUS, Open Control Center, Pause or
   Resume dispatch, Stop NEXUS...). Without an overnight run it shows the runtime's state and those entries.
 - **"Stop NEXUS"** (the tray, or Runtime diagnostics; channel `runtime.stop`) stops the runtime. With an overnight run
-  live it asks first, in a native dialog shown by the connected window or, with none, by the runtime: stop and leave the
+  live it asks first, in a native dialog of the runtime process: stop and leave the
   Windows timer armed (when one is pending), cancel the mission and its shutdown and then stop, or return. With other
   work active it asks whether to stop the agent sessions. A stop that nobody can be asked about is not carried out.
   A sign-out of Windows or an operating-system request to quit stops the runtime without a question.

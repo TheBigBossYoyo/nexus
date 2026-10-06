@@ -31,7 +31,8 @@ the whole application.
 
 The runtime core imports nothing from Electron. The Electron host gives it the tray, notifications, the
 user-bound key store (DPAPI) and the power-save blocker. A second host, `src/main/runtime-node.ts`, runs the same
-core under plain Node; tests use it to start, kill and restart a real runtime process without a window.
+core under plain Node; tests use it to start, kill and restart a real runtime process without a window. It is
+built for tests and is not part of the package.
 
 No WSL, no Docker, no service, no administrator rights. Everything runs as the signed-in user.
 
@@ -49,7 +50,8 @@ No WSL, no Docker, no service, no administrator rights. Everything runs as the s
   work is active; or by itself after two minutes with no window connected, no run working, nothing on the queue
   and no schedule switched on. A runtime that has a reason to stay shows why in `runtime.status`.
 - **One runtime per data directory**: the Electron host takes a single-instance lock on its own profile
-  directory (`<data>/runtime-profile`).
+  directory (`<data>/runtime-profile`), and every host refuses to start while a runtime answers on the pipe the
+  endpoint file names.
 - **A runtime of another NEXUS version** (older or newer) that is still running is asked to stop by the window,
   which then starts its own. A runtime that speaks another protocol version is not talked to; the window says so.
 
@@ -63,7 +65,7 @@ No WSL, no Docker, no service, no administrator rights. Everything runs as the s
   version and protocol. It is written whole (temporary file, rename); the access list is narrowed with
   `icacls` to the user, SYSTEM and administrators on the temporary file, before it gets its name.
   `runtime.status` says whether that succeeded; when it did not, the list inherited from the user's profile
-  applies. NEXUS sets no access list on the pipe itself: what protects the pipe is the handshake.
+  applies, and with a data directory outside the profile the runtime does not start. NEXUS sets no access list on the pipe itself: what protects the pipe is the handshake.
 - **Handshake**: mutual, by HMAC-SHA-256 over both sides' nonces with the token as key. The runtime proves
   itself first; the client checks that proof before it sends its own. The token never crosses the pipe. A
   connection that has not completed the handshake within five seconds is closed; before the handshake no frame
@@ -75,14 +77,19 @@ No WSL, no Docker, no service, no administrator rights. Everything runs as the s
   that channel's strict schema before a handler runs. There is no channel that takes a command line, a file
   path to read or write, or code.
 - **Events**: after the handshake a client receives every push message.
-- **Questions to the user** (authorize overnight power control, trust an Arena case, pick a folder) are sent by
-  the runtime to the connected desktop as a closed set of `ui.req` frames and shown there as native dialogs.
-  With no window connected the Electron host shows them itself; under the Node host they fail. A question that
-  nobody can see is never answered yes.
+- **Confirmations** (authorize overnight power control, trust an Arena case, a settings change that starts a
+  program or widens what agents may do unasked, stop while work runs) are shown by the runtime process itself,
+  in a native dialog, and never travel over the pipe. A client of the pipe only has to hold the token; it must
+  not be able to answer the question it caused. Under the Node host, which can show nothing, they fail. A
+  question that nobody can see is never answered yes.
+- **Folder pickers** and opening the data directory carry no authority (a path can be given directly) and are
+  sent to the connected window as `ui.req` frames; with no window the Electron host shows them itself.
 - **Reconnect**: the client reconnects with backoff. While it is disconnected every request fails at once with
   `runtime_unavailable`; nothing is queued and nothing old is shown as current. After a reconnect the window
   reads everything again.
 - **Slow readers**: a client with more than 64 MB unsent is dropped. The runtime never waits for a window.
+- **Bounds**: at most 16 connections may be waiting to authenticate and 64 may exist; beyond that a new one is
+  closed at once.
 
 ### What the protocol protects against, and what it does not
 
@@ -91,10 +98,21 @@ against a process that can reach the pipe but cannot read the user's files.
 
 It does **not** protect against a process running as the same user that reads the endpoint file. Such a process
 can call every channel the window can. Windows offers no boundary between processes of one user that NEXUS could
-rely on here; the same process could as well drive the window. What stays out of reach even then: provider
-credentials (NEXUS never holds them), a channel that executes a command, and raw power control. Power actions
-exist only as typed operations of the overnight supervisor, which checks the persisted, signed authorization
-and asks the user in a native dialog.
+rely on here; the same process could as well drive the window. What stays out of reach of the pipe even then: provider
+credentials (NEXUS never holds them) and raw power control. Power actions exist only as typed operations of the
+overnight supervisor, which checks the persisted, signed authorization; that authorization, and every settings
+change through which a program could be started (the Claude executable, an MCP server, a command prefix that
+needs no approval), is confirmed in a dialog of the runtime process, which a pipe client cannot answer.
+
+Two limits of that statement, stated plainly:
+
+- A process of the same user can also operate the user's desktop: it can click a dialog. The dialog raises the
+  effort from "send one frame" to "automate the user interface"; it is not a boundary against such a process.
+- Code that NEXUS allows an agent to run (a test, a build script) is a process of the same user. It can read
+  the endpoint file and call the channels the window can, for example resolve an approval. The policy layer
+  refuses obvious access to the endpoint file and the pipe, and anything that code could do through the pipe
+  it can already do directly as the user. Closing this needs OS isolation of what agents run, which is the
+  subject of `V0_8_PROPOSAL.md`.
 
 ## 4. Database ownership
 

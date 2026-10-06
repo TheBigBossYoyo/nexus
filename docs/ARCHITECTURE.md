@@ -162,11 +162,13 @@ memory. No WSL, no Docker, no Windows service, no administrator rights: every pr
   channel must be one of the closed contract in `src/shared/ipc.ts` and the input must pass that channel's strict schema
   before a handler runs. No channel takes a command line, a file path to read or write, or code.
 - **Events.** After the handshake a client receives every push message.
-- **Questions to the user.** Authorizing overnight power control, trusting an Arena case, picking a folder and opening
-  the data directory are sent by the runtime to the connected window as one of three fixed `ui.req` frames (`confirm`,
-  `pickDirectory`, `openDataDir`) and shown there as native dialogs by the window's main process, not by page script.
-  With no window connected the Electron host of the runtime shows them natively; under the Node host they fail. A
-  question nobody can see is never answered yes.
+- **Questions to the user.** A confirmation (authorizing overnight power control, trusting an Arena case, a settings
+  change that starts a program or widens what agents may do unasked, stopping while work runs) is shown by the runtime
+  process itself in a native dialog and never travels over the pipe, so a client of the pipe cannot answer the question
+  it caused. Picking a folder and opening the data directory carry no authority; they are sent to the connected window
+  as `ui.req` frames (`pickDirectory`, `openDataDir`) and shown by the window's main process, or by the Electron host of
+  the runtime when no window is connected. Under the Node host a confirmation fails. A question nobody can see is never
+  answered yes.
 - **Reconnect.** The client reconnects with backoff. While it is disconnected every request fails at once with
   `runtime_unavailable`; nothing is queued and nothing old is shown as current. The window marks the page stale and
   inert, then reads everything again.
