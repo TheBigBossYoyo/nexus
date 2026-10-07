@@ -1,7 +1,6 @@
 # NEXUS 0.7.1 progress
 
-Branch `nexus-0.7.1-token-intelligence`, from `main` at `v0.7.0`. Not merged, not tagged. Work stopped on
-2026-10-07 at the user's request (the machine was being closed); everything is committed.
+Branch `nexus-0.7.1-token-intelligence`, from `main` at `v0.7.0`. Not merged, not tagged.
 
 ## Done
 
@@ -37,34 +36,11 @@ Defaults that follow from this: failure-first check output ON; stable prefix OFF
 pressure rotation OFF; Context Graph in agent context OFF (retrieval evidence is good, the one real pair
 showed more tokens and no quality difference, and the quality gate needs eight pairs).
 
-## Not done (in order)
+## State on 2026-10-07, end of work
 
-1. **Fix the security review findings** (review finished; no CRITICAL or HIGH):
-   - MEDIUM: titles of one program's knowledge reach other runs through section summaries and the map.
-     Sections under `programs/<id>` have no `programId`; `describeChildren` names program-scoped children;
-     `renderMap` lists children unfiltered. Fix: give sections under a program its `programId`
-     (`projection.ts` `Builder.section`), name only children visible to the parent in `describeChildren`
-     (`service.ts`), and pass the run's program to `renderMap` (`render.ts`, `orchestrator/context-graph.ts`).
-   - LOW-MEDIUM: no cap on notes per run; `rebuildSummaries` pages every derived node on each note write.
-     Fix: cap (for example 50 notes per run) in `writeNote`; fetch `onlyIds` by id instead of paging.
-   - LOW: `renderDetail` prints source file names without `oneLine` (`render.ts`, the "Source files" line).
-   - LOW: the duplicate-note check in `writeNote` ignores `programId`.
-   - LOW (optional): facts built from README text are labelled verified.
-2. **Rerun the two reviews that were stopped before reporting**: graph and memory correctness; token
-   accounting, SDK use and test quality. Their prompts are in the session that launched them; the scopes are
-   the files listed under "Done". Fix what they find.
-3. **Full regression**: `pnpm typecheck`, `pnpm lint`, `pnpm test` (was stopped mid-run, no result),
-   `pnpm test:e2e` (the sidebar gained "Context": stored screenshots need `--update-snapshots` after review),
-   the existing stress suites, `pnpm package`.
-4. `TEST_STATUS.md`, `BUILD_PROGRESS.md`, `V0_7_1_RELEASE_REPORT.md` (not written yet). The README release
-   history still says "Use 0.7.0".
-5. Release gate, then merge and tag only on PASS.
+Everything under "Not done" in the earlier version of this note is done: the security findings are fixed
+(`39727d0`), both remaining reviews ran and their findings are fixed (`db9c9dc`), the full regression, the
+stress suites, packaging and the migration campaign are green, and the documents are written.
 
-## Known limits to state in the release report
-
-- No Arena campaign compared a 0.7.1 context variant with 0.7.0; the Arena has no context-variant dimension.
-- One real paired mission only. Engineering-quality delta of the Context Graph: NOT VERIFIED.
-- Compaction fidelity and rotation fidelity with real sessions: NOT VERIFIED (no baseline session compacted).
-- Reviewer and verifier prompts carry no graph section.
-- A `summary` context breakdown is the runtime's estimate (it over-stated a real request by about half).
-- Usage-window change per mission was not sampled.
+The release gate is PARTIAL (`V0_7_1_RELEASE_REPORT.md`): not merged, not tagged. Missing for PASS: the
+paired real campaign over eight task categories, to be run after the usage window resets on 2026-10-10.

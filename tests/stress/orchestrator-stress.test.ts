@@ -473,7 +473,11 @@ async function checkInvariants(h: Harness, run: Run, s: Scenario, obs: Observati
     for (const key of obs.crashed) {
       const t = planned.find((x) => x.key === key)
       if (t && !unaffected(t)) continue
-      if (t && t.attempt < 2) problems.push(`crashed task ${key} was not retried (attempt ${t.attempt})`)
+      if (!t || t.attempt >= 2) continue
+      // The retry must have been scheduled. It need not have run: an applied proposal can replace the task
+      // (split it, cancel it) while it waits for its retry. Seen at seed 597 of the 0.7.1 campaign.
+      const retryScheduled = firstSeq('task.retry', t.id) !== -1
+      if (!retryScheduled || t.state !== 'cancelled') problems.push(`crashed task ${key} was not retried (attempt ${t.attempt}, ${t.state}, retry ${retryScheduled ? 'scheduled' : 'not scheduled'})`)
     }
     // A verification failure that fired leaves a repair child or a second verifier row.
     for (const key of obs.verifyFailed) {
