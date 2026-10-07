@@ -10,7 +10,7 @@ export type { RuntimeContextUsage }
  * Two sources are combined and never confused:
  *  - the runtime's own breakdown (system prompt, tool definitions, memory files, and the conversation split
  *    into tool calls, tool results, assistant and user text). In `full` detail the runtime counted each
- *    category (`exact`); in `summary` detail it answered from the last response and local estimates (`observed`);
+ *    category (`exact`); in `summary` detail it answered from local estimates (`estimated`);
  *  - NEXUS's estimate (characters / 4) of the parts of its own text: the role prompt inside the system
  *    prompt, and the sections of the context pack inside the user messages (`estimated`).
  */
@@ -93,16 +93,24 @@ export function buildBreakdown(input: BreakdownInput): Breakdown {
     return { components: out, totalTokens: out.reduce((n, c) => n + c.tokens, 0), maxTokens: null, basis: 'estimated', model: null }
   }
 
-  const basis: TokenBasis = u.detail === 'full' ? 'exact' : 'observed'
+  // `full` is counted by the runtime per category. `summary` is the runtime's own local estimate: on the real
+  // runtime it reported 24.9k tokens for a request that processed 15.9k, so it is labelled an estimate.
+  const basis: TokenBasis = u.detail === 'full' ? 'exact' : 'estimated'
   const sum = (xs: readonly { tokens: number }[]): number => xs.reduce((n, x) => n + x.tokens, 0)
   const used = u.categories.filter((c) => c.kind === 'used')
   const usedTotal = sum(used)
 
-  // The structured lists say what each row is without reading its display name.
-  const system = sum(u.systemPromptSections)
-  const tools = sum(u.systemTools) + sum(u.mcpTools.filter((t) => t.isLoaded !== false))
-  const memory = sum(u.memoryFiles)
-  const mb = u.messageBreakdown
+  // The structured lists say what each row is without reading its display name. A summary breakdown leaves
+  // them empty; then the runtime's own rows are the only source and their names are read.
+  const row = (...words: string[]): number => sum(used.filter((c) => words.every((w) => c.name.toLowerCase().includes(w))))
+  const system = sum(u.systemPromptSections) || row('system', 'prompt')
+  const tools = sum(u.systemTools) + sum(u.mcpTools.filter((t) => t.isLoaded !== false)) || row('tools')
+  const memory = sum(u.memoryFiles) || row('memory')
+  const messages = row('messages')
+  // A message split that claims more than the window holds is not a split of this conversation: it is dropped.
+  const split = u.messageBreakdown
+  const splitTotal = split ? split.toolCallTokens + split.toolResultTokens + split.attachmentTokens + split.assistantMessageTokens + split.userMessageTokens : 0
+  const mb = split && system + tools + memory + splitTotal <= Math.max(u.totalTokens, usedTotal) ? split : null
   const roleShare = Math.min(role, system)
   add(out, 'SYSTEM_CORE', system - roleShare, basis, "The runtime's system prompt")
   add(out, 'ROLE', roleShare, 'estimated', 'Role prompt appended to the system prompt (part of the system prompt figure)')
@@ -123,6 +131,16 @@ export function buildBreakdown(input: BreakdownInput): Breakdown {
     }
     add(out, 'MESSAGES', userLeft, basis, 'User messages outside the context pack sections')
     attributed += mb.toolResultTokens + mb.toolCallTokens + mb.assistantMessageTokens + mb.attachmentTokens + mb.userMessageTokens
+  } else if (messages > 0) {
+    // No usable split: the conversation is one figure. The pack's sections are estimated inside it.
+    let left = messages
+    for (const c of pack) {
+      const share = Math.min(c.tokens, left)
+      if (share > 0) out.push({ ...c, tokens: share, detail: `${c.detail} (part of the messages figure)` })
+      left -= share
+    }
+    add(out, 'HISTORY', left, basis, 'Conversation, not split by the runtime')
+    attributed += messages
   }
   // Whatever the runtime counted as used and the lists above did not name (skills, agents, a message figure without a split).
   const total = Math.max(u.totalTokens, usedTotal)

@@ -1,0 +1,465 @@
+{
+  "kind": "cache-acceptance",
+  "startedAt": "2026-10-07T09:37:10.105Z",
+  "finishedAt": "2026-10-07T09:37:28.811Z",
+  "model": "haiku",
+  "promptSent": true,
+  "note": "One-turn sessions; every figure is runtime-reported. `firstRequest` classifies the first request of each session: write (prefix written), read (prefix read from cache), partial.",
+  "sessions": [
+    {
+      "label": "baseline-A",
+      "cwd": "A",
+      "options": {
+        "stablePrefix": false,
+        "alwaysLoadNexusTools": false,
+        "contextUsageDetail": "summary"
+      },
+      "role": "worker",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheCreationTokens": 16008,
+          "outputTokens": 4
+        }
+      ],
+      "firstRequest": "write",
+      "context": {
+        "totalTokens": 24873,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4545,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 17843,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 175127,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 26005,
+          "assistantMessageTokens": 171,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 0,
+        "mcpToolsDeferred": 8,
+        "mcpToolTokensLoaded": 0
+      },
+      "outcome": "success",
+      "durationMs": 2862
+    },
+    {
+      "label": "baseline-B",
+      "cwd": "B",
+      "options": {
+        "stablePrefix": false,
+        "alwaysLoadNexusTools": false,
+        "contextUsageDetail": "summary"
+      },
+      "role": "worker",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 14994,
+          "cacheCreationTokens": 1015,
+          "outputTokens": 4
+        }
+      ],
+      "firstRequest": "read",
+      "context": {
+        "totalTokens": 24873,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4545,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 17843,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 175127,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 26005,
+          "assistantMessageTokens": 177,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 0,
+        "mcpToolsDeferred": 8,
+        "mcpToolTokensLoaded": 0
+      },
+      "outcome": "success",
+      "durationMs": 2608
+    },
+    {
+      "label": "stable-A",
+      "cwd": "A",
+      "options": {
+        "stablePrefix": true,
+        "alwaysLoadNexusTools": false,
+        "contextUsageDetail": "summary"
+      },
+      "role": "worker",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 13231,
+          "cacheCreationTokens": 2609,
+          "outputTokens": 3
+        }
+      ],
+      "firstRequest": "read",
+      "context": {
+        "totalTokens": 24706,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4378,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 17843,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 175294,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 25669,
+          "assistantMessageTokens": 158,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 0,
+        "mcpToolsDeferred": 8,
+        "mcpToolTokensLoaded": 0
+      },
+      "outcome": "success",
+      "durationMs": 2790
+    },
+    {
+      "label": "stable-B",
+      "cwd": "B",
+      "options": {
+        "stablePrefix": true,
+        "alwaysLoadNexusTools": false,
+        "contextUsageDetail": "summary"
+      },
+      "role": "worker",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 14826,
+          "cacheCreationTokens": 1015,
+          "outputTokens": 3
+        }
+      ],
+      "firstRequest": "read",
+      "context": {
+        "totalTokens": 24706,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4378,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 17843,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 175294,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 25669,
+          "assistantMessageTokens": 167,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 0,
+        "mcpToolsDeferred": 8,
+        "mcpToolTokensLoaded": 0
+      },
+      "outcome": "success",
+      "durationMs": 2605
+    },
+    {
+      "label": "stable-B-other-prompt",
+      "cwd": "B",
+      "options": {
+        "stablePrefix": true,
+        "alwaysLoadNexusTools": false,
+        "contextUsageDetail": "summary"
+      },
+      "role": "worker",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 14826,
+          "cacheCreationTokens": 1016,
+          "outputTokens": 4
+        }
+      ],
+      "firstRequest": "read",
+      "context": {
+        "totalTokens": 24706,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4378,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 17843,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 175294,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 25669,
+          "assistantMessageTokens": 170,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 0,
+        "mcpToolsDeferred": 8,
+        "mcpToolTokensLoaded": 0
+      },
+      "outcome": "success",
+      "durationMs": 2608
+    },
+    {
+      "label": "stable-A-reviewer",
+      "cwd": "A",
+      "options": {
+        "stablePrefix": true,
+        "alwaysLoadNexusTools": false,
+        "contextUsageDetail": "summary"
+      },
+      "role": "reviewer",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheCreationTokens": 14458,
+          "outputTokens": 4
+        }
+      ],
+      "firstRequest": "write",
+      "context": {
+        "totalTokens": 21789,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4180,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 15124,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 178211,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 23539,
+          "assistantMessageTokens": 171,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 0,
+        "mcpToolsDeferred": 8,
+        "mcpToolTokensLoaded": 0
+      },
+      "outcome": "success",
+      "durationMs": 2665
+    },
+    {
+      "label": "stable-B-tools-upfront",
+      "cwd": "B",
+      "options": {
+        "stablePrefix": true,
+        "alwaysLoadNexusTools": true,
+        "contextUsageDetail": "summary"
+      },
+      "role": "worker",
+      "requests": [
+        {
+          "inputTokens": 10,
+          "cacheReadTokens": 15841,
+          "cacheCreationTokens": 0,
+          "outputTokens": 4
+        }
+      ],
+      "firstRequest": "read",
+      "context": {
+        "totalTokens": 24706,
+        "maxTokens": 200000,
+        "categories": [
+          {
+            "name": "System prompt",
+            "tokens": 4378,
+            "kind": "used"
+          },
+          {
+            "name": "System tools",
+            "tokens": 17843,
+            "kind": "used"
+          },
+          {
+            "name": "MCP tools",
+            "tokens": 2484,
+            "kind": "used"
+          },
+          {
+            "name": "Messages",
+            "tokens": 1,
+            "kind": "used"
+          },
+          {
+            "name": "Free space",
+            "tokens": 175294,
+            "kind": "free"
+          }
+        ],
+        "messageBreakdown": {
+          "toolCallTokens": 0,
+          "toolResultTokens": 0,
+          "attachmentTokens": 25669,
+          "assistantMessageTokens": 170,
+          "userMessageTokens": 13,
+          "toolCallsByType": []
+        },
+        "systemPromptTokens": 0,
+        "systemToolTokens": 0,
+        "mcpToolsLoaded": 8,
+        "mcpToolsDeferred": 0,
+        "mcpToolTokensLoaded": 2483
+      },
+      "outcome": "success",
+      "durationMs": 2564
+    }
+  ]
+}

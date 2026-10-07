@@ -87,7 +87,7 @@ describe('scenario: stable prefixes and the prompt cache', () => {
     // The prefix registry knows the prefix, how often it was used and what the cache did last.
     const prefix = h.repos.promptPrefixes.byHash(warm.prefixHash!)!
     expect(prefix).toMatchObject({ role: 'worker', cacheable: true, uses: 2 })
-    expect(prefix.components.some((c) => c.startsWith('dynamic=') && c === 'dynamic=')).toBe(true)
+    expect(prefix.components).toContain('dynamic=')
     expect(h.repos.optimizationDecisions.listByRun(runId).filter((d) => d.action === 'STABLE_PREFIX').length).toBeGreaterThanOrEqual(6)
 
     // Cache figures can be read by role and for the run.
@@ -98,17 +98,24 @@ describe('scenario: stable prefixes and the prompt cache', () => {
     expect(totals.cacheReadTokens).toBe(events.reduce((n, e) => n + e.cacheReadTokens, 0))
   })
 
-  it('without it every worktree writes its own prefix, and the diagnosis says why', async () => {
+  it('sessions share a prefix across worktrees without the option too; a different role shares nothing', async () => {
+    // What the real runtime does (docs/acceptance/cache-acceptance-*.json), reproduced by the cache model.
     const cache = new FakeCacheSim()
     h = await createHarness({ script: scripts(), files: FILES, cache, settings: tokens({ stablePrefix: 'off' }) })
     const runId = await runMission(h)
     expect(cache.requested.every((r) => !r.stablePrefix)).toBe(true)
-    const workers = h.repos.cacheEvents.listByRun(runId).filter((e) => e.requestIndex === 0 && e.role === 'worker')
-    expect(workers.map((e) => e.result)).toEqual(['write', 'write'])
-    expect(new Set(workers.map((e) => e.prefixHash)).size).toBe(2)
-    expect(workers.map((e) => e.cause).sort()).toEqual(['DYNAMIC_PREFIX_CONTAMINATION', 'FIRST_USE'])
-    expect(h.repos.cacheEvents.misses('2000-01-01T00:00:00.000Z').some((e) => e.cause === 'DYNAMIC_PREFIX_CONTAMINATION' && e.causeBasis === 'local_inference')).toBe(true)
-    expect(h.repos.optimizationDecisions.listByRun(runId).some((d) => d.action === 'KEEP_FULL_CONTEXT' && d.detail?.['technique'] === 'stablePrefix')).toBe(true)
+    const firsts = h.repos.cacheEvents.listByRun(runId).filter((e) => e.requestIndex === 0)
+    const workers = firsts.filter((e) => e.role === 'worker')
+    expect(workers.map((e) => e.result).sort()).toEqual(['read', 'write'])
+    expect(new Set(workers.map((e) => e.prefixHash)).size).toBe(1)
+    // Each role has its own tools and role text: its first session writes its own prefix, and that is a first use, not a miss.
+    for (const role of ['planner', 'reviewer', 'verifier']) {
+      const first = firsts.find((e) => e.role === role)!
+      expect(first, role).toMatchObject({ result: 'write', cause: 'FIRST_USE' })
+    }
+    expect(new Set(firsts.map((e) => e.prefixHash)).size).toBe(4)
+    expect(h.repos.cacheEvents.misses('2000-01-01T00:00:00.000Z')).toEqual([])
+    expect(h.repos.optimizationDecisions.listByRun(runId).some((d) => d.action === 'STABLE_PREFIX')).toBe(false)
   })
 
   it('records what each session context was made of, and the components sum to the runtime total', async () => {
@@ -119,7 +126,9 @@ describe('scenario: stable prefixes and the prompt cache', () => {
     for (const b of breakdowns) {
       expect(b.components.reduce((n, c) => n + c.tokens, 0)).toBe(b.totalTokens)
       expect(b.maxTokens).toBe(200_000)
-      expect(b.components.some((c) => c.component === 'TOOL_DEFINITIONS' && c.basis === 'observed')).toBe(true)
+      expect(b.components.some((c) => c.component === 'TOOL_DEFINITIONS')).toBe(true)
+      // A summary breakdown is the runtime's estimate and is labelled so.
+      expect(b.basis).toBe('estimated')
       expect(b.components.some((c) => c.component === 'ROLE' && c.basis === 'estimated')).toBe(true)
     }
     const worker = h.repos.agents.listByRun(runId).find((a) => a.role === 'worker')!

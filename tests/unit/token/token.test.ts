@@ -467,11 +467,33 @@ describe('request component accounting', () => {
   })
 
   it('labels a summary breakdown observed and an estimate-only breakdown estimated', () => {
-    expect(buildBreakdown({ usage: usage({ detail: 'summary' }), pack: null, roleText: '' }).components.every((c) => c.basis === 'observed')).toBe(true)
+    expect(buildBreakdown({ usage: usage({ detail: 'summary' }), pack: null, roleText: '' }).components.every((c) => c.basis === 'estimated')).toBe(true)
     const estimate = buildBreakdown({ usage: null, pack, roleText: 'x'.repeat(400), promptText: 'y'.repeat(12_000) })
     expect(estimate.basis).toBe('estimated')
     expect(estimate.maxTokens).toBeNull()
     expect(estimate.totalTokens).toBe(100 + 3_000)
+  })
+
+  it('reads the runtime rows when a summary leaves the lists empty, and drops a message split that cannot be right', () => {
+    // The shape the real runtime returned for a one-turn session in summary detail.
+    const real = usage({
+      detail: 'summary',
+      totalTokens: 24_873,
+      categories: [{ name: 'System prompt', tokens: 4_545, kind: 'used' }, { name: 'System tools', tokens: 17_843, kind: 'used' }, { name: 'MCP tools', tokens: 2_484, kind: 'used' }, { name: 'Messages', tokens: 1, kind: 'used' }, { name: 'Free space', tokens: 175_127, kind: 'free' }],
+      systemPromptSections: [],
+      systemTools: [],
+      mcpTools: [],
+      messageBreakdown: { toolCallTokens: 0, toolResultTokens: 0, attachmentTokens: 26_005, assistantMessageTokens: 171, userMessageTokens: 13, toolCallsByType: [] },
+    })
+    const b = buildBreakdown({ usage: real, pack: null, roleText: 'x'.repeat(3_800) })
+    const of = (c: string): number => b.components.filter((x) => x.component === c).reduce((n, x) => n + x.tokens, 0)
+    expect(b.totalTokens).toBe(24_873)
+    expect(b.components.reduce((n, c) => n + c.tokens, 0)).toBe(24_873)
+    expect(of('SYSTEM_CORE') + of('ROLE')).toBe(4_545)
+    expect(of('TOOL_DEFINITIONS')).toBe(20_327)
+    expect(of('HISTORY')).toBe(1)
+    expect(of('OTHER')).toBe(0)
+    expect(b.basis).toBe('estimated')
   })
 
   it('composition percentages are whole numbers that sum to 100', () => {

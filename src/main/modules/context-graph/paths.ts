@@ -56,6 +56,7 @@ export function validatePath(input: string): string {
   const raw = input.trim().replace(/^\/+|\/+$/g, '')
   if (raw === '') return ''
   if (raw.length > MAX_PATH_CHARS) throw new NexusError('invalid_input', `A context path is at most ${MAX_PATH_CHARS} characters`)
+  // eslint-disable-next-line no-control-regex
   if (/[\0-\x1f\x7f\\%]/.test(raw)) throw new NexusError('invalid_input', 'A context path holds only lowercase letters, digits, ".", "_", "~", "-" and "/"')
   const parts = raw.split('/')
   if (parts.length > MAX_PATH_DEPTH) throw new NexusError('invalid_input', `A context path is at most ${MAX_PATH_DEPTH} levels deep`)

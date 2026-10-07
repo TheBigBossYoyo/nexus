@@ -313,10 +313,12 @@ export type Technique = 'stablePrefix' | 'contextGraph' | 'toolLoading' | 'outpu
  * release's benchmarks showed it non-inferior; the evidence for each line is in the release report.
  */
 export const AUTO_DEFAULTS: Record<Technique, boolean> = {
-  // Decided by the real cache acceptance: see docs/V0_7_1_RELEASE_REPORT.md.
+  // Measured on the real runtime (docs/acceptance/cache-acceptance-*.json): sessions of one role in different
+  // working directories already share the cached prefix, so the option adds nothing; it stays off.
   stablePrefix: false,
   // The retrieval benchmark must show recall no lower than the V2 selection.
   contextGraph: false,
+  // Measured on the real runtime: loading the NEXUS tools upfront did not change the size of a request.
   toolLoading: false,
   // Shows a superset of the failure lines the tail cut showed; the raw output remains stored.
   outputFiltering: true,

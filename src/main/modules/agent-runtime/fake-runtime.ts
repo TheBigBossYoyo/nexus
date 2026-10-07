@@ -130,11 +130,12 @@ export interface FakeUsageState {
  * failure. Every availability check (usage report or probe session) is counted in `probes`.
  */
 /**
- * A model of the runtime's prompt cache, for tests. It follows the documented rules and nothing else: a
- * prefix is the model, the tool names, the system text and (unless the session asked for the stable prefix)
- * the working directory; a session's first request reads the prefix when an identical one was used within
- * the lifetime, and writes it otherwise; later requests read what the session itself wrote. The token sizes
- * are invented and fixed. It proves how NEXUS handles what a runtime reports, never what Claude does.
+ * A model of the runtime's prompt cache, for tests. It follows what the real runtime was observed to do
+ * (docs/acceptance/cache-acceptance-*.json) and nothing else: a prefix is the model, the tool names and the
+ * system text; the working directory is not part of it; a session's first request reads the prefix when an
+ * identical one was used within the lifetime, and writes it otherwise; later requests read what the session
+ * itself wrote. The token sizes are invented and fixed. It proves how NEXUS handles what a runtime reports,
+ * never what Claude does.
  */
 export class FakeCacheSim {
   /** Tokens of the simulated runtime system prompt and built-in tool definitions. */
@@ -147,14 +148,14 @@ export class FakeCacheSim {
   lifetimeMs = 5 * 60_000
 
   key(spec: SessionSpec): string {
-    const stable = spec.contextOptions?.stablePrefix === true
-    return JSON.stringify([spec.model ?? 'fake-model', [...spec.tools].sort(), spec.systemPromptAppend, spec.nexusTools ? Object.keys(spec.nexusTools).sort() : [], spec.contextOptions?.alwaysLoadNexusTools === true, stable ? null : spec.cwd])
+    return JSON.stringify([spec.model ?? 'fake-model', [...spec.tools].sort(), spec.systemPromptAppend, spec.nexusTools ? Object.keys(spec.nexusTools).sort() : [], spec.contextOptions?.stablePrefix === true])
   }
 
   prefixTokens(spec: SessionSpec): number {
     const nexus = spec.nexusTools ? Object.keys(spec.nexusTools).length : 0
     // Deferred tool definitions are outside the window; loaded ones are in it.
-    return FakeCacheSim.BASE_PREFIX + Math.ceil(spec.systemPromptAppend.length / 4) + spec.tools.length * 150 + (spec.contextOptions?.alwaysLoadNexusTools ? nexus * 200 : 0)
+    void nexus
+    return FakeCacheSim.BASE_PREFIX + Math.ceil(spec.systemPromptAppend.length / 4) + spec.tools.length * 150
   }
 
   /** The usage of the next request of a session. `added` is what the conversation grew by since the last request. */

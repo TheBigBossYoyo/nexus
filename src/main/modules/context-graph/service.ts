@@ -538,7 +538,7 @@ export class ContextGraphService {
    * files changed in the working tree. Falls back to a full check when there is no earlier commit to diff from.
    */
   async refreshFromGit(space: ContextSpace, rootPath: string, git: { run(cwd: string, args: readonly string[], opts?: { okCodes?: number[] }): Promise<{ exitCode: number | null; stdout: string }> }): Promise<ContextRefreshJob> {
-    let head: string | null = null
+    let head: string | null
     try {
       const r = await git.run(rootPath, ['rev-parse', 'HEAD'], { okCodes: [0, 128] })
       head = r.exitCode === 0 ? r.stdout.trim() || null : null

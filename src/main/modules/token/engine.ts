@@ -110,8 +110,10 @@ export class TokenIntelligenceEngine {
       systemText: input.systemText,
       tools: [...input.tools, ...input.nexusToolNames.map((n) => `mcp__nexus__${n}`), ...input.externalServers.map((s) => `mcp__${s}`)],
       flags: { stablePrefix: options.stablePrefix, nexusToolsAlwaysLoaded: options.alwaysLoadNexusTools, projectSettings: input.loadProjectSettings, structuredOutput: input.structuredOutput },
-      // Without the stable prefix the runtime writes the working directory into the system prompt.
-      dynamicSystem: options.stablePrefix ? null : input.cwd,
+      // The working directory is NOT part of the cached prefix: on the real runtime two sessions of one role in
+      // different directories read the same prefix with or without the stable-prefix option
+      // (docs/acceptance/cache-acceptance-*.json). So it is not part of the identity either.
+      dynamicSystem: null,
     }
     this.live.set(input.agentId, {
       ctx: { runId: input.runId, taskId: input.taskId, agentId: input.agentId, role: input.role },
@@ -131,8 +133,6 @@ export class TokenIntelligenceEngine {
     const nexusPrefixTokens = estimateTokens(input.systemText)
     if (options.stablePrefix) {
       this.decide(input, 'STABLE_PREFIX', 'Per-session text is kept out of the system prompt so that sessions with the same role and tools share a cached prefix. The working directory reaches the model in the first message instead.', { role: input.role }, null, 'estimated')
-    } else if (!techniqueEnabled(input.settings, 'stablePrefix')) {
-      this.decide(input, 'KEEP_FULL_CONTEXT', 'The system prompt keeps its per-session sections (the 0.7.0 behaviour): the stable prefix is not an evidence-supported default yet.', { role: input.role, technique: 'stablePrefix' }, null, 'estimated')
     }
     if (input.nexusToolNames.length > 0) this.decide(input, tools.action, tools.reason, { nexusTools: input.nexusToolNames.length, externalServers: input.externalServers.length }, null, 'estimated')
     return { options, tools, nexusPrefixTokens }
@@ -159,7 +159,6 @@ export class TokenIntelligenceEngine {
       provider: started.provider,
       flags: caps.stableSystemPrefix ? s.identity.flags : { stablePrefix: false, nexusToolsAlwaysLoaded: false, projectSettings: s.identity.flags.projectSettings, structuredOutput: s.identity.flags.structuredOutput },
       tools: caps.nexusTools ? s.identity.tools : s.identity.tools.filter((t) => !t.startsWith('mcp__nexus__')),
-      dynamicSystem: caps.stableSystemPrefix ? s.identity.dynamicSystem : null,
     }
     s.requests = 0
     s.seenRequestIds.clear()
