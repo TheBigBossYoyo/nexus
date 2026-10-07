@@ -74,6 +74,9 @@ export interface NoteInput {
   author: { source: string; runId?: string | null; taskId?: string | null; agentId?: string | null }
 }
 
+/** Notes one run may write. Enough for real use; a loop that writes notes stops here. */
+export const MAX_NOTES_PER_RUN = 50
+
 export type NoteRejection = 'instruction' | 'transcript' | 'empty' | 'too_long' | 'no_evidence'
 
 const HISTORY: readonly ContextStatus[] = ['SUPERSEDED', 'ARCHIVED']
@@ -411,16 +414,20 @@ export class ContextGraphService {
    */
   private rebuildSummaries(space: ContextSpace, at: string, onlyIds?: ReadonlySet<string>): number {
     let changed = 0
+    const isDerived = (n: ContextNode): boolean => n.trust === 'GENERATED_SUMMARY' && (n.originKind === 'graph' || n.path === '') && n.type !== 'NOTE' && n.type !== 'CUSTOM' && n.status !== 'ARCHIVED'
+    // A few named nodes (the ancestors of a note that was just written) are read by id; the whole space is paged.
+    const batches = onlyIds
+      ? [this.g.nodes.getMany([...onlyIds]).filter(isDerived).sort((a, b) => b.depth - a.depth)]
+      : null
     for (let offset = 0; ; offset += 500) {
-      const batch = this.g.nodes.listDerived(space, 500, offset)
+      const batch = batches ? (offset === 0 ? (batches[0] as ContextNode[]) : []) : this.g.nodes.listDerived(space, 500, offset)
       for (const node of batch) {
-        if (onlyIds && !onlyIds.has(node.id)) continue
         const children = this.g.nodes.children(node.id, { limit: 200 })
         const total = this.g.nodes.countChildren(node.id)
-        const summaryHash = sha(`${total}\0${children.map((c) => `${c.id}:${c.contentHash}:${c.status}`).join('\0')}`)
+        const summaryHash = sha(`v2\0${total}\0${children.map((c) => `${c.id}:${c.contentHash}:${c.status}:${c.programId ?? ''}`).join('\0')}`)
         if (node.summaryHash === summaryHash) continue
         const lead = node.path === '' ? node.summary.split('\nContains: ')[0] ?? '' : ''
-        const summary = clip(describeChildren(lead, children, total), CONTEXT_SUMMARY_MAX_CHARS)
+        const summary = clip(describeChildren(lead, children, total, node.programId), CONTEXT_SUMMARY_MAX_CHARS)
         this.g.nodes.update(node.id, { summary, summaryHash, contentHash: hashOf({ type: node.type, trust: node.trust, title: node.title, summary }), tokenEstimate: estimateTokens(`${node.title}\n${summary}`), updatedAt: at })
         changed++
       }
@@ -604,8 +611,12 @@ export class ContextGraphService {
       const draft = { type: 'NOTE' as const, trust, title, summary: clip(body, CONTEXT_SUMMARY_MAX_CHARS) }
       const contentHash = hashOf(draft, body)
       // The same note written twice is one note.
-      const twin = this.g.nodes.children(parent.id, { types: ['NOTE'], limit: 500 }).find((n) => n.contentHash === contentHash)
+      const twin = this.g.nodes.children(parent.id, { types: ['NOTE'], limit: 500 }).find((n) => n.contentHash === contentHash && n.programId === (input.programId ?? null))
       if (twin) return twin
+      // An agent cannot fill the graph: a run writes a bounded number of notes.
+      if (!byUser && input.author.runId && this.g.nodes.countNotesOfRun(space, input.author.runId) >= MAX_NOTES_PER_RUN) {
+        throw new NexusError('invalid_state', `This run already wrote ${MAX_NOTES_PER_RUN} notes. Update or archive one instead of adding another.`)
+      }
       const node: ContextNode = {
         id: newId(),
         spaceKind: space.kind,
@@ -1095,14 +1106,18 @@ const PLURAL: Partial<Record<ContextNodeType, string>> = {
 }
 
 /** "Contains: 4 modules (src/main, src/renderer, ...); 2 hazards (...)". Counts say how many are stale or in conflict. */
-function describeChildren(lead: string, children: readonly ContextNode[], total: number): string {
+function describeChildren(lead: string, children: readonly ContextNode[], total: number, ownerProgramId: string | null): string {
   if (total === 0) return lead || 'Empty.'
   const groups = new Map<ContextNodeType, ContextNode[]>()
   for (const c of children) groups.set(c.type, [...(groups.get(c.type) ?? []), c])
+  // A summary is read by everyone who may read its node. Knowledge of a program is named only in a summary
+  // that belongs to that program; elsewhere it is counted, never named.
+  const nameable = (n: ContextNode): boolean => n.programId === null || n.programId === ownerProgramId
   const parts = [...groups.entries()].map(([type, list]) => {
-    const names = list.slice(0, 6).map((n) => n.title)
+    const names = list.filter(nameable).slice(0, 6).map((n) => n.title)
     const flagged = list.filter((n) => n.status !== 'CURRENT').length
-    return `${list.length} ${PLURAL[type] ?? `${type.toLowerCase()} nodes`}${flagged > 0 ? ` (${flagged} stale or in conflict)` : ''}: ${names.join(', ')}${list.length > names.length ? ', …' : ''}`
+    const head = `${list.length} ${PLURAL[type] ?? `${type.toLowerCase()} nodes`}${flagged > 0 ? ` (${flagged} stale or in conflict)` : ''}`
+    return names.length === 0 ? head : `${head}: ${names.join(', ')}${list.length > names.length ? ', …' : ''}`
   })
   const more = total > children.length ? `; ${total - children.length} more` : ''
   const body = `Contains: ${parts.join('; ')}${more}.`

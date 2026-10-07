@@ -380,3 +380,62 @@ describe('navigation and scope', () => {
     expect(health.lastRefresh?.trigger).toBe('sync')
   })
 })
+
+describe('program knowledge does not leak through summaries, the map or notes', () => {
+  it('names program knowledge only to a run of that program', async () => {
+    const { buildWorld } = await import('../../helpers/retrieval-benchmark')
+    const { renderMap } = await import('@main/modules/context-graph')
+    const w = await buildWorld()
+    try {
+      const space = w.spaces[0]!
+      const stores = w.h.repos.contextGraph
+      const programs = stores.nodes.byPath(space, 'programs')!
+      // The shared branch counts its programs and names none of them.
+      expect(programs.summary).toBe('Contains: 1 programs.')
+      expect(programs.programId).toBeNull()
+      const root = stores.nodes.children(programs.id)[0]!
+      expect(root.programId).toBe(w.programId)
+      // Every node under the program, sections included, belongs to it.
+      const under = stores.nodes.subtree(space, root.path)
+      expect(under.length).toBeGreaterThan(10)
+      expect(under.every((n) => n.programId === w.programId)).toBe(true)
+      expect(stores.nodes.byPath(space, `${root.path}/decisions`)!.summary).toContain('Race state is rebuilt from an event log')
+
+      const outside = renderMap(stores, space, {})
+      const inside = renderMap(stores, space, { programId: w.programId })
+      expect(outside).toContain('- programs/ (1)')
+      expect(outside).not.toContain('Reliability')
+      expect(inside).toContain('- programs/ (1): Reliability')
+      // Search and retrieval outside the program do not return its sections either.
+      const { retrieve } = await import('@main/modules/context-graph')
+      const found = retrieve(stores, { spaces: w.spaces, programId: null, text: 'reliability milestones decisions event log reorder buffer', files: [] })
+      expect(found.nodes.filter((r) => r.node.programId !== null)).toEqual([])
+
+      // A note written inside a program: its folder's summary counts it and does not name it.
+      const note = w.h.graph.writeNote({ space, programId: w.programId, folder: 'wrap', title: 'Secret plan of the program', body: 'The reorder buffer will be replaced.', author: { source: 'worker', runId: 'run-p' } })
+      const folder = stores.nodes.get(note.parentId!)!
+      expect(folder.summary).toBe('Contains: 1 notes.')
+      // The same text written by a run of no program is another note, not a pointer to the program's.
+      const other = w.h.graph.writeNote({ space, folder: 'wrap', title: 'Secret plan of the program', body: 'The reorder buffer will be replaced.', author: { source: 'worker', runId: 'run-q' } })
+      expect(other.id).not.toBe(note.id)
+    } finally {
+      w.h.close()
+    }
+  })
+
+  it('a run writes a bounded number of notes; the user is not limited', async () => {
+    const { MAX_NOTES_PER_RUN } = await import('@main/modules/context-graph/service')
+    h = graphHarness()
+    await h.graph.syncProject(h.project.id)
+    const write = (i: number, source = 'worker') => h.graph.writeNote({ space: h.space, title: `Note ${i}`, body: `Observation ${i}.`, author: { source, runId: 'run-1' } })
+    for (let i = 0; i < MAX_NOTES_PER_RUN; i++) write(i)
+    expect(() => write(MAX_NOTES_PER_RUN)).toThrow(/already wrote 50 notes/)
+    // Another run, and the user, can still write; archiving one frees a place.
+    expect(h.graph.writeNote({ space: h.space, title: 'Other run', body: 'x y z.', author: { source: 'worker', runId: 'run-2' } }).status).toBe('CURRENT')
+    expect(write(1000, 'user').trust).toBe('USER_PROVIDED')
+    const first = h.repos.contextGraph.nodes.listBySpace(h.space, { types: ['NOTE'] }).find((n) => n.title === 'Note 0')!
+    h.graph.archiveNote(first.id, { source: 'worker', runId: 'run-1' }, 'done')
+    expect(write(MAX_NOTES_PER_RUN).status).toBe('CURRENT')
+    expect(h.repos.contextGraph.nodes.byPath(h.space, 'notes/general')!.summary).toMatch(/^Contains: 52 notes: /)
+  })
+})

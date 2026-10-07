@@ -36,7 +36,7 @@ export const GRAPH_DATA_NOTE =
  * The compact map of a space: the root, its branches with counts and first names, and one more level under
  * the branches in `focus`. Bounded by `maxChars`; what does not fit is counted, never silently dropped.
  */
-export function renderMap(stores: ContextGraphStores, space: ContextSpace, options: { focus?: readonly string[]; maxChars?: number; primary?: ContextSpace } = {}): string {
+export function renderMap(stores: ContextGraphStores, space: ContextSpace, options: { focus?: readonly string[]; maxChars?: number; primary?: ContextSpace; programId?: string | null } = {}): string {
   const root = stores.nodes.root(space)
   if (!root) return ''
   const primary = options.primary ?? space
@@ -45,14 +45,17 @@ export function renderMap(stores: ContextGraphStores, space: ContextSpace, optio
   const lead = root.summary.split('\nContains: ')[0] ?? ''
   lines.push(`${handleOf(root, primary)} [${root.type.toLowerCase()}] "${oneLine(root.title, 80)}"${lead ? `: "${oneLine(lead, 220)}"` : ''}`)
   const focus = new Set(options.focus ?? [])
+  const programId = options.programId ?? null
+  const visible = (n: ContextNode): boolean => n.programId === null || n.programId === programId
   const branches = stores.nodes.children(root.id, { limit: 40 })
   let omitted = 0
   for (const branch of branches) {
     const total = stores.nodes.countChildren(branch.id)
     if (total === 0) continue
-    const kids = stores.nodes.children(branch.id, { limit: 8 })
+    // Program knowledge is named only to a run of that program; to anyone else the branch is a count.
+    const kids = stores.nodes.children(branch.id, { limit: 16 }).filter(visible).slice(0, 8)
     const names = kids.map((k) => oneLine(k.title, 48)).join(', ')
-    const line = `- ${handleOf(branch, primary)}/ (${total}): ${names}${total > kids.length ? ', …' : ''}`
+    const line = `- ${handleOf(branch, primary)}/ (${total})${names ? `: ${names}${total > kids.length ? ', …' : ''}` : ''}`
     if (lines.join('\n').length + line.length > max) {
       omitted++
       continue
@@ -60,7 +63,7 @@ export function renderMap(stores: ContextGraphStores, space: ContextSpace, optio
     lines.push(line)
     for (const kid of kids) {
       if (!focus.has(kid.path)) continue
-      const inner = stores.nodes.children(kid.id, { limit: 12 })
+      const inner = stores.nodes.children(kid.id, { limit: 12 }).filter(visible)
       if (inner.length === 0) continue
       const detail = `  - ${handleOf(kid, primary)}/: ${inner.map((n) => `${oneLine(n.title, 40)}${n.type === 'SECTION' ? ` (${stores.nodes.countChildren(n.id)})` : ''}`).join(', ')}`
       if (lines.join('\n').length + detail.length <= max) lines.push(detail)
@@ -88,10 +91,10 @@ export interface GraphSection {
 }
 
 /** The Context Graph section of a context pack: the data note, the map, the selected nodes, the tool hint. */
-export function renderGraphSection(stores: ContextGraphStores, primary: ContextSpace, result: RetrievalResult, options: { tools: boolean; mapChars?: number } = { tools: true }): GraphSection {
+export function renderGraphSection(stores: ContextGraphStores, primary: ContextSpace, result: RetrievalResult, options: { tools: boolean; mapChars?: number; programId?: string | null } = { tools: true }): GraphSection {
   const chars = new Map<string, number>()
   const focus = result.nodes.filter((r) => r.node.type === 'MODULE' && r.node.spaceKind === primary.kind && r.node.spaceId === primary.id).map((r) => r.node.path)
-  const map = renderMap(stores, primary, { focus, ...(options.mapChars !== undefined ? { maxChars: options.mapChars } : {}) })
+  const map = renderMap(stores, primary, { focus, programId: options.programId ?? null, ...(options.mapChars !== undefined ? { maxChars: options.mapChars } : {}) })
   const parts: string[] = [GRAPH_DATA_NOTE]
   if (map) parts.push(`Map:\n${map}`)
   if (result.nodes.length > 0) {
@@ -121,7 +124,7 @@ export function renderDetail(detail: ContextNodeDetail, primary: ContextSpace, o
   if (options.sources !== false && detail.sources.length > 0) {
     const files = detail.sources.filter((s) => s.kind === 'file').map((s) => s.ref)
     const others = detail.sources.filter((s) => s.kind !== 'file').map((s) => `${s.kind} ${oneLine(s.ref, 80)}`)
-    if (files.length > 0) out.push(`Source files (read these for the authoritative content): ${files.slice(0, 20).join(', ')}${files.length > 20 ? `, and ${files.length - 20} more` : ''}`)
+    if (files.length > 0) out.push(`Source files (read these for the authoritative content): ${files.slice(0, 20).map((f) => oneLine(f, 200)).join(', ')}${files.length > 20 ? `, and ${files.length - 20} more` : ''}`)
     if (others.length > 0) out.push(`Other sources: ${others.slice(0, 8).join('; ')}`)
   }
   if (options.children !== false && detail.children.length > 0) {

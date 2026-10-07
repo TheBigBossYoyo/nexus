@@ -83,6 +83,13 @@ const SECTION_TITLES: Record<string, string> = {
 class Builder {
   readonly nodes = new Map<string, NodeDraft>()
   readonly edges = new Map<string, EdgeDraft>()
+  /** Root path of each program's branch. Everything under it, sections included, carries the program's id. */
+  readonly programRoots = new Map<string, string>()
+
+  private programOf(path: string): string | null {
+    for (const [root, programId] of this.programRoots) if (path === root || path.startsWith(`${root}/`)) return programId
+    return null
+  }
 
   /** A section or container, created once. Its ancestors are created with it. */
   section(path: string, title?: string, type: ContextNodeType = 'SECTION'): void {
@@ -101,7 +108,7 @@ class Builder {
       status: 'CURRENT',
       confidence: 'high',
       subjectKey: null,
-      programId: null,
+      programId: this.programOf(path),
       provenance: { source: 'graph' },
       sources: [],
       sourceUpdatedAt: null,
@@ -406,6 +413,7 @@ function addProgram(b: Builder, r: ProgramRecords): void {
     sources: [{ kind: 'record', ref: `programs:${program.id}`, hash: null }],
     sourceUpdatedAt: program.updatedAt,
   })
+  b.programRoots.set(root, program.id)
   const milestonePath = new Map<string, string>()
   for (const m of [...r.milestones].sort((x, y) => x.ordinal - y.ordinal || x.key.localeCompare(y.key))) {
     const path = b.add(joinPath(root, 'milestones'), m.key, {

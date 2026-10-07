@@ -220,6 +220,15 @@ export class ContextNodeStore extends Table<ContextNode> {
     return this.query("WHERE space_kind = ? AND space_id = ? AND trust = 'GENERATED_SUMMARY' AND (origin_kind = 'graph' OR path = '') AND type NOT IN ('NOTE', 'CUSTOM') AND status <> 'ARCHIVED' ORDER BY depth DESC, seq LIMIT ? OFFSET ?", [space.kind, space.id, Math.max(1, limit), Math.max(0, offset)])
   }
 
+  /** Agent notes a run wrote that are still active (a note the user wrote or confirmed does not count against the run). */
+  countNotesOfRun(space: ContextSpace, runId: string): number {
+    const row = prepare(
+      this.db,
+      "SELECT COUNT(*) AS n FROM context_nodes WHERE space_kind = ? AND space_id = ? AND type = 'NOTE' AND origin_kind = 'graph' AND trust = 'AGENT_NOTE' AND status <> 'ARCHIVED' AND json_extract(provenance, '$.runId') = ?",
+    ).get(space.kind, space.id, runId) as { n: number }
+    return row.n
+  }
+
   countByStatus(space: ContextSpace): { status: string; n: number }[] {
     return prepare(this.db, 'SELECT status, COUNT(*) AS n FROM context_nodes WHERE space_kind = ? AND space_id = ? GROUP BY status').all(space.kind, space.id) as { status: string; n: number }[]
   }

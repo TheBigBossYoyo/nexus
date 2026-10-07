@@ -50,9 +50,10 @@ export function graphContextFor(core: Core, run: Run, task: Task, purpose: Agent
     const spaces = core.contextGraph.spacesForProject(run.projectId)
     const budget = allocateBudget({ windowTokens: null, fixedTokens: null, historyTokens: 0, risk: task.risk, graphBudget: settings.graphContextBudget })
     const stores = core.deps.repos.contextGraph
+    const programId = programOf(core, run)
     const result = retrieve(stores, {
       spaces,
-      programId: programOf(core, run),
+      programId,
       text: `${task.title}\n${task.description}`,
       files: task.suggestedFiles,
       role: task.role,
@@ -75,7 +76,7 @@ export function graphContextFor(core: Core, run: Run, task: Task, purpose: Agent
         }
       }
     }
-    const section = renderGraphSection(stores, primary, { ...result, nodes: shown }, { tools: true })
+    const section = renderGraphSection(stores, primary, { ...result, nodes: shown }, { tools: true, programId })
     const entries: GraphContext['entries'] = [
       ...shown.map((r) => ({ nodeId: r.node.id, title: `${r.node.type.toLowerCase()}: ${r.node.title}`, reason: `${r.reason}${r.warning ? ` ${r.warning}` : ''}`, chars: section.chars.get(r.node.id) ?? 0, included: true })),
       ...result.nodes.filter((r) => duplicate(r.node)).map((r) => ({ nodeId: r.node.id, title: `${r.node.type.toLowerCase()}: ${r.node.title}`, reason: 'Already in the pack as a repository fact or a memory entry: not repeated.', chars: 0, included: false })),
