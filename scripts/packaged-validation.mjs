@@ -7,7 +7,7 @@
 // No overnight run is started: a packaged build always uses the real Windows power controller.
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -21,7 +21,7 @@ if (!exe || !existsSync(exe) || sources.length === 0) {
 }
 const root = resolve(import.meta.dirname, '..')
 const VERSION = require(join(root, 'package.json')).version
-const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6, 7, 8]
+const LATEST_SCHEMA = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 function schemaOf(dbPath) {
@@ -37,6 +37,76 @@ function schemaOf(dbPath) {
   } finally {
     db.close()
   }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// Asked of Windows, not of a process handle this script may still hold.
+const alive = (pid) => {
+  try {
+    return execFileSync('tasklist', ['/FI', `PID eq ${Number(pid)}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true }).includes(`"${Number(pid)}"`)
+  } catch {
+    return false
+  }
+}
+/** The runtime's endpoint file of a data directory, without its token. */
+function endpointOf(dataDir) {
+  const file = join(dataDir, 'runtime', 'endpoint.json')
+  if (!existsSync(file)) return null
+  try {
+    const { pid, bootId, version, protocol } = JSON.parse(readFileSync(file, 'utf8'))
+    return { pid, bootId, version, protocol }
+  } catch {
+    return null
+  }
+}
+function commandLineOf(pid) {
+  try {
+    return execFileSync('powershell', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`], { encoding: 'utf8' }).trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 0.7: the process lifecycle in the package. The runtime is a process of its own started from the packaged
+ * executable; a worker process starts from the packaged entry point; the window's process can end without the
+ * runtime ending; a new window finds the same runtime; "Stop NEXUS" ends it and removes its endpoint.
+ * Uses no provider. Returns the last window so the caller can close it.
+ */
+async function lifecycleChecks(app, page, dataDir, env, entry) {
+  const invoke = (p, channel, input = {}) => p.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
+  const first = endpointOf(dataDir)
+  // The window's own process, as it reports itself: what Playwright launched may be a shell around it.
+  const windowPid = await app.evaluate(() => process.pid)
+  const line = first ? commandLineOf(first.pid) : ''
+  entry.runtime = { endpoint: first, windowPid, commandLine: line.replace(/"/g, '') }
+  entry.checks['0.7: the runtime is a separate process started from the packaged executable'] = !!first && first.pid !== windowPid && alive(first.pid) && line.toLowerCase().includes(exe.toLowerCase().split(/[\\/]/).at(-1)) && line.includes('--nexus-runtime')
+  const status = await invoke(page, 'runtime.status')
+  entry.checks['0.7: the runtime reports the package version and a restricted endpoint file'] = status.ok && status.value.version === VERSION && status.value.endpointAcl === 'restricted'
+  const selfTest = await invoke(page, 'runtime.workerSelfTest')
+  entry.workerSelfTest = selfTest.ok ? selfTest.value : selfTest.error
+  const workerLine = selfTest.ok && selfTest.value.pid ? commandLineOf(selfTest.value.pid) : ''
+  entry.workerCommandLine = workerLine.replace(/"/g, '')
+  entry.checks['0.7: a worker process starts from the packaged worker entry and reports the provider runtimes'] = selfTest.ok && selfTest.value.ok === true && selfTest.value.capabilities.includes('claude') && /worker\.js/.test(workerLine)
+  // The window's process ends; the runtime has a reason to stay only while something keeps it, so give it one.
+  await invoke(page, 'runtime.setDispatchPaused', { paused: false })
+  // The window is closed as a user closes it. Not `app.close()`: Playwright waits for the output streams of the
+  // process it launched, and the runtime that process started holds them open for as long as it lives.
+  void app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.close())).catch(() => undefined)
+  for (let i = 0; i < 40 && alive(windowPid); i++) await sleep(500)
+  await sleep(3000)
+  entry.checks['0.7: the window process ended and the runtime went on'] = !alive(windowPid) && !!first && alive(first.pid)
+  const app2 = await electron.launch({ executablePath: exe, env })
+  const page2 = await app2.firstWindow()
+  await page2.waitForSelector('[data-testid="app-shell"]', { timeout: 60_000 })
+  await (await import('./acceptance-common.mjs')).waitForRuntime(page2)
+  const again = await invoke(page2, 'runtime.status')
+  entry.checks['0.7: a new window found the same runtime'] = again.ok && !!first && again.value.bootId === first.bootId && again.value.pid === first.pid
+  const stop = await invoke(page2, 'runtime.stop')
+  for (let i = 0; i < 120 && first && alive(first.pid); i++) await sleep(500)
+  entry.checks['0.7: Stop NEXUS ended the runtime and removed its endpoint'] = stop.ok && stop.value.stopping === true && !!first && !alive(first.pid) && endpointOf(dataDir) === null
+  entry.checks['0.7: no worker process outlived the runtime'] = !(selfTest.ok && selfTest.value.pid) || !alive(selfTest.value.pid)
+  return app2
 }
 
 const repo = mkdtempSync(join(tmpdir(), 'nexus-pkg-repo-'))
@@ -58,10 +128,11 @@ for (const source of sources) {
   const env = { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_WINDOW_OFFSCREEN: '1' }
   delete env.NEXUS_FAKE_RUNTIME
   delete env.NEXUS_FAKE_POWER
-  const app = await electron.launch({ executablePath: exe, env })
+  let app = await electron.launch({ executablePath: exe, env })
   try {
     const page = await app.firstWindow()
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 60_000 })
+    await (await import('./acceptance-common.mjs')).waitForRuntime(page)
     const call = async (channel, input = {}) => {
       const result = await page.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
       if (!result.ok) throw new Error(`${channel}: ${result.error.code} ${result.error.message}`)
@@ -154,14 +225,25 @@ for (const source of sources) {
     await shot('overnight-composer')
     // A packaged build must refuse the test-only switches.
     entry.checks['no fake power log is written by a packaged build'] = !existsSync(join(dataDir, 'fake-power.log'))
+    app = await lifecycleChecks(app, page, dataDir, env, entry)
   } catch (e) {
     entry.error = String(e?.stack ?? e)
     log('ERROR', entry.error)
   } finally {
     await app.close().catch(() => undefined)
+    // Nothing of this validation stays behind: the runtime of this copy's own data directory.
+    const left = endpointOf(dataDir)
+    if (left && alive(left.pid)) {
+      try {
+        execFileSync('taskkill', ['/PID', String(left.pid), '/T', '/F'], { stdio: 'ignore' })
+      } catch {
+        // Already gone.
+      }
+      await sleep(1000)
+    }
   }
   entry.after = schemaOf(join(dataDir, 'nexus.db'))
-  entry.checks['schema upgraded to version 8'] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
+  entry.checks[`schema upgraded to version ${LATEST_SCHEMA.at(-1)}`] = JSON.stringify(entry.after.versions) === JSON.stringify(LATEST_SCHEMA)
   const oldVersion = Math.max(...entry.before.versions)
   entry.checks['the database as the older release left it was kept as a .bak copy'] = oldVersion >= LATEST_SCHEMA.at(-1) || existsSync(join(dataDir, `nexus.db.v${oldVersion}.bak`))
   entry.checks['no row was lost in the upgrade'] = entry.after.runs === entry.before.runs && entry.after.tasks === entry.before.tasks && entry.after.agents === entry.before.agents && entry.after.events >= entry.before.events

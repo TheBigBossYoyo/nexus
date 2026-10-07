@@ -1572,6 +1572,12 @@ export class OvernightSupervisor {
         return this.fail(record, 'POWER_ACTION_FAILED', `${action.action} was due at ${action.executeAt} but did not happen while NEXUS was not running; it is not executed late.`)
       }
       if (action.mechanism === 'os_timer' && action.result === null) {
+        // A record whose seal does not verify was edited from outside, or was sealed with a key this start no
+        // longer has. Its timers are dropped and no power action is requested for it, as on every other path.
+        if (!this.intact(record)) {
+          if (!(await dropTimers('The authorization of this run could not be verified after a restart'))) return this.fail(record, 'POWER_ACTION_FAILED', stuckTimer)
+          return this.fail(record, 'POWER_ACTION_FAILED', 'The authorization of this run could not be verified after a restart; its final action is not executed.')
+        }
         // NEXUS died around the moment it asked Windows for the final timer: ask again. 1190 means the
         // first request was accepted, which is exactly the timer this record describes.
         const delaySeconds = Math.max(10, Math.round((Date.parse(action.executeAt) - now) / 1000))

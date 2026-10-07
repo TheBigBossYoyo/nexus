@@ -46,6 +46,8 @@ export interface ClaudeSdkRuntimeOptions {
 
 const KEY_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']
 const NEXUS_TOOL_PREFIX = 'mcp__nexus__'
+/** The longest text an agent may hand to NEXUS for other agents in one field: enough for evidence, too little to flood a context. */
+const MAX_AGENT_TEXT_CHARS = 16_000
 /** The runtime delivers `outputFormat` results through this internal tool; it has no side effects. */
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput'
 const INIT_TIMEOUT_MS = 20_000
@@ -383,7 +385,7 @@ export function createNexusMcpServer(handlers: NexusToolHandlers): McpServerConf
         {
           type: AgentMessageTypeSchema,
           subject: z.string().max(MAX_AGENT_SUBJECT_CHARS),
-          body: z.string(),
+          body: z.string().max(MAX_AGENT_TEXT_CHARS),
           toTask: z.string().nullish(),
           toRole: AgentRoleSchema.nullish(),
           severity: SeveritySchema.nullish(),
@@ -403,22 +405,22 @@ export function createNexusMcpServer(handlers: NexusToolHandlers): McpServerConf
       tool(
         'report_blocker',
         'Report that you cannot make progress, with the evidence that proves it.',
-        { summary: z.string(), evidence: z.string() },
+        { summary: z.string().max(MAX_AGENT_TEXT_CHARS), evidence: z.string().max(MAX_AGENT_TEXT_CHARS) },
         (a) => guarded(() => handlers.reportBlocker(a)),
       ),
       tool(
         'record_decision',
         'Record a design or implementation decision and its rationale for later agents.',
-        { title: z.string(), decision: z.string(), rationale: z.string() },
+        { title: z.string().max(MAX_AGENT_SUBJECT_CHARS), decision: z.string().max(MAX_AGENT_TEXT_CHARS), rationale: z.string().max(MAX_AGENT_TEXT_CHARS) },
         (a) => guarded(() => handlers.recordDecision(a)),
       ),
       tool(
         'propose_memory',
         'Propose a durable project fact for the shared memory. It is reviewed before being kept.',
         {
-          title: z.string(),
-          content: z.string(),
-          evidence: z.string(),
+          title: z.string().max(MAX_AGENT_SUBJECT_CHARS),
+          content: z.string().max(MAX_AGENT_TEXT_CHARS),
+          evidence: z.string().max(MAX_AGENT_TEXT_CHARS),
           tags: z.array(z.string()).optional(),
           filePaths: z.array(z.string()).optional(),
         },
@@ -440,7 +442,8 @@ export function createNexusMcpServer(handlers: NexusToolHandlers): McpServerConf
 function buildMcpServers(spec: SessionSpec): Record<string, McpServerConfig> {
   const servers: Record<string, McpServerConfig> = {}
   for (const [name, s] of Object.entries(spec.mcpServers ?? {})) {
-    if (name === 'nexus') throw new NexusError('invalid_input', "MCP server name 'nexus' is reserved")
+    // Tools of the built-in server are trusted by their name's prefix; no configured server may share it.
+    if (/^nexus/i.test(name)) throw new NexusError('invalid_input', "MCP server names that begin with 'nexus' are reserved")
     if (s.type === 'stdio') {
       if (!s.command) throw new NexusError('invalid_input', `MCP server '${name}' needs a command`)
       servers[name] = { type: 'stdio', command: s.command, ...(s.args ? { args: s.args } : {}) }

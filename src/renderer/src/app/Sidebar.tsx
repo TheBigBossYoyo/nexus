@@ -25,12 +25,14 @@ import {
   SidebarIcon,
   StatusDot,
   Tooltip,
+  ControlIcon,
   ProvidersIcon,
   UsageIcon,
 } from '../components/ui'
 import { NAV_GROUPS, NAV_ITEMS } from './nav'
 import { useCurrentProject } from './useCurrent'
 import { IndicatorGlyph, UsagePopover } from './UsagePopover'
+import { useConnectionStale } from '../store/connection'
 
 const ICONS: Record<string, ReactNode> = {
   home: <HomeIcon size={16} />,
@@ -45,6 +47,7 @@ const ICONS: Record<string, ReactNode> = {
   providers: <ProvidersIcon size={16} />,
   performance: <PerformanceIcon size={16} />,
   intelligence: <IntelligenceIcon size={16} />,
+  control: <ControlIcon size={16} />,
   overnight: <MoonIcon size={16} />,
   activity: <ActivityIcon size={16} />,
   memory: <MemoryIcon size={16} />,
@@ -123,7 +126,8 @@ function RecentMissions() {
   const view = useUiStore((s) => s.view)
   const openRun = useUiStore((s) => s.openRun)
   const setView = useUiStore((s) => s.setView)
-  if (!project) return null
+  const stale = useConnectionStale()
+  if (!project || stale) return null
   const recent = [...(runs.data ?? [])]
     .filter((r) => r.projectId === project.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -172,6 +176,7 @@ function RecentMissions() {
 }
 
 function ClaudeRow({ collapsed }: { collapsed: boolean }) {
+  const stale = useConnectionStale()
   return (
     <UsagePopover align="start" side="top">
       {(p, { model }) => (
@@ -179,18 +184,19 @@ function ClaudeRow({ collapsed }: { collapsed: boolean }) {
           type="button"
           {...p}
           data-testid="sidebar-claude"
-          aria-label={`Claude, ${model.label}`}
-          title={collapsed ? `Claude · ${model.label}` : undefined}
+          aria-label={`Claude, ${stale ? 'unknown' : model.label}`}
+          title={collapsed ? `Claude · ${stale ? 'Unknown' : model.label}` : undefined}
+          data-stale={stale || undefined}
           className={cn(
             'flex h-[var(--row-h)] w-full items-center gap-2 rounded-md px-2.5 text-left text-small transition-colors hover:bg-surface-hover',
             collapsed && 'justify-center px-0',
           )}
         >
-          <IndicatorGlyph model={model} />
+          {stale ? <StatusDot tone="neutral" /> : <IndicatorGlyph model={model} />}
           {collapsed ? null : (
             <span className="min-w-0 flex-1 truncate">
               <span className="text-text-muted">Claude · </span>
-              <span className="text-text-primary">{model.label}</span>
+              <span className={stale ? 'text-text-muted' : 'text-text-primary'}>{stale ? 'Unknown' : model.label}</span>
             </span>
           )}
         </button>
@@ -209,7 +215,9 @@ export function Sidebar() {
   const overnightActive = (useActiveOvernight().data ?? []).length > 0
   const liveRuns = runs.filter((r) => !TERMINAL_RUN_STATES.includes(r.state)).length
 
+  const stale = useConnectionStale()
   const badgeFor = (view: View): ReactNode => {
+    if (stale) return null
     if (view === 'run' && liveRuns > 0)
       return (
         <span

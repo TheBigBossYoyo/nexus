@@ -13,6 +13,8 @@ import { QuotaBanner } from './QuotaBanner'
 import { Sidebar } from './Sidebar'
 import { Toasts } from './Toasts'
 import { ViewRouter } from './ViewRouter'
+import { useConnectionStale } from '../store/connection'
+import { ConnectionAnnouncer, ConnectionBanner, ConnectionContent, StartupState } from './ConnectionGate'
 
 function Banners() {
   return (
@@ -29,20 +31,27 @@ export function AppShell() {
   useHotkeys()
   useApplySavedAppearance()
   useAutoOpenApprovals()
+  const stale = useConnectionStale()
   const slots = useMemo(
     () => ({
-      status: (
+      // While the connection to the runtime is lost nothing here may look live: no Claude, agent or run status
+      // and no quota or approval banner, only a plain statement that the state is unknown.
+      status: stale ? (
+        <span className="text-small text-text-muted" data-testid="status-unknown" data-stale="true">
+          Status unknown
+        </span>
+      ) : (
         <ErrorBoundary label="Status failed">
           <GlobalStatus />
         </ErrorBoundary>
       ),
-      banners: (
+      banners: stale ? null : (
         <ErrorBoundary label="Banners failed">
           <Banners />
         </ErrorBoundary>
       ),
     }),
-    [],
+    [stale],
   )
   return (
     <div className="flex h-full bg-background" data-testid="app-shell">
@@ -59,11 +68,20 @@ export function AppShell() {
       <ErrorBoundary label="Navigation failed">
         <Sidebar />
       </ErrorBoundary>
-      <main id="main-content" tabIndex={-1} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <ShellSlotsContext.Provider value={slots}>
-          <ViewRouter />
-        </ShellSlotsContext.Provider>
-      </main>
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <ErrorBoundary label="Connection banner failed">
+          <ConnectionBanner />
+        </ErrorBoundary>
+        <ConnectionContent>
+          <main id="main-content" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+            <ShellSlotsContext.Provider value={slots}>
+              <ViewRouter />
+            </ShellSlotsContext.Provider>
+          </main>
+        </ConnectionContent>
+      </div>
+      <ConnectionAnnouncer />
+      <StartupState />
       <ApprovalDrawer />
       <RecoveryDialog />
       <CommandPalette />

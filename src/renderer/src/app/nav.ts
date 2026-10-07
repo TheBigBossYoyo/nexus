@@ -70,6 +70,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     keywords: 'repository intelligence facts files',
   },
   {
+    view: 'control',
+    label: 'Control Center',
+    group: 'system',
+    keywords: 'control plane queue scheduler priority capacity schedules runtime health incidents',
+  },
+  {
     view: 'overnight',
     label: 'Overnight',
     group: 'system',
@@ -107,6 +113,7 @@ export const VIEW_META: Record<View, { title: string; context?: string }> = {
   usage: { title: 'Usage', context: 'Intelligence' },
   performance: { title: 'Performance', context: 'Intelligence' },
   intelligence: { title: 'Repository', context: 'Intelligence' },
+  control: { title: 'Control Center', context: 'System' },
   overnight: { title: 'Overnight', context: 'System' },
   activity: { title: 'Activity', context: 'System' },
   memory: { title: 'Memory', context: 'System' },
@@ -124,6 +131,7 @@ export const VIEWS_WITH_OWN_HEADER: readonly View[] = [
   'policy',
   'providers',
   'usage',
+  'control',
   'overnight',
   'activity',
   'settings',

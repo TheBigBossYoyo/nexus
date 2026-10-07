@@ -21,7 +21,53 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [PROGRAMS](docs/PROGRAMS.md),
 [LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md),
 [WORKSPACES](docs/WORKSPACES.md), [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md),
-[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md).
+[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md),
+[V0_7_DESIGN](docs/V0_7_DESIGN.md), [CONTROL_PLANE](docs/CONTROL_PLANE.md), [GLOBAL_SCHEDULER](docs/GLOBAL_SCHEDULER.md),
+[WORKERS](docs/WORKERS.md).
+
+## 0.7.0: secure control plane
+
+This section describes 0.7.0 as it is implemented. What is tested and what is not verified is
+in [V0_7_RELEASE_REPORT](docs/V0_7_RELEASE_REPORT.md). The design is [V0_7_DESIGN](docs/V0_7_DESIGN.md).
+
+Until 0.6 everything NEXUS did lived in one Electron process: the window, the database, the engines and the agent
+sessions. Quitting NEXUS stopped the work. 0.7 splits the one executable into three process roles:
+
+| Process | What it is | Details |
+|---|---|---|
+| Window (`nexus-desktop`) | The user interface. A client: it owns no database and no work, and shows what the runtime tells it | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| Runtime (`nexus-runtime`) | A persistent process without a window. It owns the database, the global queue, the scheduler, schedules, the engines, the overnight supervisor and power control, and the tray icon. The window starts it when none is running | [CONTROL_PLANE](docs/CONTROL_PLANE.md), [GLOBAL_SCHEDULER](docs/GLOBAL_SCHEDULER.md) |
+| Workers (`nexus-worker-N`) | One process per agent session, started and watched by the runtime, each under a lease stored in the database. A worker decides nothing: every tool call is sent back to the runtime for the policy decision | [WORKERS](docs/WORKERS.md) |
+
+What this changes for you:
+
+- **Closing the window does not stop any work.** Missions, programs, campaigns, schedules and overnight runs continue in
+  the runtime. During an overnight mission the window still asks before it closes (hide, cancel the mission, or return).
+- **"Stop NEXUS" stops the runtime**: in the tray icon, or in the Runtime diagnostics of the Control Center. It asks
+  first when work is active. Interrupted runs are paused for recovery at the next start, as before
+  ([RECOVERY](docs/RECOVERY.md)).
+- **The tray icon belongs to the runtime** and exists while the runtime does, with or without a window. Until 0.6 it existed
+  only during an overnight run.
+- **The runtime stops by itself** after two minutes with no window connected, no run working, nothing on the queue and no
+  schedule switched on. It keeps running without a window while a schedule is switched on.
+- **Nothing starts the runtime at Windows sign-in.** Schedules fire only while a runtime runs, so after a reboot or a
+  sign-out nothing fires until NEXUS has been opened once.
+- **The window and the runtime talk over a Windows named pipe**, not over the network: nothing listens on a TCP port.
+  Each side proves that it holds a random token kept in a file in the data directory that only your Windows user (and
+  SYSTEM and administrators) can read. This protects against other Windows users and against a process that squats the
+  pipe name. It does not protect against another program running as you that reads that file: such a program can do
+  what the window can ([ARCHITECTURE](docs/ARCHITECTURE.md), "The local protocol").
+- **Everything that uses agents is one queue** with priorities, aging so that low-priority work is not kept out for good,
+  a dispatch pause, recorded scheduling decisions, durable schedules that fire once per occurrence, and nine health
+  components. See [CONTROL_PLANE](docs/CONTROL_PLANE.md), which also lists what does not exist.
+- **Execution security** is stricter: scripts, inline interpreter code and package scripts are inspected before an agent
+  may run them, and refusals are logged ([SECURITY](docs/SECURITY.md)).
+
+**NEXUS is not a sandbox.** The execution policy classifies and decides what an agent asks to run, including what an
+interpreter or a package script would run and who wrote it. That is a policy layer. Code that NEXUS allows to run,
+runs as your Windows user, with your permissions; processes of the runtime and of the workers are not isolated from your
+files. Operating-system containment is not part of 0.7: see [WINDOWS_EXECUTION_ISOLATION](docs/WINDOWS_EXECUTION_ISOLATION.md)
+and [V0_8_PROPOSAL](docs/V0_8_PROPOSAL.md).
 
 ## What's new in 0.6
 
@@ -121,7 +167,7 @@ The design and its deviations from the implementation are in [V0_3_DESIGN](docs/
 |---|---|---|
 | Overnight Mode | An unattended MISSION run with a wall-clock deadline and an end-of-run power action (shut down, sleep, hibernate or none) that you authorize for that run, in the composer and in a native Windows dialog. NEXUS itself performs the action, from deterministic main-process code, after the agents are stopped and the final report is saved. A Windows shutdown timer is armed as a failsafe before any agent starts. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Power controller | `WindowsPowerController` runs `System32\shutdown.exe` (and Windows PowerShell for sleep) with argument arrays, no shell and fixed messages. Only the overnight supervisor holds it. Agents have no path to it, and power commands in an agent's shell are refused for every role. | [SECURITY](docs/SECURITY.md) |
-| Tray and background | Closing the window during an overnight run asks whether to hide to the tray; the mission continues in the main process. The tray icon exists only while an overnight run is live. | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Tray and background | Closing the window during an overnight run asks whether to hide to the tray; the mission continues without the window. In 0.2.1 to 0.6 the work lived in the main process and the tray icon existed only while an overnight run was live; since 0.7 (branch `nexus-0.7`) both belong to the runtime process, which exists with or without a window (see 0.7 above). | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Quota waiting | In an overnight run, a usage limit whose reset time falls inside the mission time is waited out (`QUOTA_PAUSED`) and the run resumes by itself; otherwise the run ends as quota exhausted, which is not a failure. (0.3 adds a probe before the resume and probing when the reset time is unknown.) | [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
 | Evidence builder | One `TaskEvidenceBuilder` assembles everything reviewers, verifiers and debuggers are told that the repository cannot show: check results, commits, changed files, reviews, repair history, dependency handoffs, graph revisions, messages sent and received, decisions with their text, and the result the agent reported. Agent-written text is quoted and labelled. | [ORCHESTRATION](docs/ORCHESTRATION.md) |
 | Command classes | Shell commands are classified (`SAFE_READ`, `SAFE_PROJECT_WRITE`, `GIT_LOCAL`, `NETWORK`, `SYSTEM_CHANGE`, `DESTRUCTIVE`, `UNKNOWN`). Heredoc commit messages and `cat > file <<'EOF'` inside the worktree no longer need approval; `git config` of keys that can run code, Git redirected outside the worktree, and the NEXUS database are gated or refused. The project's own package scripts count as verification commands for reviewers and verifiers. | [SECURITY](docs/SECURITY.md) |
@@ -141,6 +187,63 @@ The design and its deviations from the implementation are in [V0_3_DESIGN](docs/
 | New views | Performance (Ctrl+6), Intelligence (Ctrl+7), and in the Run view a Plan inspector (candidate plans, critic findings, final plan, graph revisions with a diff, change proposals) plus a revision selector on the task graph. | |
 
 The design and its deviations from the implementation are in [V0_2_DESIGN](docs/V0_2_DESIGN.md).
+
+## Release history and supported versions
+
+Use 0.7.0. 0.6.0 is the oldest line that has the fixes of 0.6, but the security review of 0.7 found that two of
+its protections can be bypassed (see "Known defects of 0.6.0" below); 0.7.0 fixes them. Earlier tags are kept as they are, for history; no tag has been rewritten or deleted.
+Dates are those of the tagged commit (+01:00).
+
+| Version | Tag | Date | Status | Note |
+|---|---|---|---|---|
+| 0.1, 0.2.0 | none | 2026-10-04 | Not recommended | Never tagged. Both are before the security fixes of 0.6.0; the worktree pointer defect is recorded as present since 0.1 |
+| 0.2.1 | `v0.2.1` | 2026-10-04 | Not recommended | Contains both defects fixed in 0.6.0 (see below) |
+| 0.3.0 | `v0.3.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
+| 0.4.0 | `v0.4.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
+| 0.5.0 | `v0.5.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0. The tag also lacks the 0.5.0 entries of `docs/TEST_STATUS.md` and `docs/BUILD_PROGRESS.md` (see below) |
+| 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended; has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
+| 0.7.0 | `v0.7.0` | 2026-10-07 | Recommended | Secure control plane; fixes the known defects of 0.6.0 listed below. Report: `docs/V0_7_RELEASE_REPORT.md` |
+
+Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
+record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
+
+1. An agent's shell could rewrite a task worktree's `.git` pointer file. NEXUS's next commit, reset or clean then
+   acted on the user's repository or on another task's worktree. Recorded as present since 0.1. Fixed in 0.6.0
+   (commit `42a88ea`).
+2. A `git config` command with a value option in front of the key (for example `--type bool core.fsmonitor ...`)
+   passed the command classifier, and the program the configuration named then ran inside NEXUS's own git calls,
+   with NEXUS's environment. Recorded as present since 0.2.1. Fixed in 0.6.0 (commit `42a88ea`).
+
+0.2.1 is affected too. In the source of tag `v0.2.1`, the git service has no check of the worktree pointer and
+passes no `core.fsmonitor`, `core.hooksPath`, `core.pager` or `protocol.ext.allow` setting to git, and the command
+classifier tests only the first positional word of `git config` as a key and has no rule for non-git commands that
+name a `.git` path. This is a reading of the source; the defects were not reproduced on a build of 0.2.1.
+
+Known defects of 0.6.0. The independent security review of the `nexus-0.7` branch (2026-10-06) reproduced these
+against code that 0.6.0 also has. They are fixed in 0.7.0.
+
+1. The worktree pointer check of 0.6.0 compares only Git's back-pointer. A Git directory that an agent creates
+   itself inside its worktree, with a back-pointer to the worktree and the user's repository as its common
+   directory, passes the check, and NEXUS's next commit then moves the user's branch.
+2. The rule that a non-git command naming a `.git` path asks first compares the name literally. `.git` followed by
+   a space or a dot, and the short name `GIT~1`, are the same file to Windows and pass without a question, so the
+   pointer can be rewritten with an ordinary shell command.
+3. NEXUS's own read-only git commands (status, diff) do not verify the pointer, and they run the `filter` and
+   `textconv` programs of whatever repository the pointer names.
+4. A power command written without a space before its switch (`cmd /c shutdown/s`) passed the command classifier
+   of the 0.7 branch. The classifier of 0.6.0 matches a command's name the same way (a reading of its source; this
+   one was not reproduced on a build of 0.6.0).
+
+Items 1 to 3 are in the source of tag `v0.6.0` (`git-service.ts` and `command-classifier.ts` as of commit
+`42a88ea`); they were reproduced on the 0.7 branch before the fix, not on a build of 0.6.0.
+
+Do not run 0.6.0 on a repository whose content you do not trust. 0.7.0 is not a sandbox either (see
+`docs/SECURITY.md`): review what agents changed before you rely on a branch.
+
+The 0.5.0 tag gap. Tag `v0.5.0` points at commit `389d95f` (2026-10-05 05:17:26). The test status and build
+progress for 0.5.0 were committed 28 seconds later, as `f8e5a67`, which is not in the history of `v0.5.0`. At that
+tag, `docs/TEST_STATUS.md` still describes 0.4.0 and `docs/BUILD_PROGRESS.md` has no 0.5.0 section. Current
+`main` and later tags have both.
 
 ## Requirements
 
@@ -204,8 +307,9 @@ cost beyond that document.
 
 ## Launching and opening a project
 
-1. Start the app (`pnpm dev`, `pnpm start`, or the installed NEXUS shortcut). Only one instance runs;
-   starting a second one focuses the first.
+1. Start the app (`pnpm dev`, `pnpm start`, or the installed NEXUS shortcut). Only one window runs;
+   starting a second one focuses the first. On the `nexus-0.7` branch the window starts the runtime process when none is
+   running and connects to it; closing the window leaves the runtime and its work running (see 0.7 above).
 2. Projects view, "Open Project", and pick a folder. NEXUS resolves the Git root, then profiles the
    project read-only: package managers, languages, frameworks, scripts, and the build, test, lint and
    typecheck commands it will use as automated checks. Nothing in the folder is changed.
@@ -315,6 +419,7 @@ cleaned up. NEXUS does not merge into your branch, push, or delete branches. See
 | Arena trial repositories | `%APPDATA%\NEXUS\arena\<campaign>\<trial>\`; removed by `arena.cleanup` for a finished campaign |
 | Task and integration worktrees | `%APPDATA%\NEXUS\worktrees\<run>\<task>\` |
 | Electron profile data | `%APPDATA%\NEXUS\` |
+| Runtime files (0.7 branch) | `%APPDATA%\NEXUS\runtime\` (`endpoint.json`: the pipe name and token, readable by your user only; `runtime.log`), `%APPDATA%\NEXUS\runtime-profile\` (the runtime's own profile), `%APPDATA%\NEXUS\overnight.key` |
 | Claude session transcripts | Written by the Claude runtime itself under `~\.claude\projects\` |
 
 This is Electron's `userData` directory; the exact path is reported by the app (`app.info` returns
@@ -390,10 +495,10 @@ earlier single-mission acceptance script.
 - No automatic merge into your branch and no approval-gated merge action. The `git` and `merge`
   approval kinds exist in the type definitions but nothing creates them. You run `git merge` yourself.
 - Memory is a keyword index (SQLite FTS5 with bm25). There is no vector or embedding memory.
-- Shell command classification is heuristic. Inline interpreter code (`python -c`, `node -e`) and
-  script files are not inspected, and writing roles can run such commands without approval. There is
-  no OS-level sandbox on native Windows: agents run with your user's permissions. See
-  [SECURITY](docs/SECURITY.md).
+- Shell command classification is heuristic. Up to 0.6, inline interpreter code (`python -c`, `node -e`) and
+  script files were not inspected, and writing roles could run such commands without approval; the `nexus-0.7` branch
+  inspects them, which is still static inspection. There is no OS-level sandbox on native Windows: agents run with
+  your user's permissions, and NEXUS is not a sandbox. See [SECURITY](docs/SECURITY.md).
 - NEXUS itself runs the dependency install (`pnpm install`, `yarn install`, `bun install` or
   `npm ci`) in each new worktree and the project's check commands. These run project code and are
   not passed through the agent policy engine.
@@ -413,7 +518,8 @@ earlier single-mission acceptance script.
 - The planner, reviewer and verifier outputs are schema-checked, but the quality of plans and reviews
   is whatever the model produces. A passing verification means the verifier agent judged the criteria
   met, not that the software is correct.
-- Single window, single instance.
+- Single window, single instance. On the `nexus-0.7` branch there is also one runtime process per data directory, which keeps
+  running after the window closes until you choose "Stop NEXUS" or it has had nothing to do for two minutes.
 
 ### Limitations of 0.3 features
 

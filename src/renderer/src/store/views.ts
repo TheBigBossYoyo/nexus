@@ -12,6 +12,7 @@ export type View =
   | 'usage'
   | 'performance'
   | 'intelligence'
+  | 'control'
   | 'overnight'
   | 'activity'
   | 'memory'
@@ -30,6 +31,7 @@ export const VIEWS: readonly View[] = [
   'usage',
   'performance',
   'intelligence',
+  'control',
   'overnight',
   'activity',
   'memory',

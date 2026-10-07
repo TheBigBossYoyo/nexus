@@ -41,25 +41,28 @@ describe('openDatabase', () => {
       { version: 6, name: 'programs' },
       { version: 7, name: 'workspaces' },
       { version: 8, name: 'providers' },
+      { version: 9, name: 'control-plane' },
+      { version: 10, name: 'workers' },
+      { version: 11, name: 'security' },
     ])
     first.close()
 
     const second = openDatabase(path)
     open.push(second)
-    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 8 })
+    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 11 })
   })
 
   it('rolls the whole migration back when one fails', () => {
     const db = openDatabase(':memory:')
     open.push(db)
     const bad = [
-      { version: 9, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
-      { version: 10, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
+      { version: 12, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
+      { version: 13, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
     ]
-    expect(() => runMigrations(db, [{ version: 1, name: 'initial', sql: '' }, { version: 2, name: 'v0-2', sql: '' }, { version: 3, name: 'overnight', sql: '' }, { version: 4, name: 'v0-3', sql: '' }, { version: 5, name: 'overnight-workloads', sql: '' }, { version: 6, name: 'programs', sql: '' }, { version: 7, name: 'workspaces', sql: '' }, { version: 8, name: 'providers', sql: '' }, ...bad])).toThrow()
+    expect(() => runMigrations(db, [{ version: 1, name: 'initial', sql: '' }, { version: 2, name: 'v0-2', sql: '' }, { version: 3, name: 'overnight', sql: '' }, { version: 4, name: 'v0-3', sql: '' }, { version: 5, name: 'overnight-workloads', sql: '' }, { version: 6, name: 'programs', sql: '' }, { version: 7, name: 'workspaces', sql: '' }, { version: 8, name: 'providers', sql: '' }, { version: 9, name: 'control-plane', sql: '' }, { version: 10, name: 'workers', sql: '' }, { version: 11, name: 'security', sql: '' }, ...bad])).toThrow()
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'extra_%'").all()
     expect(tables).toEqual([])
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 8 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 11 })
   })
 
   it('refuses a database written by a newer schema', () => {

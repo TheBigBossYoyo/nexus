@@ -8,6 +8,7 @@ import type {
   TaskState,
 } from './domain'
 import type { OvernightStatus } from './overnight'
+import type { ConnectionState } from './runtime-protocol'
 import type { UsageOverview } from './v3'
 
 /**
@@ -204,3 +205,11 @@ export type PushMessage =
   | { kind: 'workspace'; workspaceId: string }
   /** v0.6. A provider's status, the provider policy or the record of provider sessions changed. */
   | { kind: 'providers' }
+  /** v0.7. The global queue, the allocation, a schedule or the runtime health changed. */
+  | { kind: 'control' }
+  /** v0.7. The runtime's own state changed: recovery finished, dispatch paused, a worker started or ended. */
+  | { kind: 'runtime' }
+  /** v0.7. From the window's main process: its connection to the runtime changed. */
+  | { kind: 'connection'; state: ConnectionState }
+  /** v0.7. The runtime asks the window to come forward, optionally on a page. Handled by the window's main process. */
+  | { kind: 'desktop'; action: 'show'; view: 'control' | null }

@@ -2,7 +2,7 @@
 // They drive the real app through its preload bridge with the REAL Claude Agent SDK and consume usage.
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -35,12 +35,61 @@ export async function launchNexus(prefix, exe) {
   const app = await electron.launch(exe ? { executablePath: exe, env } : { args: ['.'], cwd: root, env })
   const page = await app.firstWindow()
   await page.waitForSelector('[data-testid="app-shell"]', { timeout: 30_000 })
+  await waitForRuntime(page)
   const call = async (channel, input = {}) => {
     const result = await page.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
     if (!result.ok) throw new Error(`${channel}: ${result.error.code} ${result.error.message}`)
     return result.value
   }
   return { app, page, call, dataDir }
+}
+
+/** 0.7: the window is a client of the runtime process; it is usable once that runtime answers and has recovered. */
+export async function waitForRuntime(page, timeoutMs = 120_000) {
+  const started = Date.now()
+  for (;;) {
+    const state = await page.evaluate(() => globalThis.nexus.invoke('desktop.connection', {}))
+    if (state.ok && state.value.phase === 'READY') return
+    if (Date.now() - started > timeoutMs) throw new Error(`The NEXUS runtime did not become ready: ${JSON.stringify(state)}`)
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
+
+/**
+ * 0.7: closes NEXUS as a whole. Closing the window alone leaves the runtime (and the database it holds open)
+ * running; a script that reads the database afterwards, or that must leave nothing behind, stops the runtime
+ * first. The pid comes from the endpoint file of the script's own data directory.
+ */
+export async function stopNexus(app, dataDir) {
+  const pidOf = () => {
+    try {
+      const file = join(dataDir, 'runtime', 'endpoint.json')
+      return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).pid : null
+    } catch {
+      return null
+    }
+  }
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const pid = pidOf()
+  const page = app.windows()[0]
+  if (page && !page.isClosed()) await page.evaluate(() => globalThis.nexus.invoke('runtime.stop', {})).catch(() => undefined)
+  for (let i = 0; i < 120 && pid && alive(pid); i++) await new Promise((r) => setTimeout(r, 500))
+  await app.close().catch(() => undefined)
+  const left = pidOf() ?? pid
+  if (left && alive(left)) {
+    try {
+      execFileSync('taskkill', ['/PID', String(left), '/T', '/F'], { stdio: 'ignore' })
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 export async function requireAuth(call, evidence) {

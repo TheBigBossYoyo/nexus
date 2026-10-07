@@ -1,0 +1,514 @@
+{
+  "executable": "release/win-unpacked/NEXUS.exe",
+  "startedAt": "2026-10-07T03:12:11.821Z",
+  "databases": [
+    {
+      "source": "C:\\Users\\user\\AppData\\Local/Temp/nexus-adv-data-GmThcM",
+      "checks": {
+        "launches as packaged 0.7.0": true,
+        "the old run is readable with all its tasks and agents": true,
+        "an old run is not an overnight run": true,
+        "no overnight run is active": true,
+        "the old run opens in Mission Control": true,
+        "Claude status is reported": true,
+        "a project opens": true,
+        "Home, Missions, Arena, Policy, Usage, Overnight and Settings render": true,
+        "Programs renders; an upgraded database has no program": true,
+        "Workspaces renders; an upgraded database has no workspace": true,
+        "Providers renders; Claude is detected; no other provider is enabled": true,
+        "the 12 built-in Arena cases are found next to the packaged app": true,
+        "the default policy is active (version 1, no preference)": true,
+        "usage overview answers with provenance on every figure": true,
+        "an old run has no strategy and no outcome": true,
+        "Overnight panel renders; start is disabled until authorized; force close is off": true,
+        "no fake power log is written by a packaged build": true,
+        "0.7: the runtime is a separate process started from the packaged executable": true,
+        "0.7: the runtime reports the package version and a restricted endpoint file": true,
+        "0.7: a worker process starts from the packaged worker entry and reports the provider runtimes": true,
+        "0.7: the window process ended and the runtime went on": true,
+        "0.7: a new window found the same runtime": true,
+        "0.7: Stop NEXUS ended the runtime and removed its endpoint": true,
+        "0.7: no worker process outlived the runtime": true,
+        "schema upgraded to version 11": true,
+        "the database as the older release left it was kept as a .bak copy": true,
+        "no row was lost in the upgrade": true
+      },
+      "before": {
+        "versions": [
+          1
+        ],
+        "runs": 1,
+        "tasks": 13,
+        "agents": 40,
+        "events": 1123
+      },
+      "app": {
+        "version": "0.7.0",
+        "isPackaged": true,
+        "sdkVersion": "0.3.288",
+        "gitVersion": "2.53.0.windows.2",
+        "dataDir": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-pkg-data-D5pRiq"
+      },
+      "oldRun": {
+        "state": "paused",
+        "tasks": 13,
+        "agents": 40
+      },
+      "auth": {
+        "state": "authenticated",
+        "mode": "subscription",
+        "subscriptionType": "Claude subscription"
+      },
+      "pages": {
+        "run": true,
+        "arena": true,
+        "policy": true,
+        "usage": true,
+        "overnight": true,
+        "settings": true,
+        "home": true
+      },
+      "providers": [
+        {
+          "id": "claude",
+          "installed": "installed",
+          "version": "2.1.288",
+          "auth": "authenticated",
+          "supported": true,
+          "health": "healthy"
+        },
+        {
+          "id": "codex",
+          "installed": "installed",
+          "version": "0.130.0",
+          "auth": "authenticated",
+          "supported": true,
+          "health": "unknown"
+        },
+        {
+          "id": "gemini",
+          "installed": "not_installed",
+          "version": null,
+          "auth": "unknown",
+          "supported": false,
+          "health": "unavailable"
+        }
+      ],
+      "arena": {
+        "builtinCases": 12,
+        "node": {
+          "nodeFound": true,
+          "nodeVersion": "v24.14.0",
+          "ok": true,
+          "message": "Node.js v24.14.0"
+        }
+      },
+      "usage": {
+        "status": "LIMIT_APPROACHING",
+        "accountMode": {
+          "value": "subscription",
+          "source": "RUNTIME",
+          "confidence": "EXACT"
+        },
+        "windows": [
+          {
+            "limitType": "five_hour",
+            "utilizationPercent": 5,
+            "confidence": "EXACT"
+          },
+          {
+            "limitType": "iguana_necktie",
+            "utilizationPercent": 0,
+            "confidence": "EXACT"
+          },
+          {
+            "limitType": "seven_day",
+            "utilizationPercent": 90,
+            "confidence": "EXACT"
+          }
+        ],
+        "usageReportSupported": true
+      },
+      "runtime": {
+        "endpoint": {
+          "pid": 37096,
+          "bootId": "cd42fa53-4325-4373-bbc7-7ff91f7d664e",
+          "version": "0.7.0",
+          "protocol": 1
+        },
+        "windowPid": 7884,
+        "commandLine": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe --nexus-runtime"
+      },
+      "workerSelfTest": {
+        "ok": true,
+        "pid": 29948,
+        "capabilities": [
+          "claude",
+          "codex"
+        ],
+        "milliseconds": 188,
+        "detail": "A worker process started and reported ready."
+      },
+      "workerCommandLine": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\resources\\app.asar\\out\\main\\worker.js",
+      "after": {
+        "versions": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "runs": 1,
+        "tasks": 13,
+        "agents": 40,
+        "events": 1123
+      }
+    },
+    {
+      "source": "C:\\Users\\user\\AppData\\Local/Temp/nexus-v02-data-lT2lR2",
+      "checks": {
+        "launches as packaged 0.7.0": true,
+        "the old run is readable with all its tasks and agents": true,
+        "an old run is not an overnight run": true,
+        "no overnight run is active": true,
+        "the old run opens in Mission Control": true,
+        "Claude status is reported": true,
+        "a project opens": true,
+        "Home, Missions, Arena, Policy, Usage, Overnight and Settings render": true,
+        "Programs renders; an upgraded database has no program": true,
+        "Workspaces renders; an upgraded database has no workspace": true,
+        "Providers renders; Claude is detected; no other provider is enabled": true,
+        "the 12 built-in Arena cases are found next to the packaged app": true,
+        "the default policy is active (version 1, no preference)": true,
+        "usage overview answers with provenance on every figure": true,
+        "an old run has no strategy and no outcome": true,
+        "Overnight panel renders; start is disabled until authorized; force close is off": true,
+        "no fake power log is written by a packaged build": true,
+        "0.7: the runtime is a separate process started from the packaged executable": true,
+        "0.7: the runtime reports the package version and a restricted endpoint file": true,
+        "0.7: a worker process starts from the packaged worker entry and reports the provider runtimes": true,
+        "0.7: the window process ended and the runtime went on": true,
+        "0.7: a new window found the same runtime": true,
+        "0.7: Stop NEXUS ended the runtime and removed its endpoint": true,
+        "0.7: no worker process outlived the runtime": true,
+        "schema upgraded to version 11": true,
+        "the database as the older release left it was kept as a .bak copy": true,
+        "no row was lost in the upgrade": true
+      },
+      "before": {
+        "versions": [
+          1,
+          2
+        ],
+        "runs": 1,
+        "tasks": 9,
+        "agents": 42,
+        "events": 1334
+      },
+      "app": {
+        "version": "0.7.0",
+        "isPackaged": true,
+        "sdkVersion": "0.3.288",
+        "gitVersion": "2.53.0.windows.2",
+        "dataDir": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-pkg-data-LDfutn"
+      },
+      "oldRun": {
+        "state": "paused",
+        "tasks": 9,
+        "agents": 42
+      },
+      "auth": {
+        "state": "authenticated",
+        "mode": "subscription",
+        "subscriptionType": "Claude subscription"
+      },
+      "pages": {
+        "run": true,
+        "arena": true,
+        "policy": true,
+        "usage": true,
+        "overnight": true,
+        "settings": true,
+        "home": true
+      },
+      "providers": [
+        {
+          "id": "claude",
+          "installed": "installed",
+          "version": "2.1.288",
+          "auth": "authenticated",
+          "supported": true,
+          "health": "healthy"
+        },
+        {
+          "id": "codex",
+          "installed": "installed",
+          "version": "0.130.0",
+          "auth": "authenticated",
+          "supported": true,
+          "health": "unknown"
+        },
+        {
+          "id": "gemini",
+          "installed": "not_installed",
+          "version": null,
+          "auth": "unknown",
+          "supported": false,
+          "health": "unavailable"
+        }
+      ],
+      "arena": {
+        "builtinCases": 12,
+        "node": {
+          "nodeFound": true,
+          "nodeVersion": "v24.14.0",
+          "ok": true,
+          "message": "Node.js v24.14.0"
+        }
+      },
+      "usage": {
+        "status": "LIMIT_APPROACHING",
+        "accountMode": {
+          "value": "subscription",
+          "source": "RUNTIME",
+          "confidence": "EXACT"
+        },
+        "windows": [
+          {
+            "limitType": "five_hour",
+            "utilizationPercent": 5,
+            "confidence": "EXACT"
+          },
+          {
+            "limitType": "iguana_necktie",
+            "utilizationPercent": 0,
+            "confidence": "EXACT"
+          },
+          {
+            "limitType": "seven_day",
+            "utilizationPercent": 90,
+            "confidence": "EXACT"
+          }
+        ],
+        "usageReportSupported": true
+      },
+      "runtime": {
+        "endpoint": {
+          "pid": 33504,
+          "bootId": "a396e2cf-7596-402a-a0e5-7ff1177b24a6",
+          "version": "0.7.0",
+          "protocol": 1
+        },
+        "windowPid": 25992,
+        "commandLine": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe --nexus-runtime"
+      },
+      "workerSelfTest": {
+        "ok": true,
+        "pid": 30728,
+        "capabilities": [
+          "claude",
+          "codex"
+        ],
+        "milliseconds": 196,
+        "detail": "A worker process started and reported ready."
+      },
+      "workerCommandLine": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\resources\\app.asar\\out\\main\\worker.js",
+      "after": {
+        "versions": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "runs": 1,
+        "tasks": 9,
+        "agents": 42,
+        "events": 1334
+      }
+    },
+    {
+      "source": "C:\\Users\\user\\AppData\\Local/Temp/nexus-rot-data-v5Hj3a",
+      "checks": {
+        "launches as packaged 0.7.0": true,
+        "the old run is readable with all its tasks and agents": true,
+        "an old run is not an overnight run": true,
+        "no overnight run is active": true,
+        "the old run opens in Mission Control": true,
+        "Claude status is reported": true,
+        "a project opens": true,
+        "Home, Missions, Arena, Policy, Usage, Overnight and Settings render": true,
+        "Programs renders; an upgraded database has no program": true,
+        "Workspaces renders; an upgraded database has no workspace": true,
+        "Providers renders; Claude is detected; no other provider is enabled": true,
+        "the 12 built-in Arena cases are found next to the packaged app": true,
+        "the default policy is active (version 1, no preference)": true,
+        "usage overview answers with provenance on every figure": true,
+        "an old run has no strategy and no outcome": true,
+        "Overnight panel renders; start is disabled until authorized; force close is off": true,
+        "no fake power log is written by a packaged build": true,
+        "0.7: the runtime is a separate process started from the packaged executable": true,
+        "0.7: the runtime reports the package version and a restricted endpoint file": true,
+        "0.7: a worker process starts from the packaged worker entry and reports the provider runtimes": true,
+        "0.7: the window process ended and the runtime went on": true,
+        "0.7: a new window found the same runtime": true,
+        "0.7: Stop NEXUS ended the runtime and removed its endpoint": true,
+        "0.7: no worker process outlived the runtime": true,
+        "schema upgraded to version 11": true,
+        "the database as the older release left it was kept as a .bak copy": true,
+        "no row was lost in the upgrade": true
+      },
+      "before": {
+        "versions": [
+          1,
+          2,
+          3
+        ],
+        "runs": 1,
+        "tasks": 1,
+        "agents": 5,
+        "events": 144
+      },
+      "app": {
+        "version": "0.7.0",
+        "isPackaged": true,
+        "sdkVersion": "0.3.288",
+        "gitVersion": "2.53.0.windows.2",
+        "dataDir": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-pkg-data-sej5dg"
+      },
+      "oldRun": {
+        "state": "completed",
+        "tasks": 1,
+        "agents": 5
+      },
+      "auth": {
+        "state": "authenticated",
+        "mode": "subscription",
+        "subscriptionType": "Claude subscription"
+      },
+      "pages": {
+        "run": true,
+        "arena": true,
+        "policy": true,
+        "usage": true,
+        "overnight": true,
+        "settings": true,
+        "home": true
+      },
+      "providers": [
+        {
+          "id": "claude",
+          "installed": "installed",
+          "version": "2.1.288",
+          "auth": "authenticated",
+          "supported": true,
+          "health": "healthy"
+        },
+        {
+          "id": "codex",
+          "installed": "installed",
+          "version": "0.130.0",
+          "auth": "authenticated",
+          "supported": true,
+          "health": "unknown"
+        },
+        {
+          "id": "gemini",
+          "installed": "not_installed",
+          "version": null,
+          "auth": "unknown",
+          "supported": false,
+          "health": "unavailable"
+        }
+      ],
+      "arena": {
+        "builtinCases": 12,
+        "node": {
+          "nodeFound": true,
+          "nodeVersion": "v24.14.0",
+          "ok": true,
+          "message": "Node.js v24.14.0"
+        }
+      },
+      "usage": {
+        "status": "LIMIT_APPROACHING",
+        "accountMode": {
+          "value": "subscription",
+          "source": "RUNTIME",
+          "confidence": "EXACT"
+        },
+        "windows": [
+          {
+            "limitType": "five_hour",
+            "utilizationPercent": 5,
+            "confidence": "EXACT"
+          },
+          {
+            "limitType": "iguana_necktie",
+            "utilizationPercent": 0,
+            "confidence": "EXACT"
+          },
+          {
+            "limitType": "seven_day",
+            "utilizationPercent": 90,
+            "confidence": "EXACT"
+          }
+        ],
+        "usageReportSupported": true
+      },
+      "runtime": {
+        "endpoint": {
+          "pid": 45508,
+          "bootId": "b9d6ae6d-3b3d-4516-b835-8be20569622a",
+          "version": "0.7.0",
+          "protocol": 1
+        },
+        "windowPid": 34668,
+        "commandLine": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe --nexus-runtime"
+      },
+      "workerSelfTest": {
+        "ok": true,
+        "pid": 13288,
+        "capabilities": [
+          "claude",
+          "codex"
+        ],
+        "milliseconds": 200,
+        "detail": "A worker process started and reported ready."
+      },
+      "workerCommandLine": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\resources\\app.asar\\out\\main\\worker.js",
+      "after": {
+        "versions": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "runs": 1,
+        "tasks": 1,
+        "agents": 5,
+        "events": 144
+      }
+    }
+  ],
+  "verdict": "PASS"
+}

@@ -3,6 +3,46 @@
 Factual status as of 2026-10-05 06:45 (+01:00), version 0.6.0, branch `nexus-0.6` (released as `v0.6.0`). Details and
 evidence: `docs/V0_6_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
 
+Note, 2026-10-05: tag `v0.5.0` (commit `389d95f`) does not contain the "0.5.0" sections of this page. At that tag the
+page still describes 0.4.0. They were committed afterwards as `f8e5a67` ("they missed the release commit"), which is
+not in the history of `v0.5.0`. The tag was not moved. See "Release history and supported versions" in `README.md`;
+0.2.1 to 0.5.0 also contain security defects fixed in 0.6.0.
+
+## 0.7.0: automated (no Claude usage)
+
+Measured 2026-10-07 on commit `f9cba8d` unless a row says otherwise. Details: `V0_7_RELEASE_REPORT.md`.
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck`, `pnpm lint` | pass |
+| `pnpm test` | 158 files, 3819 of 3819 passed, 636 s |
+| `pnpm test:e2e` | 28 of 28 passed, 2 capture-only tests skipped by design, 8.4 min |
+| Orchestrator stress, 1,000 seeds (`0f210dc`) | passed, 5,440 s |
+| Control plane runtime stress, 10,000 seeds; queue, Arena, overnight (two suites), policy, usage, program, workspace at 5,000 each (`0f210dc`) | passed, 1,213 s together |
+| Runtime soak, 60 minutes, scripted sessions in real worker processes | passed: 263 of 263 missions through 4 runtime kills and 18 worker kills |
+| Migration campaign, nine databases 0.1 to 0.6 (`b967cf9`) | PASS, 82 checks |
+| Packaged validation of `release/win-unpacked/NEXUS.exe`, three old databases | PASS, 82 checks, including the runtime and worker processes of the package |
+
+## 0.7.0: manual and with real providers
+
+| Check | Result |
+|---|---|
+| Real acceptance, `pnpm accept:v07` (program and Arena campaign at once, window closed, worker killed) | 14 of 14 gates on the final code; two earlier runs kept as evidence |
+| Independent security review | seven reviews and three verification passes; 13 HIGH confirmed, 12 fixed and verified, 1 accepted limitation |
+| Independent UI review | no HIGH; the four former HIGH items fixed |
+| `pnpm smoke:dialog` (the runtime's own confirmation dialog) | the dialog opens (observed); operating it: NOT VERIFIED |
+| Installer execution | NOT VERIFIED |
+
+## Intermittent failures (0.7.0)
+
+- The built-in Arena case `performance-optimization` timed out in every full run while it shared the machine with
+  six other workers, and passed alone. The built-in cases now run in a group of their own after the parallel
+  suites (`vitest.config.ts`, project `arena-cases`); three full runs since were green.
+- End-to-end, "the Control Center shows a failed load with Retry": the test pressed Retry after its fixture had
+  begun to succeed, and the page's own refresh removed the button first. The test now presses Retry while the
+  load still fails. No change of the product was involved.
+- Scenario tests remain sensitive to other heavy work on the machine; run the suite by itself.
+
 ## 0.6.0: automated (no Claude usage)
 
 | Command | Result |

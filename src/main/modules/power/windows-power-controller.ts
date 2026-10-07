@@ -56,7 +56,8 @@ export class WindowsPowerController implements PowerController {
     }
     const root = options.systemRoot ?? process.env['SystemRoot'] ?? 'C:\\Windows'
     // A relative or UNC "SystemRoot" would let the environment choose which binary runs.
-    const safeRoot = isAbsolute(root) && /^[A-Za-z]:\\/.test(root) ? root : 'C:\\Windows'
+    // Only a drive's own `\Windows` directory is accepted: the environment cannot name another folder's shutdown.exe.
+    const safeRoot = isAbsolute(root) && /^[A-Za-z]:\\Windows\\?$/i.test(root) ? root : 'C:\\Windows'
     this.system32 = join(safeRoot, 'System32')
     this.spawn = options.spawn ?? (nodeSpawn as unknown as SpawnLike)
     this.timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS

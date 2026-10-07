@@ -10,6 +10,7 @@ import {
   type RunConfig,
   type CheckCommands,
 } from './domain'
+import { ExecutionProfileSchema } from './security'
 import { DEFAULT_USAGE_SETTINGS, UsageSettingsSchema } from './v3'
 
 export const McpServerSettingSchema = z.object({
@@ -58,6 +59,8 @@ export const SettingsSchema = z.object({
     sessionRotationTurns: z.number().int().min(0).max(1000),
     leaseMinutes: z.number().int().min(1).max(240),
     checkTimeoutMinutes: z.number().int().min(1).max(120),
+    /** 0.7: how strictly agent commands and scripts are gated. Not a sandbox in either mode. Old stored settings read as STANDARD. */
+    profile: ExecutionProfileSchema.default('STANDARD'),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */
@@ -120,6 +123,7 @@ export const DEFAULT_SETTINGS: Settings = {
     sessionRotationTurns: 60,
     leaseMinutes: 30,
     checkTimeoutMinutes: 15,
+    profile: 'STANDARD',
   },
   git: {
     removeWorktreesOnSuccess: false,
@@ -186,4 +190,28 @@ export function buildRunConfig(
     enabledMcpServers: settings.mcp.servers.filter((s) => s.enabled).map((s) => s.name),
     ...overrides,
   }
+}
+
+/**
+ * The changes to the settings that let NEXUS start another program, or widen what agents may do without being
+ * asked. Each is one sentence shown to the user in a native confirmation before the change is stored. A change
+ * that only narrows (a program removed, a prefix removed, a stricter profile) is not listed.
+ */
+export function sensitiveSettingsChanges(before: Settings, after: Settings): string[] {
+  const changes: string[] = []
+  const short = (text: string): string => (text.length > 160 ? `${text.slice(0, 159)}…` : text)
+  if (after.claude.executablePath.trim() !== '' && after.claude.executablePath !== before.claude.executablePath) changes.push(short(`Run this program as the Claude runtime: ${after.claude.executablePath}`))
+  const known = new Map(before.mcp.servers.map((server) => [server.name, JSON.stringify(server)]))
+  for (const server of after.mcp.servers) {
+    if (!server.enabled || known.get(server.name) === JSON.stringify(server)) continue
+    changes.push(short(server.type === 'stdio' ? `Start this program as the MCP server "${server.name}": ${[server.command ?? '', ...(server.args ?? [])].join(' ')}` : `Connect agents to the MCP server "${server.name}" at ${server.url ?? ''}`))
+  }
+  const prefixes = new Set(before.permissions.safeCommandPrefixes)
+  for (const prefix of after.permissions.safeCommandPrefixes) if (!prefixes.has(prefix)) changes.push(short(`Let agents run commands that begin with "${prefix}" without asking`))
+  if (after.permissions.allowNetworkTools && !before.permissions.allowNetworkTools) changes.push('Let read-only agents fetch pages from the web')
+  if (before.execution.profile === 'RESTRICTED' && after.execution.profile === 'STANDARD') changes.push('Lower the execution profile from RESTRICTED to STANDARD')
+  if (after.memory.autoApproveVerifierMemory && !before.memory.autoApproveVerifierMemory) changes.push('Keep what verifier agents propose for the project memory without your review')
+  if (!after.claude.subscriptionMode && before.claude.subscriptionMode) changes.push('Let API keys from the environment reach the agent sessions')
+  if (after.advanced.debugSdk && !before.advanced.debugSdk) changes.push('Write the debug output of the Claude runtime to the NEXUS log (it can contain prompts and tool input)')
+  return changes
 }

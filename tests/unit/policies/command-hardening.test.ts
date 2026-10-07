@@ -205,16 +205,20 @@ describe('git config cannot install exec-capable keys', () => {
   it('asks worker and debugger', async () => {
     await expectBehavior(KEYS.map((c) => [c, 'bash'] as [string, Sh]), 'ask')
   })
-  it('keeps reads and harmless keys as before', async () => {
+  it('asks before any git config write, because a linked worktree shares its configuration with the original repository', async () => {
+    for (const c of ['git config user.name x', 'git config --local user.email a@b.c', 'git config core.autocrlf true', 'git config --unset alias.x', 'git config safe.directory *', 'git config extensions.worktreeConfig true', 'git config remote.origin.url https://example.invalid/r.git', 'git config set user.name x']) {
+      expect(cls(c, 'bash').level, c).toBe('needs_approval')
+      for (const role of WRITING) expect((await decide(role, 'bash', c)).behavior, `${role}: ${c}`).toBe('ask')
+    }
+  })
+  it('keeps reads and per-worktree writes as before', async () => {
     for (const c of [
       'git config --get user.name',
       'git config --list',
       'git config -l',
       'git config --local --get-all core.editor',
-      'git config user.name x',
-      'git config --local user.email a@b.c',
-      'git config core.autocrlf true',
-      'git config --unset alias.x',
+      'git config user.name',
+      'git config --worktree user.name x',
       'git config get core.editor',
     ]) {
       expect(cls(c, 'bash').level, c).toBe('write')
@@ -344,5 +348,17 @@ describe('readiness review: git config behind a value option, and Git\'s own fil
     for (const command of ['echo node_modules >> .gitignore', 'cat .gitattributes', 'git --git-dir=.git status', 'ls .github/workflows']) {
       expect(cls(command, 'bash').reasons.join(' '), command).not.toMatch(/Git's own files/)
     }
+  })
+})
+
+describe('readiness review: moving refs outside nexus/', () => {
+  it('asks before a branch or tag is moved, overwritten or a ref is written directly', async () => {
+    const asks = ['git branch -f main HEAD~3', 'git branch -M feature main', 'git branch --force release abc123', 'git tag -f v1.0.0', 'git tag -d v1.0.0', 'git update-ref refs/heads/main abc123', 'git update-ref HEAD abc123', 'git update-ref --stdin']
+    for (const command of asks) {
+      expect(cls(command, 'bash').level, command).not.toBe('safe')
+      for (const role of WRITING) expect((await decide(role, 'bash', command)).behavior, `${role}: ${command}`).not.toBe('allow')
+    }
+    const free = ['git branch feature', 'git branch --list', 'git tag v1.2.3', 'git update-ref refs/heads/nexus/x/task abc123']
+    for (const command of free) expect(cls(command, 'bash').reasons.join(' '), command).not.toMatch(/moves|replaces|overwrites/)
   })
 })

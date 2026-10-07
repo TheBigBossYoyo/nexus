@@ -2,6 +2,10 @@
 
 Factual log. Test and build status lives in TEST_STATUS.md.
 
+Note, 2026-10-05: tag `v0.5.0` (commit `389d95f`) does not contain the "v0.5.0" section of this page. It was
+committed afterwards as `f8e5a67`, which is not in the history of `v0.5.0`. The tag was not moved. See "Release
+history and supported versions" in `README.md`; 0.2.1 to 0.5.0 also contain security defects fixed in 0.6.0.
+
 ## Completed
 
 | Phase | What exists |
@@ -142,3 +146,23 @@ See ARCHITECTURE.md "Key decisions". Later additions:
 2. Establish or rule out the cause of the intermittent `scheduling.test.ts` pause.
 3. Exercise the repair loop, messaging and recovery with the real runtime.
 4. Optional approval-gated action to merge the integration branch into the user's branch.
+
+## v0.7.0 (2026-10-07)
+
+Secure Control Plane. Report: `V0_7_RELEASE_REPORT.md` (PASS). Design: `V0_7_DESIGN.md`. Log: `V0_7_PROGRESS.md`.
+
+- Three process roles from one executable: the window (a client), the persistent runtime (database, queue,
+  scheduler, engines, schedules, overnight supervisor), and one worker process per agent session.
+- A local protocol over a named pipe with a mutual handshake; the window reconnects and re-reads everything.
+- Worker manager with durable leases and heartbeats; a lost worker's session ends as crashed and its task is
+  decided from what is on disk.
+- Scheduler: aging against starvation, dispatch pause, recorded decisions, schedules that fire once per
+  occurrence across restarts; notifications; the tray belongs to the runtime.
+- Execution security: trust classes, capabilities, interpreter and package-script policy with provenance, the
+  RESTRICTED profile, the decision log. Not a sandbox.
+- Git safety beyond 0.6: NEXUS names the Git directory and the branch of its worktrees itself.
+- Control Center: confirmations, the load error, blocked work, the inspector, runtime diagnostics, connection
+  states.
+- Migrations 010 (workers, leases, worker events, schedule firings, scheduler decisions) and 011 (security
+  decisions, file provenance), both additive.
+- Next: `V0_8_PROPOSAL.md` (isolation and reliability). Nothing of 0.8 is implemented.

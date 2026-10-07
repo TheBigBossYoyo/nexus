@@ -276,3 +276,116 @@ Written while the 0.3 stress runs; only light test runs alongside it.
 3. 0.6 (providers), 0.7 (control plane) as far as time allows, each on its branch; partial work stays unmerged.
 4. `docs/ONE_DOT_ZERO_READINESS.md`, `docs/OVERNIGHT_FINAL_REPORT_0_3_TO_1_0.md`, preservation, then
    `finish-now` to the shutdown supervisor. Start finalization no later than 09:45.
+
+### 02:40 to 03:50 Release of 0.4.0; 0.6 built; 0.7 core built
+
+- **0.4.0 released** at 03:13. The stress in the second checkout ended with 997 of 1000 orchestrator seeds:
+  seeds 13, 16 and 22 timed out in the first three minutes, while a full test suite, a typecheck and a lint ran
+  beside it. Seeds 13 to 22 alone: 10 of 10; seeds 1 to 60 alone: 60 of 60, same commit. Recorded as it
+  happened in `docs/V0_4_RELEASE_REPORT.md`. `main` = `3e1b8b3`, tag `v0.4.0`.
+- **0.5** (`nexus-0.5`, version 0.5.0): `pnpm test` 137 files, 2600 of 2601 (one failure: the timing-based
+  evaluator of the Arena case `performance-optimization` measured a ratio of 24.1 against a limit of 24 while
+  the machine was loaded; the file passed alone, 16 of 16); E2E 22 passed. Its 1000-seed stress started at
+  03:12 in the second checkout. Still owed before a release: an independent code audit, an independent UI
+  review, a real acceptance run, a clean full suite, package.
+- **0.6** (`nexus-0.6`, from `nexus-0.5`): providers.
+  - `AgentRuntimeProvider`, discovery, provider policy, a router that is itself an `AgentRuntime` (the
+    orchestrator did not change), fallback with recorded reasons, provider sessions (schema 8), usage isolation,
+    provider-aware evidence (`codex:gpt-5.5` in mission outcomes and Arena trials), Providers page, provider
+    line in the mission inspector, IPC, PROVIDERS.md.
+  - Codex is installed on this computer (`codex-cli 0.130.0`) and signed in through its own tool ("Logged in
+    using ChatGPT"). NEXUS drives `codex exec --json` read-only. Its default model was refused by the service
+    for this tool version; `gpt-5.5`, which the service listed, works and is NEXUS's default for Codex.
+  - **Real Codex evidence** (`pnpm smoke:providers`, `docs/acceptance/providers-smoke-2026-10-05T*.json`): one
+    read-only review of a small commit with a real defect. Outcome success, verdict `request_changes`, the
+    defect named (an empty list divides by zero), two shell commands run, the attempt to write a file refused
+    by the Codex sandbox, the working directory fingerprint unchanged, 46k input tokens (36k cached).
+  - Gemini is not installed here; it is detected only and cannot be enabled.
+  - Tests: `pnpm test` 139 files, 2639 passed; E2E 24 passed (2 new, scripted providers).
+- **0.7** (`nexus-0.7`, from `nexus-0.6`): the control plane core, in the NEXUS process.
+  - Built: global work items (six types, P0 to P3, ten states, persisted order), allocation of agent capacity
+    between workloads through the orchestrator's dispatch gate (running sessions are never stopped; free
+    capacity goes to the higher priority first), adoption of every working workload however it was started,
+    durable schedules (a missed one fires once), runtime health per component, restrained notifications, boot
+    reconciliation, Control Center page, IPC (`control.*`), schema 9.
+  - Tests: `pnpm test` 140 files, 2671 passed before the page was added; 21 control-plane tests including
+    10,000 seeded allocations; E2E 1 of 1 (an adopted mission, a program from the queue, limits, a schedule,
+    a restart).
+  - **Not built, and 0.7 cannot be released without them:** a runtime process separate from the window (the
+    control plane lives in the Electron main process, which already keeps running in the tray when the window
+    is closed), a client and runtime IPC boundary of its own, and a worker manager with leases. Home was not
+    redesigned into the Control Center; the Control Center is its own page.
+- Usage: no agents and no real Claude runs were started between 02:36 and the reset at 04:10.
+
+### 03:50 to 05:17 Audits of 0.5 and 0.6, real acceptance of 0.5, reliability campaign, release of 0.5.0
+
+- 04:10: the five-hour usage window reset (93 percent at 03:53). Three independent read-only reviews started:
+  code audit of 0.5, security audit of 0.6, UI review of both.
+- **Real acceptance of 0.5** (`scripts/workspace-acceptance.mjs`, three disposable repositories, a shared JSON
+  Schema): 15 of 15 gates on the first attempt at 04:12, and again at 04:56 after the audit fixes.
+- **Audit of 0.5:** 1 HIGH (global verification passed for a repository whose checks never ran), 7 MEDIUM. The
+  HIGH and five MEDIUM fixed with tests; see `V0_5_RELEASE_REPORT.md`.
+- **Reliability campaign** (5000 histories per engine, on the 0.7 code, in a third checkout): control plane,
+  workspace and usage passed. **Program stress failed on seed 1552**: a real defect of the released 0.4.0 (a
+  result built on an older state of the program branch was verified, accepted, refused by the branch and
+  blocked, again on every resume). Fixed, 5000 passed, the seed is a permanent test. **Both overnight stresses
+  failed on four seeds**: a failsafe lost to a restart of Windows within a minute of arming stayed "armed" in
+  the record. Fixed (on the 0.6 line), 2 x 5000 passed.
+- A request to stop the processes of a running validation chain was refused by the permission system; the
+  chain was left to finish and the fix was made in another checkout.
+- **0.5.0 released** at 05:17: `pnpm test` 137 files, 2606 passed; E2E 22; package; packaged validation 19 of 19;
+  stress 1000 (before the audit fixes) plus the workspace and program stresses after them. `main` = `389d95f`,
+  tag `v0.5.0`. The script that wrote the release documents stopped halfway, so TEST_STATUS and BUILD_PROGRESS
+  for 0.5.0 are not in the tagged commit; they are on the 0.6 line.
+
+### 05:17 to 06:45 Real acceptance of 0.6, the boundary review, security hardening, release of 0.6.0
+
+- **Audit of 0.6:** 1 HIGH (the Codex tool was started by name through `cmd.exe` in the task's worktree, so a
+  planted `codex.cmd` would run), 4 MEDIUM, all fixed with tests; UI review: 3 HIGH (consent and truthfulness
+  of the Providers page), fixed. See `V0_6_RELEASE_REPORT.md`.
+- **Real acceptance of 0.6** (`scripts/provider-acceptance.mjs`): a real mission implemented and verified by
+  Claude and reviewed by a real Codex session, read-only: 14 of 14 gates at 05:22, and again at 06:43 on the
+  final code. `pnpm smoke:providers`: a real Codex review that finds a planted defect, cannot write, and does
+  not run a `codex.cmd` planted in the repository.
+- **Adversarial review of the boundaries** (for the 1.0 question, on the 0.7 code): 3 HIGH and 1 HIGH by
+  design. Fixed on the 0.6 line, each with a test that fails without the fix: an agent's shell could rewrite a
+  worktree's `.git` pointer so that NEXUS wrote into the user's repository; `git config` behind a value option
+  passed the classifier and the configured program then ran inside NEXUS's own git. NEXUS's git now runs no
+  hooks, no file system monitor, no pager and no `ext` transport, without the withheld credentials. Open by
+  design: a writing agent can write a script and run it uninspected. Six MEDIUM open (`SECURITY.md`).
+- Three failures during the validation of 0.6, none answered by loosening a check: the timing evaluator of the
+  Arena case `performance-optimization` under load (it now measures again before failing; case version 3), an
+  E2E test that did not wait for the first agent session, and the order of two steps in the packaged
+  validation script.
+- **0.6.0 released** at 06:44: `pnpm test` 139 files, 2650 passed; E2E 24; package; packaged validation 20 of 20;
+  stress 1000 (before the hardening) plus 100 orchestrator seeds after it. `main` = `0a2874f`, tag `v0.6.0`.
+- **Migration campaign:** the 0.7 development build on nine real databases from 0.1 to 0.6: 9 of 9 checks each.
+- 0.7 merged with the hardened 0.6: `pnpm test` 141 files, 2686 passed. It stays a partial branch.
+
+
+### 06:45 to 07:15, and the continuation at 20:19
+
+- 0.7 merged with the released 0.6.0. A sixth MEDIUM finding of the boundary review fixed on the 0.7 branch
+  (moving a branch or tag, or writing a ref outside `nexus/`, asks first).
+- **The first full E2E run of 0.7 failed four tests**, every one a run that is resumed and must complete. The
+  new gate answered a just-resumed run that it may hold no session and the orchestrator paused it again. Fixed
+  and tested; the four pass. `pnpm test` on 0.7: 141 files, 2688 passed.
+- An independent UI review of the latest application found three HIGH items on the Control Center (no
+  confirmation for Cancel and Delete, an endless "Loading" beside an error, blocked work that cannot be opened).
+  Not fixed; listed in `V0_7_RELEASE_REPORT.md`.
+- A small Arena comparison on the packaged 0.6.0 build was started at 06:49 (ADAPTIVE turned out not to be an
+  Arena strategy; SINGLE and BUILD on three cases). One trial was evaluated.
+- **At about 07:15 a tool call was declined and the session stopped and waited.** `finish-now` was not sent.
+  The failsafe shut the computer down at the hard limit, 10:36.
+- **20:19, continued by the user.** Run again: E2E on 0.7 (25 of 25 passed (1 capture-only test skipped by design), 8.2 min, run in the continuation), the migration campaign (9 of 9 checks on each of nine databases, the 0.6 one holding a real mission with a Codex review (`migration-campaign-2026-10-05T19-37-27-463Z.json`; a run minutes earlier is kept too: it counted a newly registered Arena case version as a changed table)), the control
+  plane stress (passed, 472 s). Written into the repository: `V0_7_RELEASE_REPORT.md`, `ONE_DOT_ZERO_READINESS.md`,
+  `OVERNIGHT_FINAL_REPORT_0_3_TO_1_0.md`. No shutdown was triggered in the continuation.
+
+### Final state
+
+| | |
+|---|---|
+| `main` | `0a2874f`, 0.6.0 |
+| Tags of the night | `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0` |
+| `nexus-0.7` | PARTIAL, unmerged, checked out |
+| 1.0 | NOT READY FOR RC; no tag, no candidate |

@@ -1,0 +1,62 @@
+{
+  "minutes": 60,
+  "counters": {
+    "runtimeRestarts": 4,
+    "workersKilled": 18,
+    "clientReconnects": 60,
+    "pauses": 48,
+    "schedules": 37,
+    "holds": 177,
+    "cancels": 14
+  },
+  "runsStarted": 263,
+  "runsFinished": 263,
+  "samples": 114,
+  "lastBoot": {
+    "samples": 24,
+    "rssMb": [
+      148.38333333333333,
+      253.73333333333335
+    ],
+    "heapUsedMb": [
+      32.85,
+      39.63333333333333
+    ],
+    "timers": [
+      1.8333333333333333,
+      1.3333333333333333
+    ],
+    "handles": [
+      15,
+      13.833333333333334
+    ]
+  },
+  "max": {
+    "rssMb": 269,
+    "timers": 5,
+    "handles": 25,
+    "liveWorkers": 4,
+    "queueOpen": 6,
+    "walMb": 4.2
+  },
+  "end": {
+    "at": "2026-10-06T23:27:18.222Z",
+    "minute": 64.2,
+    "boot": 5,
+    "rssMb": 256.2,
+    "heapUsedMb": 33.7,
+    "timers": 0,
+    "handles": 8,
+    "dbMb": 71.1,
+    "walMb": 4.2,
+    "liveWorkers": 2,
+    "activeLeases": 0,
+    "queueOpen": 0,
+    "queueFinished": 300,
+    "runsStarted": 263,
+    "runsFinished": 263,
+    "worktreeDirs": 341,
+    "workerProcesses": 2
+  },
+  "problems": []
+}

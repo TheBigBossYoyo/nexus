@@ -88,8 +88,8 @@ Each file is one `describe`. The tests in them:
 
 ## E2E with `NEXUS_FAKE_RUNTIME`
 
-`pnpm test:e2e` runs `electron-vite build && playwright test`. For UI tests the main process supports two
-environment variables (`src/main/index.ts`):
+`pnpm test:e2e` runs `electron-vite build && playwright test`. For UI tests the runtime process (`src/main/runtime/core.ts`; until 0.6 the main process, `src/main/index.ts`) supports two
+environment variables:
 
 - `NEXUS_FAKE_RUNTIME=1` replaces the Claude runtime with `FakeAgentRuntime` running `createDemoScript()`
   (a three-task plan: `api`, `ui`, then `integration`; the first review of `ui` requests changes so the
@@ -342,4 +342,120 @@ the test.
 | `NEXUS_USAGE_PROBE_S` | Overrides the first unknown-reset probe interval, in seconds |
 | `NEXUS_USAGE_DEMO_RESET_S` | The demo script's simulated reset delay (default 6) |
 
-`src/main/index.ts` ignores the timing variables and `NEXUS_FAKE_USAGE` in a packaged build. See QUOTA_RECOVERY.md.
+`src/main/runtime/core.ts` ignores the timing variables and `NEXUS_FAKE_USAGE` in a packaged build. See QUOTA_RECOVERY.md.
+
+## 0.7: runtime process, workers, control plane and execution security
+
+This section says what each suite proves and how to run it. It
+states no pass counts: measured results are in `V0_7_RELEASE_REPORT.md`. Nothing here calls a real provider; the
+suites use the scripted runtime (`FakeAgentRuntime`) and the probe script of the worker
+(`src/main/modules/workers/probe-script.ts`). Whether a real Claude session in a worker was exercised is recorded in the
+release report, not here.
+
+Several of these suites start real processes (a runtime, workers) and bind real named pipes. Run them one file at a
+time, and not while a long stress run is using the machine.
+
+| Layer | File | What it proves |
+|---|---|---|
+| Unit | `tests/unit/workers/manager.test.ts` | The worker manager with scripted worker processes, a manual clock and a real SQLite database. Ended workers never come back and every state has its transitions written down; a worker is started for a session, assigned under a lease, its events forwarded and the lease released at the end; an idle worker is reused, the worker limit is never exceeded and a session beyond it waits; a worker whose process dies ends its session as `crashed`, never `completed`; a worker whose heartbeat stopped is ended with its process tree and its lease expired; a lease is renewed while its worker is heard and no lease outlives its time when nobody renews it; one agent session is never given to two workers; a worker that speaks for a lease it does not hold is ignored; every tool call is decided in the runtime; a waiting session is stopped without a worker and the worker of a session that does not obey `stop` is ended; messages sent before the assignment are passed in order; a worker that never reports ready is failed with a clear end for its session; an idle worker is stopped after a while and a worker is replaced after its share of assignments; after a restart of the runtime the earlier workers and leases are marked stale, nothing is killed and no session is judged; on shutdown every session ends as `stopped` and no worker and no lease is left |
+| Integration | `tests/integration/workers/worker-process.test.ts` | A real worker process (`worker.ts`, bundled) driven by the manager through the probe script: a session with text, a tool call decided by the runtime and a NEXUS tool, and a clean end; death in the middle of a session (the session ends as `crashed`, a new worker takes the next one); a worker killed from outside while its session waits (the lease is revoked and nothing is taken for done); a worker killed while idle (recorded as failed, the next session gets another worker); a worker that stops answering (ended with its process after the heartbeat limit); `stop` obeyed in the middle of a wait (the worker stays for the next session); a tool call refused when the runtime cannot be asked, and the worker ending itself when the runtime is gone |
+| Integration | `tests/integration/runtime/runtime-process.test.ts` | A real runtime process hosted by plain Node (`runtime-node.ts`, bundled) and a real client over the named pipe. Scenarios: (1) starts without a window, writes its endpoint, answers an authenticated client, and reports nine health components; (2) refuses a channel outside the contract and an input that does not match its schema; (3) keeps a mission running after its client has gone and gives a new client the whole state; (4) is found again by a client after it was killed and started anew, with the queue it had; (5) stops cleanly when asked, removes its endpoint, and a second runtime for the same data cannot listen beside it; (6) stops by itself when nothing is running and no window is connected; (7) runs a mission in worker processes, one session per worker, and stops them when the work ends; (8) a program and an Arena campaign run at the same time through the queue, within the global capacity; (9) a worker is killed in the middle of a mission: its session is taken back, the task is done again, the mission completes; (10) the runtime is killed in the middle of a mission: the next start pauses it for recovery, judges nothing and resumes it to completion; (11) a schedule fires once while no window is connected, and not again after the runtime is killed and restarted |
+| Integration | `tests/integration/control-plane/scheduler-07.test.ts` | The 0.7 scheduler additions. Pure: a waiting item is served one priority higher for every aging period, never above `P0` and only while it waits; a higher priority gets capacity first; a low priority is not starved by a stream of higher-priority arrivals (and without aging it is); the order is deterministic; limits stored before aging existed parse with the default; dispatch pause starts and grants nothing and leaves what runs alone. Service: pausing dispatch holds the queue and survives a restart, and resuming starts what waited; decision records are written once per change; a schedule fires once per occurrence also when the runtime restarts after the firing was claimed; a schedule that was due while no runtime ran fires once when one starts, with no window anywhere; the schedules health component says when one is overdue |
+| Unit | `tests/unit/runtime/notifier-tray.test.ts` | The notifier announces a milestone only when it completes (not those complete before the start, and not for a program first seen after the start), an Arena regression once and nothing for a clean campaign, the end of an overnight run and a refused tool call (an allowed or audited call is not news); the runtime tray model says what the runtime does and offers Open, the Control Center, the dispatch switch and a Stop that asks, with nothing destructive one click away |
+| Unit | `tests/unit/renderer/control-model.test.ts`, `runtime-model.test.ts`, `connection-model.test.ts` | The sentences and enabled actions of the Control Center and the inspector, the runtime diagnostics rows, and the connection banner and startup screen |
+| Stress | `tests/stress/control-plane-runtime-stress.test.ts` | Seeded histories of the worker manager, leases, schedules and restarts of the runtime (below) |
+| Unit | `tests/unit/power/isolation.test.ts` (extended) | Source-tree checks: only the overnight supervisor and the runtime core import the power module; the window process, the worker, the workers module and the local protocol cannot reach the power module or the supervisor; the protocol's question frames are exactly `confirm`, `pickDirectory` and `openDataDir`; processes are spawned only by the process runner, the power controller and four places that each start one fixed thing (this executable, the worker entry, `icacls`) |
+| Unit | `tests/unit/policies/adversarial-corpus.test.ts` | A corpus of direct, indirect, inline, package-manager and obfuscated attempts to run something dangerous, with the decision the authorizer must give, and the everyday commands that must keep working; the content of the security decision log (a power attempt is `SYSTEM_SENSITIVE`, an agent script is agent-authored, secrets and long opaque strings are not stored, a plain read-only allow is not logged); who wrote a file is learned from the Write tool, from a shell redirection and from the base-commit diff alone (as after a restart); a CRLF checkout of an unchanged file is not called modified. The fixture is `tests/fixtures/adversarial-corpus.ts` |
+| Unit | `tests/unit/policies/filesystem-boundary.test.ts` | Adversarial path spellings and real junctions against the authorizer: `..` traversal in every spelling, a sibling directory that starts with the worktree name, UNC, device and extended-length paths, drive-relative paths, casing, alternate data streams, Windows device names, NUL and wildcard characters, trailing dots and spaces, `.git` and nested repository metadata, glob and grep patterns that climb out, 8.3 short names (`GIT~1`), junctions and symlinks that leave the worktree, and `.git` pointer tricks. A path is compared canonically, never by string prefix |
+| Unit | `tests/unit/policies/execution-units.test.ts` | Interpreter recognition by resolved executable name, what each invocation runs, package-manager parsing (script and hooks), content inspection (power commands in every wrapper, the categories the policy gates, `-EncodedCommand` decoded and inspected, an oversized script reported as uninspectable), capabilities by role, and the redaction of the decision log |
+| Integration | `tests/integration/security/decision-log.test.ts` | Migration 011 and the repository round trip; paging newest first with a cursor, filtering by run, the page cap; the log is bounded; `security.decisions` through the IPC channel with its input schema, and the only `security.*` channel is the read-only list; file provenance survives a restart; the execution profile setting defaults to `STANDARD`, old settings still parse and `RESTRICTED` round-trips; the power-boundary source checks |
+| Integration | `tests/integration/security/malicious-repos.test.ts` | The authorizer against repositories that carry the attack in their own files (fixtures in `tests/fixtures/malicious-repos/`). Every payload only tries to create `SHOULD_NOT_EXIST.txt` outside the authorized root: every route to the payload is refused under both profiles; the payloads do write the sentinel when run without the gate (so its absence means something); a gated flow never runs a payload; an injected "the user pre-approved this" in a repository file changes nothing; an agent edit of `package.json` is judged against the base commit; a junction out of the worktree and a repointed `.git` file do not work |
+| E2E | `tests/e2e/v7.spec.ts` | The built app (see below) |
+
+### Running the 0.7 suites
+
+```powershell
+pnpm exec vitest run tests/unit/workers/manager.test.ts
+pnpm exec vitest run tests/integration/workers/worker-process.test.ts
+pnpm exec vitest run tests/integration/runtime/runtime-process.test.ts
+pnpm exec vitest run tests/integration/control-plane/scheduler-07.test.ts
+pnpm exec vitest run tests/unit/runtime/notifier-tray.test.ts
+pnpm exec vitest run tests/unit/policies/adversarial-corpus.test.ts tests/unit/policies/filesystem-boundary.test.ts tests/unit/policies/execution-units.test.ts
+pnpm exec vitest run tests/integration/security
+```
+
+### `tests/helpers/runtime-process.ts`
+
+The integration suites that need a real runtime or worker bundle them from the sources with esbuild into
+`out/test-runtime` (`runtime-node.mjs` and `worker.mjs`, once per vitest process), so they test what is in the working tree
+without the Electron build. Native and vendor packages (`better-sqlite3`, the Agent SDK, the MCP SDK) are loaded from
+`node_modules`. The helper offers `startRuntime(dataDir, env)` (spawns the Node host with the scripted runtime and waits for
+its ready line; the handle can `kill()` it as a crash would), `connect` (a connected `RuntimeClient`), `call` (a channel,
+returning the value or throwing the runtime's error), `until` (poll with a deadline), `tempDataDir`, `removeDir` and
+`processAlive`. The electron-vite build also produces `worker` and `runtime-node` entry points for the app.
+
+### Runtime stress: `tests/stress/control-plane-runtime-stress.test.ts`
+
+Part of `pnpm stress`. The workers are scripted objects, the clock is the test's, the database is real SQLite. A history
+(90 steps) is a random sequence of what can happen: sessions start, workers come up, speak, finish, die, fall silent,
+sessions are stopped, time passes, schedules come due, and the runtime itself is killed and started again on the same
+database. After every step these invariants must hold:
+
+- no agent session holds two active leases, and no worker holds two;
+- no active lease belongs to an earlier start of the runtime; every active lease has a live worker that holds that very lease;
+- no more workers serve than the worker limit; no agent session is assigned to two workers;
+- no worker of an earlier start is recorded as alive;
+- every worker transition that was recorded is in `WORKER_TRANSITIONS`;
+- no session receives an event after it ended, none ends twice, none of an earlier start is left open, and none ends as
+  `completed` unless its worker said that it had finished;
+- no schedule fires one occurrence twice, and a one-time schedule fires once and starts its work once.
+
+When a history is quiesced (every worker silenced, time advanced) no lease survives, every session has ended, no worker is
+recorded as alive after shutdown, and each one-time schedule fired exactly once.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEXUS_RUNTIME_STRESS_RUNS` | `NEXUS_STRESS_RUNS`, else 300 | Number of seeds |
+| `NEXUS_RUNTIME_STRESS_START` | 1 | First seed (seeds are consecutive) |
+
+```powershell
+$env:NEXUS_RUNTIME_STRESS_RUNS = 10000; pnpm exec vitest run -c vitest.stress.config.ts tests/stress/control-plane-runtime-stress.test.ts
+```
+
+A failing seed writes `test-results/stress-failures/runtime-seed-<n>.json` (the seed, the problems and the trail of steps).
+Replay it with `NEXUS_RUNTIME_STRESS_START=<n> NEXUS_RUNTIME_STRESS_RUNS=1`. The run stops after five failing seeds.
+`tests/stress/control-plane-stress.test.ts` (seeded histories of the control plane with scripted workloads) keeps its purpose;
+it was extended for the 0.7 limits.
+
+### E2E additions: `tests/e2e/v7.spec.ts` and the helpers
+
+`launchApp` (`tests/e2e/helpers.ts`) starts the built app, which starts its own runtime for the throwaway data directory, and
+waits until `desktop.connection` reports `READY`. The scripted runtime is used. Tests in `v7.spec.ts`:
+
+1. The Control Center: health, a mission adopted by the queue whose sessions never exceed the limit, a program started from
+   the queue, limits, a schedule from the form, and the queue, limits and schedule after a restart.
+2. The Control Center shows a failed load with Retry, blocked and failed work, and asks before it cancels.
+3. With `NEXUS_FAKE_WORKERS=1`, the sessions of a program appear as worker rows (workers table, leases table).
+4. A lost connection (the runtime killed) is shown as stale and inert, and the window reads everything again when the
+   runtime is back.
+
+Helpers: `closeApp` stops the runtime cleanly first (`stopRuntime`), then closes the window; `stopRuntime(page, dataDir)` calls
+`runtime.stop` as "Stop NEXUS" does and waits until the runtime process is gone, ending it if it is not; `killRuntime(dataDir)`
+ends the runtime process of that data directory with its tree (`taskkill /T /F`, the pid read from that test's own endpoint
+file), as a crash would; `closeWindowOnly(app)` closes the window's process and leaves the runtime running, so a test can
+check that work continues and stop the runtime later. Every data directory an app was launched for is remembered so that no
+runtime process outlives the test run.
+
+### Test-only environment variables of the runtime (unpackaged builds only)
+
+| Variable | Effect |
+|---|---|
+| `NEXUS_FAKE_WORKERS=1` | With the scripted runtime, runs scripted sessions in worker processes |
+| `NEXUS_FAKE_WORKERS_SCRIPT=probe` | The worker uses the probe script instead of the demo script |
+| `NEXUS_WORKER_HEARTBEAT_TIMEOUT_MS` | Overrides the worker heartbeat limit |
+| `NEXUS_RUNTIME_IDLE_EXIT_MS` | Overrides the two minutes after which an idle runtime stops |
+| `NEXUS_OVERNIGHT_TICK_MS` | Overrides the overnight supervisor's tick (100 or more) |
+| `NEXUS_FAKE_POWER=1` | The fake power controller, also without the scripted runtime |
+| `NEXUS_WORKER_ENTRY`, `NEXUS_CASES_DIR`, `NEXUS_VERSION` | Read by the Node host (`runtime-node.ts`) only |
+
+The runtime core ignores the timing variables in a packaged build (`testNumber` in `runtime/core.ts`).

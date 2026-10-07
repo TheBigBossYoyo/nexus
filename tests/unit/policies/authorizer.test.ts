@@ -373,7 +373,7 @@ describe('shell policy by role', () => {
           'mkdir build',
           'echo hi > out.txt',
           'rm old.txt',
-          'git checkout -b task/x',
+          'git stash',
           'pnpm exec eslint --fix src',
         ]) {
           expect(await behavior(role, tool, { command: ok }), `${role}/${tool}: ${ok}`).toBe('allow')

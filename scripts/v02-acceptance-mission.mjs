@@ -52,6 +52,7 @@ delete env.NEXUS_FAKE_RUNTIME
 let app = await electron.launch(exe ? { executablePath: exe, env } : { args: ['.'], cwd: root, env })
 let page = await app.firstWindow()
 await page.waitForSelector('[data-testid="app-shell"]', { timeout: 30_000 })
+await (await import('./acceptance-common.mjs')).waitForRuntime(page)
 const call = async (channel, input = {}) => {
   const result = await page.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
   if (!result.ok) throw new Error(`${channel}: ${result.error.code} ${result.error.message}`)
@@ -120,6 +121,7 @@ for (;;) {
     app = await electron.launch(exe ? { executablePath: exe, env } : { args: ['.'], cwd: root, env })
     page = await app.firstWindow()
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 30_000 })
+    await (await import('./acceptance-common.mjs')).waitForRuntime(page)
     const recoverable = await call('runs.recoverable')
     const mine = recoverable.find((r) => r.run.id === run.id)
     restart.recoverable = mine ? { state: mine.run.state, pauseReason: mine.run.pauseReason, resumeState: mine.run.resumeState, staleAgents: mine.staleAgents, activeTasks: mine.activeTasks } : null

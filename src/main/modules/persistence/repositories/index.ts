@@ -39,6 +39,9 @@ import {
   WorkspaceTaskStore,
 } from './workspace'
 import { ProviderSessionStore } from './provider'
+import { ControlIncidentStore, ControlScheduleStore, WorkItemStore } from './control-plane'
+import { ScheduleFiringStore, SchedulerDecisionStore, WorkerLeaseStore, WorkerStore } from './workers'
+import { FileProvenanceRepository, SecurityDecisionRepository } from './security'
 import {
   ContextPackRepository,
   FactRepository,
@@ -149,6 +152,18 @@ export interface Repositories {
   // v0.5
   /** v0.6: which provider ran each agent session. */
   providerSessions: ProviderSessionStore
+  /** v0.7: the global queue, durable schedules and the control plane's incidents. */
+  workItems: WorkItemStore
+  controlSchedules: ControlScheduleStore
+  controlIncidents: ControlIncidentStore
+  /** v0.7: worker processes, their leases, schedule firings and the scheduler's decisions. */
+  workers: WorkerStore
+  workerLeases: WorkerLeaseStore
+  scheduleFirings: ScheduleFiringStore
+  schedulerDecisions: SchedulerDecisionStore
+  /** v0.7: the security decision log and the record of which files agents wrote. */
+  securityDecisions: SecurityDecisionRepository
+  fileProvenance: FileProvenanceRepository
   workspaces: WorkspaceRepositoryStore
   enrolledRepositories: EnrolledRepositoryStore
   workspaceServices: ServiceStore
@@ -231,6 +246,15 @@ export function createRepositories(db: Database): Repositories {
     expertise: new ExpertiseRepository(db),
     backgroundJobs: new BackgroundJobRepository(db),
     providerSessions: new ProviderSessionStore(db),
+    workItems: new WorkItemStore(db),
+    controlSchedules: new ControlScheduleStore(db),
+    controlIncidents: new ControlIncidentStore(db),
+    workers: new WorkerStore(db),
+    workerLeases: new WorkerLeaseStore(db),
+    scheduleFirings: new ScheduleFiringStore(db),
+    schedulerDecisions: new SchedulerDecisionStore(db),
+    securityDecisions: new SecurityDecisionRepository(db),
+    fileProvenance: new FileProvenanceRepository(db),
     workspaces: new WorkspaceRepositoryStore(db),
     enrolledRepositories: new EnrolledRepositoryStore(db),
     workspaceServices: new ServiceStore(db),

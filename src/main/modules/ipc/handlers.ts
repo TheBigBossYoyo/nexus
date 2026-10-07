@@ -11,6 +11,7 @@ import {
 } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { MIN_ROUTING_SAMPLES } from '@shared/v2'
+import { sensitiveSettingsChanges } from '@shared/settings'
 import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
@@ -26,6 +27,8 @@ import { unavailableV3Handlers, type V3Handlers } from './v3-handlers'
 import { unavailableV4Handlers, type V4Handlers } from './v4-handlers'
 import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
+import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
+import { createSecurityHandlers } from './v7-security-handlers'
 
 export interface IpcContext {
   repos: Repositories
@@ -44,6 +47,12 @@ export interface IpcContext {
    * in the renderer cannot click it.
    */
   confirmPower?: (message: string, detail: string) => Promise<boolean>
+  /**
+   * Native confirmation before a settings change that lets NEXUS start another program or widens what agents
+   * may do unasked (see `sensitiveSettingsChanges`). Absent: such a change is stored without a question, as
+   * before 0.7 (tests of the handlers).
+   */
+  confirmSettings?: (changes: string[]) => Promise<boolean>
   /** Native folder picker; resolves null when cancelled. Lives in main, never in the renderer. */
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
@@ -56,6 +65,8 @@ export interface IpcContext {
   v5?: V5Handlers
   /** v0.6 handlers (providers). */
   v6?: V6Handlers
+  /** v0.7 handlers (the control plane). */
+  v7?: V7Handlers
 }
 
 type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
@@ -86,8 +97,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'auth.models': async () => (await runtime.getCapabilities().catch(() => ({ models: [] }))).models,
 
     'settings.get': () => repos.settings.get(),
-    'settings.update': ({ settings }) => {
+    'settings.update': async ({ settings }) => {
       const before = repos.settings.get()
+      const changes = sensitiveSettingsChanges(before, settings)
+      if (changes.length > 0 && ctx.confirmSettings && !(await ctx.confirmSettings(changes))) throw new NexusError('invalid_state', 'The change was not confirmed, so the settings are as they were.')
       const saved = repos.settings.set(settings)
       if (before.claude.subscriptionMode !== saved.claude.subscriptionMode) {
         authCache = null
@@ -103,8 +116,16 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     },
     'projects.get': ({ projectId }) => repos.projects.require(projectId),
     'projects.reprofile': ({ projectId }) => projects.reprofile(projectId),
-    'projects.update': ({ projectId, respectProjectClaudeConfig }) =>
-      repos.projects.update(projectId, { respectProjectClaudeConfig }),
+    'projects.update': async ({ projectId, respectProjectClaudeConfig }) => {
+      const project = repos.projects.require(projectId)
+      // Loading a repository's own Claude configuration lets that repository run its hooks and set the session's
+      // environment, outside NEXUS's policy. Switching it on is confirmed like a program in the settings.
+      if (respectProjectClaudeConfig && !project.respectProjectClaudeConfig && ctx.confirmSettings) {
+        const ok = await ctx.confirmSettings([`Load the Claude configuration of the repository "${project.name}" (.claude/settings.json, CLAUDE.md). Its hooks are programs that run on this computer outside NEXUS's policy, and it can set the environment of the agent sessions, including where they send their credentials. Do this only for a repository you trust.`])
+        if (!ok) throw new NexusError('invalid_state', 'The change was not confirmed, so the project is as it was.')
+      }
+      return repos.projects.update(projectId, { respectProjectClaudeConfig })
+    },
     'projects.remove': ({ projectId }) => {
       const active = repos.runs.listByProject(projectId).filter((r) => !TERMINAL_RUN_STATES.includes(r.state))
       if (active.length > 0) {
@@ -386,6 +407,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     ...(ctx.v4 ?? unavailableV4Handlers()),
     ...(ctx.v5 ?? unavailableV5Handlers()),
     ...(ctx.v6 ?? unavailableV6Handlers()),
+    ...(ctx.v7 ?? unavailableV7Handlers()),
+    ...createSecurityHandlers(repos),
   }
 }
 
