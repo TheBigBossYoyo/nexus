@@ -146,7 +146,22 @@ Other findings of the day, outside the reviews:
 - `commitAll` passes `-c user.name=...` before the subcommand, so a check keyed on the first argument never saw
   `commit`. The subcommand is now found behind global options.
 
+## Phases 19 to 24: UI review, final regression, package, report (2026-10-06 and 07)
+
+- Independent UI review from 38 screenshots, measured colours and the source: the four former HIGH items fixed,
+  no HIGH, eleven MEDIUM. Fixed in `8888a14`.
+- Verification passes of the security fixes: the direct forms closed; the branch invariant closed after the
+  symbolic-reference form was added to NEXUS's own check.
+- The runtime's own confirmation dialog: a smoke test showed that it opens. The attempt to keep it off the screen
+  failed (Windows puts a dialog on a display), so two dialogs were visible for about twenty seconds each during
+  those runs. The corrected test was not run again.
+- Soak, stresses, final suite, end-to-end, package, packaged validation, migration campaign and the third real
+  acceptance run: numbers in `V0_7_RELEASE_REPORT.md`.
+- Found in the last hours, by the end-to-end restart test and by the packaged validation: the window's process was
+  not reaped after its window closed while its runtime lived; ending the runtime the same way lost the key of the
+  overnight authorization. See "Found by running it" in the report.
+- Verdict PASS; `nexus-0.7` merged into `main` without fast-forward and tagged `v0.7.0`. Nothing was pushed.
+
 ## Open points
 
-- Remaining phases: full end-to-end run, real acceptance, independent security and UI audits, fixes, final
-  regression, package, release report.
+- See "Not verified" and "Known limitations" in `V0_7_RELEASE_REPORT.md`.

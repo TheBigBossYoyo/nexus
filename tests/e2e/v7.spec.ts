@@ -299,9 +299,9 @@ test.describe('NEXUS 0.7 control plane', () => {
       await app.evaluate(({ ipcMain }, channel) => {
         type Reply = { ok: boolean; value?: Record<string, unknown[]>; error?: { code: string; message: string } }
         type Handler = (event: unknown, channel: string, input: unknown) => Promise<Reply> | Reply
-        const state = globalThis as unknown as { __e2e?: { mode: string } }
+        const state = globalThis as unknown as { __e2e?: { mode: string; calls: number } }
         if (state.__e2e) return
-        state.__e2e = { mode: 'fail' }
+        state.__e2e = { mode: 'fail', calls: 0 }
         const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
         const original = handlers.get(channel)
         if (!original) throw new Error('No invoke handler to wrap')
@@ -313,6 +313,7 @@ test.describe('NEXUS 0.7 control plane', () => {
         ipcMain.removeHandler(channel)
         ipcMain.handle(channel, async (event, name: string, input: unknown) => {
           if (name !== 'control.overview') return original(event, name, input)
+          if (state.__e2e) state.__e2e.calls += 1
           const mode = state.__e2e?.mode
           if (mode === 'fail') return { ok: false, error: { code: 'internal', message: 'The queue database is locked.' } }
           const reply = await original(event, name, input)
@@ -332,10 +333,21 @@ test.describe('NEXUS 0.7 control plane', () => {
       await expect(page.getByTestId('control-load-error-text')).toHaveText('The queue database is locked.')
       await expect(page.getByTestId('control-loading')).toHaveCount(0)
       await screenshot(page, 'v7-control-load-error')
+      // Retry is pressed while the load still fails: the button stays where it is and pressable, each press loads
+      // again, and the error stays shown. (Once the load can succeed, the page's own refresh recovers within
+      // seconds and the button is rightly gone, so pressing it is proven here, not after.)
+      const calls = (): Promise<number> => app.evaluate(() => (globalThis as unknown as { __e2e: { calls: number } }).__e2e.calls)
+      for (let press = 0; press < 3; press++) {
+        const before = await calls()
+        await page.getByTestId('control-retry').click()
+        await expect.poll(calls).toBeGreaterThan(before)
+        await expect(page.getByTestId('control-load-error')).toBeVisible()
+      }
       await app.evaluate(() => {
         ;(globalThis as unknown as { __e2e: { mode: string } }).__e2e.mode = 'seed'
       })
-      await page.getByTestId('control-retry').click()
+      // Recovery needs no press: the next load, whoever asks for it, shows the page.
+      await page.getByTestId('control-retry').click({ timeout: 2000 }).catch(() => undefined)
       await expect(page.getByTestId('control-load-error')).toHaveCount(0)
       await expect(page.getByTestId('control-page')).toBeVisible()
 

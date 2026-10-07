@@ -1,6 +1,6 @@
 # Global Scheduler
 
-Part of the 0.7 feature set on the `nexus-0.7` branch, which is not released (`V0_7_RELEASE_REPORT.md`). The
+Part of NEXUS 0.7.0 (`V0_7_RELEASE_REPORT.md`). The
 whole control plane is described in `CONTROL_PLANE.md`; this page is about the one decision the scheduler makes,
 the order in which it makes it, and what it records.
 

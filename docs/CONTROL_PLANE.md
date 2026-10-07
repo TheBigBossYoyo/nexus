@@ -1,8 +1,8 @@
 # Control Plane
 
 The 0.7 feature set puts one queue and one division of capacity above every kind of workload NEXUS runs, inside a
-runtime process that outlives the window. This document describes what is implemented on the `nexus-0.7` branch
-and, as plainly, what is not. 0.7 is not released: see `V0_7_RELEASE_REPORT.md`. The design text is
+runtime process that outlives the window. This document describes what 0.7.0 implements
+and, as plainly, what it does not. The release report is `V0_7_RELEASE_REPORT.md`. The design text is
 `V0_7_DESIGN.md`; the process model is in `ARCHITECTURE.md`.
 
 Source: `src/shared/control-plane.ts` (the model and the pure decisions), `src/main/modules/control-plane/`

@@ -1,0 +1,526 @@
+{
+  "kind": "v0.7-control-plane",
+  "startedAt": "2026-10-07T03:13:40.926Z",
+  "executable": "dev build",
+  "dataDir": "C:\\Users\\user\\AppData\\Local\\Temp\\nexus-v07-data-716hla",
+  "baseCommit": "a0e32fb27ea08b4bd8927189ba7214e897c8524b",
+  "samples": [
+    {
+      "at": "2026-10-07T03:13:45.402Z",
+      "line": "program QUEUED | arena QUEUED | agents 0/3 | workers 0 busy of 0 | health HEALTHY"
+    },
+    {
+      "at": "2026-10-07T03:13:49.426Z",
+      "line": "program RUNNING | arena RUNNING | agents 1/3 | workers 2 busy of 2 | health HEALTHY"
+    },
+    {
+      "at": "2026-10-07T03:14:34.720Z",
+      "line": "program RUNNING | arena RUNNING | agents 2/3 | workers 2 busy of 2 | health HEALTHY"
+    },
+    {
+      "at": "2026-10-07T03:14:39.892Z",
+      "line": "program RUNNING | arena RUNNING | agents 2/3 | workers 2 busy of 2 | health DEGRADED"
+    },
+    {
+      "at": "2026-10-07T03:14:51.927Z",
+      "line": "program RUNNING | arena RUNNING | agents 1/3 | workers 1 busy of 3 | health DEGRADED"
+    },
+    {
+      "at": "2026-10-07T03:14:55.947Z",
+      "line": "program RUNNING | arena COMPLETED | agents 1/3 | workers 1 busy of 3 | health DEGRADED"
+    },
+    {
+      "at": "2026-10-07T03:15:28.076Z",
+      "line": "program RUNNING | arena COMPLETED | agents 0/3 | workers 0 busy of 3 | health DEGRADED"
+    },
+    {
+      "at": "2026-10-07T03:15:32.097Z",
+      "line": "program RUNNING | arena COMPLETED | agents 1/3 | workers 1 busy of 3 | health DEGRADED"
+    },
+    {
+      "at": "2026-10-07T03:15:52.179Z",
+      "line": "program RUNNING | arena COMPLETED | agents 1/3 | workers 1 busy of 2 | health DEGRADED"
+    },
+    {
+      "at": "2026-10-07T03:16:40.427Z",
+      "line": "program COMPLETED | arena COMPLETED | agents 0/3 | workers 0 busy of 2 | health DEGRADED"
+    }
+  ],
+  "windowClosed": {
+    "before": {
+      "at": "2026-10-07T03:13:49.426Z",
+      "runtime": {
+        "pid": 3460,
+        "bootId": "a03cd4fe-4862-441c-b132-7a0926d1a5f9",
+        "pipe": "\\\\.\\pipe\\nexus-runtime-d18097d62135-b81ffee59a8a6e8f",
+        "version": "0.7.0",
+        "protocol": 1
+      },
+      "busyWorkers": [
+        {
+          "pid": 25228,
+          "agent": "ccde621d-6ccb-4429-afdf-37b2c1ce0c9a",
+          "session": "29a0090c-61ea-4e22-abec-dc8fa55eda8c"
+        }
+      ],
+      "leases": 2
+    },
+    "closedForMs": 40000,
+    "windowGone": true,
+    "runtimeAliveWithoutWindow": true,
+    "runtimeAliveAfterWait": true,
+    "sameRuntime": true,
+    "eventsWhileClosed": 18,
+    "closedWindowPid": 47056,
+    "windowGoneAfterMs": 250,
+    "reopenedAt": "2026-10-07T03:14:34.705Z"
+  },
+  "workerKill": {
+    "at": "2026-10-07T03:14:34.720Z",
+    "worker": {
+      "id": "0d7f5942-ea80-4dc6-806f-d062dfa606d5",
+      "pid": 25228
+    },
+    "agentId": "0bd1c6cb-1fa0-4d66-b5fd-e6031b53a48d",
+    "taskId": "5d6d8544-fbc0-4f0a-af6c-c636bec0e862",
+    "runId": "4803ae93-0a96-4ffc-8aae-eed423e3736f",
+    "sessionId": "87099785-d173-49c4-a25d-e8bd6420aadb",
+    "workerAfter": {
+      "state": "FAILED",
+      "error": "The worker process ended (code 1).",
+      "exitCode": 1
+    },
+    "leaseAfter": {
+      "state": "REVOKED",
+      "reason": "The worker process ended (code 1)."
+    },
+    "processGone": true,
+    "after": {
+      "runState": "completed",
+      "taskState": "completed",
+      "taskAttempts": null,
+      "agentsOfTask": [
+        {
+          "id": "0def66c1-3a0a-4ee5-afec-21af274c9994",
+          "state": "stopped",
+          "role": "worker"
+        },
+        {
+          "id": "0bd1c6cb-1fa0-4d66-b5fd-e6031b53a48d",
+          "state": "failed",
+          "role": "reviewer"
+        },
+        {
+          "id": "fc819e01-61d0-4efc-92ff-45dad6e28d5d",
+          "state": "stopped",
+          "role": "reviewer"
+        },
+        {
+          "id": "27e058bc-6cc3-458d-bacf-e2e9deb94c56",
+          "state": "stopped",
+          "role": "verifier"
+        }
+      ]
+    },
+    "leasesOfRunAfter": [
+      {
+        "agentId": "27e058bc-6cc3-458d-bacf-e2e9deb94c56",
+        "state": "RELEASED",
+        "grantedAt": "2026-10-07T03:14:50.275Z"
+      },
+      {
+        "agentId": "fc819e01-61d0-4efc-92ff-45dad6e28d5d",
+        "state": "RELEASED",
+        "grantedAt": "2026-10-07T03:14:35.065Z"
+      },
+      {
+        "agentId": "0bd1c6cb-1fa0-4d66-b5fd-e6031b53a48d",
+        "state": "REVOKED",
+        "grantedAt": "2026-10-07T03:14:33.135Z"
+      },
+      {
+        "agentId": "0def66c1-3a0a-4ee5-afec-21af274c9994",
+        "state": "RELEASED",
+        "grantedAt": "2026-10-07T03:14:12.796Z"
+      }
+    ]
+  },
+  "app": {
+    "version": "0.7.0",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "usageBefore": {
+    "capturedAt": "2026-10-07T03:13:44.952Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "LIMIT_APPROACHING",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 0,
+      "turns": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "durationMs": 0,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "f63b612a-0830-415e-80a5-39a62d518493",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 5,
+        "resetAt": "2026-10-07T06:40:00.472952+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-07T03:13:44.947Z",
+        "updatedAt": "2026-10-07T03:13:44.947Z",
+        "stale": false
+      },
+      {
+        "id": "6f952d32-c507-462e-a12a-6fab7ce61780",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-07T03:13:44.947Z",
+        "updatedAt": "2026-10-07T03:13:44.947Z",
+        "stale": false
+      },
+      {
+        "id": "438f41d3-6db1-4f06-9a46-3ee3b84597ac",
+        "limitType": "seven_day",
+        "status": "allowed_warning",
+        "utilizationPercent": 90,
+        "resetAt": "2026-10-10T04:00:00.472973+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-07T03:13:44.947Z",
+        "updatedAt": "2026-10-07T03:13:44.947Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 90,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-10T04:00:00.472Z",
+      "source": "SDK_EVENT",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "runtime": {
+    "pid": 3460,
+    "bootId": "a03cd4fe-4862-441c-b132-7a0926d1a5f9",
+    "version": "0.7.0",
+    "protocol": 1,
+    "endpointAcl": "restricted",
+    "endpoint": {
+      "pid": 3460,
+      "bootId": "a03cd4fe-4862-441c-b132-7a0926d1a5f9",
+      "pipe": "\\\\.\\pipe\\nexus-runtime-d18097d62135-b81ffee59a8a6e8f",
+      "version": "0.7.0",
+      "protocol": 1
+    },
+    "windowPid": 24520
+  },
+  "items": {
+    "program": "680cbafa-ab66-448d-8aea-56d835f10bd1",
+    "arena": "e3949bc9-dcc9-4519-b1de-918962916977"
+  },
+  "result": {
+    "program": {
+      "state": "COMPLETED",
+      "roadmap": [
+        {
+          "key": "format-duration",
+          "state": "COMPLETED",
+          "attempts": 1
+        },
+        {
+          "key": "round-trip",
+          "state": "COMPLETED",
+          "attempts": 1
+        }
+      ],
+      "missions": 2
+    },
+    "arena": {
+      "state": "completed",
+      "trials": [
+        {
+          "state": "passed",
+          "strategy": "SINGLE",
+          "success": null,
+          "score": null
+        }
+      ]
+    },
+    "items": {
+      "program": "COMPLETED",
+      "arena": "COMPLETED"
+    },
+    "seen": {
+      "maxAgents": 2,
+      "maxBusyWorkers": 2,
+      "bothActive": true,
+      "distinctWorkerPids": 3,
+      "distinctSessionIds": 12,
+      "leaseViolations": 0
+    },
+    "decisions": {
+      "program": [
+        {
+          "at": "2026-10-07T03:13:45.637Z",
+          "itemId": "680cbafa-ab66-448d-8aea-56d835f10bd1",
+          "decision": "GRANT",
+          "reason": "May hold 2 of 2 agent(s)."
+        },
+        {
+          "at": "2026-10-07T03:13:45.383Z",
+          "itemId": "680cbafa-ab66-448d-8aea-56d835f10bd1",
+          "decision": "ADMIT",
+          "reason": "Started with 2 of 2 agent(s) at P1."
+        }
+      ],
+      "arena": [
+        {
+          "at": "2026-10-07T03:13:45.753Z",
+          "itemId": "e3949bc9-dcc9-4519-b1de-918962916977",
+          "decision": "GRANT",
+          "reason": "May hold 1 of 2 agent(s)."
+        },
+        {
+          "at": "2026-10-07T03:13:45.637Z",
+          "itemId": "e3949bc9-dcc9-4519-b1de-918962916977",
+          "decision": "ADMIT",
+          "reason": "Started with 1 of 2 agent(s) at P2."
+        }
+      ]
+    },
+    "workers": {
+      "ended": 2,
+      "failed": [
+        {
+          "pid": 25228,
+          "error": "The worker process ended (code 1)."
+        }
+      ],
+      "activeLeases": 0
+    },
+    "security": {
+      "recorded": 8,
+      "byDecision": {
+        "DENY": 7,
+        "ALLOW_WITH_AUDIT": 1
+      }
+    },
+    "health": {
+      "level": "DEGRADED",
+      "components": [
+        {
+          "component": "database",
+          "level": "HEALTHY",
+          "detail": "The database answers. The runtime is its only writer.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "scheduler",
+          "level": "HEALTHY",
+          "detail": "Passes are running.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "workers",
+          "level": "DEGRADED",
+          "detail": "1 worker failed in the last five minutes; their sessions were taken back. 2 worker processes alive, 0 holding a session.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "providers",
+          "level": "HEALTHY",
+          "detail": "Claude: Claude subscription.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "git",
+          "level": "HEALTHY",
+          "detail": "Git operations go through the Git service.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "usage",
+          "level": "HEALTHY",
+          "detail": "Claude usage: LIMIT_APPROACHING.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "power_supervisor",
+          "level": "HEALTHY",
+          "detail": "No end-of-run action is armed.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "ipc",
+          "level": "HEALTHY",
+          "detail": "1 window connected over a local pipe (protocol 1, authenticated). Nothing listens on the network.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        },
+        {
+          "component": "schedules",
+          "level": "HEALTHY",
+          "detail": "No schedule is switched on.",
+          "checkedAt": "2026-10-07T03:16:44.437Z"
+        }
+      ]
+    }
+  },
+  "usageAfter": {
+    "capturedAt": "2026-10-07T03:16:46.395Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "LIMIT_APPROACHING",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 13,
+      "turns": 81,
+      "inputTokens": 32700,
+      "outputTokens": 19094,
+      "cacheReadTokens": 561031,
+      "cacheCreationTokens": 63154,
+      "durationMs": 203022,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "f63b612a-0830-415e-80a5-39a62d518493",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 6,
+        "resetAt": "2026-10-07T06:40:00.176097+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-07T03:16:46.391Z",
+        "updatedAt": "2026-10-07T03:16:46.391Z",
+        "stale": false
+      },
+      {
+        "id": "6f952d32-c507-462e-a12a-6fab7ce61780",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-07T03:16:46.391Z",
+        "updatedAt": "2026-10-07T03:16:46.391Z",
+        "stale": false
+      },
+      {
+        "id": "438f41d3-6db1-4f06-9a46-3ee3b84597ac",
+        "limitType": "seven_day",
+        "status": "allowed_warning",
+        "utilizationPercent": 90,
+        "resetAt": "2026-10-10T04:00:00.176120+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-07T03:16:46.391Z",
+        "updatedAt": "2026-10-07T03:16:46.391Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 90,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-10T04:00:00.176Z",
+      "source": "SDK_EVENT",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "persistence": {
+    "stoppedCleanly": true,
+    "newBootId": true,
+    "finished": [
+      {
+        "type": "program",
+        "state": "COMPLETED"
+      },
+      {
+        "type": "arena",
+        "state": "COMPLETED"
+      }
+    ],
+    "programStateAfterRestart": "COMPLETED"
+  },
+  "finishedAt": "2026-10-07T03:16:49.044Z",
+  "ok": true
+}

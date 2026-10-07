@@ -346,7 +346,7 @@ the test.
 
 ## 0.7: runtime process, workers, control plane and execution security
 
-0.7 is on the `nexus-0.7` branch and is not released. This section says what each suite proves and how to run it. It
+This section says what each suite proves and how to run it. It
 states no pass counts: measured results are in `V0_7_RELEASE_REPORT.md`. Nothing here calls a real provider; the
 suites use the scripted runtime (`FakeAgentRuntime`) and the probe script of the worker
 (`src/main/modules/workers/probe-script.ts`). Whether a real Claude session in a worker was exercised is recorded in the

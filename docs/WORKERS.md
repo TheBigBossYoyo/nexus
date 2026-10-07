@@ -1,6 +1,6 @@
 # Workers
 
-Part of the 0.7 feature set on the `nexus-0.7` branch, which is not released (`V0_7_RELEASE_REPORT.md`). This page
+Part of NEXUS 0.7.0 (`V0_7_RELEASE_REPORT.md`). This page
 describes the worker manager as it is implemented, and what it does not do. The design is in `V0_7_DESIGN.md`
 section 5.
 

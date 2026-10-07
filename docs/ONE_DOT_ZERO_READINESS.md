@@ -28,7 +28,8 @@ In order of weight:
 ## Highest completed release
 
 **0.6.0** (`v0.6.0`, `main` at `0a2874f`). Released tonight: 0.3.0, 0.4.0, 0.5.0, 0.6.0, each with a release
-report. 0.7 is PARTIAL on the branch `nexus-0.7`.
+report. 0.7 was PARTIAL on the branch `nexus-0.7` when this page was written; it was finished and released as 0.7.0 on 2026-10-07
+(`V0_7_RELEASE_REPORT.md`). The rest of this page is as of 2026-10-05 and has not been reassessed.
 
 ## Reliability
 
