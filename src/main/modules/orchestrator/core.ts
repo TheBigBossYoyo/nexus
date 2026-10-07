@@ -17,6 +17,9 @@ import { assertTransition, canPauseRun, canTransition } from '@main/modules/stat
 import { AgentRunner } from './agent-runner'
 import { ApprovalService } from './approvals'
 import { GraphService } from './graph-service'
+import { ContextGraphService } from '@main/modules/context-graph'
+import { TokenIntelligenceEngine } from '@main/modules/token'
+import { contextToolHandler, graphEnabled } from './context-graph'
 import type { OrchestratorDeps } from './deps'
 import { MemoryService } from './memory'
 import { MessageService } from './messaging'
@@ -52,14 +55,23 @@ export class Core {
   readonly graph: GraphService
   readonly agents: AgentRunner
   readonly routing: ModelRoutingService
+  /** v0.7.1: the knowledge index over the project's stores, and the accounting of what sessions' contexts hold. */
+  readonly contextGraph: ContextGraphService
+  readonly tokens: TokenIntelligenceEngine
 
   constructor(readonly deps: OrchestratorDeps) {
+    this.contextGraph = deps.contextGraph ?? new ContextGraphService({ repos: deps.repos })
+    this.tokens = deps.tokens ?? new TokenIntelligenceEngine({ repos: deps.repos, log: (line) => deps.logger?.(line) })
     this.approvals = new ApprovalService(deps)
     this.messages = new MessageService(deps)
     this.memory = new MemoryService(deps)
     this.graph = new GraphService(deps, this.approvals)
     this.routing = new ModelRoutingService(deps)
     this.agents = new AgentRunner(deps, this.approvals, this.messages, this.memory, this.graph, this.routing)
+    this.agents.attachContext({
+      tokens: this.tokens,
+      contextTool: (session) => (graphEnabled(this) ? contextToolHandler(this, session) : null),
+    })
   }
 
   log(line: string): void {

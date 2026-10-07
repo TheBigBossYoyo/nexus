@@ -100,6 +100,7 @@ function toSpec(leaseId: string, wire: WireSessionSpec): SessionSpec {
         recordDecision: (input) => call(leaseId, 'recordDecision', [input]) as Promise<string>,
         proposeMemory: (input) => call(leaseId, 'proposeMemory', [input]) as Promise<string>,
         ...(tools.proposeGraphChange ? { proposeGraphChange: (input: unknown) => call(leaseId, 'proposeGraphChange', [input]) as Promise<string> } : {}),
+        ...(tools.contextTool ? { contextTool: (input: unknown) => call(leaseId, 'contextTool', [input]) as Promise<string> } : {}),
       }
     : undefined
   const { nexusTools: _flags, ...data } = wire

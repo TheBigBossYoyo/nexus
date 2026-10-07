@@ -61,6 +61,11 @@ export interface ComposeContextInput {
   priorReview: { reviewId: string; findings: ReviewFinding[] } | null
   extra?: ContextPackInput['extra']
   factLimit?: number
+  /**
+   * v0.7.1 (Context Engine V3): what the Context Graph adds. Given the ids of the facts and memory entries this
+   * pack already shows, so that nothing is sent twice. Null leaves the pack exactly as V2 built it.
+   */
+  graph?: (shown: { factIds: ReadonlySet<string>; memoryIds: ReadonlySet<string> }) => { text: string; entries: { nodeId: string; title: string; reason: string; chars: number; included: boolean }[] } | null
 }
 
 export interface ComposedContext {
@@ -215,6 +220,12 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
     drafts.push(excluded('Project memory', 'memory', m.id, m.title, "Approved memory that does not match the task's title, description or files.", m.content.length))
   }
 
+  // Context Graph (V3): the map, what is related to the task in any store, and how to read further.
+  const graph = input.graph?.({ factIds: new Set(facts.map((f) => f.id)), memoryIds: new Set(memory.map((m) => m.id)) }) ?? null
+  if (graph) {
+    for (const e of graph.entries) drafts.push((e.included ? included : excluded)('Project knowledge', 'context_node', e.nodeId, e.title, e.reason, e.chars))
+  }
+
   // Routed messages and the user's instructions.
   const peerMessages = input.messages.filter((m) => m.type !== 'user_instruction')
   for (const m of input.messages) {
@@ -270,6 +281,7 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
     decisions,
     memory,
     facts,
+    graphText: graph?.text ?? null,
     reviewFindings,
     messages: peerMessages,
     repo: input.repo,

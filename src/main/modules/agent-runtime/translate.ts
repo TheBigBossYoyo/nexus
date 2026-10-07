@@ -23,6 +23,8 @@ export interface TranslatorState {
   quotaSignal: boolean
   /** Set by the session handle when interrupt() is called, so the resulting error result reads as aborted. */
   interruptRequested: boolean
+  /** API message ids whose usage was already reported: one response can arrive as several assistant messages. */
+  reportedRequests: Set<string>
 }
 
 export function createTranslatorState(options: { expectStructuredOutput: boolean }): TranslatorState {
@@ -33,6 +35,7 @@ export function createTranslatorState(options: { expectStructuredOutput: boolean
     authError: false,
     quotaSignal: false,
     interruptRequested: false,
+    reportedRequests: new Set(),
   }
 }
 
@@ -68,6 +71,7 @@ function mapUsage(msg: SDKResultMessage): UsageInfo[] {
     cacheCreationTokens: u.cacheCreationInputTokens,
     costUsd: u.costUSD,
     contextWindow: u.contextWindow > 0 ? u.contextWindow : null,
+    ...(typeof u.thinkingTokens === 'number' ? { thinkingTokens: u.thinkingTokens } : {}),
   }))
 }
 
@@ -135,13 +139,34 @@ export function translateSdkMessage(msg: SDKMessage, state: TranslatorState): Ag
       if (msg.subtype === 'status') {
         return msg.status ? [{ type: 'status', status: msg.status }] : []
       }
-      if (msg.subtype === 'compact_boundary') return [{ type: 'status', status: 'compacted' }]
+      if (msg.subtype === 'compact_boundary') {
+        const meta = msg.compact_metadata
+        return [
+          { type: 'status', status: 'compacted' },
+          { type: 'compaction', trigger: meta.trigger, preTokens: Number.isFinite(meta.pre_tokens) ? meta.pre_tokens : null, postTokens: typeof meta.post_tokens === 'number' ? meta.post_tokens : null, durationMs: typeof meta.duration_ms === 'number' ? meta.duration_ms : null },
+        ]
+      }
       return []
     }
 
     case 'assistant': {
       if (msg.parent_tool_use_id !== null) return []
       const events: AgentEvent[] = []
+      // Per-request usage: counted once per API message id. Synthetic error carriers report no real request.
+      const requestId = msg.message.id
+      const usage = msg.message.usage as { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } | undefined
+      if (!msg.error && typeof requestId === 'string' && requestId !== '' && usage && !state.reportedRequests.has(requestId)) {
+        state.reportedRequests.add(requestId)
+        events.push({
+          type: 'request.usage',
+          requestId,
+          model: typeof msg.message.model === 'string' ? msg.message.model : null,
+          inputTokens: usage.input_tokens ?? 0,
+          cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+          cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+          outputTokens: usage.output_tokens ?? 0,
+        })
+      }
       if (msg.error) {
         if (AUTH_ERRORS.includes(msg.error)) state.authError = true
         const errorText = msg.message.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join(' ')

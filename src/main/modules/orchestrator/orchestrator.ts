@@ -377,9 +377,27 @@ export class Orchestrator implements PipelineHost {
     const run = repos.runs.require(runId)
     const result = await refreshProjectFacts(this.deps, this.core.project(run), (line) => this.core.log(line))
     if (result) bus.emit({ runId, type: 'intelligence.refreshed', payload: result })
+    await this.syncContextGraph(run.projectId)
     // Shutdown began meanwhile: nothing new may start (the run is picked up by recovery on the next launch).
     if (this.closing) return false
     return repos.runs.require(runId).state === 'planning'
+  }
+
+  /**
+   * Bring the project's Context Graph up to date with its stores, then check file evidence against the
+   * repository (only the files git reports as changed since the last check). The graph is an aid: a failure
+   * is logged and never blocks a run.
+   */
+  private async syncContextGraph(projectId: string): Promise<void> {
+    try {
+      const project = this.deps.repos.projects.require(projectId)
+      const space = { kind: 'project' as const, id: projectId }
+      await this.core.contextGraph.syncProject(projectId)
+      for (const enrolment of this.deps.repos.enrolledRepositories.listByProject(projectId)) await this.core.contextGraph.syncWorkspace(enrolment.workspaceId)
+      await this.core.contextGraph.refreshFromGit(space, project.rootPath, this.deps.git)
+    } catch (e) {
+      this.core.log(`context graph refresh failed: ${errorMessage(e)}`)
+    }
   }
 
   private async plan(runId: string, feedback?: string, previousPlan?: MissionPlan): Promise<void> {

@@ -163,6 +163,7 @@ describe('translateSdkMessage', () => {
       },
       { type: 'status', status: 'compacting' },
       { type: 'status', status: 'compacted' },
+      { type: 'compaction', trigger: 'auto', preTokens: 1, postTokens: null, durationMs: null },
     ])
   })
 

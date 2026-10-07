@@ -58,6 +58,8 @@ export interface ContextPackInput {
   memory: MemoryEntry[]
   /** v0.2: repository facts selected for the task. */
   facts?: RepositoryFact[]
+  /** v0.7.1: the Context Graph section (map, selected nodes, tool hint), already rendered as data. */
+  graphText?: string | null
   /** v0.2: significant findings of the task's latest review that this session must address. */
   reviewFindings?: ReviewFinding[]
   messages: Message[]
@@ -164,6 +166,7 @@ export function buildContextPack(input: ContextPackInput): {
     { name: 'Relevant decisions', body: decisions },
     { name: 'Repository intelligence', body: facts },
     { name: 'Project memory', body: memory },
+    { name: 'Project knowledge', body: input.graphText ?? null },
     { name: 'Review findings to address', body: reviewFindings },
     { name: 'Messages from other agents', body: messages },
     { name: 'Repository state', body: truncate(repoText, SECTION_LIMITS.repo) },

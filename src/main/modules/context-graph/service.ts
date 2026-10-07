@@ -23,7 +23,6 @@ import { newId, nowIso } from '@shared/ids'
 import { NexusError, errorMessage } from '@shared/result'
 import { estimateTokens } from '@shared/token'
 import { isSecretPath } from '@main/modules/intelligence/walk'
-import type { Database } from '@main/modules/persistence/database'
 import type { Repositories } from '@main/modules/persistence/repositories'
 import { looksLikeInstruction } from '@main/modules/program/memory'
 import { clip, depthOf, joinPath, normFile, parentPath, segment, sha, shortHash, subjectKey, validatePath } from './paths'
@@ -44,7 +43,6 @@ export const defaultFileState: FileStateReader = async (rootPath, rel) => {
 
 export interface ContextGraphDeps {
   repos: Repositories
-  db: Database
   now?: () => string
   fileState?: FileStateReader
 }
@@ -115,7 +113,7 @@ export class ContextGraphService {
   }
 
   private tx<T>(fn: () => T): T {
-    return this.deps.db.transaction(fn)()
+    return this.deps.repos.transaction(fn)
   }
 
   // ───────────────────────────── sync ─────────────────────────────

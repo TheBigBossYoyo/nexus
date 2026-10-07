@@ -44,7 +44,7 @@ export function graphHarness(over: Partial<Project> = {}): GraphHarness {
   let t = Date.parse('2026-10-07T08:00:00.000Z')
   const now = (): string => new Date((t += 1000)).toISOString()
   const project = repos.projects.insert(makeProject({ name: 'RaceDeck', rootPath: 'C:\\repos\\racedeck', ...over }))
-  const graph = new ContextGraphService({ repos, db, now, fileState: files.reader })
+  const graph = new ContextGraphService({ repos, now, fileState: files.reader })
   return {
     db,
     repos,
