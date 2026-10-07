@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ContextNode, ContextSpace } from '@shared/context-graph'
 import { newId } from '@shared/ids'
@@ -122,6 +124,13 @@ describe(`context graph at scale (${NODES} nodes, ${NODES * 5} edges)`, () => {
     expect(section.text.length).toBeLessThan(40_000)
 
     console.log(`graph of ${counts.nodes} nodes and ${counts.edges} edges built in ${built} ms; query times (ms): ${JSON.stringify(timings)}`)
+    if (process.env['NEXUS_WRITE_BENCHMARK'] === '1') {
+      const dir = resolve(import.meta.dirname, '../../docs/acceptance')
+      mkdirSync(dir, { recursive: true })
+      const at = new Date().toISOString()
+      writeFileSync(join(dir, `context-graph-scale-${at.replace(/[:.]/g, '-')}.json`), `${JSON.stringify({ kind: 'context-graph-scale', at, nodes: counts.nodes, edges: counts.edges, buildMs: built, queryMs: timings }, null, 2)}
+`)
+    }
     // Bounds a hang or a table scan gone quadratic, not a performance promise: every query answers well inside a second.
     for (const [name, ms] of Object.entries(timings)) expect(ms, name).toBeLessThan(2_000)
     db.close()
@@ -179,7 +188,7 @@ describe(`context graph histories (${RUNS} runs of ${STEPS} steps)`, () => {
             if (stale[0]) await h.graph.reverify(stale[0].id, h.project.rootPath, 'the user')
           }
         } catch (e) {
-          throw new Error(`run ${run} step ${step} op ${op}: ${e instanceof Error ? e.message : String(e)}`)
+          throw new Error(`run ${run} step ${step} op ${op}: ${e instanceof Error ? e.message : String(e)}`, { cause: e })
         }
         if (rand() < 0.6) await h.graph.syncProject(h.project.id)
 
