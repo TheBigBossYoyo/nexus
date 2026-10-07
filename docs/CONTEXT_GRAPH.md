@@ -42,6 +42,9 @@ Project graph (`space` = `project:<id>`):
 Workspace graph (`space` = `workspace:<id>`): `repositories/`, `architecture/`, `contracts/`, `decisions/`,
 `standards/`, `hazards/`, `notes/`.
 
+Everything under `programs/<program>/`, sections included, carries that program's id. A branch summary and
+the map name program knowledge only to a run of that program; to any other run it is a count.
+
 A node's canonical path is unique in its space. A node is referred to as
 `context://<project|workspace>/<space id>/<path>`; inside its own project an agent uses the path alone.
 
@@ -163,7 +166,8 @@ Agents write through one tool, `context_note`. A note:
   it states a fact about a named subject without evidence;
 - can be edited or archived only by an agent of the run that wrote it, and not at all once promoted;
 - is shown to later agents as `UNVERIFIED: an agent wrote this note; it is a lead to check, not a fact`;
-- is not used for high-risk work.
+- is not used for high-risk work;
+- counts against a limit of 50 active agent notes per run.
 
 Promotion: the user makes a note USER_PROVIDED; a verifier makes it VERIFIED and must give evidence.
 Reviewers, verifiers and security reviewers read the graph and cannot write notes. Facts, memory entries and
@@ -226,8 +230,10 @@ drawing of the graph: relations are listed, grouped by how they read from the no
 
 ## Scale
 
-Indexed SQL only; nothing loads the graph whole. Measured on 100,000 nodes and 500,000 edges (see the release
-report): children, expand, search, neighbours, detail, retrieval and health each answer in milliseconds.
+Indexed SQL only; nothing loads the graph whole. Measured on 100,000 nodes and 500,000 edges
+(`docs/acceptance/context-graph-scale-*.json`): a page of children 4 ms, expand 1 to 4 ms, neighbours and a
+node's detail 2 ms, the nodes for 200 changed files 3 ms, full-text search 81 ms, retrieval for a task 117 ms
+(67 ms broad), health 462 ms.
 
 ## Limits
 
