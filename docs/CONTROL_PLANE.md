@@ -227,8 +227,6 @@ Each item below was checked against the source.
   item type has an adapter but nothing creates such an item.
 - **The Control Center queues programs only.** Campaigns, workspace missions and audits are queued through
   `control.enqueue` or a schedule created through `control.createSchedule`.
-- **Decision records and schedule firing records are not pruned.** `SchedulerDecisionStore.prune` and
-  `ScheduleFiringStore.prune` exist, and nothing calls them (the worker history is pruned by the manager).
 - **The `security_high` notification is not a severity.** It is raised for each refused tool call, restrained by the
   notification rules above.
 

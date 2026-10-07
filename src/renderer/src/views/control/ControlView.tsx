@@ -1097,7 +1097,9 @@ export function ControlView() {
                 </div>
                 <Button
                   variant="primary"
-                  loading={overview.isFetching}
+                  // Never disabled and never re-rendered as busy: the load is tried again every few seconds by itself,
+                  // and a button that goes grey and back under the pointer cannot be pressed. Pressing it while a try
+                  // is under way is harmless.
                   onClick={() => void overview.refetch()}
                   data-testid="control-retry"
                 >
@@ -1123,7 +1125,6 @@ export function ControlView() {
               </span>
               <Button
                 size="sm"
-                loading={overview.isFetching}
                 onClick={() => void overview.refetch()}
                 data-testid="control-retry"
               >

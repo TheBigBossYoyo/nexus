@@ -179,11 +179,18 @@ try {
     if (closedDone && !killDone && busy.length > 0) {
       const victim = busy.find((w) => w.assignment.sessionId) ?? null
       if (victim) {
-        killDone = true
         const at = new Date().toISOString()
         log('ending worker', victim.pid, 'agent', victim.assignment.agentId, 'task', victim.assignment.taskId)
         // The pid is the runtime's own record of a worker it started in this run; its tree is the session's processes.
-        execFileSync('taskkill', ['/PID', String(victim.pid), '/T', '/F'], { stdio: 'ignore' })
+        try {
+          execFileSync('taskkill', ['/PID', String(victim.pid), '/T', '/F'], { stdio: 'ignore' })
+        } catch {
+          // Its session had just ended and the worker with it: nothing was killed. The next busy worker is taken.
+          log('that worker had already gone; taking the next one')
+          await sleep(1000)
+          continue
+        }
+        killDone = true
         let record = null
         let lease = null
         for (let i = 0; i < 60; i++) {
