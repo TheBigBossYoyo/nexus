@@ -65,6 +65,10 @@ export interface ComposeContextInput {
    * v0.7.1 (Context Engine V3): what the Context Graph adds. Given the ids of the facts and memory entries this
    * pack already shows, so that nothing is sent twice. Null leaves the pack exactly as V2 built it.
    */
+  /** v0.7.1: why an approved memory entry must not be shown as current (superseded, archived), or null. */
+  memoryStatus?: (entry: MemoryEntry) => string | null
+  /** v0.7.1: why a fact the store still calls fresh must not be shown (the graph saw its file change since), or null. */
+  factStatus?: (fact: RepositoryFact) => string | null
   graph?: (shown: { factIds: ReadonlySet<string>; memoryIds: ReadonlySet<string> }) => { text: string; entries: { nodeId: string; title: string; reason: string; chars: number; included: boolean }[] } | null
 }
 
@@ -181,7 +185,12 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
   }
 
   // Repository facts: relevant by files and terms, within the budget; stale ones are never used.
-  const live = input.facts.filter((f) => !f.stale)
+  const notCurrent = new Map<string, string>()
+  for (const f of input.facts) {
+    const reason = f.stale ? null : (input.factStatus?.(f) ?? null)
+    if (reason) notCurrent.set(f.id, reason)
+  }
+  const live = input.facts.filter((f) => !f.stale && !notCurrent.has(f.id))
   const ranked = selectFactsForTask(live, task, live.length)
   const limit = input.factLimit ?? FACT_LIMIT
   const rankedIds = new Set(ranked.map((s) => s.fact.id))
@@ -198,7 +207,9 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
   for (const fact of input.facts) {
     const title = `${fact.kind}: ${fact.subject}`
     const chars = fact.statement.length + fact.subject.length
-    if (fact.stale) {
+    if (notCurrent.has(fact.id)) {
+      drafts.push(excluded('Repository intelligence', 'repository_fact', fact.id, title, notCurrent.get(fact.id) as string, chars))
+    } else if (fact.stale) {
       drafts.push(excluded('Repository intelligence', 'repository_fact', fact.id, title, 'Stale: a supporting file changed since the fact was verified.', chars))
     } else if (!rankedIds.has(fact.id)) {
       drafts.push(excluded('Repository intelligence', 'repository_fact', fact.id, title, "Not relevant to this task's files or terms.", chars))
@@ -209,7 +220,10 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
   const memory: MemoryEntry[] = []
   for (const m of input.memorySelected) {
     const why = memoryRelevance(m, task)
-    if (why) {
+    const notCurrent = why ? (input.memoryStatus?.(m) ?? null) : null
+    if (notCurrent) {
+      drafts.push(excluded('Project memory', 'memory', m.id, m.title, notCurrent, m.content.length))
+    } else if (why) {
       memory.push(m)
       drafts.push(included('Project memory', 'memory', m.id, m.title, why, m.content.length))
     } else {

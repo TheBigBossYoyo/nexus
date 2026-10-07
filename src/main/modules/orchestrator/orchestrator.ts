@@ -1,3 +1,4 @@
+import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import {
   ACTIVE_AGENT_STATES,
@@ -984,6 +985,7 @@ export class Orchestrator implements PipelineHost {
             missionCriteria: criteria.map((c) => c.text),
             diffStat: stat || '(no changes)',
             checkResults: checks.commands,
+            checkOutputMode: checkOutputMode(this.deps.repos.settings.get().tokens),
             planSummary: run.plan?.summary,
             evidence: buildTaskEvidence(repos, runId, null),
           }).prompt,

@@ -131,7 +131,7 @@ export class ContextGraphService {
     const projection = projectProject({
       project,
       facts: repos.facts.listByProject(projectId, { includeStale: true }),
-      memory: repos.memory.list({ projectId, scope: 'project', status: 'any', limit: 2000 }),
+      memory: repos.memory.list({ projectId, scope: 'project', status: 'any', limit: 100_000 }),
       programs,
     })
     const profile = project.profile

@@ -1,3 +1,4 @@
+import type { FilterMode } from '@main/modules/token/filter'
 import type {
   CommandResult,
   Handoff,
@@ -134,6 +135,8 @@ export interface ReviewPromptInput {
   diffStat: string
   patch: string
   checkResults: CommandResult[]
+  /** v0.7.1: how check output is shown. Absent means failures first, then the tail. */
+  checkOutputMode?: FilterMode
   attempt: number
   /** Dual review: this reviewer's focus. */
   lens?: string
@@ -151,7 +154,7 @@ export function buildReviewPrompt(input: ReviewPromptInput): Pack {
     { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria) },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
-    { name: 'Check results', body: renderChecks(input.checkResults) },
+    { name: 'Check results', body: renderChecks(input.checkResults, input.checkOutputMode) },
     { name: 'Orchestration records', body: input.evidence ? renderSentMessages(input.evidence.messages, input.evidence.omittedMessages ?? 0) : null },
     { name: 'Review focus', body: input.lens ?? null },
     {
@@ -168,6 +171,8 @@ export interface VerifierPromptInput {
   missionCriteria: string[]
   diffStat: string
   checkResults: CommandResult[]
+  /** v0.7.1: how check output is shown. Absent means failures first, then the tail. */
+  checkOutputMode?: FilterMode
   reviewSummary?: string
   evidence?: OrchestrationEvidence
 }
@@ -177,7 +182,7 @@ export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
     { name: 'Task', body: renderTaskSpec(input.task) },
     { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria) },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
-    { name: 'Check results', body: renderChecks(input.checkResults) },
+    { name: 'Check results', body: renderChecks(input.checkResults, input.checkOutputMode) },
     { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Review summary',
@@ -195,6 +200,8 @@ export interface MissionVerifierPromptInput {
   missionCriteria: string[]
   diffStat: string
   checkResults: CommandResult[]
+  /** v0.7.1: how check output is shown. Absent means failures first, then the tail. */
+  checkOutputMode?: FilterMode
   planSummary?: string
   evidence?: OrchestrationEvidence
 }
@@ -214,7 +221,7 @@ export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): P
       body: branch ? `${branch} (base commit ${input.run.baseCommit ?? 'unknown'}); it is checked out in the current working directory.` : null,
     },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
-    { name: 'Check results', body: renderChecks(input.checkResults) },
+    { name: 'Check results', body: renderChecks(input.checkResults, input.checkOutputMode) },
     { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Instructions',
@@ -235,6 +242,7 @@ export interface RepairPromptInput {
   findings?: ReviewFinding[]
   failures?: VerificationFailure[]
   checkResults?: CommandResult[]
+  checkOutputMode?: FilterMode
   evidence?: OrchestrationEvidence
 }
 
@@ -272,7 +280,7 @@ export function buildRepairPrompt(input: RepairPromptInput): Pack {
         ? boundedList(input.failures.map(renderVerificationFailure), SECTION_LIMITS.findings, 'failures')
         : null,
     },
-    { name: 'Check results', body: input.checkResults ? renderChecks(input.checkResults) : null },
+    { name: 'Check results', body: input.checkResults ? renderChecks(input.checkResults, input.checkOutputMode) : null },
     { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Instructions',

@@ -1,3 +1,4 @@
+import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import type { ZodType } from 'zod'
 import {
@@ -521,6 +522,7 @@ export class TaskPipeline {
         diffStat: diffStat(diff),
         patch: diff.patch,
         checkResults: checks,
+        checkOutputMode: checkOutputMode(this.core.deps.repos.settings.get().tokens),
         attempt,
         evidence: buildTaskEvidence(repos, run.id, task, { changedFiles: diff.files }),
         ...(lens ? { lens } : {}),
@@ -717,6 +719,7 @@ export class TaskPipeline {
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
         checkResults: checks,
+        checkOutputMode: checkOutputMode(this.core.deps.repos.settings.get().tokens),
         reviewSummary,
         evidence: buildTaskEvidence(repos, run.id, task, { changedFiles: diff.files }),
       }).prompt,
@@ -891,6 +894,7 @@ export class TaskPipeline {
       findings: failure.findings,
       failures: failure.failures,
       checkResults: failure.checkResults,
+      checkOutputMode: checkOutputMode(this.core.deps.repos.settings.get().tokens),
       evidence: buildTaskEvidence(repos, run.id, parent),
     })
     const instructions = this.core.messages.takeInstructions(parent.id)

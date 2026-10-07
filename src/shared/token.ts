@@ -341,3 +341,9 @@ export function weakestBasis(bases: readonly TokenBasis[]): TokenBasis {
   for (const b of bases) if (BASIS_ORDER[b] > BASIS_ORDER[out]) out = b
   return out
 }
+
+/** How check output is shown to agents: `off` is the 0.7.0 tail cut, `auto` adds the failures before the tail, `on` also shortens passing runs. */
+export function checkOutputMode(settings: TokenSettings | undefined): 'tail' | 'superset' | 'compact' {
+  const value = (settings ?? DEFAULT_TOKEN_SETTINGS).outputFiltering
+  return value === 'off' ? 'tail' : value === 'on' ? 'compact' : 'superset'
+}

@@ -80,6 +80,33 @@ export function graphContextFor(core: Core, run: Run, task: Task, purpose: Agent
   }
 }
 
+/**
+ * Why an approved memory entry is not current any more, as the graph records it. The memory store has no
+ * supersession of its own; without this a superseded entry would still be shown as project memory.
+ */
+export function memoryNotCurrent(core: Core, memoryId: string): string | null {
+  if (!graphEnabled(core)) return null
+  try {
+    const node = core.deps.repos.contextGraph.nodes.byOrigin('memory', memoryId)[0]
+    if (node?.status === 'SUPERSEDED') return 'Superseded by a later record (see its history in the Context Graph).'
+    if (node?.status === 'ARCHIVED') return 'Archived in the Context Graph.'
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Why a fact the store calls fresh is not: the graph saw one of its files change after the fact was verified. */
+export function factNotCurrent(core: Core, factId: string): string | null {
+  if (!graphEnabled(core)) return null
+  try {
+    const node = core.deps.repos.contextGraph.nodes.byOrigin('repository_fact', factId)[0]
+    return node?.status === 'STALE' ? 'Stale: a supporting file changed since the fact was verified (seen by the Context Graph).' : null
+  } catch {
+    return null
+  }
+}
+
 // ───────────────────────────── agent tools ─────────────────────────────
 
 const Path = z.string().max(600)

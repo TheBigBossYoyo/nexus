@@ -20,7 +20,7 @@ import { joinPath, normFile, segment } from './paths'
  *  1. path: a node whose evidence is one of the task's files, and the module that contains the file;
  *  2. edges: what is one typed relation away from those (tests, decisions, hazards, contracts);
  *  3. full text (BM25) over titles, summaries and paths;
- *  4. hierarchy: commands, and in a broad retrieval every current hazard and decision.
+ *  4. hierarchy: in a broad retrieval, every current hazard and decision.
  *
  * A wrong node is worse than a larger context, so: scope and path outrank text; a node that is not CURRENT
  * is never returned as if it were; and when the retriever is not confident it widens instead of guessing.
@@ -38,6 +38,9 @@ export function queryTerms(text: string): string[] {
   for (const t of text.toLowerCase().split(/[^a-z0-9_]+/)) if (t.length >= 3 && !STOP.has(t)) out.add(t)
   return [...out]
 }
+
+/** A crude stem, so that "sessions" and "session", "caching" and "cache" compare equal. The index itself stems with Porter. */
+const stem = (t: string): string => (t.length > 4 ? t.replace(/(ing|ed|es|s)$/, '') : t)
 
 /** Categories and risks for which a narrow context is the wrong default. */
 const BROAD_CATEGORIES: ReadonlySet<string> = new Set(['architecture', 'security', 'refactor', 'migration', 'cross_cutting', 'workspace', 'unknown'])
@@ -180,8 +183,9 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
     const hits = stores.nodes.search(spaces, terms.join(' '), { statuses: allowedStatuses, limit: LIMITS[requested].fts })
     hits.forEach((h, i) => {
       const hay = `${h.node.title} ${h.node.path}`.toLowerCase()
-      const inTitle = terms.filter((t) => hay.includes(t))
-      const inAll = terms.filter((t) => `${hay} ${h.node.summary.toLowerCase()}`.includes(t))
+      const all = `${hay} ${h.node.summary.toLowerCase()}`
+      const inTitle = terms.filter((t) => hay.includes(stem(t)))
+      const inAll = terms.filter((t) => all.includes(stem(t)))
       // One shared word in a long summary is noise; it takes a title match or two shared terms to count.
       if (inTitle.length === 0 && inAll.length < 2) return
       const score = 2 + 3 * (1 - i / Math.max(1, hits.length)) + Math.min(3, inTitle.length) + Math.min(1, inAll.length * 0.25)
@@ -244,8 +248,8 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
   // 4. Hierarchy.
   if (on('hierarchy')) {
     for (const space of spaces) {
-      const commands = stores.nodes.byPath(space, 'commands')
-      if (commands && query.role !== 'planner') for (const c of stores.nodes.children(commands.id, { limit: 10 })) offer(c, 3, 'A check command of the repository.', 'hierarchy', commands.id)
+      // Commands are not offered here: every pack already carries the check commands (the benchmark showed
+      // that offering them again only spent the budget of nodes that mattered).
       if (breadth === 'broad') {
         for (const section of ['hazards', 'decisions']) {
           const s = stores.nodes.byPath(space, section)

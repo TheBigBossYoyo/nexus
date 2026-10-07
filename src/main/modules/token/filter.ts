@@ -28,7 +28,8 @@ export interface FilteredOutput {
 
 /** Lines that report a failure, across the test runners and compilers NEXUS's check commands run. */
 const FAILURE_PATTERNS: readonly RegExp[] = [
-  /\b(FAIL(ED|URE|S)?|ERROR|Error:|error:|panic:|fatal:|FATAL|Traceback|Exception|Unhandled|AssertionError|assertion failed|not ok\b|Segmentation fault|TIMED OUT|timed out)\b/,
+  /\b(FAIL(ED|URE|S)?|ERROR|FATAL|Traceback|Exception|Unhandled|AssertionError|assertion failed|not ok|Segmentation fault|TIMED OUT|timed out)\b/,
+  /\b(Error|error|panic|fatal):/,
   /^\s*(✗|✘|×|❯|✖)\s/u,
   /\berror\s+(TS|CS|E|C)\d+/,
   /\b\d+\s+(failed|failing|errors?)\b/i,

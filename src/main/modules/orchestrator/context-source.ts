@@ -4,7 +4,7 @@ import type { RepositoryFact } from '@shared/v2'
 import { composeContext, type ComposedContext } from '@main/modules/context/context-engine'
 import { dependenciesOf } from '@main/modules/task-graph'
 import { attachArbitration, effectiveFindings } from './arbitration'
-import { graphContextFor } from './context-graph'
+import { factNotCurrent, graphContextFor, memoryNotCurrent } from './context-graph'
 import type { Core } from './core'
 
 const REVIEW_PURPOSES: readonly AgentPurpose[] = ['implement', 'diagnose']
@@ -67,6 +67,8 @@ export function composeForTask(
     },
     priorReview: REVIEW_PURPOSES.includes(purpose) ? priorReviewFor(core, task) : null,
     graph: (shown) => graphContextFor(core, run, task, purpose, shown),
+    memoryStatus: (entry) => memoryNotCurrent(core, entry.id),
+    factStatus: (fact) => factNotCurrent(core, fact.id),
     extra: {
       attempt: task.attempt,
       userInstructions: messages.filter((m) => m.type === 'user_instruction').map((m) => m.body),
