@@ -42,6 +42,18 @@ import { ProviderSessionStore } from './provider'
 import { ControlIncidentStore, ControlScheduleStore, WorkItemStore } from './control-plane'
 import { ScheduleFiringStore, SchedulerDecisionStore, WorkerLeaseStore, WorkerStore } from './workers'
 import { FileProvenanceRepository, SecurityDecisionRepository } from './security'
+import { contextGraphStores, type ContextGraphStores } from './context-graph'
+import {
+  ArtifactContextRefStore,
+  CacheEventStore,
+  CompactionEventStore,
+  OptimizationDecisionStore,
+  PromptComponentStore,
+  PromptPrefixStore,
+  RequestBreakdownStore,
+  SessionEfficiencyStore,
+  TokenBenchmarkStore,
+} from './token'
 import {
   ContextPackRepository,
   FactRepository,
@@ -164,6 +176,17 @@ export interface Repositories {
   /** v0.7: the security decision log and the record of which files agents wrote. */
   securityDecisions: SecurityDecisionRepository
   fileProvenance: FileProvenanceRepository
+  /** v0.7.1: the Context Graph (an index over the stores above) and token accounting. */
+  contextGraph: ContextGraphStores
+  promptComponents: PromptComponentStore
+  promptPrefixes: PromptPrefixStore
+  requestBreakdowns: RequestBreakdownStore
+  cacheEvents: CacheEventStore
+  optimizationDecisions: OptimizationDecisionStore
+  artifactContextRefs: ArtifactContextRefStore
+  compactionEvents: CompactionEventStore
+  sessionEfficiency: SessionEfficiencyStore
+  tokenBenchmarks: TokenBenchmarkStore
   workspaces: WorkspaceRepositoryStore
   enrolledRepositories: EnrolledRepositoryStore
   workspaceServices: ServiceStore
@@ -255,6 +278,16 @@ export function createRepositories(db: Database): Repositories {
     schedulerDecisions: new SchedulerDecisionStore(db),
     securityDecisions: new SecurityDecisionRepository(db),
     fileProvenance: new FileProvenanceRepository(db),
+    contextGraph: contextGraphStores(db),
+    promptComponents: new PromptComponentStore(db),
+    promptPrefixes: new PromptPrefixStore(db),
+    requestBreakdowns: new RequestBreakdownStore(db),
+    cacheEvents: new CacheEventStore(db),
+    optimizationDecisions: new OptimizationDecisionStore(db),
+    artifactContextRefs: new ArtifactContextRefStore(db),
+    compactionEvents: new CompactionEventStore(db),
+    sessionEfficiency: new SessionEfficiencyStore(db),
+    tokenBenchmarks: new TokenBenchmarkStore(db),
     workspaces: new WorkspaceRepositoryStore(db),
     enrolledRepositories: new EnrolledRepositoryStore(db),
     workspaceServices: new ServiceStore(db),
@@ -348,3 +381,5 @@ export type {
 } from './program'
 export type { MessageRecipient } from './agents'
 export { toFtsQuery } from './memory'
+export type { ContextGraphStores, ContextNodeStore, ContextEdgeStore, ContextSourceStore, NodeListOptions, FtsHit } from './context-graph'
+export type { CacheTotals, CacheGroup } from './token'

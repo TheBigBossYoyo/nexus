@@ -9,6 +9,7 @@ import { providersSchema } from './008-providers'
 import { controlPlaneSchema } from './009-control-plane'
 import { workersSchema } from './010-workers'
 import { securitySchema } from './011-security'
+import { contextGraphSchema } from './012-context-graph'
 
 export interface Migration {
   version: number
@@ -29,4 +30,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 9, name: 'control-plane', sql: controlPlaneSchema },
   { version: 10, name: 'workers', sql: workersSchema },
   { version: 11, name: 'security', sql: securitySchema },
+  { version: 12, name: 'context-graph', sql: contextGraphSchema },
 ]

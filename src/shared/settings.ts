@@ -12,6 +12,7 @@ import {
 } from './domain'
 import { ExecutionProfileSchema } from './security'
 import { DEFAULT_USAGE_SETTINGS, UsageSettingsSchema } from './v3'
+import { DEFAULT_TOKEN_SETTINGS, TokenSettingsSchema } from './token'
 
 export const McpServerSettingSchema = z.object({
   name: z
@@ -90,6 +91,8 @@ export const SettingsSchema = z.object({
   }),
   /** v0.3. How NEXUS behaves around Claude usage limits. */
   usage: UsageSettingsSchema,
+  /** 0.7.1. Context and token efficiency. Old stored settings read as the defaults. */
+  tokens: TokenSettingsSchema.default(DEFAULT_TOKEN_SETTINGS),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
@@ -136,6 +139,7 @@ export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: 'light', density: 'compact', fontSize: 13 },
   advanced: { debugSdk: false },
   usage: DEFAULT_USAGE_SETTINGS,
+  tokens: DEFAULT_TOKEN_SETTINGS,
 }
 
 /** ECO routes everything except planning/verification one tier down and halves parallelism. */
