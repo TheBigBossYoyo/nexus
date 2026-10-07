@@ -6,7 +6,7 @@ import { FakeCacheSim, completeWith, scriptsByRole, type FakeScript } from '@mai
 import { ContextGraphService } from '@main/modules/context-graph'
 import { fingerprintFiles } from '@main/modules/intelligence/fingerprint'
 import { CONTINUE_SESSION_PROMPT } from '@main/modules/orchestrator/agent-runner'
-import { approvedReview, createHarness, fileWorker, passedVerification, plan, plannedTask, type Harness } from './harness'
+import { approvedReview, createHarness, fileWorker, passedVerification, plan, plannedTask, writeFiles, type Harness } from './harness'
 
 /**
  * 0.7.1 scenarios: whole missions on the scripted runtime, with a model of the prompt cache. They show how
@@ -158,7 +158,9 @@ describe('scenario: the Context Graph in a mission', () => {
     const answers: Record<string, string> = {}
     const worker: FakeScript = async (spec, ctx) => {
       const tool = ctx.nexusTools?.contextTool
-      if (tool && spec.prompt.includes('ordering')) {
+      // Both tasks can match (the user's note about ordering reaches both packs); the first one explores.
+      if (tool && spec.prompt.includes('ordering') && answers['root'] === undefined) {
+        answers['root'] = ''
         answers['root'] = await tool({ op: 'open', path: '/' })
         answers['module'] = await tool({ op: 'open', path: 'modules/src.telemetry' })
         answers['related'] = await tool({ op: 'related', path: 'modules/src.telemetry' })
@@ -208,7 +210,7 @@ describe('scenario: the Context Graph in a mission', () => {
     expect(answers['hazard']).toContain('> Telemetry packets can arrive out of order')
     expect(answers['hazard']).toContain('Source files (read these for the authoritative content): src/telemetry/parser.ts')
     expect(answers['search']).toContain('decisions/packet-versions')
-    expect(answers['note']).toMatch(/^Note stored at notes\/alpha\/ordering-fixed-by-clock-tie-break-[0-9a-f]{6} as an unverified note/)
+    expect(answers['note']).toMatch(/^Note stored at notes\/(alpha|beta)\/ordering-fixed-by-clock-tie-break-[0-9a-f]{6} as an unverified note/)
     expect(answers['bad-note']).toContain('A note is a statement about the project')
     expect(answers['escape']).toContain('Invalid context path')
 
@@ -340,5 +342,77 @@ describe('scenario: session efficiency', () => {
     // What a successor needs does not depend on the summary: the criteria are in the database.
     expect(decision.reason).toContain('stored by NEXUS')
     expect(h.repos.criteria.listByRun(runId).length).toBeGreaterThan(0)
+  })
+})
+
+describe('scenario: check output and note hygiene', () => {
+  let h: Harness
+  afterEach(async () => h?.dispose())
+
+  // Fails with the failure line near the top of a long output until `fixed.txt` exists.
+  const CHECK = [
+    "const { existsSync } = require('node:fs')",
+    "const pass = (n, from) => { for (let i = 0; i < n; i++) console.log('ok ' + (from + i) + ' - lap ' + (from + i) + ' is stored in driving order') }",
+    "if (existsSync('fixed.txt')) { pass(5, 1); console.log('# pass 5'); process.exit(0) }",
+    'pass(30, 1)',
+    "console.log('not ok 31 - ordering: Error: laps out of order at lap 7 (expected 7, got 9)')",
+    'pass(400, 32)',
+    "console.log('# pass 430')",
+    "console.log('# fail 1')",
+    'process.exit(1)',
+  ].join('\n')
+  const oneTask = plan([plannedTask('alpha')])
+  const repairer: FakeScript = async (spec, ctx) => {
+    await writeFiles(spec, ctx, { 'fixed.txt': 'fixed' })
+    await ctx.completeTurn({ text: 'Fixed the ordering.' })
+  }
+  const script = (): FakeScript => scriptsByRole({ planner: completeWith({ text: 'plan', structuredOutput: oneTask }), worker: fileWorker, debugger: repairer, reviewer: completeWith({ text: 'review', structuredOutput: approvedReview }), verifier: completeWith({ text: 'verify', structuredOutput: passedVerification }) })
+
+  it('a failure buried before the tail of a long check output reaches the agent that repairs it', async () => {
+    h = await createHarness({ script: script(), files: { 'check.cjs': CHECK }, commands: { test: 'node check.cjs' } })
+    const runId = await runMission(h)
+    const repair = h.runtime.sessions.find((s) => s.role === 'debugger')!
+    expect(repair.prompt).toContain('not ok 31 - ordering: Error: laps out of order at lap 7 (expected 7, got 9)')
+    expect(repair.prompt).toContain('# fail 1')
+    expect(repair.prompt).toMatch(/\[\.\.\. \d+ lines omitted; the full output is stored \.\.\.\]/)
+    // What was shown and where the rest is stored is on record; the failed check is pinned.
+    const refs = h.repos.artifactContextRefs.listByRun(runId)
+    const failed = refs.find((r) => r.state === 'PINNED')!
+    expect(failed).toMatchObject({ kind: 'check_output', ref: expect.stringMatching(/^verification:[0-9a-f-]+#test$/) })
+    expect(failed.charsShown).toBeLessThan(failed.charsTotal)
+    expect(failed.title).toMatch(/^test: failed \(exit 1\); 43\d lines, 1 failure lines/)
+    // The complete output is still there.
+    const stored = h.repos.verifications.get(failed.ref.slice('verification:'.length, failed.ref.indexOf('#')))!
+    expect(stored.commands[0]!.output).toContain('ok 400 - lap 400 is stored in driving order')
+    const decision = h.repos.optimizationDecisions.listByRun(runId).find((d) => d.action === 'FILTER_OUTPUT')!
+    expect(decision).toMatchObject({ basis: 'exact' })
+    expect(decision.reason).toContain('1 failure line(s) lie before the tail')
+  })
+
+  it('with output filtering off the prompt is the 0.7.0 tail, which does not show that failure', async () => {
+    h = await createHarness({ script: script(), files: { 'check.cjs': CHECK }, commands: { test: 'node check.cjs' }, settings: tokens({ outputFiltering: 'off' }) })
+    const runId = await runMission(h)
+    const repair = h.runtime.sessions.find((s) => s.role === 'debugger')!
+    expect(repair.prompt).not.toContain('not ok 31 - ordering')
+    expect(repair.prompt).toContain('# fail 1')
+    expect(h.repos.optimizationDecisions.listByRun(runId).some((d) => d.action === 'FILTER_OUTPUT')).toBe(false)
+  })
+
+  it('a progress note of a finished task leaves active retrieval at the next mission, and is kept as history', async () => {
+    const worker: FakeScript = async (spec, ctx) => {
+      await ctx.nexusTools?.contextTool?.({ op: 'note', action: 'write', title: 'Half way', body: 'The file is written; the commit is next.', progress: true })
+      await fileWorker(spec, ctx)
+    }
+    h = await createHarness({ script: scriptsByRole({ planner: completeWith({ text: 'plan', structuredOutput: oneTask }), worker, reviewer: completeWith({ text: 'review', structuredOutput: approvedReview }), verifier: completeWith({ text: 'verify', structuredOutput: passedVerification }) }), settings: tokens({ contextGraph: 'on' }) })
+    // The graph exists from the first sync, so the first mission's worker can write to it.
+    await new ContextGraphService({ repos: h.repos }).syncProject(h.project.id)
+    await runMission(h)
+    const space = { kind: 'project' as const, id: h.project.id }
+    const notes = (): string[] => h.repos.contextGraph.nodes.listBySpace(space, { types: ['NOTE'], statuses: ['CURRENT', 'ARCHIVED'] }).filter((n) => n.title === 'Half way').map((n) => n.status).sort()
+    expect(notes()).toEqual(['CURRENT'])
+    // The second mission starts by tidying the graph: the first mission's progress note is archived. Its own
+    // worker then writes a new one, which is current until the mission after it.
+    await runMission(h)
+    expect(notes()).toEqual(['ARCHIVED', 'CURRENT'])
   })
 })

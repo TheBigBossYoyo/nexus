@@ -297,6 +297,9 @@ export class AgentRunner {
           canHandoff: canRotate,
           settings: repos.settings.get().tokens,
           ...(input.task ? { risk: input.task.risk } : {}),
+          // Cumulative for the session, as the runtime reports usage. Thinking is absent when no turn recorded it.
+          outputTokens: last.result ? last.result.usage.reduce((n, u) => n + u.outputTokens, 0) : null,
+          thinkingTokens: last.result && last.result.usage.some((u) => u.thinkingTokens !== undefined) ? last.result.usage.reduce((n, u) => n + (u.thinkingTokens ?? 0), 0) : null,
         })
         if (!canRotate) break
         if (efficiency && efficiency.action !== 'HANDOFF_AND_ROTATE' && last.sdkSessionId) {

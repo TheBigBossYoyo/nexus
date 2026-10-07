@@ -67,8 +67,17 @@ interaction; security; SDK support; difficulty; lossless?; Arena needed?; recomm
 - **SDK support.** DOCUMENTED (S1). **Difficulty.** Low. **Lossless.** Information: yes. Position: changed.
 - **Arena.** Yes for becoming the default without a setting; a real cache acceptance (request 1 writes,
   request 2 of another agent reads) is the proof it works.
-- **Recommendation.** Implement behind `stablePrefix`. Default ON only if the real cache acceptance shows
-  the cross-agent read and no quality regression is observed; otherwise ship OFF.
+- **Recommendation at research time.** Implement behind `stablePrefix`; decide the default by the real cache
+  acceptance.
+- **MEASURED (PROVEN, 2026-10-07).** The premise was wrong. On the real runtime, two sessions of one role in
+  different working directories share the prefix **without** the option (second session: 14,994 read, 1,015
+  written); with the option the figures are the same (14,826 read, 1,015 written). The runtime already keeps
+  its per-session sections out of the cached prefix. The option has a documented cost and no measured
+  benefit: **default OFF**. Evidence: `docs/acceptance/cache-acceptance-*.json`; `PROMPT_CACHING.md`.
+- **What the measurement found instead.** A session of a *different role* reads nothing (0 read, 14,458
+  written): tools render first in the prefix and each role has its own tool list. The per-role cold start is
+  the real cost. Sharing one tool list across roles would remove it, at the price of showing read-only roles
+  tools they may not use; that is a security and prompt change and is not made in 0.7.1.
 
 ### 2. Role prompt ordering (shared text first)
 
@@ -142,10 +151,16 @@ interaction; security; SDK support; difficulty; lossless?; Arena needed?; recomm
 - **NEXUS's situation.** The premise that NEXUS has a large tool surface is false for what agents see: a
   role-filtered list of built-ins plus 5 MCP tools (9 with the context tools 0.7.1 adds). Tool search is
   already active by default for them, which costs a round trip (baseline D3) for definitions that are small.
-- **Recommendation.** A `ToolSetPlanner` that decides per session: below 10 tools and a small token total,
-  mark the NEXUS server `alwaysLoad`; above that, leave deferral on. External MCP servers a project
-  configures stay deferred (the runtime default). Default to the planner's choice only after the fake-runtime
-  comparison and, quota permitting, one real comparison. DOCUMENTED; the saving in NEXUS is INFERRED.
+- **Recommendation at research time.** A `ToolSetPlanner` that decides per session: few, small tools are
+  marked `alwaysLoad`; many are left deferred. External MCP servers stay deferred.
+- **MEASURED (PROVEN, 2026-10-07).** With the 8 NEXUS tools marked `alwaysLoad`, the first request processed
+  exactly as many tokens as without (15,851 in both cases), although the runtime's breakdown lists the tools
+  as loaded in one case and deferred in the other. No saving and no cost was observed: **default OFF** (the
+  runtime's behaviour is left alone). Whether an agent needs an extra search turn to use a deferred NEXUS
+  tool was not measured.
+- **Measured tool cost.** Built-in tool definitions are about 17,800 tokens of a worker's fresh context and
+  the NEXUS tools about 2,500 (the runtime's estimate). The tool surface that costs tokens is the built-in
+  one, which the role's tool list already limits.
 
 ### 9. Tool definition hygiene
 
@@ -269,17 +284,17 @@ interaction; security; SDK support; difficulty; lossless?; Arena needed?; recomm
 | Token counting preflight | Needs an API key | Runtime figures plus labelled estimates |
 | Programmatic tool calling | Not available | Aggregating tools |
 
-## Recommended defaults for 0.7.1 (to be confirmed by measurement)
+## Defaults for 0.7.1, after measurement
 
-| Technique | Lossless | Default |
-| --- | --- | --- |
-| Per-request usage and cache accounting | yes (measurement) | ON |
-| Context usage snapshot (`summary`) | yes (measurement) | ON |
-| Thinking-token and compaction recording | yes (measurement) | ON |
-| Canonical prompt registry and auditor | yes | ON |
-| Failure-first check output | shows a superset of the failures | ON |
-| Stable prefix (`excludeDynamicSections`) | information yes, position no | decided by the real cache acceptance |
-| NEXUS tools always loaded when the set is small | definitions only | decided by comparison |
-| Context Graph retrieval in packs | no | decided by the retrieval benchmark |
-| Pressure-based rotation | no | OFF unless evidence |
-| Model, effort, reviewer or agent-count reductions | no | never for tokens |
+| Technique | Lossless | Default | Why |
+| --- | --- | --- | --- |
+| Per-request usage and cache accounting | yes (measurement) | ON | |
+| Context usage snapshot (`summary`) | yes (measurement) | ON | labelled estimated: the summary over-stated a real request by about half |
+| Compaction recording | yes (measurement) | ON | |
+| Canonical prompt registry and auditor | yes | ON | |
+| Failure-first check output | shows a superset of the failures | ON | property-tested against the tail cut |
+| Stable prefix (`excludeDynamicSections`) | information yes, position no | OFF | measured: no cache benefit |
+| NEXUS tools always loaded | definitions only | OFF | measured: no change in request size |
+| Context Graph in packs | adds context | see `V0_7_1_RELEASE_REPORT.md` | retrieval benchmark and one real pair |
+| Pressure-based rotation | no | OFF | not evaluated with real runs |
+| Model, effort, reviewer or agent-count reductions | no | never for tokens | |

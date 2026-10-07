@@ -86,7 +86,7 @@ const compactionCodec: Codec<CompactionEvent> = {
 
 const efficiencyCodec: Codec<SessionEfficiencyRecord> = {
   table: 'session_efficiency',
-  fields: { id: 'text', runId: 'text', taskId: 'text', agentId: 'text', sdkSessionId: 'text', turns: 'num', contextTokens: 'num', maxTokens: 'num', pressure: 'text', action: 'text', reason: 'text', createdAt: 'text' },
+  fields: { id: 'text', runId: 'text', taskId: 'text', agentId: 'text', sdkSessionId: 'text', turns: 'num', contextTokens: 'num', maxTokens: 'num', outputTokens: 'num', thinkingTokens: 'num', pressure: 'text', action: 'text', reason: 'text', createdAt: 'text' },
 }
 
 const benchmarkCodec: Codec<TokenBenchmarkResult> = {

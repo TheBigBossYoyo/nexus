@@ -195,6 +195,9 @@ export interface SessionEfficiencyRecord {
   turns: number
   contextTokens: number | null
   maxTokens: number | null
+  /** Output tokens of the session so far, and how many of them were thinking, as the runtime reported. Null when it did not. */
+  outputTokens: number | null
+  thinkingTokens: number | null
   pressure: ContextPressure
   action: SessionAction
   reason: string

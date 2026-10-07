@@ -18,7 +18,9 @@ import { AgentRunner } from './agent-runner'
 import { ApprovalService } from './approvals'
 import { GraphService } from './graph-service'
 import { ContextGraphService } from '@main/modules/context-graph'
-import { TokenIntelligenceEngine } from '@main/modules/token'
+import { TokenIntelligenceEngine, filterOutput, resultState, summarizeOutput } from '@main/modules/token'
+import { SECTION_LIMITS } from '@main/modules/context/render'
+import { checkOutputMode } from '@shared/token'
 import { contextToolHandler, graphEnabled } from './context-graph'
 import type { OrchestratorDeps } from './deps'
 import { MemoryService } from './memory'
@@ -258,8 +260,46 @@ export class Core {
         type: 'checks.completed',
         payload: { passed, failed: failed.map((r) => r.name) },
       })
+      this.recordOutputRefs(run, taskId, verification.id, results)
       return verification
     })
+  }
+
+  /**
+   * A check output that is longer than what a prompt shows of it is recorded with what was shown and where the
+   * complete output is stored (the verification row). A failed check is PINNED: it stays in prompts until it
+   * is resolved. Never fails the checks: this is bookkeeping.
+   */
+  private recordOutputRefs(run: Run, taskId: string | null, verificationId: string, results: readonly CommandResult[]): void {
+    try {
+      const mode = checkOutputMode(this.deps.repos.settings.get().tokens)
+      let earlyFailures = 0
+      for (const r of results) {
+        const failed = r.exitCode !== 0 || r.timedOut
+        const shown = filterOutput(r.output, { failed, tailChars: SECTION_LIMITS.checkItem, mode })
+        if (!shown.truncated) continue
+        const tail = filterOutput(r.output, { failed, tailChars: SECTION_LIMITS.checkItem, mode: 'tail' })
+        earlyFailures += Math.max(0, shown.failureLinesShown - tail.failureLinesShown)
+        this.deps.repos.artifactContextRefs.insert({
+          id: newId(),
+          runId: run.id,
+          taskId,
+          agentId: null,
+          kind: 'check_output',
+          ref: `verification:${verificationId}#${r.name}`,
+          title: `${r.name}: ${summarizeOutput(r.output, r.exitCode, r.timedOut)}`.slice(0, 300),
+          state: resultState({ unresolved: failed, superseded: false, stored: true, age: 0 }),
+          charsTotal: shown.totalChars,
+          charsShown: shown.shownChars,
+          createdAt: nowIso(),
+        })
+      }
+      if (earlyFailures > 0) {
+        this.tokens.decide({ runId: run.id, taskId, agentId: null }, 'FILTER_OUTPUT', `${earlyFailures} failure line(s) lie before the tail of the check output; they are shown to the agents that receive it.`, { verificationId, mode }, null, 'exact')
+      }
+    } catch (e) {
+      this.log(`check output references could not be recorded: ${errorMessage(e)}`)
+    }
   }
 
   private async runOne(name: string, command: string, cwd: string): Promise<CommandResult> {

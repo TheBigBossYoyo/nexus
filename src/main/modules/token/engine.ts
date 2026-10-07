@@ -268,7 +268,7 @@ export class TokenIntelligenceEngine {
   // ───────────────────────────── after a turn ─────────────────────────────
 
   /** What to do with the session now that a turn has ended. Recorded; the caller acts on HANDOFF_AND_ROTATE only. */
-  turnEnded(agentId: string, sdkSessionId: string | null, input: { turns: number; rotationTurns: number; hitTurnLimit: boolean; canHandoff: boolean; settings: TokenSettings | undefined; risk?: 'low' | 'medium' | 'high' | 'critical' }): SessionEfficiencyDecision {
+  turnEnded(agentId: string, sdkSessionId: string | null, input: { turns: number; rotationTurns: number; hitTurnLimit: boolean; canHandoff: boolean; settings: TokenSettings | undefined; risk?: 'low' | 'medium' | 'high' | 'critical'; outputTokens?: number | null; thinkingTokens?: number | null }): SessionEfficiencyDecision {
     const s = this.live.get(agentId)
     const decision = decideSessionAction({
       turns: input.turns,
@@ -284,7 +284,7 @@ export class TokenIntelligenceEngine {
     })
     if (s) {
       this.guard('session efficiency', () => {
-        const record: SessionEfficiencyRecord = { id: newId(), runId: s.ctx.runId, taskId: s.ctx.taskId, agentId: s.ctx.agentId, sdkSessionId, turns: input.turns, contextTokens: s.contextTokens, maxTokens: s.maxTokens, pressure: decision.pressure, action: decision.action, reason: decision.reason, createdAt: this.now() }
+        const record: SessionEfficiencyRecord = { id: newId(), runId: s.ctx.runId, taskId: s.ctx.taskId, agentId: s.ctx.agentId, sdkSessionId, turns: input.turns, contextTokens: s.contextTokens, maxTokens: s.maxTokens, outputTokens: input.outputTokens ?? null, thinkingTokens: input.thinkingTokens ?? null, pressure: decision.pressure, action: decision.action, reason: decision.reason, createdAt: this.now() }
         this.deps.repos.sessionEfficiency.insert(record)
         if (decision.action === 'HANDOFF_AND_ROTATE') this.decide(s.ctx, 'ROTATE_SESSION', decision.reason, { turns: input.turns, pressure: decision.pressure }, null, 'observed')
         else if (decision.action === 'CLEAR_STALE_TOOL_RESULTS') this.decide(s.ctx, 'CLEAR_TOOL_RESULTS', decision.reason, { pressure: decision.pressure }, null, 'observed')

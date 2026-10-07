@@ -254,6 +254,8 @@ CREATE TABLE session_efficiency (
   turns INTEGER NOT NULL,
   context_tokens INTEGER,
   max_tokens INTEGER,
+  output_tokens INTEGER,
+  thinking_tokens INTEGER,
   pressure TEXT NOT NULL,
   action TEXT NOT NULL,
   reason TEXT NOT NULL,

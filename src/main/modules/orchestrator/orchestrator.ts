@@ -396,6 +396,9 @@ export class Orchestrator implements PipelineHost {
       await this.core.contextGraph.syncProject(projectId)
       for (const enrolment of this.deps.repos.enrolledRepositories.listByProject(projectId)) await this.core.contextGraph.syncWorkspace(enrolment.workspaceId)
       await this.core.contextGraph.refreshFromGit(space, project.rootPath, this.deps.git)
+      // Duplicate notes and progress notes of tasks that are no longer open leave active retrieval (archived, not deleted).
+      const open: ReadonlySet<string> = new Set(['draft', 'ready', 'blocked', 'queued', 'assigned', 'running', 'waiting', 'review', 'verification'])
+      this.core.contextGraph.collectGarbage(space, (taskId) => open.has(this.deps.repos.tasks.get(taskId)?.state ?? ''))
     } catch (e) {
       this.core.log(`context graph refresh failed: ${errorMessage(e)}`)
     }

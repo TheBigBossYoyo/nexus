@@ -65,15 +65,15 @@ cost of a rotation is **NOT MEASURED**. Compactions: none observed (sessions are
 1. **Sessions are short and the prefix dominates.** A session runs 3 to 16 turns and processes about 8.6k to
    9.6k input tokens per turn. Nearly all of that is the Claude Code system prompt, the tool definitions and
    the first message, re-read from cache on every turn.
-2. **Every session pays to write its own prefix.** Cache writes are 10% to 27% of processed input. The
+2. **Every role pays to write its own prefix.** Cache writes are 10% to 27% of processed input. The
    reviewer session is the clearest case: 3 turns, 16,954 tokens written, 15,966 read. A three-turn session
    that writes more than it reads did not start from a warm cache.
-3. **Cross-session reuse happens sometimes, not reliably.** Cache write per session ranges from 4,981
+3. **Reuse works inside a role and not across roles.** Cache write per session ranges from 4,981
    (SPECULATIVE reviewer) and 5,050 (Program) to 18,048 (BUILD worker). The cheap sessions started from a
-   prefix an earlier session had written; the expensive ones did not. The difference, roughly 8k to 12k
-   tokens per session, is the size of the opportunity. **INFERRED** from aggregate figures: 0.7.0 records no
-   per-request cache data, so the cause cannot be read from the baseline. Section 5 lists the three
-   candidate causes found in the code.
+   prefix an earlier session of the same role had written; the expensive ones were the first of their role.
+   This was an inference from aggregate figures when the baseline was taken. It was then **measured**
+   (section 7): a second session of one role in another worktree reads the prefix; a session of another role
+   reads nothing.
 4. **Output is small.** 9% to 13% of uncached-plus-output volume per turn; about 300 output tokens per turn.
 5. **The context pack is not where the tokens are.** See section 4: the pack is a few thousand characters
    against a per-turn prefix of several thousand tokens. Making the pack smaller cannot move the totals;
@@ -98,7 +98,7 @@ cost of a rotation is **NOT MEASURED**. Compactions: none observed (sessions are
 
 | # | Finding | Evidence | Kind |
 | --- | --- | --- | --- |
-| D1 | The system prompt contains each agent's working directory and git status. Every task has its own worktree, so no two agents share a system prompt. | `claude-sdk-runtime.ts:617` uses the `claude_code` preset without `excludeDynamicSections`; `cwd: spec.cwd` | cache prefix |
+| D1 | Each role has its own tool list and role text, and tools render first in the prefix, so no two roles share any of it: a mission writes one prefix of about 15k tokens per distinct role. (First recorded as "the working directory is in the system prompt, so no two agents share a prefix"; the measurement in section 7 refuted that.) | `policies/tools.ts` `toolsForRole`; `docs/acceptance/cache-acceptance-*.json` | cache prefix |
 | D2 | The shared 418 tokens of every role prompt come last, after the role-specific text, so they are never a common prefix between roles. | `prompts.ts:148` | cache prefix |
 | D3 | NEXUS's five MCP tools are deferrable by the SDK's tool search, which is on by default. A session that needs `send_message` may pay a search round trip first. | SDK 0.3.288 `alwaysLoad`; `createNexusMcpServer` does not set it | turns |
 | D4 | The tool list is described twice: in the role prompt (`NEXUS_TOOLS`) and in the tool definitions themselves. | `prompts.ts:16`, `claude-sdk-runtime.ts:371` | duplicate instructions |
@@ -128,3 +128,40 @@ mission, against ~283k processed. It is real duplication and it is 3% of the mis
 
 The usage-window change of a mission (percent of the five-hour or weekly window) is **NOT MEASURED** per
 mission in the evidence: the window percentage was read before and after whole campaigns only.
+
+## 7. Measured after the baseline: what the prefix is made of, and when it is shared
+
+The baseline could not say why sessions re-write their prefix, because 0.7.0 records nothing per request.
+0.7.1 records per-request usage and the runtime's context breakdown, and `pnpm smoke:cache` ran seven
+one-turn sessions on the real runtime (`docs/acceptance/cache-acceptance-2026-10-07T*.json`, model `haiku`,
+worker role; every figure runtime-reported).
+
+Composition of a worker session's context before any work (the runtime's summary breakdown, an estimate):
+
+| Part | Tokens |
+| --- | ---: |
+| Runtime system prompt, including the appended role prompt | 4,545 |
+| Built-in tool definitions | 17,843 |
+| NEXUS tool definitions (8 tools) | 2,484 |
+| First message | 1 |
+
+The first request of that session processed 16,018 tokens (10 uncached + 16,008 written), so the summary
+breakdown over-states the total by about half. The proportions are what it is good for: **tool definitions
+are about 80% of a fresh session's context, and the role prompt NEXUS writes is under 4%.**
+
+First request of each session:
+
+| Session | Read | Written |
+| --- | ---: | ---: |
+| Worker, directory A (first) | 0 | 16,008 |
+| Worker, directory B | 14,994 | 1,015 |
+| Worker, A, `excludeDynamicSections` on | 13,231 | 2,609 |
+| Worker, B, `excludeDynamicSections` on | 14,826 | 1,015 |
+| Worker, B, same, another prompt | 14,826 | 1,016 |
+| Reviewer, A (another role) | 0 | 14,458 |
+| Worker, B, NEXUS tools loaded upfront | 15,841 | 0 |
+
+Consequences for the numbers above: a five-session BUILD mission has four distinct roles (planner, worker,
+reviewer, verifier) and so about four cold prefix writes of 14k to 16k tokens, which accounts for most of
+its 75.8k cache-write tokens. The second verifier session reads. A Program, whose missions reuse the same
+roles inside the cache lifetime, writes 5k per session.
