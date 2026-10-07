@@ -309,7 +309,12 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
       30_000,
       'the killed worker to be recorded as failed',
     )
-    expect(after.leases.find((l) => l.id === lease)?.state).toBe('REVOKED')
+    // The scripted sessions last milliseconds: the one seen on the worker may have ended by itself in the moment
+    // before the kill landed, and its lease was then released, not revoked. Either way no lease of the dead
+    // worker is left active. (The revocation itself is pinned down, without this race, in
+    // tests/integration/workers/worker-process.test.ts.)
+    expect(['REVOKED', 'RELEASED']).toContain(after.leases.find((l) => l.id === lease)?.state)
+    expect(after.leases.filter((l) => l.workerId === victim?.id && l.state === 'ACTIVE')).toEqual([])
     expect(processAlive(victim?.pid as number)).toBe(false)
 
     const done = await until(
