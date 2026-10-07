@@ -59,8 +59,22 @@ export function graphContextFor(core: Core, run: Run, task: Task, purpose: Agent
       risk: task.risk,
       tokenBudget: budget.graphTokens,
     })
-    const duplicate = (n: ContextNode): boolean => (n.originKind === 'repository_fact' && n.originId !== null && alreadyShown.factIds.has(n.originId)) || (n.originKind === 'memory' && n.originId !== null && alreadyShown.memoryIds.has(n.originId))
+    const inPack = (n: ContextNode): boolean => (n.originKind === 'repository_fact' && n.originId !== null && alreadyShown.factIds.has(n.originId)) || (n.originKind === 'memory' && n.originId !== null && alreadyShown.memoryIds.has(n.originId))
+    // A record the pack already shows is not repeated, unless the graph has something to say about it (a
+    // conflict, possible staleness): then it is listed here with its warning.
+    const duplicate = (n: ContextNode): boolean => inPack(n) && warningOf(n) === null
     const shown = result.nodes.filter((r) => !duplicate(r.node))
+    const listed = new Set(shown.map((r) => r.node.id))
+    for (const [kind, ids] of [['repository_fact', alreadyShown.factIds], ['memory', alreadyShown.memoryIds]] as const) {
+      for (const id of ids) {
+        const node = stores.nodes.byOrigin(kind, id)[0]
+        const warning = node ? warningOf(node) : null
+        if (node && warning && !listed.has(node.id)) {
+          listed.add(node.id)
+          shown.push({ node, score: 0, reason: kind === 'memory' ? 'Shown above as project memory; listed again for its warning.' : 'Shown above as a repository fact; listed again for its warning.', via: 'hierarchy', fromNodeId: null, warning })
+        }
+      }
+    }
     const section = renderGraphSection(stores, primary, { ...result, nodes: shown }, { tools: true })
     const entries: GraphContext['entries'] = [
       ...shown.map((r) => ({ nodeId: r.node.id, title: `${r.node.type.toLowerCase()}: ${r.node.title}`, reason: `${r.reason}${r.warning ? ` ${r.warning}` : ''}`, chars: section.chars.get(r.node.id) ?? 0, included: true })),
