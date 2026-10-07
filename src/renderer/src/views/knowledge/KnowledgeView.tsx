@@ -75,7 +75,7 @@ function Branch({ projectId, space, parentId, depth, history, open, toggle, sele
 
 function NodeRow({ node, onSelect }: { node: ContextNode; onSelect: (id: string) => void }) {
   return (
-    <button type="button" className="flex w-full flex-col gap-0.5 border-b px-4 py-2 text-left hover:bg-surface-muted" onClick={() => onSelect(node.id)} data-testid="knowledge-search-result">
+    <button type="button" className="flex w-full flex-col gap-0.5 border-b px-4 py-2 text-left hover:bg-surface-muted" onClick={() => onSelect(node.id)} data-testid="knowledge-search-result" data-path={node.path}>
       <span className="flex items-center gap-2">
         <Badge mono>{typeLabel(node.type)}</Badge>
         <span className="truncate font-medium">{node.title}</span>

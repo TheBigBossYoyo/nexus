@@ -88,7 +88,7 @@ export interface ToolPlan {
 export function planTools(input: ToolPlanInput): ToolPlan {
   if (input.nexusTools === 0) return { alwaysLoadNexusTools: false, action: 'DEFER_TOOLS', reason: 'The session has no NEXUS tools.' }
   if (!techniqueEnabled(input.settings, 'toolLoading')) {
-    return { alwaysLoadNexusTools: false, action: 'DEFER_TOOLS', reason: 'Tool loading is left to the runtime default (tool search): loading upfront is not an evidence-supported default yet.' }
+    return { alwaysLoadNexusTools: false, action: 'DEFER_TOOLS', reason: 'Tool loading is left to the runtime (tool search). Measured on the Claude runtime, loading the NEXUS tools upfront did not change the size of a request.' }
   }
   if (input.nexusTools > UPFRONT_TOOL_LIMIT) {
     return { alwaysLoadNexusTools: false, action: 'DEFER_TOOLS', reason: `${input.nexusTools} NEXUS tools: more than ${UPFRONT_TOOL_LIMIT}, so their definitions stay behind tool search.` }

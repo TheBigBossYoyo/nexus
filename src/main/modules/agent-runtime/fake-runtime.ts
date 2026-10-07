@@ -166,9 +166,10 @@ export class FakeCacheSim {
     const key = this.key(spec)
     const last = this.seen.get(key)
     const warm = last !== undefined && this.now - last <= this.lifetimeMs
+    // Uncached input stays what the scripted runtime always reported (1,000 per turn), so figures that predate the cache model do not move.
     const usage = first
-      ? { inputTokens: 20, cacheReadTokens: warm ? prefix : 0, cacheCreationTokens: (warm ? 0 : prefix) + added }
-      : { inputTokens: 20, cacheReadTokens: prefix + state.history, cacheCreationTokens: added }
+      ? { inputTokens: 1000, cacheReadTokens: warm ? prefix : 0, cacheCreationTokens: (warm ? 0 : prefix) + added }
+      : { inputTokens: 1000, cacheReadTokens: prefix + state.history, cacheCreationTokens: added }
     this.seen.set(key, this.now)
     this.perSession.set(sessionId, { requests: state.requests + 1, history: state.history + added })
     return usage

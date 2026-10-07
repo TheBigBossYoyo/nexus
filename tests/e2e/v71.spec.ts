@@ -63,8 +63,8 @@ test.describe('NEXUS 0.7.1 context and tokens', () => {
       await screenshot(page, 'v71-context-tree')
 
       // Search finds a node; its inspector shows where it comes from.
-      await page.getByTestId('knowledge-search').fill('entry point')
-      await page.getByTestId('knowledge-search-result').first().click()
+      await page.getByTestId('knowledge-search').fill('entry point index')
+      await page.locator('[data-testid="knowledge-search-result"][data-path^="architecture/entry-points/"]').first().click()
       await expect(page.getByTestId('knowledge-inspector')).toBeVisible()
       await expect(page.getByTestId('knowledge-node-status')).toHaveText('Current')
       await expect(page.getByTestId('knowledge-sources')).toContainText('package.json')
@@ -78,7 +78,7 @@ test.describe('NEXUS 0.7.1 context and tokens', () => {
       await page.getByTestId('knowledge-refresh').click()
       await expect(page.getByTestId('knowledge-refresh-result')).toContainText('Refreshed')
       await page.getByTestId('knowledge-search').fill('release freeze')
-      await page.getByTestId('knowledge-search-result').first().click()
+      await page.locator('[data-testid="knowledge-search-result"][data-path^="notes/"]').first().click()
       await expect(page.getByTestId('knowledge-node-trust')).toHaveText('User provided')
       await page.getByTestId('knowledge-archive').click()
       await expect(page.getByTestId('knowledge-node-status')).toHaveText('Archived')
@@ -101,14 +101,14 @@ test.describe('NEXUS 0.7.1 context and tokens', () => {
       await screenshot(page, 'v71-usage-tokens')
 
       // The agent inspector answers "why this context".
-      const agents = await invoke(page, 'agents.list', { runId })
+      const agents = (await invoke(page, 'runs.get', { runId })).agents
       const worker = agents.find((a) => a.role === 'worker')
       if (!worker) throw new Error('No worker agent')
       const tokens = await invoke(page, 'tokens.agent', { agentId: worker.id })
       expect(tokens.efficiency.length).toBeGreaterThanOrEqual(1)
       expect(tokens.decisions.some((d) => d.action === 'DEFER_TOOLS')).toBe(true)
       await page.getByTestId('nav-agents').click()
-      await page.getByTestId('agents-view').getByText(worker.label, { exact: false }).first().click()
+      await page.getByTestId(`agent-row-${worker.id}`).click()
       await page.getByTestId('agent-tab-context').click()
       await expect(page.getByTestId('agent-context')).toBeVisible()
       await expect(page.getByTestId('agent-context-decisions')).toContainText('Tools left behind tool search')
@@ -116,7 +116,7 @@ test.describe('NEXUS 0.7.1 context and tokens', () => {
 
       // Settings: the Context Graph can be turned on for agents; the choice is stored.
       await page.getByTestId('nav-settings').click()
-      await page.getByTestId('settings-view').getByRole('button', { name: 'Tokens' }).click()
+      await page.getByTestId('settings-section-tokens').click()
       await page.getByTestId('tokens-contextGraph').selectOption('on')
       await page.getByTestId('settings-save').click()
       await expect.poll(async () => (await invoke(page, 'settings.get', {})).tokens.contextGraph).toBe('on')

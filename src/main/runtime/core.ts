@@ -10,7 +10,7 @@ import type { WorkersOverview } from '@shared/workers'
 import { ArenaService } from '../modules/arena'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
-import { FakeAgentRuntime } from '../modules/agent-runtime/fake-runtime'
+import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
 import { resolveClaudeExecutable } from '../modules/agent-runtime/resolve-executable'
 import type { AgentRuntime } from '../modules/agent-runtime/types'
 import { activeAgentsOf, ControlPlane, createWorkloadAdapters, RuntimeNotifier, unownedActiveWorkloads, unownedRecoveryRuns } from '../modules/control-plane'
@@ -184,7 +184,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
 
   // The scripted runtime exists for UI tests only and cannot be enabled in a packaged build.
   const useFake = !host.isPackaged && env['NEXUS_FAKE_RUNTIME'] === '1'
-  const fakeRuntime = useFake ? new FakeAgentRuntime({ script: createDemoScript() }) : null
+  const fakeRuntime = useFake ? new FakeAgentRuntime({ script: createDemoScript(), cache: new FakeCacheSim() }) : null
   // UI tests choose what the scripted runtime says about usage: `unknown` = no usage report at all (what a
   // runtime without that method looks like), a number = the plan window's reported percentage.
   const fakeUsage = env['NEXUS_FAKE_USAGE']
