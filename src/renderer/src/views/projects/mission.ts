@@ -61,7 +61,7 @@ export function buildCreateRunInput(d: MissionDraft): IpcInput<'runs.create'> {
     projectId: d.projectId,
     mode: d.mode,
     preset: d.preset,
-    prompt: d.prompt.trim(),
+    prompt: d.prompt,
     requirePlanApproval: d.requirePlanApproval,
   }
   if (d.maxAgents !== null) input.maxParallelAgents = d.maxAgents
@@ -75,6 +75,7 @@ export function buildCreateRunInput(d: MissionDraft): IpcInput<'runs.create'> {
 
 /** Returns a human-readable problem, or null when the draft is acceptable to main. */
 export function validateMission(d: MissionDraft): string | null {
+  if (!d.prompt.trim()) return 'Describe the mission first.'
   const parsed = ipcInputs['runs.create'].safeParse(buildCreateRunInput(d))
   if (parsed.success) return null
   const issue = parsed.error.issues[0]

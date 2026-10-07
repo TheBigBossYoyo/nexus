@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { expect, test, type Page } from '@playwright/test'
 import type { ControlPlaneOverview } from '../../src/shared/control-plane'
 import type { ConnectionState } from '../../src/shared/runtime-protocol'
@@ -130,6 +131,7 @@ test.describe('NEXUS 0.7 control plane', () => {
       await page.getByTestId('mode-select').selectOption('build')
       await page.getByTestId('strategy-select').selectOption('BUILD')
       await page.getByTestId('preset-select').selectOption('balanced')
+      await selectExactCompilation(page)
       await page.getByTestId('create-run').click()
       await expect(page.getByTestId('run-state')).toHaveAttribute('data-state', 'awaiting_approval')
       const adopted = await waitForOverview(

@@ -182,6 +182,21 @@ export async function runRuntime(): Promise<void> {
     // Workers are this same executable run as plain Node, so a packaged app needs no second binary.
     worker: { entry: join(import.meta.dirname, 'worker.js'), execPath: process.execPath },
     createSealer,
+    protectedStorage: {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (value) => safeStorage.encryptString(value),
+      decrypt: (value) => safeStorage.decryptString(value),
+    },
+    openBrowser: async (url) => {
+      const target = new URL(url)
+      if (!(
+        (target.origin === 'https://auth.openai.com' &&
+          target.pathname === '/api/accounts/authorize') ||
+        url === 'https://chatgpt.com/settings/usage'
+      ))
+        throw new Error('Unsupported provider browser destination')
+      await shell.openExternal(url)
+    },
     notify: (title, body) => {
       if (Notification.isSupported()) new Notification({ title, body, silent: true }).show()
     },

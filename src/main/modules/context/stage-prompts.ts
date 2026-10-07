@@ -1,4 +1,5 @@
 import type { FilterMode } from '@main/modules/token/filter'
+import { renderOriginalIntent, renderCompiledAdvice } from './compiled'
 import type {
   CommandResult,
   Handoff,
@@ -111,7 +112,8 @@ export function buildPlannerPrompt(input: PlannerPromptInput): Pack {
     : null
 
   return assemble([
-    { name: 'Request', body: truncate(run.prompt, SECTION_LIMITS.task) },
+    { name: 'Request', body: renderOriginalIntent(run) },
+    { name: 'Compiled specification with provenance', body: renderCompiledAdvice(run) },
     { name: 'Mode', body: modeGuidance },
     { name: 'Limits', body: limits },
     { name: 'Planning lens', body: input.lens ? `You are ${input.lens.label}. ${input.lens.guidance}` : null },
@@ -210,7 +212,8 @@ export interface MissionVerifierPromptInput {
 export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): Pack {
   const branch = input.run.integrationBranch
   return assemble([
-    { name: 'Original request', body: truncate(input.run.prompt, SECTION_LIMITS.task) },
+    { name: 'Original request', body: renderOriginalIntent(input.run) },
+    { name: 'Compiled specification with provenance', body: renderCompiledAdvice(input.run) },
     { name: 'Plan summary', body: input.planSummary ? truncate(input.planSummary, SECTION_LIMITS.criteria) : null },
     {
       name: 'Mission acceptance criteria',

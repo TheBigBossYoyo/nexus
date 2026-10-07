@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { renderOriginalIntent, renderCompiledAdvice } from './compiled'
 import type {
   AgentPurpose,
   CheckCommands,
@@ -161,6 +162,8 @@ export function buildContextPack(input: ContextPackInput): {
 
   return assemble([
     { name: 'Task', body: `Purpose: ${input.purpose}\n\n${renderTaskSpec(task)}` },
+    { name: 'Original user request', body: input.run.config.compiledTaskSpec ? renderOriginalIntent(input.run) : null },
+    { name: 'Compiled specification with provenance', body: renderCompiledAdvice(input.run) },
     { name: 'Acceptance criteria', body: criteriaSection(task, input.missionCriteria) },
     { name: 'Results of dependency tasks', body: dependencies },
     { name: 'Relevant decisions', body: decisions },

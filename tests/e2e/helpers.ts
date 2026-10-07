@@ -7,6 +7,12 @@ import type { IpcChannel, IpcOutputs } from '../../src/shared/ipc'
 
 export const REPO_ROOT = resolve(import.meta.dirname, '..', '..')
 export const SCREENSHOT_DIR = join(REPO_ROOT, 'test-results', 'screenshots')
+/** Baseline execution scenarios explicitly bypass external enrichment; AUTO is covered separately. */
+export async function selectExactCompilation(page: Page): Promise<void> {
+  const panel = page.getByTestId('compilation-preview')
+  if (await panel.getAttribute('open') === null) await panel.locator('summary').click()
+  await page.getByTestId('compilation-mode').selectOption('EXACT')
+}
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim()

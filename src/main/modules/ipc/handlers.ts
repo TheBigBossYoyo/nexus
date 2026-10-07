@@ -1,5 +1,5 @@
 import type { AuthStatus } from '@shared/auth'
-import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { TERMINAL_RUN_STATES, type RunConfig } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
 import {
   ipcInputs,
@@ -30,8 +30,13 @@ import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
 import { createV71Handlers } from './v71-handlers'
+import { createV72Handlers } from './v72-handlers'
+import type { ChatGPTConnection } from '@main/modules/intelligence/connection'
+import { IntelligenceOperations } from '@main/modules/intelligence/operations'
 
 export interface IpcContext {
+  chatgpt?: ChatGPTConnection
+  intelligenceOperations?: IntelligenceOperations
   repos: Repositories
   git: GitService
   runtime: AgentRuntime
@@ -76,6 +81,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
   const { repos, orchestrator, runtime } = ctx
   const projects = new ProjectService(repos, ctx.git)
   const queries = new QueryService(repos, ctx.git)
+  const intelligenceOperations = ctx.intelligenceOperations ?? new IntelligenceOperations()
+  const v72 = createV72Handlers(repos, ctx.chatgpt, ctx.git, intelligenceOperations)
   let authCache: AuthStatus | null = null
   const overnight = (): OvernightSupervisor => {
     if (!ctx.overnight) throw new NexusError('runtime_unavailable', 'Overnight Mode is not available in this process')
@@ -83,6 +90,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
   }
 
   return {
+    ...v72,
     'app.info': () => ctx.appInfo(),
     'app.openDataDir': async () => {
       await ctx.openDataDir()
@@ -175,18 +183,28 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       worktrees: repos.worktrees.listByRun(runId),
       pendingApprovals: repos.approvals.listPending(runId),
     }),
-    'runs.create': ({ projectId, mode, preset, prompt, strategy, speculativeCandidates, ...overrides }) => {
-      const defined = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined))
+    'runs.create': ({ projectId, mode, preset, prompt, strategy, speculativeCandidates, compilationMode, compiledTaskSpecId, ...overrides }) => intelligenceOperations.run(async () => {
+      const defined: Partial<RunConfig> = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined))
+      let compiledHead: string | undefined
+      if (mode !== 'ask') {
+        const selectedMode = compilationMode ?? 'AUTO'
+        const specId = compiledTaskSpecId ?? (await v72['compilation.preview']({ projectId, raw: prompt, mode: selectedMode })).id
+        const spec = await v72['compilation.validate']({ projectId, specId, raw: prompt, mode: selectedMode })
+        defined.compiledTaskSpec = spec
+        const snapshot = spec.dependencies.find((d) => d.id === `repository:${projectId}`)?.version.split(':')[0]
+        if (snapshot && snapshot !== 'no-head') compiledHead = snapshot
+      }
       return orchestrator.createRun({
         projectId,
         mode,
         preset,
         prompt,
         overrides: defined,
+        ...(compiledHead ? { expectedHead: compiledHead } : {}),
         ...(strategy ? { strategy } : {}),
         ...(speculativeCandidates !== undefined ? { speculativeCandidates } : {}),
       })
-    },
+    }),
     'runs.approvePlan': ({ runId }) => orchestrator.approvePlan(runId),
     'runs.replan': ({ runId, feedback }) => orchestrator.replan(runId, feedback),
     'runs.pause': ({ runId }) => orchestrator.pauseRun(runId),
@@ -304,9 +322,13 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       return packs.filter((p) => !seen.has(p.id) && seen.add(p.id))
     },
 
-    'overnight.start': async ({ confirmed, confirmation, ...input }) => {
+    'overnight.start': ({ confirmed, confirmation, compilationMode, compiledTaskSpecId, ...input }) => intelligenceOperations.run(async () => {
       const defined = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as typeof input
       const supervisor = overnight()
+      const selectedMode = compilationMode ?? 'AUTO'
+      const specId = compiledTaskSpecId ?? (await v72['compilation.preview']({ projectId: input.projectId, raw: input.prompt, mode: selectedMode })).id
+      const spec = await v72['compilation.validate']({ projectId: input.projectId, specId, raw: input.prompt, mode: selectedMode })
+      const snapshot = spec.dependencies.find((d) => d.id === `repository:${input.projectId}`)?.version.split(':')[0]
       const p = input.policy
       if (ctx.confirmPower) {
         const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
@@ -322,8 +344,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
         const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Start an unattended overnight run?' : 'Authorize NEXUS to control Windows power state for this run?', detail)
         if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
       }
-      return supervisor.start({ ...defined, confirmed, confirmation })
-    },
+      return supervisor.start({ ...defined, confirmed, confirmation, compiledTaskSpec: spec, ...(snapshot && snapshot !== 'no-head' ? { expectedHead: snapshot } : {}) })
+    }),
     'overnight.startArena': async ({ campaign, policy: p, confirmed, confirmation }) => {
       const supervisor = overnight()
       if (ctx.confirmPower) {

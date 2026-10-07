@@ -1,4 +1,9 @@
 import { mkdirSync, statSync } from 'node:fs'
+import { BUILD_STAMP } from '@shared/build-identity'
+import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
+import { IntelligenceOperations } from '../modules/intelligence/operations'
+import { MIGRATIONS } from '../modules/persistence/migrations'
+import { CapacityRegistry } from '../modules/capacity/registry'
 import { release } from 'node:os'
 import { join } from 'node:path'
 import type { PushMessage } from '@shared/events'
@@ -45,6 +50,8 @@ import { WorkspaceEngine } from '../modules/workspace'
  * Electron.
  */
 export interface RuntimeHost {
+  protectedStorage?: ProtectedStorage
+  openBrowser?(url: string): Promise<void>
   dataDir: string
   version: string
   isPackaged: boolean
@@ -113,6 +120,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // The runtime is the only writer of the database. Windows read through it.
   const db = openDatabase(dbPath)
   const repos = createRepositories(db)
+  repos.intelligenceArtifacts.reconcileInterrupted()
   const bus = new EventBus(repos.events, repos.transaction)
   const git = new GitService()
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
@@ -629,6 +637,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   let stopping: Promise<boolean> | null = null
   const stop = async (): Promise<boolean> => {
     phase = 'STOPPING'
+    intelligenceOperations.closeAdmission()
+    chatgpt.dispose()
     push({ kind: 'runtime' })
     keepAwake()
     try {
@@ -636,6 +646,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       // overnight failsafe is left alone: it belongs to Windows and outlives this process on purpose.
       await (overnight ? Promise.race([overnight.idle(), new Promise((resolve) => setTimeout(resolve, 30_000))]) : Promise.resolve())
       overnight?.dispose()
+      await intelligenceOperations.idle()
+      await chatgpt.idle()
       // Nothing new may start: the queue, programs, campaigns and quota recovery stop first. The usage
       // service stays until the agent sessions have ended, so what they used is still recorded.
       control.dispose()
@@ -718,6 +730,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   }
 
   const appInfo = async (): Promise<AppInfo> => ({
+    build: {
+      ...BUILD_STAMP,
+      runtimeProtocol: RUNTIME_PROTOCOL_VERSION,
+      databaseSchema: MIGRATIONS.reduce((max, m) => Math.max(max, m.version), 0),
+    },
     version: host.version,
     dataDir,
     dbPath,
@@ -728,7 +745,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     isPackaged: host.isPackaged,
   })
 
+  const chatgpt = new ChatGPTConnection(dataDir, host.protectedStorage, host.openBrowser, fetch, new CapacityRegistry(repos.intelligenceArtifacts))
+  const intelligenceOperations = new IntelligenceOperations()
   const handlers = createIpcHandlers({
+    chatgpt,
+    intelligenceOperations,
     repos,
     git,
     runtime,

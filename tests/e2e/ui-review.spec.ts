@@ -51,7 +51,7 @@ test.describe('UI review capture', () => {
       const project = (await invoke(page, 'projects.list', {}))[0]
       if (!project) throw new Error('no project')
       await shot(page, 'light-wide-projects-composer')
-      const run = await invoke(page, 'runs.create', { projectId: project.id, mode: 'mission', preset: 'balanced', prompt: 'Add an API module and a UI module, then integrate them.', strategy: 'SINGLE', requirePlanApproval: false } as never)
+      const run = await invoke(page, 'runs.create', { projectId: project.id, mode: 'mission', preset: 'balanced', compilationMode: 'EXACT', prompt: 'Add an API module and a UI module, then integrate them.', strategy: 'SINGLE', requirePlanApproval: false } as never)
       const runId = (run as { id: string }).id
       await expect.poll(async () => (await invoke(page, 'runs.get', { runId })).run.state, { timeout: 180_000, intervals: [1000] }).toMatch(/completed|failed|awaiting_approval/)
 

@@ -19,3 +19,5 @@ Work sequence:
 Documentation discrepancy: `docs/OVERNIGHT.md` is absent from the parent. Use the actual Overnight module, README and related documentation instead.
 
 Completion requires evidence for every gate in the user's specification. Foundations, mock runs and inherited evidence are not completion of the release.
+
+2026-10-07 checkpoint: official Plus sign-in/catalog observed; live inference still waits for the user's external paid-credit confirmation. Advisory/compiler/capacity foundations and new UI surfaces are implemented, reviewed and tested. Engineering missions and Overnight missions have compiler admission. Programs/Workspaces/queue entry boundaries, global capacity scheduling and the complete UI 2 pass remain open. See `V0_7_2_RELEASE_REPORT.md` for verification failures and exact scope; status stays PARTIAL.

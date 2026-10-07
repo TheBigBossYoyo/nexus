@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { closeApp, createRepo, invoke, launchApp, removeDir, screenshot, tempDir } from './helpers'
 
@@ -45,6 +46,7 @@ async function startMission(page: Page, prompt: string, strategy = 'BUILD'): Pro
   await page.getByTestId('mode-select').selectOption('build')
   await page.getByTestId('strategy-select').selectOption(strategy)
   await page.getByTestId('plan-approval-toggle').uncheck()
+  await selectExactCompilation(page)
   await page.getByTestId('create-run').click()
   await expect(page.getByTestId('run-view')).toBeVisible()
   const runs = await invoke(page, 'runs.list', {})

@@ -58,7 +58,7 @@ describe('overnight form to policy', () => {
     const input = buildOvernightStartInput(f, 'p1', '  do it  ')
     expect(input).toMatchObject({
       projectId: 'p1',
-      prompt: 'do it',
+      prompt: '  do it  ',
       confirmed: true,
       confirmation: OVERNIGHT_CONFIRMATION_TEXT,
       maxParallelAgents: 3,

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { CompiledTaskSpec } from './intelligence'
 import type { RunStrategyInfo } from './v3'
 
 // ───────────────────────────── enums ─────────────────────────────
@@ -274,6 +275,8 @@ export interface Project {
 }
 
 export interface RunConfig {
+  /** Server-validated snapshot from the user-entry compiler; absent on internal/legacy runs. */
+  compiledTaskSpec?: CompiledTaskSpec
   maxParallelAgents: number
   maxTurnsPerAgent: number
   maxRetriesPerTask: number

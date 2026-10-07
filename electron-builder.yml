@@ -11,6 +11,7 @@ files:
   - "!**/*.map"
   # The runtime hosted by plain Node exists for tests; it is not part of the app.
   - "!out/main/runtime-node.js"
+  - "!out/validation/**"
   - "!**/better-sqlite3/{deps,src}/**"
 # The built-in Arena cases (fixtures and hidden evaluators) are plain files NEXUS copies and executes.
 extraResources:

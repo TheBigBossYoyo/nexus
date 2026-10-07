@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { expect, test, type Page } from '@playwright/test'
 import {
   closeApp,
@@ -25,6 +26,7 @@ async function runMission(page: Page): Promise<string> {
   await page.getByTestId('mode-select').selectOption('build')
   await page.getByTestId('strategy-select').selectOption('BUILD')
   await page.getByTestId('preset-select').selectOption('balanced')
+  await selectExactCompilation(page)
   await page.getByTestId('create-run').click()
   await expect(page.getByTestId('run-view')).toBeVisible()
   await expect(page.getByTestId('run-state')).toHaveAttribute('data-state', 'awaiting_approval')

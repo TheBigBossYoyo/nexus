@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChatGPTCard } from './ChatGPTCard'
 import {
   PROVIDER_NAMES,
   type ProviderId,
@@ -384,6 +385,7 @@ export function ProvidersView() {
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-6 py-5">
+          <ChatGPTCard />
           {overview.error ? (
             <div className="flex flex-col items-start gap-2" data-testid="providers-error">
               <ErrorNote error={overview.error} />
@@ -398,19 +400,17 @@ export function ProvidersView() {
               <ErrorNote error={save.error} />
             </div>
           ) : null}
-          {!o ? (
-            overview.error ? null : (
+          {!o ? overview.error ? null : (
               <p className="m-0 text-text-muted" role="status" data-testid="providers-loading">
                 Detecting providers…
               </p>
-            )
-          ) : (
+            ) : (
             <>
               <p className="m-0 text-small text-text-secondary" data-testid="providers-intro">
-                NEXUS finds these by asking each provider&apos;s own command line tool for its
-                version and sign-in state. It reads no credential and sends no prompt to do so.{' '}
-                {PROVIDER_NAMES.claude} is always used; nothing is sent to another provider unless
-                you enable it here.
+                These execution providers are detected through their command line tools without
+                sending a model prompt. {PROVIDER_NAMES.claude} currently plans and implements missions;
+                optional providers handle only the roles enabled below. The ChatGPT strategy
+                connection above has separate sign-in and consent controls.
               </p>
               <div className="grid gap-4 xl:grid-cols-3" data-testid="providers-list">
                 {o.statuses.map((s) => (

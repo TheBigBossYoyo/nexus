@@ -303,7 +303,7 @@ export function buildOvernightStartInput(
   const input: IpcInput<'overnight.start'> = {
     projectId,
     preset: form.preset,
-    prompt: prompt.trim(),
+    prompt,
     policy: buildPolicy(form),
     confirmed: true,
     confirmation: OVERNIGHT_CONFIRMATION_TEXT,

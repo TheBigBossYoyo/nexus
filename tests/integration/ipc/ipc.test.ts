@@ -25,6 +25,18 @@ const APP_INFO: AppInfo = {
 
 /** One minimal valid input per channel. Typed so that adding a channel without an entry fails to compile. */
 const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
+  'chatgpt.status': {},
+  'director.invoke': { projectId: 'p1', objective: 'Plan the next release', level: 2 },
+  'director.history': { projectId: 'p1' },
+  'chatgpt.connect': {},
+  'chatgpt.select': { profileId: 'p1' },
+  'chatgpt.models': {},
+  'chatgpt.configure': { model: 'test', includedOnlyConfirmed: false },
+  'chatgpt.disconnect': {},
+  'chatgpt.manageUsage': {},
+  'compilation.preview': { projectId: 'p1', raw: 'Fix typo', mode: 'EXACT' },
+  'compilation.history': { projectId: 'p1' },
+  'compilation.validate': { projectId: 'p1', specId: 's1', raw: 'Fix typo', mode: 'EXACT' },
   'overnight.start': { projectId: 'p1', preset: 'balanced', prompt: 'do it', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT },
   'overnight.startArena': {
     campaign: { name: 'c', caseIds: ['case-1'], strategies: ['SINGLE'], repetitions: 1, modelPreset: 'balanced', budgetPreset: 'eco' },
@@ -368,6 +380,30 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     call = (channel, input) => dispatchIpc(handlers, channel, input ?? {}) as never
   })
   afterEach(async () => h?.dispose())
+  it('blocks an unavailable Overnight compilation before native authorization or power arming', async () => {
+    const start = vi.fn(), confirmPower = vi.fn(async () => true)
+    const local = createIpcHandlers(makeContext(h, [], { overnight: { start } as unknown as NonNullable<IpcContext['overnight']>, confirmPower }))
+    const result = await dispatchIpc(local, 'overnight.start', { ...VALID_INPUTS['overnight.start'], projectId: h.project.id, prompt: '  Add a leaderboard\n' })
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(start).not.toHaveBeenCalled()
+    expect(confirmPower).not.toHaveBeenCalled()
+    expect(h.repos.intelligenceArtifacts.listCompilations(h.project.id)[0]?.rawIntent).toBe('  Add a leaderboard\n')
+  })
+  it('passes only a validated exact specification to the Overnight supervisor', async () => {
+    const start = vi.fn(async () => ({ run: { id: 'test' }, overnight: {} }))
+    const local = createIpcHandlers(makeContext(h, [], { overnight: { start } as unknown as NonNullable<IpcContext['overnight']> }))
+    const raw = '  Add a leaderboard\n'
+    expect((await dispatchIpc(local, 'overnight.start', { ...VALID_INPUTS['overnight.start'], projectId: h.project.id, prompt: raw, compilationMode: 'EXACT' })).ok).toBe(true)
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ prompt: raw, compiledTaskSpec: expect.objectContaining({ rawIntent: raw, mode: 'EXACT', status: 'READY' }) }))
+  })
+  it('rejects a repository change between admission and run insertion', async () => {
+    const expectedHead = await h.git.headCommit(h.project.rootPath)
+    const head = vi.spyOn(h.git, 'headCommit').mockResolvedValueOnce(expectedHead).mockResolvedValueOnce('different-head')
+    try {
+      await expect(h.orchestrator.createRun({ projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'Snapshot-sensitive task', expectedHead })).rejects.toThrow('changed after compilation')
+      expect(h.repos.runs.listByProject(h.project.id)).toEqual([])
+    } finally { head.mockRestore() }
+  })
 
   it('projects.open → runs.create → runs.get → approvals.pending → summary, diffs, agent output and event paging', async () => {
     // projects.open profiles the real repository and registers it (or returns the existing project).
@@ -379,6 +415,7 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     expect(await value('projects.open', {})).toBeNull() // the folder picker was cancelled
 
     const created = await value<{ id: string; state: string }>('runs.create', {
+      compilationMode: 'EXACT',
       projectId: project.id,
       mode: 'build',
       preset: 'balanced',
@@ -485,7 +522,7 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
   it('exercises the control channels: approvals, pause/resume/cancel, task controls, memory, settings, projects', async () => {
     const project = h.project
     // A run that waits for plan approval shows up in approvals.pending and is released through approvals.resolve.
-    const waiting = await value<{ id: string }>('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Needs a plan review', requirePlanApproval: true })
+    const waiting = await value<{ id: string }>('runs.create', { compilationMode: 'EXACT', projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Needs a plan review', requirePlanApproval: true })
     await h.waitForState(waiting.id, 'awaiting_approval')
     const pending = await value<{ id: string; kind: string; runId: string }[]>('approvals.pending')
     expect(pending).toHaveLength(1)
@@ -509,13 +546,21 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     expect(await call('runs.recover', { runId: 'missing', action: 'resume' })).toMatchObject({ ok: false, error: { code: 'not_found' } })
     expect(await call('projects.open', { path: `${h.dir}\\does-not-exist` })).toMatchObject({ ok: false, error: { code: 'not_found' } })
     // Only absolute local paths are opened: UNC, device and relative paths are refused before any filesystem access.
-    for (const bad of ['\\\\host\\share\\repo', '//host/share/repo', '\\\\?\\C:\\repo', '\\\\.\\pipe\\x', 'relative/dir', '..\\other', '\\rooted-no-drive']) {
+    for (const bad of [
+      '\\\\host\\share\\repo',
+      '//host/share/repo',
+      '\\\\?\\C:\\repo',
+      '\\\\.\\pipe\\x',
+      'relative/dir',
+      '..\\other',
+      '\\rooted-no-drive',
+    ]) {
       expect(await call('projects.open', { path: bad }), bad).toMatchObject({ ok: false, error: { code: 'invalid_input' } })
     }
 
     // Replan, pause and cancel through the channels.
     h.runtime.script = scenarioScript({ plan: plan([plannedTask('later')]) })
-    const second = await value<{ id: string }>('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Another', requirePlanApproval: true })
+    const second = await value<{ id: string }>('runs.create', { compilationMode: 'EXACT', projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Another', requirePlanApproval: true })
     await h.waitForState(second.id, 'awaiting_approval')
     expect(await value<{ state: string }>('runs.replan', { runId: second.id, feedback: 'smaller please' })).toMatchObject({ state: 'planning' })
     await h.waitFor(() => h.repos.runs.require(second.id).state === 'awaiting_approval', 'the revised plan')
@@ -560,6 +605,7 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
   it('serves the v0.2 channels from durable state and passes planningMode/reviewMode into the run config', async () => {
     const project = await value<{ id: string }>('projects.open', { path: h.repoDir })
     const created = await value<{ id: string }>('runs.create', {
+      compilationMode: 'EXACT',
       projectId: project.id,
       mode: 'build',
       preset: 'balanced',
@@ -624,7 +670,7 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
       if (spec.role === 'planner') await ctx.sleep(60_000)
       else await completeWith({ text: 'x' })(spec, ctx)
     }
-    const run = await value<{ id: string }>('runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'slow' })
+    const run = await value<{ id: string }>('runs.create', { compilationMode: 'EXACT', projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: 'slow' })
     expect(await call('projects.remove', { projectId: h.project.id })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
     await value('runs.cancel', { runId: run.id })
     expect(await value('projects.remove', { projectId: h.project.id })).toBeNull()

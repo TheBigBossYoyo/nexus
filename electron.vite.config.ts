@@ -1,4 +1,6 @@
 import { resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -8,8 +10,35 @@ const alias = {
   '@main': resolve(import.meta.dirname, 'src/main'),
 }
 
+const packageVersion = (
+  JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as {
+    version: string
+  }
+).version
+const gitRead = (args: string[]) => {
+  try {
+    return execFileSync('git', args, {
+      cwd: import.meta.dirname,
+      encoding: 'utf8',
+      windowsHide: true,
+    }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+const buildDefine = {
+  __NEXUS_BUILD__: JSON.stringify({
+    version: packageVersion,
+    commit: gitRead(['rev-parse', 'HEAD']),
+    dirty: gitRead(['status', '--porcelain']) !== '',
+    builtAt: new Date().toISOString(),
+    channel: 'development',
+  }),
+}
+
 export default defineConfig({
   main: {
+    define: buildDefine,
     resolve: { alias },
     build: {
       // Three entry points: the app (window or runtime, by argument), the worker the runtime forks, and the

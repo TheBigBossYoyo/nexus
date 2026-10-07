@@ -39,6 +39,7 @@ import { planQuotaWait } from '@main/modules/usage/machine'
 import type { AvailabilityProbe } from '@main/modules/usage/probe'
 import type { CreateCampaignInput } from '@main/modules/arena'
 import { MissionWorkload } from './mission-workload'
+import type { CompiledTaskSpec } from '@shared/intelligence'
 import { powerAddendum } from './report'
 import type { AutonomousWorkload, WorkloadFactory } from './workload'
 
@@ -50,6 +51,7 @@ export interface OvernightOrchestrator {
     preset: Preset
     prompt: string
     overrides?: Partial<RunConfig>
+    expectedHead?: string
     prepare?: (run: Run) => Promise<void>
     strategy?: Strategy
   }): Promise<Run>
@@ -98,6 +100,9 @@ export interface OvernightDeps {
 }
 
 export interface OvernightStartInput {
+  /** Runtime-validated advisory snapshot; never accepted directly from the renderer. */
+  compiledTaskSpec?: CompiledTaskSpec
+  expectedHead?: string
   projectId: string
   prompt: string
   preset: Preset
@@ -323,11 +328,13 @@ export class OvernightSupervisor {
       mode: 'mission',
       preset: input.preset,
       prompt: input.prompt,
+      ...(input.expectedHead ? { expectedHead: input.expectedHead } : {}),
       // A strategy makes the mission's outcome usable as evidence. BUILD sets what the preset already set.
       strategy: input.strategy ?? 'BUILD',
       overrides: {
         // Nobody is there to approve a plan; starting the run is the approval.
         requirePlanApproval: false,
+        ...(input.compiledTaskSpec ? { compiledTaskSpec: input.compiledTaskSpec } : {}),
         maxDurationMinutes: policy.maxDurationMinutes,
         ...(input.maxParallelAgents !== undefined ? { maxParallelAgents: input.maxParallelAgents } : {}),
         ...(input.maxIterations !== undefined ? { maxIterations: input.maxIterations } : {}),

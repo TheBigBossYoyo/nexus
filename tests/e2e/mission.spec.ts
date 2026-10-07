@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -33,6 +34,7 @@ test.describe('mission happy path', () => {
       await page.getByTestId('mode-select').selectOption('build')
       await page.getByTestId('strategy-select').selectOption('BUILD')
       await page.getByTestId('preset-select').selectOption('balanced')
+      await selectExactCompilation(page)
       await page.getByTestId('create-run').click()
 
       // The planner's plan is shown while the run awaits approval.

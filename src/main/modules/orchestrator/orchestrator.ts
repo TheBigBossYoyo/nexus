@@ -62,6 +62,8 @@ const MAX_PLAN_ATTEMPTS = 3
 const DEPENDENCY_BLOCK_PREFIX = 'dependency:'
 
 export interface CreateRunInput {
+  /** User-entry admission binds compiled advice to this immutable repository snapshot. */
+  expectedHead?: string
   projectId: string
   mode: RunMode
   preset: Preset
@@ -185,6 +187,7 @@ export class Orchestrator implements PipelineHost {
 
     const checks = project.profile?.commands ?? { build: null, test: null, lint: null, typecheck: null }
     const config = buildRunConfig(settings, input.preset, checks, project.respectProjectClaudeConfig, input.overrides)
+    if (input.expectedHead && (baseCommit !== input.expectedHead || await git.headCommit(project.rootPath) !== input.expectedHead)) throw new NexusError('invalid_state', 'Repository changed after compilation. Preview again before starting.')
     const run = bus.transaction(() => {
       const row = repos.runs.insert({
         id: newId(),

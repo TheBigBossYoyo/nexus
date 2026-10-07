@@ -57,7 +57,7 @@ async function client(dir: string, options: Parameters<typeof connect>[1] = {}):
 /** Opens a project and starts a mission that the scripted runtime plans and executes; returns the run id. */
 async function startMission(c: RuntimeClient, repo: string): Promise<string> {
   const project = await call<{ id: string }>(c, 'projects.open', { path: repo })
-  const run = await call<{ id: string }>(c, 'runs.create', { projectId: project.id, mode: 'build', prompt: 'Build the demo modules', preset: 'balanced', requirePlanApproval: false })
+  const run = await call<{ id: string }>(c, 'runs.create', { projectId: project.id, mode: 'build', prompt: 'Build the demo modules', preset: 'balanced', requirePlanApproval: false, compilationMode: 'EXACT' })
   return run.id
 }
 

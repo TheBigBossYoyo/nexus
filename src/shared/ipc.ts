@@ -1,4 +1,7 @@
 import { z } from 'zod'
+import type { BuildIdentity } from './build-identity'
+import type { ChatGPTStatus } from './chatgpt'
+import type { CompiledTaskSpec, DirectorInvocation } from './intelligence'
 import {
   ContractKindSchema,
   DependencyKindSchema,
@@ -129,6 +132,7 @@ const GraphSpace = z.object({ kind: z.enum(['project', 'workspace']), id: Id }).
 const Empty = z.object({}).strict()
 
 export interface AppInfo {
+  build?: BuildIdentity
   version: string
   dataDir: string
   dbPath: string
@@ -208,6 +212,36 @@ import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
 import type { WorkersOverview } from './workers'
 
 export const ipcInputs = {
+  'chatgpt.status': Empty,
+  'director.invoke': z
+    .object({
+      projectId: Id,
+      objective: z.string().min(1).max(32000),
+      level: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+    })
+    .strict(),
+  'director.history': z
+    .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
+    .strict(),
+  'chatgpt.connect': z.object({ profileId: Id.optional() }).strict(),
+  'chatgpt.select': z.object({ profileId: Id }).strict(),
+  'chatgpt.models': Empty,
+  'chatgpt.configure': z
+    .object({ model: z.string().min(1).max(200), includedOnlyConfirmed: z.boolean() })
+    .strict(),
+  'chatgpt.disconnect': Empty,
+  'chatgpt.manageUsage': Empty,
+  'compilation.preview': z
+    .object({
+      projectId: Id,
+      raw: z.string().min(1).max(32000),
+      mode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']),
+    })
+    .strict(),
+  'compilation.history': z
+    .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
+    .strict(),
+  'compilation.validate': z.object({ projectId: Id, specId: Id, raw: z.string().min(1).max(32000), mode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']) }).strict(),
   'app.info': Empty,
   'app.openDataDir': Empty,
 
@@ -236,6 +270,8 @@ export const ipcInputs = {
       mode: RunModeSchema,
       preset: PresetSchema,
       prompt: z.string().min(1).max(20_000),
+      compilationMode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']).optional(),
+      compiledTaskSpecId: Id.optional(),
       maxParallelAgents: z.number().int().min(1).max(16).optional(),
       maxIterations: z.number().int().min(1).max(50).optional(),
       maxDurationMinutes: z.number().int().min(1).max(1440).optional(),
@@ -339,6 +375,8 @@ export const ipcInputs = {
       projectId: Id,
       preset: PresetSchema,
       prompt: z.string().min(1).max(20_000),
+      compilationMode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']).optional(),
+      compiledTaskSpecId: Id.optional(),
       policy: OvernightPolicySchema,
       /** The run-specific authorization: the ticked box and the exact sentence that was shown. */
       confirmed: z.literal(true),
@@ -605,6 +643,18 @@ export type IpcChannel = keyof typeof ipcInputs
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcInputs)[C]>
 
 export interface IpcOutputs {
+  'chatgpt.status': ChatGPTStatus
+  'director.invoke': DirectorInvocation
+  'director.history': DirectorInvocation[]
+  'chatgpt.connect': ChatGPTStatus
+  'chatgpt.select': ChatGPTStatus
+  'chatgpt.models': ChatGPTStatus
+  'chatgpt.configure': ChatGPTStatus
+  'chatgpt.disconnect': ChatGPTStatus
+  'chatgpt.manageUsage': null
+  'compilation.preview': CompiledTaskSpec
+  'compilation.history': CompiledTaskSpec[]
+  'compilation.validate': CompiledTaskSpec
   'app.info': AppInfo
   'app.openDataDir': null
   'auth.status': AuthStatus

@@ -9,6 +9,7 @@ export type View =
   | 'arena'
   | 'policy'
   | 'providers'
+  | 'director'
   | 'usage'
   | 'performance'
   | 'intelligence'
@@ -29,6 +30,7 @@ export const VIEWS: readonly View[] = [
   'arena',
   'policy',
   'providers',
+  'director',
   'usage',
   'performance',
   'intelligence',

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT, type OvernightPolicy, type OvernightStatus } from '../../src/shared/overnight'
-import { closeApp, createRepo, git, invoke, launchApp, removeDir, screenshot, tempDir } from './helpers'
+import { closeApp, createRepo, git, invoke, launchApp, removeDir, screenshot, tempDir, selectExactCompilation } from './helpers'
 
 /**
  * Overnight Mode against the built app. The power controller is the fake one (it is selected whenever
@@ -42,6 +42,7 @@ async function startOvernight(page: Page, projectId: string, prompt: string, pol
     projectId,
     preset: 'balanced',
     prompt,
+    compilationMode: 'EXACT',
     policy: { ...DEFAULT_OVERNIGHT_POLICY, ...policy },
     confirmed: true,
     confirmation: OVERNIGHT_CONFIRMATION_TEXT,
@@ -83,6 +84,7 @@ test.describe('Overnight Mode', () => {
       await openProject(page)
       await page.getByTestId('mission-prompt').fill('Add an API module and a UI module, then integrate them.')
       await page.getByTestId('mode-select').selectOption('overnight')
+      await selectExactCompilation(page)
       await expect(page.getByTestId('overnight-panel')).toBeVisible()
       await screenshot(page, 'overnight-1-composer')
 

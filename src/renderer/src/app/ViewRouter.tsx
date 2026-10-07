@@ -20,6 +20,7 @@ import { AuthView } from '../views/auth/AuthView'
 import { PerformanceView } from '../views/performance/PerformanceView'
 import { IntelligenceView } from '../views/intelligence/IntelligenceView'
 import { KnowledgeView } from '../views/knowledge/KnowledgeView'
+import { DirectorView } from '../views/intelligence/DirectorView'
 import { ErrorBoundary } from './ErrorBoundary'
 import { VIEW_META, VIEWS_WITH_OWN_HEADER } from './nav'
 
@@ -43,6 +44,8 @@ function renderView(view: View) {
       return <PolicyView />
     case 'providers':
       return <ProvidersView />
+    case 'director':
+      return <DirectorView />
     case 'control':
       return <ControlView />
     case 'usage':
