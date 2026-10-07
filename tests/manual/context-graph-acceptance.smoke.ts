@@ -136,7 +136,7 @@ async function mission(variant: 'BASELINE' | 'GRAPH'): Promise<Outcome> {
 
   // Hidden evaluation on the integration branch, in a scratch checkout.
   let hiddenPassed = false
-  let hiddenOutput = ''
+  let hiddenOutput: string
   try {
     const integration = repos.worktrees.listByRun(run.id).find((w) => w.taskId === null)
     const checkout = join(dir, 'hidden')
