@@ -8,6 +8,7 @@ import { RunSection } from './RunSection'
 import { HistorySection } from './HistorySection'
 import { LimitSection } from './LimitSection'
 import { EfficiencySection } from './EfficiencySection'
+import { TokenSections } from './TokenSections'
 
 /** Claude usage: what Claude reports, what NEXUS itself observed, and how limits were handled. */
 export function UsageView() {
@@ -63,6 +64,7 @@ export function UsageView() {
           <HistorySection today={today} />
           <LimitSection now={now} />
           <EfficiencySection />
+          <TokenSections />
         </div>
       </div>
     </div>

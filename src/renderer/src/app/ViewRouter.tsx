@@ -19,6 +19,7 @@ import { SettingsView } from '../views/settings/SettingsView'
 import { AuthView } from '../views/auth/AuthView'
 import { PerformanceView } from '../views/performance/PerformanceView'
 import { IntelligenceView } from '../views/intelligence/IntelligenceView'
+import { KnowledgeView } from '../views/knowledge/KnowledgeView'
 import { ErrorBoundary } from './ErrorBoundary'
 import { VIEW_META, VIEWS_WITH_OWN_HEADER } from './nav'
 
@@ -58,6 +59,8 @@ function renderView(view: View) {
       return <PerformanceView />
     case 'intelligence':
       return <IntelligenceView />
+    case 'knowledge':
+      return <KnowledgeView />
     case 'auth':
       return <AuthView />
     default:

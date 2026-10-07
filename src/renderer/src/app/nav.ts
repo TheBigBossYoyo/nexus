@@ -70,6 +70,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     keywords: 'repository intelligence facts files',
   },
   {
+    view: 'knowledge',
+    label: 'Context',
+    group: 'intelligence',
+    keywords: 'context graph knowledge tree memory decisions hazards contracts architecture modules notes',
+  },
+  {
     view: 'control',
     label: 'Control Center',
     group: 'system',
@@ -113,6 +119,7 @@ export const VIEW_META: Record<View, { title: string; context?: string }> = {
   usage: { title: 'Usage', context: 'Intelligence' },
   performance: { title: 'Performance', context: 'Intelligence' },
   intelligence: { title: 'Repository', context: 'Intelligence' },
+  knowledge: { title: 'Context', context: 'Intelligence' },
   control: { title: 'Control Center', context: 'System' },
   overnight: { title: 'Overnight', context: 'System' },
   activity: { title: 'Activity', context: 'System' },
@@ -139,6 +146,7 @@ export const VIEWS_WITH_OWN_HEADER: readonly View[] = [
   'memory',
   'performance',
   'intelligence',
+  'knowledge',
   'auth',
   'run',
 ]

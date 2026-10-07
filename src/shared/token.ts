@@ -349,3 +349,62 @@ export function checkOutputMode(settings: TokenSettings | undefined): 'tail' | '
   const value = (settings ?? DEFAULT_TOKEN_SETTINGS).outputFiltering
   return value === 'off' ? 'tail' : value === 'on' ? 'compact' : 'superset'
 }
+
+// ───────────────────────────── views ─────────────────────────────
+
+/** Cache figures of a set of requests. Every number is what the runtime reported. */
+export interface CacheTotalsView {
+  key: string
+  requests: number
+  sessions: number
+  inputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  outputTokens: number
+  /** Sessions whose first request read its prefix from cache, and wrote it. */
+  warmStarts: number
+  coldStarts: number
+  /** Cold starts that NEXUS expected to be warm (a local inference). */
+  unexpectedMisses: number
+}
+
+export interface TokenOverview {
+  sinceIso: string
+  cache: CacheTotalsView
+  byRole: CacheTotalsView[]
+  byModel: CacheTotalsView[]
+  byProvider: CacheTotalsView[]
+  misses: CacheEvent[]
+  compactions: number
+  sessionActions: { action: string; n: number }[]
+  decisions: { action: string; n: number }[]
+  /** What session contexts were made of, summed over the latest breakdown of each session. Whole percentages. */
+  composition: { component: RequestComponent; tokens: number; percent: number }[]
+  compositionSessions: number
+  compositionBasis: TokenBasis | null
+  techniques: { technique: Technique; setting: TechniqueSwitch; enabled: boolean; autoDefault: boolean }[]
+  contextUsageDetail: TokenSettings['contextUsageDetail']
+}
+
+export interface AgentTokenView {
+  breakdown: RequestBreakdown | null
+  cache: CacheEvent[]
+  decisions: TokenOptimizationDecision[]
+  compactions: CompactionEvent[]
+  efficiency: SessionEfficiencyRecord[]
+  /** Context Graph nodes of the agent's packs: what was loaded, what was considered and left out, and why. */
+  graphNodes: { packId: string; nodeId: string | null; title: string; reason: string; included: boolean; chars: number }[]
+}
+
+export interface RunTokenView {
+  cache: CacheTotalsView
+  decisions: TokenOptimizationDecision[]
+  compactions: CompactionEvent[]
+  artifactRefs: ArtifactContextRef[]
+}
+
+/** Share of processed input (uncached + cache read + cache write) that was read from cache. */
+export function cacheReadShare(t: Pick<CacheTotalsView, 'inputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>): number | null {
+  const total = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens
+  return total > 0 ? t.cacheReadTokens / total : null
+}

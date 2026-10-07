@@ -24,6 +24,8 @@ import {
 } from './workspace'
 import { ControlLimitsSchema, EnqueueInputSchema, PrioritySchema, ScheduleInputSchema, type ControlLimits, type ControlPlaneOverview, type GlobalWorkItem, type Schedule } from './control-plane'
 import { SecurityDecisionsInputSchema, type SecurityDecisionPage } from './security'
+import type { ContextGraphHealth, ContextNode, ContextNodeDetail, ContextRefreshJob, ContextSpace } from './context-graph'
+import type { AgentTokenView, RunTokenView, TechniqueSwitch, TokenOverview } from './token'
 import { ProviderIdSchema, ProviderPolicySchema, type ProviderPolicy, type ProviderSession, type ProvidersOverview, type ProviderStatus } from './provider'
 import {
   BACKLOG_STATUSES,
@@ -123,6 +125,7 @@ import {
 } from './overnight'
 
 const Id = z.string().min(1).max(64)
+const GraphSpace = z.object({ kind: z.enum(['project', 'workspace']), id: Id }).strict()
 const Empty = z.object({}).strict()
 
 export interface AppInfo {
@@ -581,6 +584,21 @@ export const ipcInputs = {
   'desktop.reconnect': Empty,
   // v0.7: the execution security decision log (read-only, paged).
   'security.decisions': SecurityDecisionsInputSchema,
+  // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
+  'knowledge.health': z.object({ projectId: Id }).strict(),
+  'knowledge.tree': z.object({ projectId: Id, space: GraphSpace.optional(), parentId: Id.nullish(), includeHistory: z.boolean().optional(), offset: z.number().int().min(0).max(1_000_000).optional() }).strict(),
+  'knowledge.node': z.object({ projectId: Id, nodeId: Id, includeHistory: z.boolean().optional() }).strict(),
+  'knowledge.search': z.object({ projectId: Id, query: z.string().min(1).max(400), includeHistory: z.boolean().optional() }).strict(),
+  'knowledge.refresh': z.object({ projectId: Id }).strict(),
+  'knowledge.confirm': z.object({ projectId: Id, nodeId: Id }).strict(),
+  'knowledge.writeNote': z.object({ projectId: Id, title: z.string().trim().min(1).max(200), body: z.string().trim().min(1).max(16_000), evidence: z.string().max(16_000).optional() }).strict(),
+  'knowledge.promote': z.object({ projectId: Id, nodeId: Id }).strict(),
+  'knowledge.archive': z.object({ projectId: Id, nodeId: Id, reason: z.string().trim().min(1).max(300) }).strict(),
+  'knowledge.supersede': z.object({ projectId: Id, olderId: Id, newerId: Id, reason: z.string().trim().min(1).max(300) }).strict(),
+  // v0.7.1: token figures (read-only).
+  'tokens.overview': z.object({ days: z.number().int().min(1).max(90).optional() }).strict(),
+  'tokens.agent': z.object({ agentId: Id }).strict(),
+  'tokens.run': z.object({ runId: Id }).strict(),
 } as const
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -729,6 +747,19 @@ export interface IpcOutputs {
   'desktop.connection': ConnectionState
   'desktop.reconnect': ConnectionState
   'security.decisions': SecurityDecisionPage
+  'knowledge.health': { spaces: { space: ContextSpace; name: string; health: ContextGraphHealth | null; refreshes: ContextRefreshJob[] }[]; enabled: boolean; setting: TechniqueSwitch }
+  'knowledge.tree': { parent: ContextNode | null; children: ContextNode[]; total: number; childCounts: Record<string, number> }
+  'knowledge.node': ContextNodeDetail
+  'knowledge.search': ContextNode[]
+  'knowledge.refresh': { sync: { created: number; updated: number; archived: number; restored: number; stale: number; conflicts: number; nodes: number; edges: number }; job: ContextRefreshJob }
+  'knowledge.confirm': ContextNode
+  'knowledge.writeNote': ContextNode
+  'knowledge.promote': ContextNode
+  'knowledge.archive': ContextNode
+  'knowledge.supersede': null
+  'tokens.overview': TokenOverview
+  'tokens.agent': AgentTokenView
+  'tokens.run': RunTokenView
   /** Null when the run is not an overnight run. */
   'overnight.get': OvernightStatus | null
   'overnight.active': OvernightStatus[]
