@@ -218,6 +218,16 @@ export async function runRuntime(): Promise<void> {
     event.preventDefault()
     void core?.shutdown()
   })
+  // As in the window's process (see desktop.ts): a finished process is not reaped while a NEXUS process it started
+  // is alive, and the runtime may have started a window from the tray. By `quit` the runtime has stopped its
+  // workers and closed its database, so it ends itself outright.
+  app.on('quit', () => {
+    try {
+      process.kill(process.pid)
+    } catch {
+      // Already going.
+    }
+  })
   // The runtime has no window of its own; the hidden owner of its dialogs must not end it when it goes.
   app.on('window-all-closed', () => undefined)
   // A second start of the runtime for the same data directory means a window is looking for it; nothing to do.

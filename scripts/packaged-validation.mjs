@@ -40,10 +40,10 @@ function schemaOf(dbPath) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// Asked of Windows, not of a process handle this script may still hold.
 const alive = (pid) => {
   try {
-    process.kill(pid, 0)
-    return true
+    return execFileSync('tasklist', ['/FI', `PID eq ${Number(pid)}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true }).includes(`"${Number(pid)}"`)
   } catch {
     return false
   }
@@ -76,7 +76,8 @@ function commandLineOf(pid) {
 async function lifecycleChecks(app, page, dataDir, env, entry) {
   const invoke = (p, channel, input = {}) => p.evaluate(([c, i]) => globalThis.nexus.invoke(c, i), [channel, input])
   const first = endpointOf(dataDir)
-  const windowPid = app.process().pid
+  // The window's own process, as it reports itself: what Playwright launched may be a shell around it.
+  const windowPid = await app.evaluate(() => process.pid)
   const line = first ? commandLineOf(first.pid) : ''
   entry.runtime = { endpoint: first, windowPid, commandLine: line.replace(/"/g, '') }
   entry.checks['0.7: the runtime is a separate process started from the packaged executable'] = !!first && first.pid !== windowPid && alive(first.pid) && line.toLowerCase().includes(exe.toLowerCase().split(/[\\/]/).at(-1)) && line.includes('--nexus-runtime')
@@ -89,8 +90,11 @@ async function lifecycleChecks(app, page, dataDir, env, entry) {
   entry.checks['0.7: a worker process starts from the packaged worker entry and reports the provider runtimes'] = selfTest.ok && selfTest.value.ok === true && selfTest.value.capabilities.includes('claude') && /worker\.js/.test(workerLine)
   // The window's process ends; the runtime has a reason to stay only while something keeps it, so give it one.
   await invoke(page, 'runtime.setDispatchPaused', { paused: false })
-  await app.close().catch(() => undefined)
-  await sleep(4000)
+  // The window is closed as a user closes it. Not `app.close()`: Playwright waits for the output streams of the
+  // process it launched, and the runtime that process started holds them open for as long as it lives.
+  void app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.close())).catch(() => undefined)
+  for (let i = 0; i < 40 && alive(windowPid); i++) await sleep(500)
+  await sleep(3000)
   entry.checks['0.7: the window process ended and the runtime went on'] = !alive(windowPid) && !!first && alive(first.pid)
   const app2 = await electron.launch({ executablePath: exe, env })
   const page2 = await app2.firstWindow()

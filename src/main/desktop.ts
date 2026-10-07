@@ -249,6 +249,18 @@ export async function runDesktop(): Promise<void> {
     client.close()
     app.quit()
   })
+  // Measured on Windows: after the whole quit sequence has run (`before-quit`, `will-quit`, `quit`, Node's own
+  // `exit`), this process is not reaped for as long as the runtime it started is alive; it ends the moment the
+  // runtime does. Every close of the window would leave one more finished process behind. This process owns
+  // nothing durable (no database, no session; the runtime has it all), so once Electron has said `quit` it ends
+  // itself outright.
+  app.on('quit', () => {
+    try {
+      process.kill(process.pid)
+    } catch {
+      // Already going.
+    }
+  })
 
   client.start()
   createMainWindow()

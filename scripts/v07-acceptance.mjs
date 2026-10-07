@@ -156,12 +156,13 @@ try {
       log('closing the window; the runtime is left alone for', WINDOW_CLOSED_MS / 1000, 's')
       // The window is closed as a user closes it. Not `app.close()`: Playwright waits for the output streams of the
       // process it launched, and the runtime that process started holds them open for as long as it lives.
-      const child = app.process()
-      const exited = new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)))
+      // The window's own process, as it reports itself: what Playwright launched may be a shell around it.
+      const closedWindowPid = await app.evaluate(() => process.pid)
       void app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.close())).catch(() => undefined)
-      const sawExit = await Promise.race([exited.then(() => true), sleep(20_000).then(() => false)])
+      let waitedMs = 0
+      for (; waitedMs < 20_000 && alive(closedWindowPid); waitedMs += 250) await sleep(250)
       await sleep(3000)
-      const windowGone = !alive(child.pid)
+      const windowGone = !alive(closedWindowPid)
       const runtimeAliveWithoutWindow = alive(before.runtime.pid)
       await sleep(WINDOW_CLOSED_MS)
       const runtimeAliveAfterWait = alive(before.runtime.pid)
@@ -169,7 +170,7 @@ try {
       const after = await call('runtime.status')
       let eventsWhileClosed = 0
       for (const runId of runIds) eventsWhileClosed += (await call('events.list', { runId, limit: 5000 })).filter((e) => e.seq > seqBefore[runId] && e.createdAt > before.at).length
-      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid: child.pid, windowExitSeen: sawExit, windowExitCode: child.exitCode, reopenedAt: new Date().toISOString() }
+      evidence.windowClosed = { before, closedForMs: WINDOW_CLOSED_MS, windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: after.bootId === before.runtime.bootId && after.pid === before.runtime.pid, eventsWhileClosed, closedWindowPid, windowGoneAfterMs: waitedMs, reopenedAt: new Date().toISOString() }
       log('window reopened', JSON.stringify({ windowGone, runtimeAliveWithoutWindow, runtimeAliveAfterWait, sameRuntime: evidence.windowClosed.sameRuntime, eventsWhileClosed }))
       continue
     }
