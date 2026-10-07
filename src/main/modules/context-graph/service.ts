@@ -289,7 +289,8 @@ export class ContextGraphService {
     let status: ContextStatus = draft.status
     if (status === 'CURRENT' && changedFile !== null) status = 'STALE'
     // Supersession is graph knowledge: a record that still says "active" does not undo it.
-    if (existing.status === 'SUPERSEDED' && draft.status === 'CURRENT' && this.g.edges.incoming(existing.id, ['SUPERSEDES'], 1).length > 0) status = 'SUPERSEDED'
+    // (Found by the history stress: a superseded node whose fact went stale became STALE, and from there current again.)
+    if (existing.status === 'SUPERSEDED' && this.g.edges.incoming(existing.id, ['SUPERSEDES'], 1).length > 0) status = 'SUPERSEDED'
 
     const contentChanged = existing.contentHash !== contentHash
     const derived = draft.derived

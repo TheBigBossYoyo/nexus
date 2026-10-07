@@ -69,8 +69,8 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
 
 // Static prompt components: bundle the prompt module and measure what NEXUS adds to every session.
 const tmp = mkdtempSync(join(tmpdir(), 'nexus-baseline-'))
-let components = []
-let shared = null
+let components
+let shared
 try {
   const out = join(tmp, 'prompts.mjs')
   await build({
