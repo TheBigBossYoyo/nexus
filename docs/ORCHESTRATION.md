@@ -591,3 +591,36 @@ commands, then term overlap; stale facts never), relevant approved memory, undel
 `included` and a reason, at most 30 excluded entries per pack; repair and resume prompts are recorded as packs too. The pack
 is stored with the agent (`context_packs`, `context_pack_entries`, event `context.composed`) and shown in the task
 inspector's Context tab.
+
+## Context Graph, Context Engine V3 and token accounting (v0.7.1)
+
+**Before planning.** `refreshFacts` re-analyses the repository as before, then `syncContextGraph` brings the
+project's graph (and the graphs of the workspaces that enrol it) up to date with the stores, checks file
+evidence against the files git reports as changed since the last check, and archives duplicate notes and
+progress notes of tasks that are no longer open. A failure is logged and never blocks the run.
+
+**Composing a pack.** `composeForTask` passes three hooks to the context engine, all inactive unless the
+Context Graph is on for agents: `graph` (the Project knowledge section and its entries), `memoryStatus`
+(leave out a memory entry the graph knows is superseded or archived) and `factStatus` (leave out a fact whose
+file the graph saw change). See `CONTEXT_ENGINE_V3.md`.
+
+**Starting a session.** `AgentRunner.buildSpec` asks the Token Intelligence Engine for the session's context
+options and, when the graph is on, adds the `contextTool` handler to the NEXUS tools. Writing roles and
+planners may write notes; reviewers, verifiers and security reviewers may only read.
+
+**While a session runs.** New runtime events are handled next to the old ones: `request.usage` becomes a
+cache event (the first of a session is diagnosed), `context.usage` becomes a request breakdown, `compaction`
+is recorded. `session.started` now carries the provider, set by the provider router.
+
+**When a session ends.** A session-efficiency decision is recorded. With pressure rotation off (the default)
+it is the 0.7.0 rule: rotate at the turn limit. With it on, a session at its turn limit whose context is
+small is resumed with a continue prompt instead of rotated.
+
+**Checks.** `runChecks` also records, for every command whose output is longer than a prompt shows, what was
+shown and where the complete output is stored (`artifact_context_refs`), and a FILTER_OUTPUT decision when
+failure lines lie before the tail. Review, verification and repair prompts render check output failures
+first (`checkOutputMode`).
+
+What did not change: the scheduler, the pipeline stages, review and verification, strategies, dispatch gate,
+recovery. Reviewers still get the diff and criteria and nothing of the worker's narration; verifiers still
+get TaskEvidence.

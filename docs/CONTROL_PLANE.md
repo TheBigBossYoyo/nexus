@@ -195,6 +195,22 @@ not. Every input is a strict schema: an item or schedule id and values from clos
 command, a path or text that is executed. The channels travel to the runtime over the authenticated local pipe
 (`ARCHITECTURE.md`).
 
+## 0.7.1: what runs where
+
+The Context Graph and the Token Intelligence Engine live in the runtime process, with the database. A worker
+process still decides nothing: the four context tools are a `contextTool` call sent to the runtime over the
+existing channel (the same path as `sendMessage` and `proposeGraphChange`), where the input is validated and
+the scope is checked. A session's context options are plain data in the wire specification. The new events
+(`request.usage`, `context.usage`, `compaction`) are ordinary session events and reach the runtime like any
+other.
+
+The window reads the graph and the token figures through `knowledge.*` and `tokens.*`. The graph channels
+take a project id and return one level of the tree, one node or a bounded search; the window never holds the
+whole graph. The writes a user can make are a note, confirming a stale node, promoting or archiving a note,
+and superseding one node by another.
+
+The control-plane stress suites are unchanged and run as before.
+
 ## What does not exist
 
 Each item below was checked against the source.

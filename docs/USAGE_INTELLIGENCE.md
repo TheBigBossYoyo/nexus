@@ -264,6 +264,34 @@ once a second (`PUSH_INTERVAL_MS`, trailing). Notices (`usage.notice`: `limit_re
 - The minimal probe session has no tools (`tools: []`, every authorization denied), runs in the OS temp
   directory, loads no project settings and sends the fixed prompt `Reply with the single word OK.`
 
+## Cache, context and techniques (0.7.1)
+
+The Usage page has three more sections, read from `tokens.overview` (last 7 days).
+
+**Cache.** Share of processed input read from cache, cache read / cache write / uncached input, and warm and
+cold session starts, in total, by role and by model. Then the prefixes that were written again when a read
+was possible, each with a likely cause. The token figures are the runtime's (per request, deduplicated by
+API message id). The cause is NEXUS's inference from the parts of the prefix it controls and is said to be
+so on the page. See `PROMPT_CACHING.md`.
+
+**Context.** What session contexts were made of at their last turn, as whole percentages by component
+(runtime system prompt, role prompt, tool definitions, task, criteria, project facts, Context Graph, memory,
+conversation, tool results, ...). The line under the chart says how the figures are known: a `summary`
+breakdown is the runtime's own estimate and NEXUS's split of its own text is an estimate, so the chart shows
+proportions, not counts. Then the number of compactions, rotations, graph retrievals and graph nodes opened
+by agents.
+
+**Context techniques.** Each technique, what it does, whether it is on, and whether that is the release
+default or the user's choice.
+
+An agent's **Context** tab (Agents view) shows the same for one session: the components of its context with
+their basis, what its first request did with the cache and why, which Context Graph nodes were loaded and
+which were considered and left out, and every context decision.
+
+What is still not shown, because it is not known: tokens "saved". NEXUS records what a decision is believed
+to add or avoid per decision, with its basis, and does not add those figures up: decisions overlap and a sum
+would double count. It also does not turn tokens into a share of the plan.
+
 ## Limits
 
 - Observed usage is what NEXUS sessions reported. It is not the account's usage. It has no denominator.

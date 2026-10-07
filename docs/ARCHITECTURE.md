@@ -455,6 +455,43 @@ MULTI_REPO_ORCHESTRATION.md, CONTRACTS.md, RELEASE_TRAINS.md.
     `workspace_release_trains`, `workspace_memory` and `workspace_decisions`, with indexes. No existing table is
     altered.
 
+## v0.7.1: Context Graph and token intelligence
+
+Two modules and one migration. Nothing existing was moved.
+
+| Module | Role |
+| --- | --- |
+| `modules/context-graph` | `projection.ts` (stores to node and edge drafts, pure), `service.ts` (apply, freshness, conflicts, notes, hygiene, navigation), `retriever.ts` (ranked retrieval), `render.ts` (prompt and tool text), `paths.ts` (canonical paths and their validation) |
+| `modules/token` | `engine.ts` (plan a session's context options, record what the runtime reports), `registry.ts` (prompt components and prefix identity), `auditor.ts` (prompt audit, cache classification and diagnosis), `filter.ts` (check output), `lifecycle.ts` (pressure, budget, session efficiency, result states), `accounting.ts` (request breakdown), `planning.ts` (provider capabilities, tool plan), `quality-gate.ts` |
+| `orchestrator/context-graph.ts` | The graph part of a context pack and the handler behind the four agent tools |
+| `ipc/v71-handlers.ts` | `knowledge.*` and `tokens.*` channels |
+| `renderer/views/knowledge`, `views/usage/TokenSections.tsx`, `views/agents/ContextTab.tsx` | The Context view, the Usage sections, the agent Context tab |
+
+Decisions:
+
+- **The graph is an index.** `context_nodes` projects records of the existing stores (`originKind`,
+  `originId`) and is rebuilt from them; only notes and structure live in the graph alone. See
+  `MEMORY_ARCHITECTURE.md`.
+- **One parent, many edges.** The canonical path gives a tree that indexes well; cross-cutting relations
+  are typed edges with provenance. No relation is inferred from similarity.
+- **Deterministic summaries.** Branch summaries are computed from children. Building and refreshing the graph
+  makes no model call.
+- **Options are provider-neutral.** `SessionSpec.contextOptions` says what a session would like; each
+  runtime adapter applies what it supports. The orchestrator never knows which provider a session lands on,
+  and no Claude option reaches Codex.
+- **Runtime events, not polling.** The Claude adapter emits `request.usage` (per API message id),
+  `context.usage` (the runtime's breakdown, read before a turn's result is handed on) and `compaction`.
+  They cross the worker process boundary as ordinary events.
+- **Accounting cannot fail work.** Every write of the Token Intelligence Engine is guarded.
+- **Defaults follow evidence.** `AUTO_DEFAULTS` in `shared/token.ts` is the one place that says what `auto`
+  means; each line has the measurement behind it in the release report.
+
+Migration 12 (`012-context-graph.ts`, additive): `context_nodes` (+FTS5), `context_edges`,
+`context_node_sources`, `context_node_versions`, `context_node_history`, `context_refresh_jobs`,
+`prompt_components`, `prompt_prefixes`, `token_request_breakdowns`, `cache_events`,
+`context_optimization_decisions`, `artifact_context_refs`, `compaction_events`, `session_efficiency`,
+`token_benchmark_results`.
+
 ## Data location
 
 `%APPDATA%/NEXUS/` (Electron `userData` of the window): `nexus.db` (SQLite, WAL) and `worktrees/<run>/<task>/`,

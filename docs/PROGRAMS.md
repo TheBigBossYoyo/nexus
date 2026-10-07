@@ -229,6 +229,22 @@ again.
 `program_checkpoints`, `program_plan_revisions`, `program_memory`, `backlog_items`, `expertise_profiles`,
 `background_jobs`.
 
+## Programs in the Context Graph (0.7.1)
+
+A program, its milestones, its memory and its open backlog items are projected into the project's Context
+Graph under `programs/<program>/` (`milestones/`, `decisions/`, `hazards/`, `interfaces/`, `findings/`,
+`backlog/`). Program memory stays the source of truth; the graph follows its `superseded` status and adds
+conflict detection between a program decision and a project decision about the same subject.
+
+Program knowledge carries the program's id. A mission of the program can retrieve it; a mission outside any
+program, or of another program, cannot. Entries recorded while working on a milestone are linked to it
+(INTRODUCED_BY), and milestone dependencies are DEPENDS_ON edges.
+
+The mission brief is built as before (`selectMemory`, at most 6 entries, never a transcript). With the
+Context Graph on for agents, a task of the mission additionally receives program knowledge that its files or
+words reach. On the retrieval benchmark's Program cases both find what is required and both leave the
+superseded entry out; outside a program, neither shows program knowledge.
+
 ## Limits
 
 - One mission at a time per program.

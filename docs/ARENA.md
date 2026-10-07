@@ -503,6 +503,30 @@ Also written for Arena runs: `task_profiles.arena_trial_id`, `mission_outcomes.i
 `usage_events.arena_campaign_id`. The design planned `projects.kind`; the migration adds no column to
 `projects`. A trial's project is identified through `arena_trials.project_id`.
 
+## Retrieval and token comparisons (0.7.1)
+
+Two instruments were added beside the Arena. Neither is an Arena campaign and neither changes one.
+
+**The retrieval benchmark** (`pnpm bench:retrieval`, `tests/helpers/retrieval-benchmark.ts`). A fixture
+project with knowledge in every store, 18 tuning cases across the task kinds NEXUS runs (localized bug,
+cross-module bug, architecture, security, UI, database, large refactor, Program, Workspace, memory recall,
+adversarial) and 7 held-out cases written after tuning. Each case lists the records a task cannot be done
+well without and the records it would be wrong to present as current. Variants: the 0.7.0 selection, the
+graph alone, V3 (both), every current node, and ablations of the retrieval signals. It is deterministic and
+uses no model. It measures whether the right knowledge reaches the prompt, which is necessary for
+engineering quality and is not the same thing.
+
+**The quality non-regression gate** (`evaluateGate`, `token/quality-gate.ts`). Takes baseline and optimized
+trial outcomes paired by case (the Arena's trial metrics have the fields it needs: hidden evaluation,
+acceptance, findings by severity, repairs, turns, tokens, wall time) and answers IMPROVED, NON_INFERIOR,
+INFERIOR or INSUFFICIENT_EVIDENCE. It needs 8 paired cases (16 for high-risk profiles). A technique that
+changes what a model sees may become a default only on IMPROVED or NON_INFERIOR.
+
+**What has not been run.** No Arena campaign compared a 0.7.1 context variant against the 0.7.0 one. The
+only real comparison is one paired mission (`pnpm accept:graph`), which is far below the gate's minimum. The
+Arena does not yet take a context variant as a campaign dimension; that is the missing piece for running the
+gate on real trials, and it is recorded as not done in `V0_7_1_RELEASE_REPORT.md`.
+
 ## Limits
 
 - Repository-origin cases: `provisionTrial` can clone a user repository at a commit, but

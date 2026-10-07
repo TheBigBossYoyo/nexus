@@ -351,6 +351,29 @@ workspace removes all of its rows. Repository rows also cascade from their proje
 and services cascade from the repository that owns them. A mission's `program_id` and the run ids that
 missions and tasks record are plain text, not foreign keys.
 
+## Workspaces in the Context Graph (0.7.1)
+
+Each workspace has its own graph: `repositories/`, `contracts/`, `architecture/`, `decisions/`,
+`standards/`, `hazards/`, `notes/`. Repositories, dependencies, contracts and workspace memory are projected
+into it; the workspace tables stay the source of truth.
+
+| Relation | From the record |
+| --- | --- |
+| repository DEPENDS_ON repository | a workspace dependency |
+| repository PROVIDES contract | the contract's provider |
+| repository CONSUMES contract | a contract consumer row |
+| repository AFFECTED_BY hazard, DECIDED_BY decision, RELATED_TO entry | the repositories a memory entry names |
+| workspace repository DERIVED_FROM project root | the enrolled repository is that NEXUS project |
+
+A task in one repository reads its own project's graph and the graphs of the workspaces that enrol it. The
+last edge is the way in: from the project to "this repository as the workspace sees it", and from there to
+the contracts it provides or consumes and the knowledge that names it. A contract of two other repositories
+is not reached. On the retrieval benchmark the 0.7.0 pack misses the contract and the integration hazard of
+a cross-repository change; the graph finds both.
+
+A repository that is not enrolled in the workspace cannot read the workspace's graph: every graph call takes
+the spaces the caller may read, and a node outside them reads as not found.
+
 ## Limits
 
 - Discovery reads the root manifest of each repository only (`package.json`, `Cargo.toml`, `pyproject.toml`,
