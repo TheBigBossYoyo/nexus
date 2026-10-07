@@ -102,8 +102,9 @@ export interface SessionEfficiencyDecision {
  *
  * With `pressureRotation` off this is exactly 0.7.0: rotate when the turn limit was hit. With it on, a
  * session that hit the turn limit while its context is still small is KEPT (a rotation would throw away a
- * warm cache and pay for a handoff to drop little), and a session under critical pressure is rotated even
- * before the turn limit, provided a handoff can carry the work.
+ * warm cache and pay for a handoff to drop little), and a session that ended under critical pressure is
+ * rotated, provided a handoff can carry the work. The caller asks when a session has ended: a running session
+ * is never interrupted, so pressure inside it is the runtime's to handle (it compacts).
  *
  * COMPACT and CLEAR_STALE_TOOL_RESULTS are reported, not executed: the runtime does both by itself.
  */

@@ -51,6 +51,11 @@ const LIMITS: Record<RetrievalBreadth, { nodes: number; budgetFactor: number; ft
   broad: { nodes: 30, budgetFactor: 3, fts: 60, hops: 2 },
 }
 
+/** Task files looked up by path. A task that names more is cross-cutting: it is retrieved broadly by its text. */
+const MAX_TASK_FILES = 60
+/** Required nodes (a task file's evidence, a conflict) returned, as a multiple of the breadth's node limit. */
+const REQUIRED_FACTOR = 3
+
 /** How much of a node's score an edge passes on. Relations that constrain work pass on more than ones that only inform. */
 const EDGE_WEIGHT: Partial<Record<ContextEdgeType, number>> = {
   AFFECTED_BY: 0.85,
@@ -129,16 +134,18 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
 
   const candidates = new Map<string, Candidate>()
   let considered = 0
-  const offer = (node: ContextNode, score: number, reason: string, via: RetrievalSignal, fromNodeId: string | null, required = false): void => {
+  /** Returns whether the node was admitted: evidence that was dropped is not evidence. */
+  const offer = (node: ContextNode, score: number, reason: string, via: RetrievalSignal, fromNodeId: string | null, required = false): boolean => {
     considered++
-    if (!admissible(node)) return
+    if (!admissible(node)) return false
     const prior = candidates.get(node.id)
     if (!prior || score > prior.score) candidates.set(node.id, { node, score, reason, via, fromNodeId, required: required || (prior?.required ?? false) })
     else if (required) prior.required = true
+    return true
   }
 
   // 1. Path: the task's files.
-  const files = [...new Set(query.files.map(normFile).filter((f) => f !== '' && !f.startsWith('..')))]
+  const files = [...new Set(query.files.map(normFile).filter((f) => f !== '' && !f.startsWith('..')))].slice(0, MAX_TASK_FILES)
   let pathHits = 0
   if (on('path') && files.length > 0) {
     for (const space of spaces) {
@@ -148,15 +155,12 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
       for (const h of hits) {
         const node = byId.get(h.nodeId)
         if (!node) continue
-        offer(node, 10, `Its evidence is the task's file ${h.ref}.`, 'path', null, true)
-        pathHits++
+        if (offer(node, 10, `Its evidence is the task's file ${h.ref}.`, 'path', null, true)) pathHits++
       }
       for (const file of files) {
         const module = stores.nodes.byPath(space, modulePathOf(file))
-        if (module) {
-          offer(module, 8, `Contains the task's file ${file}.`, 'path', null, true)
-          pathHits++
-        }
+        // A module that is only a folder of the tree (no module fact behind it) says nothing about the task.
+        if (module && offer(module, 8, `Contains the task's file ${file}.`, 'path', null, true) && module.trust !== 'GENERATED_SUMMARY') pathHits++
       }
     }
   }
@@ -178,9 +182,10 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
   const terms = queryTerms(query.text)
   let strongText = 0
   let textHits = 0
-  if (on('fts') && terms.length > 0) {
-    const requested = query.breadth ?? 'standard'
-    const hits = stores.nodes.search(spaces, terms.join(' '), { statuses: allowedStatuses, limit: LIMITS[requested].fts })
+  const textSearch = (limit: number): void => {
+    strongText = 0
+    textHits = 0
+    const hits = stores.nodes.search(spaces, terms.join(' '), { statuses: allowedStatuses, limit })
     hits.forEach((h, i) => {
       const hay = `${h.node.title} ${h.node.path}`.toLowerCase()
       const all = `${hay} ${h.node.summary.toLowerCase()}`
@@ -189,11 +194,13 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
       // One shared word in a long summary is noise; it takes a title match or two shared terms to count.
       if (inTitle.length === 0 && inAll.length < 2) return
       const score = 2 + 3 * (1 - i / Math.max(1, hits.length)) + Math.min(3, inTitle.length) + Math.min(1, inAll.length * 0.25)
+      if (!offer(h.node, score, `Matches the task's terms: ${(inTitle.length > 0 ? inTitle : inAll).slice(0, 5).join(', ')}.`, 'fts', null)) return
       if (inTitle.length >= 2 || (inTitle.length >= 1 && inAll.length >= 3)) strongText++
       textHits++
-      offer(h.node, score, `Matches the task's terms: ${(inTitle.length > 0 ? inTitle : inAll).slice(0, 5).join(', ')}.`, 'fts', null)
     })
   }
+  const requestedFts = LIMITS[query.breadth ?? 'standard'].fts
+  if (on('fts') && terms.length > 0) textSearch(requestedFts)
 
   // Confidence, before widening: path evidence is strong, title matches are fair, nothing is weak.
   let confidence = pathHits > 0 ? 0.9 : strongText > 0 ? 0.7 : textHits > 0 ? 0.45 : 0.1
@@ -206,6 +213,9 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
     widened = true
   }
   const limits = LIMITS[breadth]
+  // The text search keeps the size of the breadth that was asked for. Running it again at the widened size was
+  // tried and measured: on the benchmark the extra low-ranked hits pushed a required memory entry out of the
+  // result (recall 100% to 98.1%). A widened retrieval gains its extra reach from edges and the hierarchy.
 
   // 2. Edges: follow typed relations from what was found so far.
   if (on('edges')) {
@@ -276,8 +286,15 @@ export function retrieve(stores: ContextGraphStores, query: RetrievalQuery): Ret
   const budget = Math.round((query.tokenBudget ?? 2_000) * limits.budgetFactor)
   const nodes: RetrievedNode[] = []
   let tokens = 0
+  let required = 0
   for (const c of ranked) {
     const cost = c.node.tokenEstimate + 12
+    // Required nodes ignore the budget, so they have a bound of their own: the best of them by score.
+    if (c.required && required >= limits.nodes * REQUIRED_FACTOR) {
+      noteExclusion(c.node, `Required (${c.reason}) but beyond the ${limits.nodes * REQUIRED_FACTOR} required nodes a ${breadth} retrieval returns.`)
+      continue
+    }
+    if (c.required) required++
     // The budget is advisory: a required node (the task's own files, a conflict) is never dropped to meet it.
     if (!c.required && nodes.length >= limits.nodes) {
       noteExclusion(c.node, `Relevant (${c.reason}) but below the ${limits.nodes} best for a ${breadth} retrieval.`)
@@ -300,6 +317,7 @@ export function warningOf(node: ContextNode): string | null {
   if (node.status === 'STALE') return 'POSSIBLY OUTDATED: a file this was based on changed since it was recorded. Verify against the code.'
   if (node.status === 'SUPERSEDED') return 'HISTORICAL: superseded by a later record.'
   if (node.status === 'ARCHIVED') return 'HISTORICAL: archived.'
+  if (node.status === 'PROPOSED') return 'NOT APPROVED: a proposal awaiting approval. It is not project knowledge yet.'
   if (node.trust === 'AGENT_NOTE') return 'UNVERIFIED: an agent wrote this note; it is a lead to check, not a fact.'
   return null
 }

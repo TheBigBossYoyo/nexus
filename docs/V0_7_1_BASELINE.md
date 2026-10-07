@@ -146,8 +146,9 @@ Composition of a worker session's context before any work (the runtime's summary
 | First message | 1 |
 
 The first request of that session processed 16,018 tokens (10 uncached + 16,008 written), so the summary
-breakdown over-states the total by about half. The proportions are what it is good for: **tool definitions
-are about 80% of a fresh session's context, and the role prompt NEXUS writes is under 4%.**
+breakdown over-states the total by about half. The proportions are what it is good for, as the runtime's
+estimate and not a count: **tool definitions are about 80% of a fresh session's context, and the role prompt
+NEXUS writes is under 4%.**
 
 First request of each session:
 

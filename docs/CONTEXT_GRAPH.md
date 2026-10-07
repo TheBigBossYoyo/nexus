@@ -141,11 +141,13 @@ they differ.
 
 ## Conflicts and supersession
 
-Two current nodes in one space with the same `subjectKey` and different content, with no SUPERSEDES edge
-between them, are both marked CONFLICTED and linked. Retrieval returns a conflict whole: both nodes, each
+Two current nodes in one space with the same `subjectKey` and different statements (title and text, compared
+without regard to case and spacing), with no SUPERSEDES edge between them, are both marked CONFLICTED and
+linked. The same statement known in two ways (a user's entry and an agent's, a project fact and a program
+decision) is not a conflict. Retrieval returns a conflict whole: both nodes, each
 with `CONFLICT: another current record states this subject differently. Neither is authoritative; check the
 source.` Superseding one resolves it; the superseded node becomes history and stays so even when its record
-still says "approved" or later goes stale.
+still says "approved", later goes stale, or is deleted and comes back.
 
 Limit: only the mechanical case is found. Two statements about one thing under two different titles are not
 compared; NEXUS does not guess at contradiction.
@@ -153,7 +155,9 @@ compared; NEXUS does not guess at contradiction.
 ## History
 
 Default retrieval and navigation return CURRENT, STALE and CONFLICTED nodes. SUPERSEDED and ARCHIVED nodes
-are returned only when history is asked for, and then with `HISTORICAL`. Each node has a history of events
+are returned only when history is asked for, and then with `HISTORICAL`. A PROPOSED node (a memory entry
+awaiting approval) is neither: no agent tool and no retrieval returns it, with or without history. The
+Context view shows it, labelled `NOT APPROVED`. Each node has a history of events
 (created, updated, stale, refreshed, superseded, conflicted, conflict resolved, archived, restored, promoted,
 compacted) and its earlier versions. Nothing is deleted.
 
@@ -175,10 +179,11 @@ contracts cannot be changed through the graph at all: they change in the stores 
 
 ## Hygiene
 
-`collectGarbage` archives a note that repeats another note, and a progress note whose task is no longer
-open. `compactNotes` folds many agent notes of one branch into one current note assembled from their titles
-and first sentences; the folded notes are archived and stay linked by DERIVED_FROM. Both archive; neither
-deletes.
+`collectGarbage` archives a note that repeats an earlier note of the same program (the note written first
+stays), and a progress note whose task is no longer open. `compactNotes` folds many agent notes of one
+branch into one current note assembled from their titles and first sentences; the folded notes are archived
+and stay linked by DERIVED_FROM. A program's note is never folded into a summary that others can read, and
+never counts as a duplicate of another program's note. Both archive; neither deletes.
 
 ## Retrieval
 
@@ -192,11 +197,15 @@ deletes.
 
 Then: scope (only the spaces the project may read; program knowledge only inside its program), status, trust
 (an agent note is not used for high-risk work), ranking, and an advisory token budget. A node required by a
-task file, and a conflict, are never dropped to meet the budget.
+task file, and a conflict, are not dropped to meet the budget; they have a bound of their own (three times
+the node limit of the breadth, the best by score), and at most 60 task files are looked up by path.
 
-**Confidence and widening.** Path evidence gives high confidence, title matches fair, nothing low. Low
-confidence, high risk, and architecture, security, refactor or migration categories widen the retrieval to
-`broad` instead of keeping the context small.
+**Confidence and widening.** Path evidence gives high confidence, title matches fair, nothing low. Only
+evidence that was admitted counts: a stale analysis fact or another program's node that names the task's
+file gives no confidence. Low confidence, high risk, and architecture, security, refactor or migration
+categories widen the retrieval to `broad` instead of keeping the context small. The text search keeps the
+size of the breadth that was asked for: running it again at the broad size was measured and lowered recall
+on the benchmark (the extra low-ranked hits displaced a required entry).
 
 No embeddings and no vector store. The ablation (`V0_7_1_RELEASE_REPORT.md`) shows path, edges and full text
 together reach the full recall on the benchmark; the hierarchy signal alone finds little, so it is used only
@@ -241,4 +250,11 @@ node's detail 2 ms, the nodes for 200 changed files 3 ms, full-text search 81 ms
 - Conflicts are found by subject key only.
 - Run-scoped decisions (`decisions`) are not projected; they reach agents through the pack as before.
 - Freshness uses file metadata, not content hashes.
+- A path is made from a record's name. When two records' names give the same path, the second gets a suffix;
+  if the first is later deleted, the second moves to the plain path as a new node. Its earlier node stays
+  readable as history and the new node's history names it, but the two are not one continuous history.
+- A sync that receives a full page of programs, backlog items or workspace memory (200, 200, 500) archives
+  nothing in that pass: a record missing from a list that may be cut short is not known to be gone.
+- A fact that is re-analysed is accepted with the file states seen at the sync, not at the analysis. A file
+  edited between the two is accepted as verified until the next change.
 - Reviewer and verifier prompts do not carry a graph section; those roles can use the read tools.

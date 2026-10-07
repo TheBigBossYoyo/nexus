@@ -40,8 +40,8 @@ task
 | `planSession` | before a session starts | builds the session's context options and prefix identity; records the decisions |
 | `attachPack` | with the pack | lets the breakdown name the pack's sections |
 | `sessionStarted` | runtime reports provider and model | registers the prefix; drops Claude options for a provider without them |
-| `requestUsage` | every model request | records a cache event; diagnoses the first request |
-| `contextUsage` | end of every turn | records the breakdown of the context |
+| `requestUsage` | every model request | records a cache event; diagnoses the first request of a fresh session. A resumed session continues a conversation and is not diagnosed; a handoff request sends no tools and is recorded without a prefix |
+| `contextUsage` | when a session's turn ends | records the breakdown of the context. One control call to the runtime, which the session waits for (8 seconds at most); none when the setting is `off` |
 | `compaction` | runtime compacted | records sizes |
 | `turnEnded` | a session ended | records the session-efficiency decision |
 
@@ -64,7 +64,8 @@ Two sources are combined:
   pack's sections inside the user messages.
 
 NEXUS's estimates only split a runtime figure; what they cannot explain stays in the runtime's category, so
-the components always add up to the runtime's total.
+the components add up to the runtime's total. When the runtime's own lists claim more than its total, every
+part is scaled to the total and labelled an estimate.
 
 `contextUsageDetail` (Settings, Tokens): `summary` (default), `full`, `off`. Measured on the real runtime, a
 `summary` breakdown is the runtime's own estimate and can differ a lot from what a request processed (24,873
@@ -100,15 +101,21 @@ Context (that session's components with their basis and detail).
 `token/filter.ts`. 0.7.0 showed the last 3,000 characters of each check's output. A failure before the tail
 was invisible.
 
-- `superset` (default): everything the tail showed, plus the failure lines before the tail with three lines
-  of context, plus summary lines, with `[... N lines omitted; the full output is stored ...]` markers. The
-  section budget grows by exactly what was added, so no check that fitted before is pushed out.
+- `superset` (default): exactly the characters the 0.7.0 tail showed (line endings normalized), and before
+  them the failure lines that lie outside the tail with three lines of context, plus summary lines, with
+  `[... N lines omitted; the full output is stored ...]` markers. The section budget grows by what was
+  added, so no check that fitted before is pushed out.
 - `tail`: the 0.7.0 rendering (setting `off`).
 - `compact` (setting `on`): also shortens passing runs to their summary lines and a short tail. A run that
   exits 0 but prints a failure line is not compacted.
 
-A property test checks on random outputs that `superset` never drops a failure line that `tail` kept. Raw
-output stays stored (check results, tool events) and is not changed by any of this.
+Bounds that hold for any output: what is added before the tail is at most 3,128 characters per check; a
+line shown there is cut to 400 characters with a note of what was left out; a line is matched against the
+failure patterns on at most its first and last 500 characters, so no output can make matching slow.
+
+Property tests check on random outputs that the rendering ends in exactly the characters 0.7.0 showed, and
+that one enormous line or thousands of short failure lines stay within the bound. Raw output stays stored
+(check results, tool events) and is not changed by any of this.
 
 ## Tool planning
 
@@ -135,6 +142,10 @@ CLEAR_STALE_TOOL_RESULTS, COMPACT, HANDOFF_AND_ROTATE.
   would discard a warm cache to drop little); one whose context is above 85% is rotated; with no figure from
   the runtime the turn rule applies.
 
+The decision is taken when a session ends, which is at its turn limit or when its work is done. NEXUS does
+not interrupt a running session, so critical pressure inside a session is handled by the runtime's own
+compaction, not by a rotation.
+
 CLEAR_STALE_TOOL_RESULTS and COMPACT are reported, not executed: the runtime clears old tool results and
 compacts by itself. NEXUS's part is that every result is stored outside the model's context, so nothing the
 runtime clears is lost. See `CONTEXT_LIFECYCLE.md`.
@@ -155,7 +166,7 @@ passes when its hidden evaluation and acceptance pass with no critical finding.
 
 | Verdict | Condition | May become default |
 | --- | --- | --- |
-| INSUFFICIENT_EVIDENCE | fewer than 8 paired cases (16 for high or critical risk) | no |
+| INSUFFICIENT_EVIDENCE | fewer than 8 paired cases (16 for high or critical risk); or a baseline case has no optimized trial; or no case passed on either side | no |
 | INFERIOR | critical findings rose; or the pass rate may be lower by more than the margin (5 points; 0 for high risk); or repairs rose; or, for high risk, any case regressed | no |
 | NON_INFERIOR | none of the above | yes |
 | IMPROVED | pass rate higher and the lower bound above zero | yes |

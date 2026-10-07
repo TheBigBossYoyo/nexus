@@ -270,7 +270,13 @@ export class AgentRunner {
     let blocker: AgentRunResult['blocker'] = null
     const files = { read: new Set<string>(), changed: new Set<string>() }
 
-    const base = this.buildSpec(input, agent, model, (b) => (blocker = b))
+    let base: Omit<SessionSpec, 'prompt' | 'maxTurns'>
+    try {
+      base = this.buildSpec(input, agent, model, (b) => (blocker = b))
+    } catch (e) {
+      this.context?.tokens.sessionClosed(agent.id)
+      throw e
+    }
     this.context?.tokens.attachPack(agent.id, input.contextPack ?? null)
     let last: SessionResult = { outcome: 'error', result: null, error: null, sdkSessionId: null, turns: 0 }
 
@@ -325,10 +331,7 @@ export class AgentRunner {
           worktreePath: input.cwd,
           branch: input.task?.branch ?? '',
         }).prompt
-        this.recordPack(
-          input,
-          agent.id,
-          packForPrompt({
+        const resumePack = packForPrompt({
             run: input.run,
             task: input.task,
             purpose: input.purpose,
@@ -337,8 +340,10 @@ export class AgentRunner {
               { section: 'Resuming task', sourceKind: 'handoff', title: 'Handoff from the rotated session', reason: 'The session reached its turn threshold and was rotated; the structured handoff replaces its history.', chars: JSON.stringify(handoff).length },
               { section: 'Task', sourceKind: 'task', sourceId: input.task?.id ?? null, title: input.task?.title ?? '', reason: 'The task being continued.', chars: input.task?.description.length ?? 0 },
             ],
-          }),
-        )
+        })
+        this.recordPack(input, agent.id, resumePack)
+        // The fresh session starts from the handoff, not from the first pack: its breakdown names these sections.
+        this.context?.tokens.attachPack(agent.id, resumePack)
       }
     } catch (e) {
       last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId, turns: last.turns }
@@ -347,8 +352,11 @@ export class AgentRunner {
     // A usage limit or an authentication stop is not a failure of the agent: it ends 'stopped', reason recorded.
     const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth'
     const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
-    this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
-    this.context?.tokens.sessionClosed(agent.id)
+    try {
+      this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
+    } finally {
+      this.context?.tokens.sessionClosed(agent.id)
+    }
     return {
       agentId: agent.id,
       outcome: last.outcome,
@@ -623,7 +631,7 @@ export class AgentRunner {
         switch (event.type) {
           case 'session.started': {
             sdkId = event.sessionId
-            this.context?.tokens.sessionStarted(agentId, { provider: event.provider ?? 'claude', model: event.model })
+            this.context?.tokens.sessionStarted(agentId, { provider: event.provider ?? 'claude', model: event.model }, { resumed: spec.resumeSessionId !== undefined, handoff: opts.handoff === true })
             repos.sessions.update(session.id, { sdkSessionId: event.sessionId, model: event.model })
             repos.agents.update(agentId, { model: event.model })
             this.setState(agentId, 'working')

@@ -119,7 +119,7 @@ rotated one on real work is NOT VERIFIED.
 | LOW | none |
 | MODERATE | the graph budget of a prompt built into that context is 75% |
 | HIGH | 50% of the budget; stale tool results are reported as clearable |
-| CRITICAL | rotate with a handoff when one can carry the work, otherwise the runtime compacts |
+| CRITICAL | when the session ends: rotate with a handoff when one can carry the work. Inside a running session the runtime compacts; NEXUS does not interrupt it |
 
 Risk overrides pressure: for a high-risk task the graph budget is widened and is not narrowed.
 

@@ -75,7 +75,8 @@ interaction; security; SDK support; difficulty; lossless?; Arena needed?; recomm
   its per-session sections out of the cached prefix. The option has a documented cost and no measured
   benefit: **default OFF**. Evidence: `docs/acceptance/cache-acceptance-*.json`; `PROMPT_CACHING.md`.
 - **What the measurement found instead.** A session of a *different role* reads nothing (0 read, 14,458
-  written): tools render first in the prefix and each role has its own tool list. The per-role cold start is
+  written). INFERRED cause: tools render first in the prefix and each role has its own tool list (the run
+  changed tools and role text together, so it does not separate them). The per-role cold start is
   the real cost. Sharing one tool list across roles would remove it, at the price of showing read-only roles
   tools they may not use; that is a security and prompt change and is not made in 0.7.1.
 
@@ -158,8 +159,9 @@ interaction; security; SDK support; difficulty; lossless?; Arena needed?; recomm
   as loaded in one case and deferred in the other. No saving and no cost was observed: **default OFF** (the
   runtime's behaviour is left alone). Whether an agent needs an extra search turn to use a deferred NEXUS
   tool was not measured.
-- **Measured tool cost.** Built-in tool definitions are about 17,800 tokens of a worker's fresh context and
-  the NEXUS tools about 2,500 (the runtime's estimate). The tool surface that costs tokens is the built-in
+- **Tool cost, by the runtime's estimate (not counted).** Built-in tool definitions are about 17,800 tokens
+  of a worker's fresh context and the NEXUS tools about 2,500. The same breakdown over-states the request's
+  total by half, so these are proportions, not token counts. The tool surface that costs tokens is the built-in
   one, which the role's tool list already limits.
 
 ### 9. Tool definition hygiene

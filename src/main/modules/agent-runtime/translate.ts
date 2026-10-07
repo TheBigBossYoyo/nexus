@@ -152,19 +152,24 @@ export function translateSdkMessage(msg: SDKMessage, state: TranslatorState): Ag
     case 'assistant': {
       if (msg.parent_tool_use_id !== null) return []
       const events: AgentEvent[] = []
-      // Per-request usage: counted once per API message id. Synthetic error carriers report no real request.
+      // Per-request usage: counted once per API message id. A message the runtime made up (model "<synthetic>",
+      // or no tokens at all) is no request; an error that carries real usage (the output limit) is one.
       const requestId = msg.message.id
       const usage = msg.message.usage as { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } | undefined
-      if (!msg.error && typeof requestId === 'string' && requestId !== '' && usage && !state.reportedRequests.has(requestId)) {
+      const realRequest =
+        usage !== undefined &&
+        msg.message.model !== '<synthetic>' &&
+        (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) > 0
+      if (realRequest && typeof requestId === 'string' && requestId !== '' && !state.reportedRequests.has(requestId)) {
         state.reportedRequests.add(requestId)
         events.push({
           type: 'request.usage',
           requestId,
           model: typeof msg.message.model === 'string' ? msg.message.model : null,
-          inputTokens: usage.input_tokens ?? 0,
-          cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-          cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
-          outputTokens: usage.output_tokens ?? 0,
+          inputTokens: usage?.input_tokens ?? 0,
+          cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+          cacheCreationTokens: usage?.cache_creation_input_tokens ?? 0,
+          outputTokens: usage?.output_tokens ?? 0,
         })
       }
       if (msg.error) {

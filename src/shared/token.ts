@@ -99,6 +99,7 @@ export interface CacheEvent {
   inputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  /** The count known when the response began to stream: a placeholder, not the response's output. Never summed; output totals are in the usage events. */
   outputTokens: number
   result: CacheResult
   /** True when an earlier session used the same prefix hash recently enough that a read was expected. */
@@ -363,7 +364,6 @@ export interface CacheTotalsView {
   inputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
-  outputTokens: number
   /** Sessions whose first request read its prefix from cache, and wrote it. */
   warmStarts: number
   coldStarts: number

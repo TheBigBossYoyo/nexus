@@ -144,7 +144,7 @@ export function buildBreakdown(input: BreakdownInput): Breakdown {
   }
   // Whatever the runtime counted as used and the lists above did not name (skills, agents, a message figure without a split).
   const total = Math.max(u.totalTokens, usedTotal)
-  add(out, 'OTHER', total - attributed, basis, 'Counted by the runtime and not split further')
+  add(out, 'OTHER', Math.max(0, total - attributed), basis, 'Counted by the runtime and not split further')
   // Merge duplicate components (MEMORY can come from the runtime and from the pack; OTHER from several places).
   const merged = new Map<string, ComponentTokens>()
   for (const c of out) {
@@ -153,7 +153,17 @@ export function buildBreakdown(input: BreakdownInput): Breakdown {
     if (prior) merged.set(key, { ...prior, tokens: prior.tokens + c.tokens, detail: `${prior.detail}; ${c.detail}` })
     else merged.set(key, c)
   }
-  const components = [...merged.values()]
+  let components = [...merged.values()]
+  // The runtime's lists can claim more than its total (a tool counted in two lists). Then no part is exact:
+  // every part is scaled to the total and labelled an estimate.
+  const claimed = components.reduce((n, c) => n + c.tokens, 0)
+  if (claimed > total + components.length && total > 0) {
+    components = components.map((c) => ({ ...c, tokens: Math.floor((c.tokens * total) / claimed), basis: 'estimated' as const, detail: `${c.detail}; scaled: the runtime's parts exceeded its total` })).filter((c) => c.tokens > 0)
+  }
+  // Rounding drift goes to the largest part, so the parts add up to the total exactly.
+  const drift = total - components.reduce((n, c) => n + c.tokens, 0)
+  const largest = components.reduce<ComponentTokens | null>((a, c) => (a === null || c.tokens > a.tokens ? c : a), null)
+  if (drift !== 0 && largest && largest.tokens + drift > 0) largest.tokens += drift
   return { components, totalTokens: total, maxTokens: u.maxTokens, basis: weakestBasis(components.map((c) => c.basis)), model: u.model }
 }
 

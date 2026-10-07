@@ -57,13 +57,13 @@ export function createV71Handlers(ctx: { repos: Repositories; git: GitService })
       const { space: s, allowed } = spaceOf(projectId, space)
       const parent = parentId ? graph.getNode(parentId, allowed) : graph.root(s)
       if (!parent) return { parent: null, children: [], total: 0, childCounts: {} }
-      const { children, total } = graph.getChildren(parent.id, allowed, { includeHistory: includeHistory ?? false, limit: 200, offset: offset ?? 0 })
+      const { children, total } = graph.getChildren(parent.id, allowed, { includeHistory: includeHistory ?? false, includeProposed: includeHistory ?? false, limit: 200, offset: offset ?? 0 })
       const childCounts: Record<string, number> = {}
       for (const c of children) childCounts[c.id] = repos.contextGraph.nodes.countChildren(c.id, includeHistory ? ['CURRENT', 'STALE', 'CONFLICTED', 'SUPERSEDED', 'ARCHIVED', 'PROPOSED'] : undefined)
       return { parent, children, total, childCounts }
     },
-    'knowledge.node': ({ projectId, nodeId, includeHistory }) => graph.detail(nodeId, spacesOf(projectId), { includeHistory: includeHistory ?? false }),
-    'knowledge.search': ({ projectId, query, includeHistory }) => graph.search(spacesOf(projectId), query, { includeHistory: includeHistory ?? false, limit: 40 }),
+    'knowledge.node': ({ projectId, nodeId, includeHistory }) => graph.detail(nodeId, spacesOf(projectId), { includeHistory: includeHistory ?? false, includeProposed: true }),
+    'knowledge.search': ({ projectId, query, includeHistory }) => graph.search(spacesOf(projectId), query, { includeHistory: includeHistory ?? false, includeProposed: includeHistory ?? false, limit: 40 }),
     'knowledge.refresh': async ({ projectId }) => {
       const project = repos.projects.require(projectId)
       const sync = await graph.syncProject(projectId)

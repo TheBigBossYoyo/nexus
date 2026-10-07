@@ -119,8 +119,9 @@ export function evaluateGate(baseline: readonly TrialOutcome[], optimized: reado
   const optimizedPassRate = n > 0 ? sums.oPass / n : 0
   const reasons: string[] = []
 
-  // One-sided 95% lower bound of the mean paired difference (normal approximation; conservative for small n by
-  // the minimum-pairs rule above rather than by a t table).
+  // One-sided 95% lower bound of the mean paired difference, by the normal approximation. For small n this
+  // bound is too optimistic (a t quantile is larger), and with no variance it equals the mean: it is one
+  // check among several, never the only one. The minimum-pairs rule and the checks below carry the rest.
   let lower: number | null = null
   if (n >= 2) {
     const d = mean(diffs)
@@ -143,6 +144,11 @@ export function evaluateGate(baseline: readonly TrialOutcome[], optimized: reado
     wallClockDelta: rel(sums.bWall, sums.oWall),
   }
 
+  const unpaired = [...b.keys()].filter((k) => !o.has(k)).sort()
+  if (unpaired.length > 0) {
+    reasons.push(`${unpaired.length} baseline case(s) have no optimized trial (${unpaired.slice(0, 5).join(', ')}${unpaired.length > 5 ? ', …' : ''}). A case that was not run cannot be assumed to pass. The baseline stays the default.`)
+    return { ...base, verdict: 'INSUFFICIENT_EVIDENCE', mayBecomeDefault: false, reasons }
+  }
   if (n < minimumPairs) {
     reasons.push(`${n} paired cases; ${minimumPairs} are needed${strict ? ` for ${cfg.risk}-risk work` : ''}. The baseline stays the default.`)
     return { ...base, verdict: 'INSUFFICIENT_EVIDENCE', mayBecomeDefault: false, reasons }
@@ -152,6 +158,10 @@ export function evaluateGate(baseline: readonly TrialOutcome[], optimized: reado
   if (lower !== null && lower < -margin) reasons.push(`The pass rate may be lower by more than ${(margin * 100).toFixed(0)} points (lower bound ${(lower * 100).toFixed(1)}).`)
   if (base.repairDelta > n * 0.25) reasons.push(`Repairs and regressions rose by ${base.repairDelta.toFixed(2)} across ${n} cases.`)
   if (reasons.length > 0) return { ...base, verdict: 'INFERIOR', mayBecomeDefault: false, reasons }
+  if (baselinePassRate === 0 && optimizedPassRate === 0) {
+    reasons.push(`No case passed on either side over ${n} paired cases: nothing shows that quality is kept. The baseline stays the default.`)
+    return { ...base, verdict: 'INSUFFICIENT_EVIDENCE', mayBecomeDefault: false, reasons }
+  }
 
   if (optimizedPassRate > baselinePassRate && lower !== null && lower > 0) {
     reasons.push(`Pass rate ${(baselinePassRate * 100).toFixed(0)}% to ${(optimizedPassRate * 100).toFixed(0)}% over ${n} paired cases.`)

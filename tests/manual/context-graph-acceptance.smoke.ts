@@ -50,7 +50,7 @@ interface Outcome {
   turns: number
   toolCalls: number
   contextToolCalls: { tool: string; input: string }[]
-  cache: { requests: number; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number; warmStarts: number; coldStarts: number }
+  cache: { requests: number; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; warmStarts: number; coldStarts: number }
   outputTokens: number
   packsWithGraph: number
   graphNodesInPacks: number
@@ -171,7 +171,7 @@ async function mission(variant: 'BASELINE' | 'GRAPH'): Promise<Outcome> {
     turns: agents.reduce((n, a) => n + a.metrics.turns, 0),
     toolCalls: tools.length,
     contextToolCalls: tools.filter((t) => t.toolName.startsWith('mcp__nexus__context_')).map((t) => ({ tool: t.toolName, input: JSON.stringify(t.input).slice(0, 200) })),
-    cache: { requests: totals.requests, inputTokens: totals.inputTokens, cacheReadTokens: totals.cacheReadTokens, cacheWriteTokens: totals.cacheWriteTokens, outputTokens: totals.outputTokens, warmStarts: totals.warmStarts, coldStarts: totals.coldStarts },
+    cache: { requests: totals.requests, inputTokens: totals.inputTokens, cacheReadTokens: totals.cacheReadTokens, cacheWriteTokens: totals.cacheWriteTokens, warmStarts: totals.warmStarts, coldStarts: totals.coldStarts },
     outputTokens: agents.reduce((n, a) => n + (a.metrics.outputTokens ?? 0), 0),
     packsWithGraph: packs.filter((p) => p.entries.some((e) => e.sourceKind === 'context_node' && e.included)).length,
     graphNodesInPacks: packs.reduce((n, p) => n + p.entries.filter((e) => e.sourceKind === 'context_node' && e.included).length, 0),

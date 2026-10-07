@@ -79,8 +79,16 @@ export const MAX_NOTES_PER_RUN = 50
 
 export type NoteRejection = 'instruction' | 'transcript' | 'empty' | 'too_long' | 'no_evidence'
 
+const ACTIVE: readonly ContextStatus[] = ['CURRENT', 'STALE', 'CONFLICTED']
 const HISTORY: readonly ContextStatus[] = ['SUPERSEDED', 'ARCHIVED']
-const EVERY_STATUS: readonly ContextStatus[] = CONTEXT_STATUSES
+/** What a reader may see. A PROPOSED node awaits approval: it is shown only to a caller that asks for it by name (the Context view), never to an agent. */
+export interface StatusScope {
+  includeHistory?: boolean
+  includeProposed?: boolean
+}
+const statusesFor = (o: StatusScope): readonly ContextStatus[] => [...ACTIVE, ...(o.includeHistory ? HISTORY : []), ...(o.includeProposed ? (['PROPOSED'] as const) : [])]
+/** The same statement, whatever its type or trust: what a conflict and a duplicate are decided on. */
+const statementOf = (n: Pick<ContextNode, 'title' | 'summary' | 'body'>): string => [n.title, n.summary, n.body ?? ''].map((t) => t.trim().replace(/\s+/g, ' ').toLowerCase()).join('\0')
 /** Service-made edges carry a `graph:` source; a projection never removes them. */
 const isGraphEdge = (e: Pick<ContextEdge, 'provenance'>): boolean => e.provenance.source.startsWith('graph:')
 const sameSpace = (a: ContextSpace, n: Pick<ContextNode, 'spaceKind' | 'spaceId'>): boolean => a.kind === n.spaceKind && a.id === n.spaceId
@@ -144,6 +152,8 @@ export class ContextGraphService {
       { type: 'REPOSITORY', title: project.name, lead: stack ? `Repository ${project.name} (${stack}).` : `Repository ${project.name}.`, originKind: 'project', originId: projectId },
       projection,
       project.rootPath,
+      // A list that came back full may be cut short: what is missing from it is not known to be gone.
+      programs.length < 200 && programs.every((p) => p.backlog.length < 200),
     )
   }
 
@@ -151,6 +161,7 @@ export class ContextGraphService {
     const { repos } = this.deps
     const workspace = repos.workspaces.require(workspaceId)
     const repositories = repos.enrolledRepositories.listByWorkspace(workspaceId)
+    const memory = repos.workspaceMemory.listByWorkspace(workspaceId, 500)
     const projection = projectWorkspace({
       workspace,
       repositories,
@@ -160,13 +171,14 @@ export class ContextGraphService {
         consumers: repos.contractConsumers.listByContract(contract.id),
         latest: repos.contractVersions.listByContract(contract.id, 1)[0] ?? null,
       })),
-      memory: repos.workspaceMemory.listByWorkspace(workspaceId, 500),
+      memory,
     })
     const result = await this.apply(
       { kind: 'workspace', id: workspaceId },
       { type: 'WORKSPACE', title: workspace.name, lead: workspace.description ? `Workspace ${workspace.name}: ${clip(workspace.description, 300)}` : `Workspace ${workspace.name}.`, originKind: 'workspace', originId: workspaceId },
       projection,
       null,
+      memory.length < 500,
     )
     // A repository of the workspace is the same thing as the root of its project graph: link them when both exist.
     this.tx(() => {
@@ -185,6 +197,7 @@ export class ContextGraphService {
     root: { type: ContextNodeType; title: string; lead: string; originKind: ContextNode['originKind']; originId: string },
     projection: Projection,
     rootPath: string | null,
+    complete = true,
   ): Promise<SyncResult> {
     const startedAt = this.now()
     // File states are read before the transaction: the transaction itself does no I/O outside SQLite.
@@ -206,7 +219,7 @@ export class ContextGraphService {
         const parentId = up === null ? null : (ids.get(up) ?? null)
         ids.set(draft.path, this.upsertNode(space, draft, parentId, states, at, counts, null).id)
       }
-      this.archiveVanished(space, projection, ids, at, counts)
+      if (complete) this.archiveVanished(space, projection, ids, at, counts)
       this.reconcileEdges(space, projection.edges, ids, at)
       this.rebuildSummaries(space, at)
       const conflicts = this.detectConflicts(space, at)
@@ -261,7 +274,8 @@ export class ContextGraphService {
       }
       this.g.nodes.insert(node)
       this.g.sources.replace(node.id, space.id, draft.sources.map((s) => ({ ...s, hash: s.kind === 'file' ? (states.get(s.ref) ?? null) : s.hash })))
-      this.record(node.id, 'created', `From ${draft.originKind}${draft.originId ? ` ${draft.originId.slice(0, 8)}` : ''}.`, at)
+      const earlier = draft.originId && draft.originKind !== 'graph' ? this.g.nodes.byOrigin(draft.originKind, draft.originId).find((n) => sameSpace(space, n) && n.id !== node.id) : undefined
+      this.record(node.id, 'created', `From ${draft.originKind}${draft.originId ? ` ${draft.originId.slice(0, 8)}` : ''}.${earlier ? ` The record was at "${earlier.path}" before; its earlier history is kept there.` : ''}`, at)
       if (draft.status === 'STALE') counts.stale++
       counts.created++
       return node
@@ -293,7 +307,8 @@ export class ContextGraphService {
     if (status === 'CURRENT' && changedFile !== null) status = 'STALE'
     // Supersession is graph knowledge: a record that still says "active" does not undo it.
     // (Found by the history stress: a superseded node whose fact went stale became STALE, and from there current again.)
-    if (existing.status === 'SUPERSEDED' && this.g.edges.incoming(existing.id, ['SUPERSEDES'], 1).length > 0) status = 'SUPERSEDED'
+    // (Found in review: a superseded node whose record vanished was ARCHIVED, and came back CURRENT with the record.)
+    if ((existing.status === 'SUPERSEDED' || existing.status === 'ARCHIVED') && this.g.edges.incoming(existing.id, ['SUPERSEDES'], 1).length > 0) status = 'SUPERSEDED'
 
     const contentChanged = existing.contentHash !== contentHash
     const derived = draft.derived
@@ -306,7 +321,7 @@ export class ContextGraphService {
     } else if (derived && existing.trust !== 'GENERATED_SUMMARY') {
       // A node that projected a record and is now only a container: its statement goes, a derived summary comes.
       Object.assign(patch, { title: draft.title, type: draft.type, trust: draft.trust, summary: '', summaryHash: '', contentHash, updatedAt: at })
-    } else if (derived && (existing.title !== draft.title || existing.type !== draft.type || (rootLead !== null && !existing.summary.startsWith(rootLead)))) {
+    } else if (derived && (existing.title !== draft.title || existing.type !== draft.type || (rootLead !== null && (existing.summary.split('\nContains: ')[0] ?? '') !== rootLead))) {
       // Sections keep their derived summary; only the title, the type and (for the root) the lead follow the draft.
       Object.assign(patch, { title: draft.title, type: draft.type, updatedAt: at, ...(rootLead !== null ? { summary: rootLead, summaryHash: '' } : {}) })
     }
@@ -338,7 +353,9 @@ export class ContextGraphService {
     if (status === 'CURRENT') patch.refreshedAt = at
     const node = Object.keys(patch).length > 0 ? this.g.nodes.update(existing.id, patch) : existing
     // A stale node keeps the file states it was verified against, so it stays stale until it is verified again.
-    this.g.sources.replace(node.id, space.id, draft.sources.map((s) => ({ ...s, hash: s.kind === 'file' ? (status === 'STALE' ? (beforeFiles.get(s.ref) ?? states.get(s.ref) ?? null) : (states.get(s.ref) ?? beforeFiles.get(s.ref) ?? null)) : s.hash })))
+    const after = draft.sources.map((s) => ({ ...s, hash: s.kind === 'file' ? (status === 'STALE' ? (beforeFiles.get(s.ref) ?? states.get(s.ref) ?? null) : (states.get(s.ref) ?? beforeFiles.get(s.ref) ?? null)) : s.hash }))
+    const sourceKey = (list: readonly { kind: string; ref: string; hash: string | null }[]): string => list.map((s) => `${s.kind}\0${s.ref}\0${s.hash ?? ''}`).sort().join('\n')
+    if (sourceKey(after) !== sourceKey(before)) this.g.sources.replace(node.id, space.id, after)
     return node
   }
 
@@ -452,7 +469,7 @@ export class ContextGraphService {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i] as ContextNode
           const b = nodes[j] as ContextNode
-          if (a.contentHash === b.contentHash) continue
+          if (a.contentHash === b.contentHash || statementOf(a) === statementOf(b)) continue
           // Knowledge of two different programs is not compared; program knowledge is compared with project knowledge.
           if (a.programId && b.programId && a.programId !== b.programId) continue
           if (this.g.edges.find(a.id, b.id, 'SUPERSEDES') || this.g.edges.find(b.id, a.id, 'SUPERSEDES')) continue
@@ -523,16 +540,22 @@ export class ContextGraphService {
       const marked = this.tx(() => {
         const at = this.now()
         let n = 0
+        let wasConflicted = false
         const touchedParents = new Set<string>()
         for (const [nodeId, ref] of stale) {
           const node = this.g.nodes.get(nodeId)
-          if (!node || !sameSpace(space, node) || node.status !== 'CURRENT') continue
+          if (!node || !sameSpace(space, node) || (node.status !== 'CURRENT' && node.status !== 'CONFLICTED')) continue
+          if (node.status === 'CONFLICTED') wasConflicted = true
           this.g.nodes.update(nodeId, { status: 'STALE', updatedAt: at })
           this.record(nodeId, 'stale', `${ref} changed since the node was verified.`, at)
           n++
           for (const a of this.ancestorsOf(node)) touchedParents.add(a.id)
         }
-        if (touchedParents.size > 0) this.rebuildSummaries(space, at, touchedParents)
+        if (wasConflicted) {
+          // Its partner no longer contradicts a current statement.
+          this.detectConflicts(space, at)
+          this.rebuildSummaries(space, at)
+        } else if (touchedParents.size > 0) this.rebuildSummaries(space, at, touchedParents)
         return n
       })
       return this.g.jobs.insert({ id: newId(), spaceKind: space.kind, spaceId: space.id, trigger: options.trigger ?? (options.changedFiles ? 'git_diff' : 'fingerprint'), fromCommit: options.fromCommit ?? null, toCommit: options.toCommit ?? null, changedFiles: options.changedFiles?.length ?? 0, nodesChecked: checked, nodesStale: marked, nodesRefreshed: 0, state: 'completed', error: null, startedAt, finishedAt: this.now() })
@@ -761,28 +784,32 @@ export class ContextGraphService {
       const at = this.now()
       let duplicates = 0
       let obsoleteProgress = 0
-      const seen = new Map<string, string>()
+      const seen = new Map<string, ContextNode>()
       const touched = new Set<string>()
       for (let offset = 0; ; ) {
         const batch = this.g.nodes.listBySpace(space, { types: ['NOTE'], statuses: ['CURRENT'], limit: 500, offset })
         let archived = 0
+        const retire = (note: ContextNode, reason: string): void => {
+          this.g.nodes.update(note.id, { status: 'ARCHIVED', updatedAt: at })
+          this.record(note.id, 'archived', reason, at)
+          for (const a of this.ancestorsOf(note)) touched.add(a.id)
+          archived++
+        }
         for (const note of batch) {
-          const first = seen.get(note.contentHash)
-          let reason: string | null = null
-          if (first && first !== note.id) {
-            reason = 'Duplicate of an earlier note.'
+          // A note of one program is never a duplicate of another program's note: neither may read the other.
+          const key = `${note.programId ?? ''}\0${note.contentHash}`
+          const first = seen.get(key)
+          if (first && first.id !== note.id) {
+            // The note written first stays, whatever the order the notes are read in.
+            const noteIsEarlier = note.createdAt < first.createdAt || (note.createdAt === first.createdAt && note.id < first.id)
+            retire(noteIsEarlier ? first : note, 'Duplicate of an earlier note.')
+            if (noteIsEarlier) seen.set(key, note)
             duplicates++
           } else if (note.provenance.source.endsWith(':progress') && note.provenance.taskId && !isTaskOpen(note.provenance.taskId)) {
-            reason = 'Progress note of a task that is no longer open.'
+            retire(note, 'Progress note of a task that is no longer open.')
             obsoleteProgress++
           } else {
-            seen.set(note.contentHash, note.id)
-          }
-          if (reason) {
-            this.g.nodes.update(note.id, { status: 'ARCHIVED', updatedAt: at })
-            this.record(note.id, 'archived', reason, at)
-            for (const a of this.ancestorsOf(note)) touched.add(a.id)
-            archived++
+            seen.set(key, note)
           }
         }
         if (batch.length < 500) break
@@ -799,7 +826,8 @@ export class ContextGraphService {
    */
   compactNotes(parentId: string, minimum = 12): ContextNode | null {
     const parent = this.g.nodes.require(parentId)
-    const notes = this.g.nodes.children(parentId, { types: ['NOTE'], statuses: ['CURRENT'], limit: 500 }).filter((n) => n.trust === 'AGENT_NOTE')
+    // Only notes that every reader of the branch may read: a program's note is never folded into a summary others see.
+    const notes = this.g.nodes.children(parentId, { types: ['NOTE'], statuses: ['CURRENT'], limit: 500 }).filter((n) => n.trust === 'AGENT_NOTE' && n.programId === parent.programId)
     if (notes.length < minimum) return null
     const space = { kind: parent.spaceKind, id: parent.spaceId }
     return this.tx(() => {
@@ -913,10 +941,11 @@ export class ContextGraphService {
     return this.g.nodes.root(space)
   }
 
-  getChildren(nodeId: string, allowed: readonly ContextSpace[], options: { includeHistory?: boolean; limit?: number; offset?: number; types?: ContextNodeType[] } = {}): { children: ContextNode[]; total: number } {
+  getChildren(nodeId: string, allowed: readonly ContextSpace[], options: StatusScope & { limit?: number; offset?: number; types?: ContextNodeType[] } = {}): { children: ContextNode[]; total: number } {
     const node = this.getNode(nodeId, allowed)
-    const statuses = options.includeHistory ? EVERY_STATUS : undefined
-    return { children: this.g.nodes.children(node.id, { ...options, ...(statuses ? { statuses } : {}) }), total: this.g.nodes.countChildren(node.id, statuses) }
+    const statuses = statusesFor(options)
+    const { includeHistory: _h, includeProposed: _p, ...list } = options
+    return { children: this.g.nodes.children(node.id, { ...list, statuses }), total: this.g.nodes.countChildren(node.id, statuses) }
   }
 
   /** Ancestors, root first. */
@@ -935,10 +964,11 @@ export class ContextGraphService {
   }
 
   /** Nodes one edge away, in the allowed spaces only: an edge into a space the caller may not read is not followed. */
-  getNeighbors(nodeId: string, allowed: readonly ContextSpace[], options: { types?: ContextEdgeType[]; includeHistory?: boolean; limit?: number } = {}): { outgoing: { edge: ContextEdge; node: ContextNode }[]; incoming: { edge: ContextEdge; node: ContextNode }[] } {
+  getNeighbors(nodeId: string, allowed: readonly ContextSpace[], options: StatusScope & { types?: ContextEdgeType[]; limit?: number } = {}): { outgoing: { edge: ContextEdge; node: ContextNode }[]; incoming: { edge: ContextEdge; node: ContextNode }[] } {
     const node = this.getNode(nodeId, allowed)
     const limit = options.limit ?? 50
-    const visible = (n: ContextNode | undefined): n is ContextNode => !!n && allowed.some((s) => sameSpace(s, n)) && (options.includeHistory === true || !HISTORY.includes(n.status))
+    const statuses = statusesFor(options)
+    const visible = (n: ContextNode | undefined): n is ContextNode => !!n && allowed.some((s) => sameSpace(s, n)) && statuses.includes(n.status)
     const out = this.g.edges.outgoing(node.id, options.types, limit)
     const inc = this.g.edges.incoming(node.id, options.types, limit)
     const byId = new Map(this.g.nodes.getMany([...out.map((e) => e.toId), ...inc.map((e) => e.fromId)]).map((n) => [n.id, n]))
@@ -957,8 +987,8 @@ export class ContextGraphService {
     return { history: this.g.history.ofNode(node.id), versions: this.g.versions.ofNode(node.id) }
   }
 
-  search(allowed: readonly ContextSpace[], text: string, options: { includeHistory?: boolean; limit?: number; types?: ContextNodeType[] } = {}): ContextNode[] {
-    return this.g.nodes.search(allowed, text, { limit: options.limit ?? 20, ...(options.types ? { types: options.types } : {}), ...(options.includeHistory ? { statuses: EVERY_STATUS } : {}) }).map((h) => h.node)
+  search(allowed: readonly ContextSpace[], text: string, options: StatusScope & { limit?: number; types?: ContextNodeType[] } = {}): ContextNode[] {
+    return this.g.nodes.search(allowed, text, { limit: options.limit ?? 20, ...(options.types ? { types: options.types } : {}), statuses: statusesFor(options) }).map((h) => h.node)
   }
 
   /** The subtree under a node, breadth first, to `depth` levels and at most `limit` nodes. */
@@ -980,10 +1010,11 @@ export class ContextGraphService {
     return out.slice(0, max)
   }
 
-  detail(nodeId: string, allowed: readonly ContextSpace[], options: { includeHistory?: boolean } = {}): ContextNodeDetail {
+  detail(nodeId: string, allowed: readonly ContextSpace[], options: StatusScope = {}): ContextNodeDetail {
     const node = this.getNode(nodeId, allowed)
-    const { children, total } = this.getChildren(nodeId, allowed, { includeHistory: options.includeHistory ?? false, limit: 200 })
-    const neighbors = this.getNeighbors(nodeId, allowed, { includeHistory: true })
+    const { children, total } = this.getChildren(nodeId, allowed, { includeHistory: options.includeHistory ?? false, includeProposed: options.includeProposed ?? false, limit: 200 })
+    // Relations to history are part of a node's detail (they are shown as historical); relations to a proposal are not.
+    const neighbors = this.getNeighbors(nodeId, allowed, { includeHistory: true, includeProposed: options.includeProposed ?? false })
     return {
       node,
       ancestors: this.ancestorsOf(node).map((a) => ({ id: a.id, title: a.title, path: a.path, type: a.type })),

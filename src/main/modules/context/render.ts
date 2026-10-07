@@ -1,5 +1,5 @@
 import type { CheckCommands, CommandResult, Handoff, Task } from '@shared/domain'
-import { filterOutput, type FilterMode } from '@main/modules/token/filter'
+import { MAX_EARLY_CHARS, filterOutput, type FilterMode } from '@main/modules/token/filter'
 
 export interface PackSection {
   name: string
@@ -89,13 +89,14 @@ function renderCommandResult(r: CommandResult, mode: FilterMode): { text: string
   if (mode === 'tail') return { text: `${head}${truncateHead(r.output.trim(), SECTION_LIMITS.checkItem)}`, extra: 0 }
   const shown = filterOutput(r.output, { failed, tailChars: SECTION_LIMITS.checkItem, mode })
   const note = shown.truncated ? `\n[${shown.totalLines} lines in all, ${shown.failureLines} of them failure lines; the full output is stored by NEXUS]` : ''
-  return { text: `${head}${shown.text}${note}`, extra: Math.max(0, shown.shownChars + note.length - SECTION_LIMITS.checkItem) }
+  // What the section budget grows by is bounded whatever the output holds.
+  return { text: `${head}${shown.text}${note}`, extra: Math.min(MAX_EARLY_CHARS + note.length, Math.max(0, shown.shownChars + note.length - SECTION_LIMITS.checkItem)) }
 }
 
 /**
  * Check results for a prompt. `superset` (the default) shows the tail 0.7.0 showed and, before it, the
- * failures that lie outside the tail; the section budget grows by exactly what that adds, so no check that
- * fitted before is dropped. `tail` is the 0.7.0 rendering; `compact` also shortens passing runs.
+ * failures that lie outside the tail; the section budget grows by what that adds (a bounded amount per
+ * check), so no check that fitted before is dropped. `tail` is the 0.7.0 rendering; `compact` also shortens passing runs.
  */
 export function renderChecks(results: readonly CommandResult[], mode: FilterMode = 'superset'): string | null {
   if (results.length === 0) return null

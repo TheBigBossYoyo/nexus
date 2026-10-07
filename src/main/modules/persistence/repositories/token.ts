@@ -162,7 +162,6 @@ export interface CacheTotals {
   inputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
-  outputTokens: number
   /** First requests of sessions that read their prefix from cache. */
   warmStarts: number
   /** First requests of sessions that wrote their prefix. */
@@ -173,7 +172,7 @@ export interface CacheTotals {
 
 const TOTAL_COLUMNS = `COUNT(*) AS requests, COUNT(DISTINCT COALESCE(sdk_session_id, agent_id)) AS sessions,
   COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-  COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens,
+  COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
   COALESCE(SUM(CASE WHEN request_index = 0 AND result = 'read' THEN 1 ELSE 0 END), 0) AS warm_starts,
   COALESCE(SUM(CASE WHEN request_index = 0 AND result IN ('write', 'partial') THEN 1 ELSE 0 END), 0) AS cold_starts,
   COALESCE(SUM(CASE WHEN cause IS NOT NULL AND cause <> 'FIRST_USE' THEN 1 ELSE 0 END), 0) AS unexpected_misses`
@@ -186,7 +185,6 @@ function toTotals(key: string, r: Row): CacheTotals {
     inputTokens: Number(r['input_tokens'] ?? 0),
     cacheReadTokens: Number(r['cache_read_tokens'] ?? 0),
     cacheWriteTokens: Number(r['cache_write_tokens'] ?? 0),
-    outputTokens: Number(r['output_tokens'] ?? 0),
     warmStarts: Number(r['warm_starts'] ?? 0),
     coldStarts: Number(r['cold_starts'] ?? 0),
     unexpectedMisses: Number(r['unexpected_misses'] ?? 0),
@@ -210,9 +208,9 @@ export class CacheEventStore extends Table<CacheEvent> {
     return this.query('WHERE run_id = ? ORDER BY created_at, rowid LIMIT ?', [runId, cap(limit, 1000, 5000)])
   }
 
-  /** The latest first request made with a prefix before `beforeIso`: what a new session is compared with. */
+  /** The latest request made with a prefix up to `beforeIso`: what a new session is compared with. */
   lastUseOfPrefix(prefixHash: string, beforeIso: string, exceptAgentId: string | null): CacheEvent | null {
-    return this.one('WHERE prefix_hash = ? AND created_at <= ? AND (agent_id IS NULL OR agent_id <> ?) ORDER BY created_at DESC, rowid DESC', [prefixHash, beforeIso, exceptAgentId ?? ''])
+    return this.one('WHERE prefix_hash = ? AND created_at <= ? AND (? IS NULL OR agent_id IS NULL OR agent_id <> ?) ORDER BY created_at DESC, rowid DESC', [prefixHash, beforeIso, exceptAgentId, exceptAgentId])
   }
 
   misses(sinceIso: string, limit = 50): CacheEvent[] {

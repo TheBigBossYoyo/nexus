@@ -173,7 +173,7 @@ export function diagnoseCache(input: CacheDiagnosisInput): CacheDiagnosis {
 
   if (input.sameHash) {
     if (distance !== null && distance > warmMs) {
-      return { expectedWarm: false, cause: 'EXPIRED', causeBasis: 'local_inference', reuseDistanceMs: distance, explanation: `The same prefix was last used ${Math.round(distance / 60_000)} minutes ago, longer than the assumed cache lifetime.` }
+      return { expectedWarm: false, cause: 'EXPIRED', causeBasis: 'local_inference', reuseDistanceMs: distance, explanation: `The same prefix was last used ${Math.round(distance / 60_000)} minutes ago, longer than the ${Math.round(warmMs / 60_000)}-minute lifetime NEXUS assumes. The real lifetime is not reported to NEXUS and may be longer.` }
     }
     // Same hash, recent, and still written: something NEXUS does not hash differs, i.e. the runtime's own dynamic sections.
     if (input.current.dynamic !== '') {

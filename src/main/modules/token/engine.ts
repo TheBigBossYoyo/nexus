@@ -58,6 +58,10 @@ interface Live {
   provider: string
   model: string | null
   requests: number
+  /** True until the first request of a fresh session was seen: only that request shows how the prefix was served. */
+  firstPending: boolean
+  /** False while the session sends something other than the planned prefix (a handoff request has no tools). */
+  ownPrefix: boolean
   seenRequestIds: Set<string>
   contextTokens: number | null
   maxTokens: number | null
@@ -74,7 +78,7 @@ export interface RequestUsage {
   inputTokens: number
   cacheReadTokens: number
   cacheCreationTokens: number
-  /** A placeholder on a streamed response (the count known when the response began); totals come from the turn result. */
+  /** A placeholder on a streamed response (the count known when the response began). Stored, never summed: output totals come from the turn result. */
   outputTokens: number
 }
 
@@ -122,6 +126,8 @@ export class TokenIntelligenceEngine {
       provider: 'claude',
       model: input.model,
       requests: 0,
+      firstPending: false,
+      ownPrefix: true,
       seenRequestIds: new Set(),
       contextTokens: null,
       maxTokens: null,
@@ -146,8 +152,13 @@ export class TokenIntelligenceEngine {
 
   // ───────────────────────────── while it runs ─────────────────────────────
 
-  /** The runtime said which provider and model the session really runs on. */
-  sessionStarted(agentId: string, started: { provider: string; model: string | null }): void {
+  /**
+   * The runtime said which provider and model the session really runs on. A resumed session continues a
+   * conversation: its first request is not the first use of a prefix and is not diagnosed, and its requests
+   * are numbered on from the agent's earlier ones. A handoff request sends no tools, so it is not a use of
+   * the planned prefix at all.
+   */
+  sessionStarted(agentId: string, started: { provider: string; model: string | null }, session: { resumed?: boolean; handoff?: boolean } = {}): void {
     const s = this.live.get(agentId)
     if (!s) return
     s.provider = started.provider
@@ -160,6 +171,9 @@ export class TokenIntelligenceEngine {
       flags: caps.stableSystemPrefix ? s.identity.flags : { stablePrefix: false, nexusToolsAlwaysLoaded: false, projectSettings: s.identity.flags.projectSettings, structuredOutput: s.identity.flags.structuredOutput },
       tools: caps.nexusTools ? s.identity.tools : s.identity.tools.filter((t) => !t.startsWith('mcp__nexus__')),
     }
+    s.ownPrefix = session.handoff !== true
+    s.firstPending = session.resumed !== true && s.ownPrefix
+    if (!s.firstPending) return
     s.requests = 0
     s.seenRequestIds.clear()
     this.guard('prefix registration', () => {
@@ -186,7 +200,7 @@ export class TokenIntelligenceEngine {
         agentId: s.ctx.agentId,
         sdkSessionId,
         requestIndex: index,
-        prefixHash: s.parts?.hash ?? null,
+        prefixHash: s.ownPrefix ? (s.parts?.hash ?? null) : null,
         provider: s.provider,
         model: usage.model ?? s.model,
         role: s.ctx.role,
@@ -201,8 +215,11 @@ export class TokenIntelligenceEngine {
         reuseDistanceMs: null,
         createdAt: at,
       }
-      if (index === 0 && s.parts) {
-        const same = this.deps.repos.cacheEvents.lastUseOfPrefix(s.parts.hash, at, s.ctx.agentId)
+      const first = s.firstPending
+      s.firstPending = false
+      if (first && s.parts) {
+        // The agent's own earlier session counts: after a rotation it is the latest use of this prefix.
+        const same = this.deps.repos.cacheEvents.lastUseOfPrefix(s.parts.hash, at, null)
         const previous = this.deps.repos.promptPrefixes.previousForRole(s.ctx.role, s.provider, s.parts.hash)
         const d = diagnoseCache({
           result,

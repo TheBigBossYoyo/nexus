@@ -37,11 +37,17 @@ What this establishes:
 2. **The stable-prefix option (`excludeDynamicSections`) adds nothing here.** Same read and write with and
    without it. It stays off: it has a documented cost (the working directory steers the model slightly less
    from a user message) and no measured benefit.
-3. **A different role shares nothing**, not even the runtime's own system prompt, because tools render first
-   and each role has its own tool list. This is why a mission's cache writes are about 15,000 tokens per
-   distinct role: planner, worker, reviewer and verifier each write once.
+3. **A different role shares nothing**, not even the runtime's own system prompt. This is why a mission's
+   cache writes are about 15,000 tokens per distinct role: planner, worker, reviewer and verifier each write
+   once. The explanation (tools render first in the prefix, and each role has its own tool list) is
+   INFERRED from the documented order of a request: the reviewer session differed from the worker in both
+   its tools and its role text, so this run does not separate the two.
 4. **A changed prompt reuses the prefix.** The dynamic suffix does not disturb it.
-5. **Loading the NEXUS tools upfront changed nothing** in the size of the request. It stays off.
+5. **Loading the NEXUS tools upfront changed nothing** in the size of the request. It stays off. The run
+   does not tell "the definitions cost nothing extra" from "the option had no effect on this request".
+
+Limits of this evidence: one session per condition, on `haiku`. It shows what happened, not how often it
+happens. The cache lifetime was not measured.
 
 All four checks of the acceptance are met: first request writes, a later one reads, a changed suffix still
 reads, a changed stable part (role) writes again.
@@ -52,7 +58,8 @@ reads, a changed stable part (role) writes again.
   path, and a test keeps them so (`tests/unit/token/token.test.ts`, "role prompts are a canonical prefix").
 - Within a role, reuse works. The cost that remains is one cold start per role per cache lifetime.
 - **Not done, and why:** giving every role the same tool list (with the policy gate refusing what a role may
-  not use) would let roles share the 17,800 tokens of built-in tool definitions. It would also show
+  not use) would let roles share the built-in tool definitions (about 17,800 tokens by the runtime's own estimate,
+  which over-states: the whole first request processed 16,018). It would also show
   read-only roles tools they must not use, which changes the security posture ("a tool a role may not use
   does not exist for it") and the prompt. It needs a security review and a quality comparison first. It is
   recorded as the largest remaining cache lever, not implemented.
@@ -62,22 +69,24 @@ reads, a changed stable part (role) writes again.
 
 ## TTL
 
-Left to the runtime: one hour on a subscription within its limits, five minutes when drawing on usage
-credits. NEXUS does not force `1h`. The runtime does not report the TTL in effect on an ordinary turn, so
+Left to the runtime. DOCUMENTED, not measured here: one hour on a subscription within its limits, five
+minutes when drawing on usage credits. NEXUS's own diagnosis assumes the five minutes every account has, so
+an "expired" cause can be wrong when the longer lifetime applied; the explanation says so. NEXUS does not force `1h`. The runtime does not report the TTL in effect on an ordinary turn, so
 NEXUS records the reuse distance (time since the same prefix was last used) with each first request.
 
 ## What is recorded
 
 For every model request (`cache_events`): the session, the request index, uncached input, cache read, cache
-write, output, the model, the role and the provider. One response delivered as several assistant messages is
+write, the model, the role and the provider. The output figure on a streamed response is the count known
+when the response began; it is stored and never summed. Output totals come from the turn results (Usage). One response delivered as several assistant messages is
 counted once (by API message id).
 
-For the first request of a session, also:
+For the first request of a fresh session, also (a resumed session and a handoff request are not diagnosed):
 
 - `prefixHash`: a hash of what decides whether the prefix can be shared: provider, model, effort, role text,
   tool names (sorted) and runtime options. The working directory is not in it.
 - `result`: `read`, `write`, `partial` or `none`.
-- `expectedWarm`: the same prefix was used by another session within the assumed lifetime.
+- `expectedWarm`: the same prefix was used, by any session, within the assumed lifetime.
 - `cause`, when the prefix was written although a read was possible.
 
 `prompt_prefixes` keeps each prefix with its parts, how often it was used and what the cache did last.

@@ -4,7 +4,7 @@ export { PromptComponentRegistry, PromptPrefixRegistry, assemblePrompt, canonica
 export type { AssembledPrompt, ComponentInput, PrefixIdentity, PrefixParts, RegisteredComponent } from './registry'
 export { ASSUMED_WARM_MS, auditPrompt, cacheHitRate, cacheRateDrop, classifyCacheResult, diagnoseCache, partsFromList, partsToList } from './auditor'
 export type { AuditBlock, AuditFinding, CacheDiagnosis, PromptAudit } from './auditor'
-export { EARLY_FAILURE_BUDGET, filterOutput, isFailureLine, isSummaryLine, summarizeOutput } from './filter'
+export { EARLY_FAILURE_BUDGET, MAX_EARLY_CHARS, filterOutput, isFailureLine, isSummaryLine, summarizeOutput } from './filter'
 export type { FilterMode, FilteredOutput } from './filter'
 export { PRESSURE_THRESHOLDS, allocateBudget, decideSessionAction, mayLeaveOut, pressureOf, resultState } from './lifecycle'
 export type { ContextBudget, SessionEfficiencyDecision, SessionEfficiencyInput } from './lifecycle'
