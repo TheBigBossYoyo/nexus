@@ -25,6 +25,7 @@ Branch: `nexus-0.7.2-director-ui-compiler`. Parent: `nexus-0.7.1-token-intellige
 | Current targeted Electron checks | 3 passed: compiler lock/focused blockers, durable waiting/connection UI, Overnight authorization and simulated power lifecycle |
 | Complete Electron assertion run | 29 passed, 2 failed, 2 optional capture tests skipped. Failures were intentional capacity/navigation image changes and a queue test reading approval detail before scheduler reconciliation. Both failed cases plus two compiler/provider cases passed in the latest four-test rerun; no threshold or product gate was relaxed. The full run preceded the final schema-error privacy patch. |
 | Earlier mission and renderer security Electron checks | Passed; not a substitute for final all-page E2E |
+| Visual baseline confirmation | The updated two usage snapshots passed again with snapshot-update mode disabled and the existing tolerance unchanged |
 | Full regression during development | 170 passing files, 3 failing files; 4,012 passing tests, 2 failing tests, plus one teardown failure; source changed during this run, so it is not final-source acceptance |
 | Security corpus isolated rerun | All 916 assertions passed; teardown still failed with Windows EPERM on an empty fixture directory |
 | Performance case isolated rerun | Existing unoptimized fixture evaluator reached its 120-second timeout; the required assertion-based verdict remains unresolved |
@@ -44,6 +45,8 @@ Repeated independent technical/security review found and drove fixes for callbac
 The subsequent technical review identified cleanup masking the primary failure; this is fixed and independently rechecked. An additional review of packaged UI screenshots was attempted but the reviewer reached an account usage limit before completing it. That attempt is not counted as a completed review.
 
 Compiler, drift and every Director stage now sanitize schema diagnostics; the independent technical reviewer confirmed capacity/auth failures retain their classifications. Two affected usage-page snapshots were regenerated after visual inspection of the intentional capacity panel and navigation changes. The queue test now waits for its required pending-approval detail, rather than just the existence of an adopted mission; the same state/detail assertion remains mandatory.
+
+Production package checks rendered all 19 navigation views, started a provider-capable idle worker without a session, verified all 13 migrations and removed the runtime endpoint on shutdown. The initial identity check correctly rejected a dirty stamp: electron-vite's transient timestamped configuration bundle was included in Git status during configuration evaluation. The generated-file ignore rule is narrowed to that numeric bundle name; final clean-identity verification is pending the refreshed package.
 
 ## Required work still open
 

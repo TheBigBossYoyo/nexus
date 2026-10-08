@@ -60,6 +60,10 @@ try {
   })
   const project = await call('projects.open', { path: fixture.repo })
   evidence.checks.project = project.profile?.isGitRepo === true
+  // Direct IPC does not run the renderer mutation's query invalidation.
+  await page.reload()
+  await page.getByTestId('app-shell').waitFor({ state: 'visible' })
+  await waitForRuntime(page)
   const views = [
     'home',
     'projects',
