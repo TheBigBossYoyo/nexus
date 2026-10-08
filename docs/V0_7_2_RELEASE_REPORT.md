@@ -1,6 +1,6 @@
 # NEXUS 0.7.2 development checkpoint
 
-Status: **PARTIAL**, 2026-10-07. This is a checkpoint of ongoing development, not a release verdict or a completed implementation of the supplied specification.
+Status: **PARTIAL**, 2026-10-08. This is a checkpoint of ongoing development, not a release verdict or a completed implementation of the supplied specification.
 
 Branch: `nexus-0.7.2-director-ui-compiler`. Parent: `nexus-0.7.1-token-intelligence` at `59e0502`. Main, release tags and remotes have not been changed. Package identity is `0.7.2-development`.
 
@@ -9,20 +9,21 @@ Branch: `nexus-0.7.2-director-ui-compiler`. Parent: `nexus-0.7.1-token-intellige
 - Runtime-owned official ChatGPT sign-in: dynamic registration, persistent host identity, loopback callback, PKCE/state/nonce, signed identity validation, isolated registrations, protected atomic credential storage and serialized rotating refresh. Public model catalog and streamed Responses adapter; no API-key fallback or host tools.
 - The user's Plus account completed the official sign-in and granted plan-use scope in an isolated development profile. Seven catalog models were returned; the user selected GPT-6.1-Sol. At this checkpoint paid-credit confirmation remains false and **no live inference request has been sent**. Browser sign-in and catalog success do not prove inference entitlement, quality, or quota.
 - Durable advisory Director requests and scoped history. Missing technical capability waits without spending strategic capacity or downgrading the requested level. Council is a fixed memo/challenge/synthesis protocol; each validated stage is saved before the next call. Failures retain completed stages and disagreement. Interrupted requests require explicit review/retry and are not replayed.
-- An isolated Claude Technical Director adapter exists behind an admission callback, with no tools, MCP servers, project settings or approvals. Fake sessions verify the boundaries and bounded cleanup; an unconfirmed stop quarantines the adapter. **It is not enabled in the production runtime and has no real quality evidence.**
+- An isolated Claude Technical Director adapter exists behind an admission callback, with no tools, MCP servers, project settings or approvals. Fake sessions verify the boundaries and bounded cleanup; an unconfirmed stop quarantines the adapter and retains handles for disposal retries. Primary failure classifications survive cleanup failure, and native start/end/stream error text is sanitized. **It is not enabled in the production runtime and has no real quality evidence.**
 - Immutable raw intent storage, bounded schemas, provenance, AUTO/EXACT/LIGHT/STANDARD/TECHNICAL/COUNCIL policies, separate semantic and structured intent comparisons, cache/single-flight behavior and context invalidation. Consequential ambiguity waits for clarification. EXACT makes no advisory model calls.
 - Engineering mission and Overnight mission IPC admission default to AUTO. A validated scoped specification is required before execution; repository snapshot changes are checked again before run insertion. Overnight compilation blocks before native authorization or power arming. Original whitespace is preserved. Internal tasks do not recursively compile.
 - Durable ChatGPT capacity observations, account registration binding, backoff and probe leases. Policy separates role quality, capabilities, local reserves and observed capacity. No Codex/SIWC shared pool is inferred, and unknown allowance/reset are displayed without fabricated percentages.
-- Director, compiler preview, ChatGPT connection and capacity UI; navigation and embedded build identity. Admission freezes the draft, announces blockers and focuses the explanation. Full advisory operations settle before database closure, including retrieval and outcome persistence.
+- Director, compiler preview, ChatGPT connection and capacity UI; navigation and embedded build identity. Admission freezes the draft, announces blockers and focuses the explanation. Full advisory operations settle before database closure, including retrieval and outcome persistence. Malformed compiler, drift and council artifacts produce local validation messages without echoing private schema keys or values.
 
 ## Verification receipts and limits
 
 | Check | Result at this checkpoint |
 | --- | --- |
-| Node and renderer type checks | Passed after admission/lifecycle changes; rerun on final source still required |
+| Node and renderer type checks | Passed; Node check rerun after cleanup and schema-error privacy fixes |
 | Full lint | Passed after correcting type-only imports |
-| Focused intelligence, persistence, IPC and Overnight renderer tests | 314 passed in 14 files; subsequent OAuth hint/browser-error privacy checks and restored migration assertions passed in a 27-test focused rerun |
+| Focused intelligence, persistence, IPC and Overnight renderer tests | 318 passed in 14 files after cleanup and malformed-artifact privacy fixes; OAuth hint/browser-error privacy checks and restored migration assertions also passed in an earlier 27-test focused rerun |
 | Current targeted Electron checks | 3 passed: compiler lock/focused blockers, durable waiting/connection UI, Overnight authorization and simulated power lifecycle |
+| Complete Electron assertion run | 29 passed, 2 failed, 2 optional capture tests skipped. Failures were intentional capacity/navigation image changes and a queue test reading approval detail before scheduler reconciliation. Both failed cases plus two compiler/provider cases passed in the latest four-test rerun; no threshold or product gate was relaxed. The full run preceded the final schema-error privacy patch. |
 | Earlier mission and renderer security Electron checks | Passed; not a substitute for final all-page E2E |
 | Full regression during development | 170 passing files, 3 failing files; 4,012 passing tests, 2 failing tests, plus one teardown failure; source changed during this run, so it is not final-source acceptance |
 | Security corpus isolated rerun | All 916 assertions passed; teardown still failed with Windows EPERM on an empty fixture directory |
@@ -39,6 +40,10 @@ The full-suite failures have not been suppressed and no evaluator timeout or acc
 Two UI review rounds inspected source and actual development-build screenshots in light and dark/narrow layouts. Fixed findings: full objective disclosure, council categories/evidence, truthful deferred states, editable drafts during admission, off-screen/unannounced blockers and capacity loading copy. The latest lock/focus behavior was checked through Electron E2E. Connected-account rendering, completed long recommendations, measured contrast and the full keyboard/page matrix still need acceptance.
 
 Repeated independent technical/security review found and drove fixes for callback ownership/replay, account/catalog races, storage failure latching and consent withdrawal, intent/context mismatch, repository TOCTOU, interrupted-request recovery, malformed-output error privacy, complete-operation shutdown, council stage persistence and quarantined technical cleanup. These reviews are static/fake-test evidence; they do not establish real provider quality or production Claude behavior.
+
+The subsequent technical review identified cleanup masking the primary failure; this is fixed and independently rechecked. An additional review of packaged UI screenshots was attempted but the reviewer reached an account usage limit before completing it. That attempt is not counted as a completed review.
+
+Compiler, drift and every Director stage now sanitize schema diagnostics; the independent technical reviewer confirmed capacity/auth failures retain their classifications. Two affected usage-page snapshots were regenerated after visual inspection of the intentional capacity panel and navigation changes. The queue test now waits for its required pending-approval detail, rather than just the existence of an adopted mission; the same state/detail assertion remains mandatory.
 
 ## Required work still open
 

@@ -1,6 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 import { FakeAgentRuntime } from '@main/modules/agent-runtime/fake-runtime'
-import { ClaudeTechnicalDirector } from '@main/modules/intelligence/technical'
+import {
+  ClaudeTechnicalDirector,
+  TechnicalAdvisoryError,
+} from '@main/modules/intelligence/technical'
+
+async function failureOf(request: Promise<unknown>): Promise<TechnicalAdvisoryError> {
+  try {
+    await request
+  } catch (error) {
+    expect(error).toBeInstanceOf(TechnicalAdvisoryError)
+    if (error instanceof TechnicalAdvisoryError) return error
+    throw error
+  }
+  throw new Error('Expected a classified technical advisory failure')
+}
 
 describe('isolated Technical Director adapter (fake sessions only)', () => {
   it('does not start a deferred session', async () => {
@@ -118,7 +132,7 @@ describe('isolated Technical Director adapter (fake sessions only)', () => {
   it('bounds a hanging stop and cleans up when end throws or stop rejects', async () => {
     const runtime = new FakeAgentRuntime({ script: async () => {} })
     const end = vi.fn(() => {
-      throw new Error('end failed')
+      throw new Error('end-failed-provider-secret')
     })
     vi.spyOn(runtime, 'startSession').mockReturnValue({
       agentId: 'test',
@@ -137,7 +151,12 @@ describe('isolated Technical Director adapter (fake sessions only)', () => {
       admitted: () => true,
       stopTimeoutMs: 30,
     })
-    await expect(adapter.complete('Review', {})).rejects.toThrow('stop was not confirmed')
+    const failure = await failureOf(adapter.complete('Review', {}))
+    expect(failure).toBeInstanceOf(TechnicalAdvisoryError)
+    expect(failure).toMatchObject({ failure: 'SESSION_END', stopConfirmed: false })
+    expect(failure.message).toContain('could not be finalized')
+    expect(failure.message).toContain('stop was not confirmed')
+    expect(failure.message).not.toContain('provider-secret')
     expect(stop).toHaveBeenCalledOnce()
     await expect(adapter.complete('Review', {})).rejects.toThrow('deferred')
     await adapter.dispose()
@@ -152,5 +171,68 @@ describe('isolated Technical Director adapter (fake sessions only)', () => {
     stop.mockRejectedValue(new Error('provider-secret'))
     await expect(second.complete('Review', {})).rejects.toThrow('stop was not confirmed')
     expect(end).toHaveBeenCalledTimes(2)
+  })
+  it('preserves a timeout classification when stopping also fails', async () => {
+    const runtime = new FakeAgentRuntime({
+      script: async (_, ctx) => {
+        await ctx.sleep(60000)
+      },
+    })
+    const actualStop = runtime.stopSession.bind(runtime)
+    const stop = vi.spyOn(runtime, 'stopSession').mockImplementation(async (handle) => {
+      await actualStop(handle)
+      throw new Error('stop-provider-private-body')
+    })
+    const adapter = new ClaudeTechnicalDirector({
+      runtime,
+      cwd: process.cwd(),
+      model: 'fake',
+      admitted: () => true,
+      timeoutMs: 20,
+      stopTimeoutMs: 30,
+    })
+    const failure = await failureOf(adapter.complete('Review', {}))
+    expect(failure).toMatchObject({ failure: 'TIMEOUT', stopConfirmed: false })
+    expect(failure.message).toContain('timed out')
+    expect(failure.message).toContain('stop was not confirmed')
+    expect(failure.message).not.toContain('private-body')
+    stop.mockImplementation(actualStop)
+    await adapter.dispose()
+  })
+  it('sanitizes native session start and stream errors', async () => {
+    const runtime = new FakeAgentRuntime({ script: async () => {} })
+    const start = vi.spyOn(runtime, 'startSession').mockImplementation(() => {
+      throw new Error('start-private-body')
+    })
+    const adapter = new ClaudeTechnicalDirector({
+      runtime,
+      cwd: process.cwd(),
+      model: 'fake',
+      admitted: () => true,
+    })
+    const startFailure = await failureOf(adapter.complete('Review', {}))
+    expect(startFailure).toMatchObject({ failure: 'SESSION_START', stopConfirmed: true })
+    expect(startFailure.message).not.toContain('private-body')
+    start.mockReturnValue({
+      agentId: 'test',
+      sessionId: () => null,
+      events: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: async () => {
+              throw new Error('stream-private-body')
+            },
+          }
+        },
+      },
+      send: () => {},
+      interrupt: async () => {},
+      end: () => {},
+      stop: async () => {},
+    })
+    vi.spyOn(runtime, 'stopSession').mockResolvedValue()
+    const streamFailure = await failureOf(adapter.complete('Review', {}))
+    expect(streamFailure).toMatchObject({ failure: 'SESSION_STREAM', stopConfirmed: true })
+    expect(streamFailure.message).not.toContain('private-body')
   })
 })

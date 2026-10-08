@@ -67,6 +67,23 @@ const candidate: RoutingCandidate = {
 }
 
 describe('task compilation authority', () => {
+  it('does not expose malformed model keys through compilation or drift schema errors', async () => {
+    const secret = 'SENTINEL_PRIVATE_ARTIFACT_KEY'
+    for (const corruptStage of ['compilation', 'drift']) {
+      const strategic: AdvisoryProvider = {
+        complete: async (instructions) => {
+          const drift = instructions.startsWith('INTENT_DRIFT_CHECK')
+          if (drift === (corruptStage === 'drift')) return { [secret]: 'private value' }
+          return output
+        },
+      }
+      const failure = await compileTask({ ...base, strategic }).catch((error) => error)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error('Expected a schema rejection')
+      expect(failure.message).toBe('Advisory provider returned invalid structured output')
+      expect(failure.message).not.toContain(secret)
+    }
+  })
   it('blocks consequential framework expansion even when both model flags deny drift', async () => {
     const spec = await compileTask({
       ...base,
@@ -159,6 +176,57 @@ describe('task compilation authority', () => {
 })
 
 describe('Director', () => {
+  it('sanitizes schema failures from each council stage without continuing', async () => {
+    const secret = 'SENTINEL_PRIVATE_COUNCIL_KEY'
+    const artifacts = [
+      {
+        objective: raw,
+        recommendation: 'Measure first',
+        rationale: [],
+        alternatives: [],
+        risks: [],
+        unknowns: [],
+        requestedExperiments: [],
+        evidenceRefs: [],
+        confidence: 'LOW',
+      },
+      {
+        agreements: [],
+        disagreements: [],
+        missingEvidence: [],
+        proposedChanges: [],
+        evidenceRefs: [],
+      },
+      {
+        decision: 'Measure first',
+        acceptedClaims: [],
+        rejectedClaims: [],
+        unresolvedUnknowns: [],
+        nextActions: [],
+        evidenceRefs: [],
+      },
+    ]
+    for (let corruptStage = 0; corruptStage < artifacts.length; corruptStage++) {
+      let calls = 0
+      const provider: AdvisoryProvider = {
+        complete: async () => {
+          const index = calls++
+          return index === corruptStage ? { [secret]: 'private value' } : artifacts[index]
+        },
+      }
+      const failure = await conveneCouncil({
+        objective: raw,
+        context: [],
+        strategic: provider,
+        technical: provider,
+      }).catch((error) => error)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error('Expected a schema rejection')
+      expect(failure.message).toBe('Advisory provider returned invalid structured output')
+      expect(failure.message).not.toContain(secret)
+      expect(calls).toBe(corruptStage + 1)
+    }
+  })
   it('reserves councils for meaningful signals', () => {
     expect(
       estimateDirectorValue({

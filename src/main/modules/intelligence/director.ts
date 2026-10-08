@@ -5,6 +5,7 @@ import {
   type IntelligenceContext,
 } from '@shared/intelligence'
 import type { AdvisoryProvider } from './compiler'
+import { parseAdvisoryArtifact } from './artifact-validation'
 
 export type DirectorLevel = 0 | 1 | 2 | 3
 export function estimateDirectorValue(signals: {
@@ -53,7 +54,8 @@ export async function requestDirectorMemo(input: {
     input.context.reduce((n, c) => n + c.text.length, 0) > 32000
   )
     throw new Error('Director material exceeds the bounded request contract')
-  const memo = DirectorMemoSchema.parse(
+  const memo = parseAdvisoryArtifact(
+    DirectorMemoSchema,
     await input.provider.complete(
       BOUNDARY +
         'Produce objective, recommendation, rationale[], alternatives[], risks[], unknowns[], requestedExperiments[], evidenceRefs[], confidence (LOW/MEDIUM/HIGH).',
@@ -97,7 +99,8 @@ export async function conveneCouncil(input: {
     return artifact
   }
   const memo = check(
-    DirectorMemoSchema.parse(
+    parseAdvisoryArtifact(
+      DirectorMemoSchema,
       await input.strategic.complete(
         BOUNDARY +
           'Produce objective, recommendation, rationale[], alternatives[], risks[], unknowns[], requestedExperiments[], evidenceRefs[], confidence (LOW/MEDIUM/HIGH).',
@@ -107,7 +110,8 @@ export async function conveneCouncil(input: {
   )
   input.onArtifact?.({ stage: 'STRATEGIC_MEMO', memo })
   const challenge = check(
-    DirectorChallengeSchema.parse(
+    parseAdvisoryArtifact(
+      DirectorChallengeSchema,
       await input.technical.complete(
         BOUNDARY +
           'Independently evaluate technical feasibility, then challenge the proposal. Do not merely approve it. Produce agreements[], disagreements[], missingEvidence[], proposedChanges[], evidenceRefs[].',
@@ -117,7 +121,8 @@ export async function conveneCouncil(input: {
   )
   input.onArtifact?.({ stage: 'TECHNICAL_CHALLENGE', challenge })
   const synthesis = check(
-    DirectorSynthesisSchema.parse(
+    parseAdvisoryArtifact(
+      DirectorSynthesisSchema,
       await input.strategic.complete(
         BOUNDARY +
           'Produce decision, acceptedClaims[], rejectedClaims[], unresolvedUnknowns[], nextActions[], evidenceRefs[]. Preserve unresolved disagreement. Recommendations are proposals, not execution authorization.',

@@ -136,8 +136,8 @@ test.describe('NEXUS 0.7 control plane', () => {
       await expect(page.getByTestId('run-state')).toHaveAttribute('data-state', 'awaiting_approval')
       const adopted = await waitForOverview(
         page,
-        (o) => o.active.some((i) => i.type === 'mission'),
-        'the mission to be adopted by the queue',
+        (o) => o.active.some((i) => i.type === 'mission' && i.detail === 'Waiting for your approval of the plan.'),
+        'the adopted mission to report its pending plan approval',
       )
       const mission = adopted.active.find((i) => i.type === 'mission')
       expect(mission).toMatchObject({

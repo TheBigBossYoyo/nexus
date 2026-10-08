@@ -8,6 +8,7 @@ import {
 import { CapacityWaitError } from '../capacity/registry'
 import { PlanInferenceError } from './openai'
 import { checkIntentDrift } from './drift'
+import { parseAdvisoryArtifact } from './artifact-validation'
 
 export interface AdvisoryProvider {
   /** Adapters return parsed JSON only after terminal provider success; no host tools are exposed. */
@@ -120,7 +121,7 @@ export async function compileTask(input: {
   try {
     const refs = new Set(context.map((c) => c.id))
     const parse = (value: unknown) => {
-      const output = CompilerOutputSchema.parse(value)
+      const output = parseAdvisoryArtifact(CompilerOutputSchema, value)
       if (output.recommendations.some((r) => r.evidenceRefs.some((id) => !refs.has(id))))
         throw new Error('Compiler returned evidence outside the retrieved scope')
       return output
