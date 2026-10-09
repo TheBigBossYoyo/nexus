@@ -1,6 +1,7 @@
 import { planningWords, strategyWord } from '../../lib/wording'
 import { CompilationPreview } from './CompilationPreview'
 import type { CompilationMode, CompiledTaskSpec } from '@shared/intelligence'
+import { defaultIntentMetadata } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
 import { useEffect, useRef, useState } from 'react'
 import { PRESETS, RUN_MODES, type Preset, type Project, type RunMode } from '@shared/domain'
@@ -134,7 +135,12 @@ export function MissionComposer({ project }: { project: Project }) {
     try {
       setCompiling(true)
       setBlockerMessage('')
-      const spec = await api.invoke('compilation.preview', { projectId: project.id, raw: prompt, mode: compilationMode })
+      const spec = await api.invoke('compilation.preview', {
+        projectId: project.id,
+        raw: prompt,
+        mode: compilationMode,
+        metadata: defaultIntentMetadata(prompt, 'OVERNIGHT'),
+      })
       setCompiledSpec(spec)
       if (spec.status !== 'READY') {
         setConfirmOpen(false)
@@ -151,7 +157,9 @@ export function MissionComposer({ project }: { project: Project }) {
       openRun(out.run.id, out.run.projectId)
     } catch (e) {
       setOvernightError(e instanceof Error ? e.message : String(e))
-    } finally { setCompiling(false) }
+    } finally {
+      setCompiling(false)
+    }
   }
 
   const draft: MissionDraft = {
@@ -241,7 +249,17 @@ export function MissionComposer({ project }: { project: Project }) {
             />
           )}
         </Field>
-        {mode !== 'ask' ? <CompilationPreview projectId={project.id} raw={prompt} mode={compilationMode} onModeChange={setCompilationMode} spec={compiledSpec} onSpec={setCompiledSpec} /> : null}
+        {mode !== 'ask' ? (
+          <CompilationPreview
+            projectId={project.id}
+            raw={prompt}
+            metadata={defaultIntentMetadata(prompt, overnightMode ? 'OVERNIGHT' : 'MISSION')}
+            mode={compilationMode}
+            onModeChange={setCompilationMode}
+            spec={compiledSpec}
+            onSpec={setCompiledSpec}
+          />
+        ) : null}
         {compilationError ? <ErrorNote error={compilationError} /> : null}
         <p ref={blocker} tabIndex={-1} role="status" aria-live="polite" className={blockerMessage ? 'text-small text-text-primary' : 'sr-only'}>
           {blockerMessage}

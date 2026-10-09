@@ -49,6 +49,11 @@ export function composeForTask(
   return composeContext({
     run,
     task,
+    admittedTaskRequests: [
+      ...repos.intelligenceArtifacts.admissionHistory('RUN_INSTRUCTION', run.id),
+      repos.intelligenceArtifacts.admission('TASK_ADDITION', task.id),
+      ...repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', task.id),
+    ].filter((spec) => spec !== null),
     purpose,
     missionCriteria: run.plan?.acceptanceCriteria ?? [],
     dependencies: tasks.filter((t) => upstreamIds.has(t.id)),

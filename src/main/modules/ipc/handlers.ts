@@ -33,10 +33,19 @@ import { createV71Handlers } from './v71-handlers'
 import { createV72Handlers } from './v72-handlers'
 import type { ChatGPTConnection } from '@main/modules/intelligence/connection'
 import { IntelligenceOperations } from '@main/modules/intelligence/operations'
+import { TaskAdmissionService } from '@main/modules/intelligence/admission'
+import {
+  defaultIntentMetadata,
+  type CompilationSelection,
+  type UserIntentMetadata,
+  type CompiledTaskSpec,
+} from '@shared/intelligence'
+import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 
 export interface IpcContext {
   chatgpt?: ChatGPTConnection
   intelligenceOperations?: IntelligenceOperations
+  taskAdmission?: TaskAdmissionService
   repos: Repositories
   git: GitService
   runtime: AgentRuntime
@@ -82,8 +91,40 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
   const projects = new ProjectService(repos, ctx.git)
   const queries = new QueryService(repos, ctx.git)
   const intelligenceOperations = ctx.intelligenceOperations ?? new IntelligenceOperations()
-  const v72 = createV72Handlers(repos, ctx.chatgpt, ctx.git, intelligenceOperations)
+  const taskAdmission =
+    ctx.taskAdmission ??
+    new TaskAdmissionService(repos, ctx.git, ctx.chatgpt, intelligenceOperations)
+  const v72 = createV72Handlers(repos, ctx.chatgpt, ctx.git, intelligenceOperations, taskAdmission)
+  const taskRequest = async (
+    runId: string,
+    raw: string,
+    selection: CompilationSelection,
+    metadata: UserIntentMetadata,
+    taskId?: string,
+  ) => {
+    const run = repos.runs.require(runId)
+    const input = {
+      projectId: run.projectId,
+      raw,
+      mode: selection.compilationMode ?? 'AUTO',
+      metadata,
+      executionScope: { runId, ...(taskId ? { taskId } : {}) },
+    }
+    const id = selection.compiledSpecId ?? (await taskAdmission.preview(input)).id
+    return taskAdmission.validate(input, id)
+  }
   let authCache: AuthStatus | null = null
+  const admitResumedRun = async (runId: string, selection: CompilationSelection) => {
+    if (!selection.compilationMode && !selection.compiledSpecId) return
+    const run = repos.runs.require(runId)
+    if (run.state !== 'paused') throw new NexusError('invalid_state', 'Only a paused mission can be admitted for recovery.')
+    if (run.config.engineeringOwner || repos.programMissions.getByRun(runId) || repos.workspaceTasks.getByRun(runId) || repos.arenaTrials.getByRun(runId))
+      throw new NexusError('invalid_state', 'Resume this internal workload from its parent page.')
+    const raw = run.config.compiledTaskSpec?.rawIntent ?? run.prompt
+    const metadata = run.config.compiledTaskSpec?.userMetadata ?? defaultIntentMetadata(raw)
+    const spec = await taskRequest(runId, raw, selection, metadata)
+    repos.runs.update(runId, { config: { ...run.config, compiledTaskSpec: spec } })
+  }
   const overnight = (): OvernightSupervisor => {
     if (!ctx.overnight) throw new NexusError('runtime_unavailable', 'Overnight Mode is not available in this process')
     return ctx.overnight
@@ -206,9 +247,19 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       })
     }),
     'runs.approvePlan': ({ runId }) => orchestrator.approvePlan(runId),
-    'runs.replan': ({ runId, feedback }) => orchestrator.replan(runId, feedback),
+    'runs.replan': ({ runId, feedback, ...selection }) => intelligenceOperations.serial(`run:${runId}`, async () => {
+      const run = repos.runs.require(runId)
+      if (run.state !== 'awaiting_approval') throw new NexusError('invalid_state', 'Only a plan awaiting approval can be replanned')
+      if (!feedback.trim()) return orchestrator.replan(runId, feedback)
+      const spec = await taskRequest(runId, feedback, selection, defaultIntentMetadata(feedback, 'MISSION_REPLAN'))
+      repos.intelligenceArtifacts.bindAdmission('RUN_INSTRUCTION', runId, spec)
+      return orchestrator.replan(runId, spec.mode === 'EXACT' ? feedback : withAdmittedIntent(feedback, spec))
+    }),
     'runs.pause': ({ runId }) => orchestrator.pauseRun(runId),
-    'runs.resume': ({ runId }) => orchestrator.resumeRun(runId),
+    'runs.resume': async ({ runId, ...selection }) => {
+      await admitResumedRun(runId, selection)
+      return orchestrator.resumeRun(runId)
+    },
     'runs.cancel': ({ runId }) => orchestrator.cancelRun(runId),
     'runs.summary': ({ runId }) => queries.runSummary(runId),
     'runs.diff': ({ runId }) => queries.runDiff(repos.runs.require(runId)),
@@ -217,7 +268,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       const overnightRuns = new Set((ctx.overnight?.active() ?? []).map((o) => o.runId))
       return orchestrator.listRecoverable().filter((r) => !overnightRuns.has(r.run.id))
     },
-    'runs.recover': ({ runId, action }) => orchestrator.recover(runId, action),
+    'runs.recover': async ({ runId, action, ...selection }) => {
+      if (action === 'resume') await admitResumedRun(runId, selection)
+      return orchestrator.recover(runId, action)
+    },
     'runs.cleanup': async ({ runId }) => {
       await orchestrator.cleanupRun(runId)
       return null
@@ -226,15 +280,87 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'tasks.retry': ({ taskId }) => orchestrator.retryTask(taskId),
     'tasks.cancel': ({ taskId }) => orchestrator.cancelTask(taskId),
     'tasks.setPriority': ({ taskId, priority }) => orchestrator.setPriority(taskId, priority),
-    'tasks.add': (input) => orchestrator.addTask(input),
-    'tasks.instruct': ({ taskId, instruction }) => orchestrator.instruct(taskId, instruction),
-    'tasks.resolveBlocker': ({ taskId, note }) => orchestrator.resolveBlocker(taskId, note),
+    'tasks.add': ({ compilationMode, compiledSpecId, ...input }) =>
+      intelligenceOperations.run(async () => {
+        const spec = await taskRequest(
+          input.runId,
+          input.description,
+          {
+            ...(compilationMode ? { compilationMode } : {}),
+            ...(compiledSpecId ? { compiledSpecId } : {}),
+          },
+          {
+            entryPoint: 'TASK_ADDITION',
+            goals: [input.title, input.description],
+            constraints: [],
+            acceptanceCriteria: input.acceptanceCriteria,
+          },
+        )
+        return repos.transaction(() => {
+          const task = orchestrator.addTask(input)
+          repos.intelligenceArtifacts.bindAdmission('TASK_ADDITION', task.id, spec)
+          return task
+        })
+      }),
+    'tasks.instruct': ({ taskId, instruction, ...selection }) =>
+      intelligenceOperations.serial(`task:${taskId}`, async () => {
+        const task = repos.tasks.require(taskId)
+        const spec = await taskRequest(
+          task.runId,
+          instruction,
+          selection,
+          defaultIntentMetadata(instruction, 'TASK_INSTRUCTION'),
+          taskId,
+        )
+        repos.intelligenceArtifacts.bindAdmission('TASK_INSTRUCTION', taskId, spec)
+        return orchestrator.instruct(
+          taskId,
+          spec.mode === 'EXACT' ? instruction : withAdmittedIntent(instruction, spec),
+        )
+      }),
+    'tasks.resolveBlocker': ({ taskId, note, ...selection }) =>
+      intelligenceOperations.serial(`task:${taskId}`, async () => {
+        const current = repos.tasks.require(taskId)
+        if (current.state !== 'blocked') throw new NexusError('invalid_state', `Task is ${current.state}, not blocked`)
+        let spec: CompiledTaskSpec | undefined
+        if (note.trim()) {
+          const task = repos.tasks.require(taskId)
+          spec = await taskRequest(
+            task.runId,
+            note,
+            selection,
+            defaultIntentMetadata(note, 'TASK_INSTRUCTION'),
+            taskId,
+          )
+        }
+        return repos.transaction(() => {
+          const task = repos.tasks.require(taskId)
+          if (task.state !== 'blocked') throw new NexusError('invalid_state', `Task is ${task.state}, not blocked`)
+          if (spec) repos.intelligenceArtifacts.bindAdmission('TASK_INSTRUCTION', taskId, spec)
+          return orchestrator.resolveBlocker(taskId, note)
+        })
+      }),
     'tasks.diff': ({ taskId }) => queries.taskDiff(repos.tasks.require(taskId)),
     // The arbiter's decisions live in an 'arbitration' artifact (the reviews table has no column for them).
     'tasks.reviews': ({ taskId }) => attachArbitration(repos.reviews.listByTask(taskId), repos.artifacts.listByTask(taskId)),
     'tasks.verifications': ({ taskId }) => repos.verifications.listByTask(taskId),
 
-    'criteria.update': ({ criterionId, text }) => orchestrator.updateCriterion(criterionId, text),
+    'criteria.update': ({ criterionId, text, ...selection }) => {
+      const criterion = repos.criteria.require(criterionId)
+      return intelligenceOperations.serial(criterion.taskId ? `task:${criterion.taskId}` : `run:${criterion.runId}`, async () => {
+        const before = repos.criteria.require(criterionId)
+        const spec = await taskRequest(before.runId, text, selection, {
+          ...defaultIntentMetadata(text, 'CRITERION_UPDATE'), acceptanceCriteria: [text],
+        }, before.taskId ?? undefined)
+        return repos.transaction(() => {
+          const current = repos.criteria.require(criterionId)
+          if (current.text !== before.text) throw new NexusError('invalid_state', 'The criterion changed during compilation. Preview again.')
+          const updated = orchestrator.updateCriterion(criterionId, text)
+          repos.intelligenceArtifacts.bindAdmission(before.taskId ? 'TASK_INSTRUCTION' : 'RUN_INSTRUCTION', before.taskId ?? before.runId, spec)
+          return updated
+        })
+      })
+    },
 
     'agents.get': ({ agentId }) => {
       const agent = repos.agents.require(agentId)
@@ -322,14 +448,37 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       return packs.filter((p) => !seen.has(p.id) && seen.add(p.id))
     },
 
-    'overnight.start': ({ confirmed, confirmation, compilationMode, compiledTaskSpecId, ...input }) => intelligenceOperations.run(async () => {
+    'overnight.start': ({
+      confirmed,
+      confirmation,
+      compilationMode,
+      compiledTaskSpecId,
+      ...input
+    }) =>
+      intelligenceOperations.run(async () => {
       const defined = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as typeof input
-      const supervisor = overnight()
-      const selectedMode = compilationMode ?? 'AUTO'
-      const specId = compiledTaskSpecId ?? (await v72['compilation.preview']({ projectId: input.projectId, raw: input.prompt, mode: selectedMode })).id
-      const spec = await v72['compilation.validate']({ projectId: input.projectId, specId, raw: input.prompt, mode: selectedMode })
+        const supervisor = overnight()
+        const selectedMode = compilationMode ?? 'AUTO'
+        const metadata = defaultIntentMetadata(input.prompt, 'OVERNIGHT')
+        const specId =
+          compiledTaskSpecId ??
+          (
+            await v72['compilation.preview']({
+              projectId: input.projectId,
+              raw: input.prompt,
+              mode: selectedMode,
+              metadata,
+            })
+          ).id
+        const spec = await v72['compilation.validate']({
+          projectId: input.projectId,
+          specId,
+          raw: input.prompt,
+          mode: selectedMode,
+          metadata,
+        })
       const snapshot = spec.dependencies.find((d) => d.id === `repository:${input.projectId}`)?.version.split(':')[0]
-      const p = input.policy
+        const p = input.policy
       if (ctx.confirmPower) {
         const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
         const detail = [
@@ -345,7 +494,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
         if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
       }
       return supervisor.start({ ...defined, confirmed, confirmation, compiledTaskSpec: spec, ...(snapshot && snapshot !== 'no-head' ? { expectedHead: snapshot } : {}) })
-    }),
+      }),
     'overnight.startArena': async ({ campaign, policy: p, confirmed, confirmation }) => {
       const supervisor = overnight()
       if (ctx.confirmPower) {

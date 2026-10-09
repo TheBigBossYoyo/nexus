@@ -488,9 +488,24 @@ export interface WorkspaceProgram {
 export const WorkspaceProgramInputSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
-    goal: z.string().trim().min(1).max(4000),
+    goal: z
+      .string()
+      .min(1)
+      .max(4000)
+      .refine((v) => v.trim().length > 0),
     milestones: z
-      .array(z.object({ title: z.string().trim().min(1).max(120), goal: z.string().trim().min(1).max(4000) }).strict())
+      .array(
+        z
+          .object({
+    title: z.string().trim().min(1).max(120),
+            goal: z
+              .string()
+              .min(1)
+              .max(4000)
+              .refine((v) => v.trim().length > 0),
+          })
+          .strict(),
+      )
       .min(1)
       .max(12),
   })

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { BuildIdentity } from './build-identity'
 import type { ChatGPTStatus } from './chatgpt'
 import type { CompiledTaskSpec, DirectorInvocation } from './intelligence'
+import { COMPILATION_MODES, UserIntentMetadataSchema } from './intelligence'
 import {
   ContractKindSchema,
   DependencyKindSchema,
@@ -236,12 +237,42 @@ export const ipcInputs = {
       projectId: Id,
       raw: z.string().min(1).max(32000),
       mode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']),
+      metadata: UserIntentMetadataSchema.optional(),
+      workspaceId: Id.optional(),
+      executionScope: z
+        .union([
+          z.object({ runId: Id, taskId: Id.optional() }).strict(),
+          z.object({ programId: Id }).strict(),
+          z.object({ workspaceMissionId: Id }).strict(),
+          z.object({ workspaceProgramId: Id }).strict(),
+        ])
+        .optional(),
     })
     .strict(),
   'compilation.history': z
     .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
     .strict(),
-  'compilation.validate': z.object({ projectId: Id, specId: Id, raw: z.string().min(1).max(32000), mode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']) }).strict(),
+  'compilation.admission': z
+    .object({ kind: z.enum(['PROGRAM', 'WORKSPACE_MISSION', 'WORKSPACE_PROGRAM']), entityId: Id })
+    .strict(),
+  'compilation.validate': z
+    .object({
+      projectId: Id,
+      specId: Id,
+      raw: z.string().min(1).max(32000),
+      mode: z.enum(COMPILATION_MODES),
+      metadata: UserIntentMetadataSchema.optional(),
+      workspaceId: Id.optional(),
+      executionScope: z
+        .union([
+          z.object({ runId: Id, taskId: Id.optional() }).strict(),
+          z.object({ programId: Id }).strict(),
+          z.object({ workspaceMissionId: Id }).strict(),
+          z.object({ workspaceProgramId: Id }).strict(),
+        ])
+        .optional(),
+    })
+    .strict(),
   'app.info': Empty,
   'app.openDataDir': Empty,
 
@@ -286,15 +317,15 @@ export const ipcInputs = {
     })
     .strict(),
   'runs.approvePlan': z.object({ runId: Id }).strict(),
-  'runs.replan': z.object({ runId: Id, feedback: z.string().max(10_000) }).strict(),
+  'runs.replan': z.object({ runId: Id, feedback: z.string().max(10_000), compilationMode: z.enum(COMPILATION_MODES).optional(), compiledSpecId: Id.optional() }).strict(),
   'runs.pause': z.object({ runId: Id }).strict(),
-  'runs.resume': z.object({ runId: Id }).strict(),
+  'runs.resume': z.object({ runId: Id, compilationMode: z.enum(COMPILATION_MODES).optional(), compiledSpecId: Id.optional() }).strict(),
   'runs.cancel': z.object({ runId: Id }).strict(),
   'runs.summary': z.object({ runId: Id }).strict(),
   'runs.diff': z.object({ runId: Id }).strict(),
   'runs.recoverable': Empty,
   'runs.recover': z
-    .object({ runId: Id, action: z.enum(['resume', 'inspect', 'cancel']) })
+    .object({ runId: Id, action: z.enum(['resume', 'inspect', 'cancel']), compilationMode: z.enum(COMPILATION_MODES).optional(), compiledSpecId: Id.optional() })
     .strict(),
   /** Remove worktrees of a finished run. Branches are kept. */
   'runs.cleanup': z.object({ runId: Id }).strict(),
@@ -312,15 +343,31 @@ export const ipcInputs = {
       suggestedFiles: z.array(z.string()),
       acceptanceCriteria: z.array(z.string().min(1)),
       complexity: ComplexitySchema,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
     })
     .strict(),
-  'tasks.instruct': z.object({ taskId: Id, instruction: z.string().min(1).max(10_000) }).strict(),
-  'tasks.resolveBlocker': z.object({ taskId: Id, note: z.string().max(10_000) }).strict(),
+  'tasks.instruct': z
+    .object({
+      taskId: Id,
+      instruction: z.string().min(1).max(10_000),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
+  'tasks.resolveBlocker': z
+    .object({
+      taskId: Id,
+      note: z.string().max(10_000),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'tasks.diff': z.object({ taskId: Id }).strict(),
   'tasks.reviews': z.object({ taskId: Id }).strict(),
   'tasks.verifications': z.object({ taskId: Id }).strict(),
 
-  'criteria.update': z.object({ criterionId: Id, text: z.string().min(1).max(2000) }).strict(),
+  'criteria.update': z.object({ criterionId: Id, text: z.string().min(1).max(2000), compilationMode: z.enum(COMPILATION_MODES).optional(), compiledSpecId: Id.optional() }).strict(),
 
   'agents.get': z.object({ agentId: Id }).strict(),
   'agents.stop': z.object({ agentId: Id }).strict(),
@@ -522,9 +569,33 @@ export const ipcInputs = {
     .object({
       projectId: Id,
       name: z.string().trim().min(1).max(120),
-      goal: z.string().trim().min(1).max(8000),
-      successCriteria: z.array(z.string().trim().min(1).max(400)).max(10).optional(),
-      constraints: z.array(z.string().trim().min(1).max(400)).max(10).optional(),
+      goal: z
+        .string()
+        .min(1)
+        .max(8000)
+        .refine((v) => v.trim().length > 0),
+      successCriteria: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(400)
+            .refine((v) => v.trim().length > 0),
+        )
+        .max(10)
+        .optional(),
+      constraints: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(400)
+            .refine((v) => v.trim().length > 0),
+        )
+        .max(10)
+        .optional(),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
       preset: z.enum(PROGRAM_PRESETS),
       /** A custom policy; when absent the preset is used as it is. */
       policy: ProgramPolicySchema.optional(),
@@ -532,13 +603,36 @@ export const ipcInputs = {
       start: z.boolean().optional(),
     })
     .strict(),
-  'program.start': z.object({ programId: Id }).strict(),
+  'program.start': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'program.pause': z.object({ programId: Id }).strict(),
-  'program.resume': z.object({ programId: Id }).strict(),
+  'program.resume': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'program.cancel': z.object({ programId: Id }).strict(),
   'program.decidePlan': z.object({ programId: Id, revisionId: Id, accept: z.boolean() }).strict(),
   /** The user asks for a reassessment of the remaining plan. The note is data for the planner, never a command. */
-  'program.replan': z.object({ programId: Id, note: z.string().trim().min(1).max(2000) }).strict(),
+  'program.replan': z
+    .object({
+      programId: Id,
+      note: z
+        .string()
+        .min(1)
+        .max(2000)
+        .refine((v) => v.trim().length > 0),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'backlog.list': z
     .object({ projectId: Id.optional(), programId: Id.optional(), statuses: z.array(z.enum(BACKLOG_STATUSES)).max(6).optional(), limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() })
     .strict(),
@@ -573,17 +667,61 @@ export const ipcInputs = {
   'workspace.addMemory': z
     .object({ workspaceId: Id, kind: z.enum(WORKSPACE_MEMORY_KINDS), title: z.string().trim().min(1).max(160), content: z.string().trim().min(1).max(1500), evidence: z.string().trim().min(1).max(1500), repositories: z.array(WorkspaceKey).min(2).max(20) })
     .strict(),
-  'workspace.createMission': z.object({ workspaceId: Id, goal: z.string().trim().min(1).max(8000), start: z.boolean().optional() }).strict(),
+  'workspace.createMission': z
+    .object({
+      workspaceId: Id,
+      goal: z
+        .string()
+        .min(1)
+        .max(8000)
+        .refine((v) => v.trim().length > 0),
+      start: z.boolean().optional(),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.mission': z.object({ missionId: Id }).strict(),
-  'workspace.startMission': z.object({ missionId: Id }).strict(),
+  'workspace.startMission': z
+    .object({
+      missionId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.decidePlan': z.object({ missionId: Id, accept: z.boolean() }).strict(),
   'workspace.pauseMission': z.object({ missionId: Id }).strict(),
-  'workspace.resumeMission': z.object({ missionId: Id }).strict(),
+  'workspace.resumeMission': z
+    .object({
+      missionId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.cancelMission': z.object({ missionId: Id }).strict(),
   /** A workspace program: an ordered series of cross-repository missions, one per milestone the user wrote. */
-  'workspace.createProgram': z.object({ workspaceId: Id, program: WorkspaceProgramInputSchema, start: z.boolean().optional() }).strict(),
-  'workspace.startProgram': z.object({ programId: Id }).strict(),
-  'workspace.resumeProgram': z.object({ programId: Id }).strict(),
+  'workspace.createProgram': z
+    .object({
+      workspaceId: Id,
+      program: WorkspaceProgramInputSchema,
+      start: z.boolean().optional(),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
+  'workspace.startProgram': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
+  'workspace.resumeProgram': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.cancelProgram': z.object({ programId: Id }).strict(),
   'workspace.prepareRelease': z.object({ missionId: Id }).strict(),
   /** Always refused in 0.5: NEXUS prepares release trains and does not publish them. */
@@ -653,6 +791,7 @@ export interface IpcOutputs {
   'chatgpt.disconnect': ChatGPTStatus
   'chatgpt.manageUsage': null
   'compilation.preview': CompiledTaskSpec
+  'compilation.admission': CompiledTaskSpec | null
   'compilation.history': CompiledTaskSpec[]
   'compilation.validate': CompiledTaskSpec
   'app.info': AppInfo
@@ -752,7 +891,11 @@ export interface IpcOutputs {
   'workspace.addService': Service
   'workspace.registerContract': Contract
   'workspace.addConsumer': ContractConsumer
-  'workspace.captureContract': { version: ContractVersion; result: CompatibilityResult; created: boolean }
+  'workspace.captureContract': {
+    version: ContractVersion
+    result: CompatibilityResult
+    created: boolean
+  }
   'workspace.addMemory': WorkspaceMemoryEntry
   'workspace.createMission': WorkspaceMission
   'workspace.mission': { mission: WorkspaceMission; tasks: CrossRepoTask[] }
@@ -788,7 +931,13 @@ export interface IpcOutputs {
   'runtime.status': RuntimeStatus
   'runtime.workers': WorkersOverview
   /** Starts one worker process without a session and says whether it came up. Uses no provider. */
-  'runtime.workerSelfTest': { ok: boolean; pid: number | null; capabilities: string[]; milliseconds: number; detail: string }
+  'runtime.workerSelfTest': {
+    ok: boolean
+    pid: number | null
+    capabilities: string[]
+    milliseconds: number
+    detail: string
+  }
   /** What the tray shows; read by tests. */
   'runtime.tray': unknown
   'runtime.setDispatchPaused': { paused: boolean }
@@ -797,11 +946,37 @@ export interface IpcOutputs {
   'desktop.connection': ConnectionState
   'desktop.reconnect': ConnectionState
   'security.decisions': SecurityDecisionPage
-  'knowledge.health': { spaces: { space: ContextSpace; name: string; health: ContextGraphHealth | null; refreshes: ContextRefreshJob[] }[]; enabled: boolean; setting: TechniqueSwitch }
-  'knowledge.tree': { parent: ContextNode | null; children: ContextNode[]; total: number; childCounts: Record<string, number> }
+  'knowledge.health': {
+    spaces: {
+      space: ContextSpace
+      name: string
+      health: ContextGraphHealth | null
+      refreshes: ContextRefreshJob[]
+    }[]
+    enabled: boolean
+    setting: TechniqueSwitch
+  }
+  'knowledge.tree': {
+    parent: ContextNode | null
+    children: ContextNode[]
+    total: number
+    childCounts: Record<string, number>
+  }
   'knowledge.node': ContextNodeDetail
   'knowledge.search': ContextNode[]
-  'knowledge.refresh': { sync: { created: number; updated: number; archived: number; restored: number; stale: number; conflicts: number; nodes: number; edges: number }; job: ContextRefreshJob }
+  'knowledge.refresh': {
+    sync: {
+      created: number
+      updated: number
+      archived: number
+      restored: number
+      stale: number
+      conflicts: number
+      nodes: number
+      edges: number
+    }
+    job: ContextRefreshJob
+  }
   'knowledge.confirm': ContextNode
   'knowledge.writeNote': ContextNode
   'knowledge.promote': ContextNode

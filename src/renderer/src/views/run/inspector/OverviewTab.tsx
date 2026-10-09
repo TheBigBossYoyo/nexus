@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, type Task } from '@shared/domain'
 import {
+  defaultIntentMetadata,
+  type CompilationMode,
+  type CompiledTaskSpec,
+} from '@shared/intelligence'
+import { CompilationPreview } from '../../projects/CompilationPreview'
+import {
   Button,
+  ErrorNote,
   KeyValue,
   Markdown,
   Notice,
@@ -58,6 +65,10 @@ export function OverviewTab({ task }: { task: Task }) {
   const [priority, setPriorityValue] = useState(task.priority)
   const [note, setNote] = useState('')
   const [instruction, setInstruction] = useState('')
+  const [instructionMode, setInstructionMode] = useState<CompilationMode>('AUTO')
+  const [instructionSpec, setInstructionSpec] = useState<CompiledTaskSpec | null>(null)
+  const [resolutionMode, setResolutionMode] = useState<CompilationMode>('AUTO')
+  const [resolutionSpec, setResolutionSpec] = useState<CompiledTaskSpec | null>(null)
   useEffect(() => setPriorityValue(task.priority), [task.id, task.priority])
 
   const terminal = TERMINAL_TASK_STATES.includes(task.state)
@@ -127,7 +138,11 @@ export function OverviewTab({ task }: { task: Task }) {
             <Textarea
               rows={2}
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => {
+                setNote(e.target.value)
+                setResolutionSpec(null)
+              }}
+              disabled={resolve.isPending}
               placeholder="Resolution note (optional)"
               aria-label="Blocker resolution note"
               data-testid="blocker-note"
@@ -136,12 +151,43 @@ export function OverviewTab({ task }: { task: Task }) {
               <Button
                 size="sm"
                 loading={resolve.isPending}
-                onClick={() => resolve.mutate({ taskId: task.id, note: note.trim() }, { onSuccess: () => setNote('') })}
+                onClick={() =>
+                  resolve.mutate(
+                    {
+                      taskId: task.id,
+                      note,
+                      compilationMode: resolutionMode,
+                      ...(resolutionSpec ? { compiledSpecId: resolutionSpec.id } : {}),
+                    },
+                    {
+                      onSuccess: () => {
+                        setNote('')
+                        setResolutionSpec(null)
+                      },
+                    },
+                  )
+                }
                 data-testid="resolve-blocker"
               >
                 Mark blocker resolved
               </Button>
             </div>
+            {note.trim() ? (
+              <CompilationPreview
+                projectId={detail.run.projectId}
+                raw={note}
+                executionScope={{ runId: detail.run.id, taskId: task.id }}
+                metadata={defaultIntentMetadata(note, 'TASK_INSTRUCTION')}
+                mode={resolutionMode}
+                onModeChange={(mode) => {
+                  setResolutionMode(mode)
+                  setResolutionSpec(null)
+                }}
+                spec={resolutionSpec}
+                onSpec={setResolutionSpec}
+              />
+            ) : null}
+            {resolve.isError ? <ErrorNote error={resolve.error} /> : null}
           </div>
         </Notice>
       ) : null}
@@ -190,19 +236,26 @@ export function OverviewTab({ task }: { task: Task }) {
         ]}
       />
 
-      <Group title="Observed usage" aside={<SourceLabel confidence="OBSERVED" source="LOCAL_AGGREGATION" />} testId="task-usage">
+      <Group
+        title="Observed usage"
+        aside={<SourceLabel confidence="OBSERVED" source="LOCAL_AGGREGATION" />}
+        testId="task-usage"
+      >
         {agents.length === 0 ? (
           <p className="m-0 text-small text-text-muted">No Claude session has run for this task yet.</p>
         ) : (
           <div className="flex gap-6 text-body">
             <span>
-              <span className="tnum font-semibold">{formatTokens(inputTokens)}</span> <span className="text-text-muted">input</span>
+              <span className="tnum font-semibold">{formatTokens(inputTokens)}</span>{' '}
+              <span className="text-text-muted">input</span>
             </span>
             <span>
-              <span className="tnum font-semibold">{formatTokens(outputTokens)}</span> <span className="text-text-muted">output</span>
+              <span className="tnum font-semibold">{formatTokens(outputTokens)}</span>{' '}
+              <span className="text-text-muted">output</span>
             </span>
             <span>
-              <span className="tnum font-semibold">{turns}</span> <span className="text-text-muted">turns</span>
+              <span className="tnum font-semibold">{turns}</span>{' '}
+              <span className="text-text-muted">turns</span>
             </span>
           </div>
         )}
@@ -290,10 +343,13 @@ export function OverviewTab({ task }: { task: Task }) {
         <Textarea
           rows={3}
           value={instruction}
-          onChange={(e) => setInstruction(e.target.value)}
+          onChange={(e) => {
+            setInstruction(e.target.value)
+            setInstructionSpec(null)
+          }}
           placeholder="Guidance for the agent working on this task"
           aria-label="Instruction"
-          disabled={terminal}
+          disabled={terminal || instruct.isPending}
           data-testid="task-instruction"
         />
         <div>
@@ -302,12 +358,41 @@ export function OverviewTab({ task }: { task: Task }) {
             variant="primary"
             disabled={terminal || instruction.trim() === ''}
             loading={instruct.isPending}
-            onClick={() => instruct.mutate({ taskId: task.id, instruction: instruction.trim() }, { onSuccess: () => setInstruction('') })}
+            onClick={() =>
+              instruct.mutate(
+                {
+                  taskId: task.id,
+                  instruction,
+                  compilationMode: instructionMode,
+                  ...(instructionSpec ? { compiledSpecId: instructionSpec.id } : {}),
+                },
+                {
+                  onSuccess: () => {
+                    setInstruction('')
+                    setInstructionSpec(null)
+                  },
+                },
+              )
+            }
             data-testid="task-instruct"
           >
             Send
           </Button>
         </div>
+        <CompilationPreview
+          projectId={detail.run.projectId}
+          raw={instruction}
+          executionScope={{ runId: detail.run.id, taskId: task.id }}
+          metadata={defaultIntentMetadata(instruction, 'TASK_INSTRUCTION')}
+          mode={instructionMode}
+          onModeChange={(mode) => {
+            setInstructionMode(mode)
+            setInstructionSpec(null)
+          }}
+          spec={instructionSpec}
+          onSpec={setInstructionSpec}
+        />
+        {instruct.isError ? <ErrorNote error={instruct.error} /> : null}
       </Group>
     </div>
   )

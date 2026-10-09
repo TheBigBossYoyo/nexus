@@ -56,11 +56,18 @@ test.describe('UI review capture', () => {
       await expect.poll(async () => (await invoke(page, 'runs.get', { runId })).run.state, { timeout: 180_000, intervals: [1000] }).toMatch(/completed|failed|awaiting_approval/)
 
       // 0.4: one program that ran to completion (with a rejection, backlog and memory), one waiting for approval.
-      const finished = await invoke(page, 'program.create', { projectId: project.id, name: 'Modules program', goal: 'Build the API and UI modules, integrate them, then harden the integration.', preset: 'autonomous', start: true })
+      const finished = await invoke(page, 'program.create', {
+        projectId: project.id,
+        name: 'Modules program', goal: 'Build the API and UI modules, integrate them, then harden the integration.',
+        preset: 'autonomous',
+        start: true,
+        compilationMode: 'EXACT',
+      })
       await expect.poll(async () => (await invoke(page, 'program.get', { programId: finished.id })).program.state, { timeout: 400_000, intervals: [1000] }).toMatch(/COMPLETED|BLOCKED|FAILED/)
       const awaiting = await invoke(page, 'program.create', {
         projectId: project.id,
         name: 'Billing rework',
+        compilationMode: 'EXACT',
         goal: 'Rework the billing module in small verified steps.',
         preset: 'conservative',
         schedule: { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' }] },

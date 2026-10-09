@@ -1,10 +1,13 @@
 # NEXUS 0.7.2 development checkpoint
 
-Status: **PARTIAL**, 2026-10-08. This is a checkpoint of ongoing development, not a release verdict or a completed implementation of the supplied specification.
+Status: **PARTIAL**, 2026-10-09. Ongoing development; this is not a release verdict or a completed implementation of the supplied specification.
 
 Branch: `nexus-0.7.2-director-ui-compiler`. Parent: `nexus-0.7.1-token-intelligence` at `59e0502`. Main, release tags and remotes have not been changed. Package identity is `0.7.2-development`.
 
 ## Implemented and connected
+
+- Canonical compiler admission now covers Programs, Workspace Missions/Programs, task additions/instructions, replanning feedback and criterion edits. Migration 14 separates immutable intent metadata and canonical references from artifact bodies, binds engineering entities and retains ordered amendments. Scheduler starts reject stale drafts; production recovery guards legacy user Missions and internal work inherits parent admission. Inspector/history and explicit resume previews preserve raw text and retained execution snapshots. This block is undergoing focused/Electron validation; no final all-entry acceptance is claimed.
+- Admission validation: 499 tests across 25 focused files passed; 84 intelligence tests passed after the final snapshot refinement. Node/renderer typechecks, changed-file lint and build passed. Six current-build Electron scenarios passed, including stale queue refusal, root/amendment preservation, full Program execution and cross-repository Workspace verification. These do not replace the eventual full stable-source regression or complete UI/accessibility matrix.
 
 - Runtime-owned official ChatGPT sign-in: dynamic registration, persistent host identity, loopback callback, PKCE/state/nonce, signed identity validation, isolated registrations, protected atomic credential storage and serialized rotating refresh. Public model catalog and streamed Responses adapter; no API-key fallback or host tools.
 - The user's Plus account completed the official sign-in and granted plan-use scope in an isolated development profile. Seven catalog models were returned; the user selected GPT-6.1-Sol. At this checkpoint paid-credit confirmation remains false and **no live inference request has been sent**. Browser sign-in and catalog success do not prove inference entitlement, quality, or quota.
@@ -53,7 +56,7 @@ The protected Plus profile was reopened in the current development app and the o
 
 ## Required work still open
 
-1. Complete compiler entry boundaries for Programs, Workspaces and user engineering queue items, including canonical intent references, explicit goal/constraint metadata and stale-start checks. Current coverage is engineering missions and Overnight missions only.
+1. Finish canonical admission breadth and E2E acceptance. Program, Workspace and user task entry boundaries, immutable metadata, canonical references, stale queue starts and recovery protections are implemented; final entry audit and stable-source acceptance remain.
 2. Complete typed compiler passes, explicit consequential user decisions, canonical-reference storage and inspection/history integration. Current compiler development is bounded but does not implement every requested pass or eliminate duplicated snapshots.
 3. Wire the technical adapter and Director escalation orchestration after capacity/role quality admission; implement durable routing/escalation artifacts and outcome learning. Real technical/council validation remains deferred.
 4. Integrate the capacity/quality kernel with global worker scheduling, reserves, provider-scoped waits, recovery and coherent failover. Current Claude dispatch/recovery continues through the inherited machinery.

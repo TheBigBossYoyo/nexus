@@ -49,6 +49,7 @@ import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
 import { Core } from './core'
+import { assertRunAdmission } from '@main/modules/intelligence/run-admission'
 import { buildTaskEvidence } from './evidence'
 import type { OrchestratorDeps } from './deps'
 import type { InsertTaskSpec } from './graph-service'
@@ -597,6 +598,7 @@ export class Orchestrator implements PipelineHost {
   async approvePlan(runId: string): Promise<Run> {
     const run = this.deps.repos.runs.require(runId)
     if (run.state !== 'awaiting_approval') throw new NexusError('invalid_state', `Run is ${run.state}, not awaiting approval`)
+    if (this.deps.requireEngineeringAdmission) assertRunAdmission(this.deps.repos, run)
     const pending = this.deps.repos.approvals.listPending(runId).find((a) => a.kind === 'plan')
     if (pending) {
       // Resolving the request re-enters through onApprovalResolved, which starts execution.
@@ -629,6 +631,7 @@ export class Orchestrator implements PipelineHost {
 
   private async startExecution(runId: string): Promise<void> {
     const { repos, bus } = this.deps
+    if (this.deps.requireEngineeringAdmission) assertRunAdmission(repos, repos.runs.require(runId))
     bus.transaction(() => {
       for (const task of repos.tasks.listByState(runId, 'draft')) {
         this.core.setTaskState(task.id, 'ready')
@@ -695,6 +698,12 @@ export class Orchestrator implements PipelineHost {
     const { repos, bus } = this.deps
     const run = repos.runs.get(runId)
     if (this.closing || !run || !ACTIVE_RUN_STATES.includes(run.state)) return
+    if (this.deps.requireEngineeringAdmission) {
+      try { assertRunAdmission(repos, run) } catch (error) {
+        await this.pauseRun(runId, 'user', errorMessage(error))
+        return
+      }
+    }
 
     // The limit bounds active time: paused intervals (user, quota, recovery) do not count, and a resume
     // after the limit paused the run grants a fresh window.
@@ -1126,6 +1135,7 @@ export class Orchestrator implements PipelineHost {
     const { repos, bus } = this.deps
     const run = repos.runs.require(runId)
     if (run.state !== 'paused') throw new NexusError('invalid_state', `Run is ${run.state}, not paused`)
+    if (this.deps.requireEngineeringAdmission) assertRunAdmission(repos, run)
     await this.settle(runId)
     const target = resumeTarget(run)
     // Every resume reconciles first (recovery 'inspect' included): a merge interrupted by a crash would

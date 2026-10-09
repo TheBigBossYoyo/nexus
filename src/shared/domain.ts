@@ -277,6 +277,8 @@ export interface Project {
 export interface RunConfig {
   /** Server-validated snapshot from the user-entry compiler; absent on internal/legacy runs. */
   compiledTaskSpec?: CompiledTaskSpec
+  /** Main-process provenance for internal subtasks; unavailable in user IPC inputs. */
+  engineeringOwner?: { kind: 'PROGRAM' | 'WORKSPACE_MISSION'; id: string }
   maxParallelAgents: number
   maxTurnsPerAgent: number
   maxRetriesPerTask: number

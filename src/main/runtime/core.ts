@@ -2,6 +2,7 @@ import { mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
 import { IntelligenceOperations } from '../modules/intelligence/operations'
+import { TaskAdmissionService } from '../modules/intelligence/admission'
 import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
 import { release } from 'node:os'
@@ -301,7 +302,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   policy.ensureDefault()
   attachOutcomeRecording(bus, policy)
 
-  const orchestrator = new Orchestrator({ repos, bus, runtime, git, worktrees: new WorktreeManager(git, worktreesDir), push, logger, strategies: policy })
+  const orchestrator = new Orchestrator({ repos, bus, runtime, git, worktrees: new WorktreeManager(git, worktreesDir), push, logger, strategies: policy, requireEngineeringAdmission: true })
   orchestrator.setDispatchGate(usage)
   // Runs that were active when the runtime last stopped are paused, never judged: what became of their
   // sessions is read from the worktrees when they are resumed.
@@ -406,11 +407,21 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   )
   // Programs: long-horizon goals pursued across milestones. The engine owns the state; missions and the
   // reasoning sessions (plan, verify, reassess) are ordinary runs of the orchestrator.
+  const chatgpt = new ChatGPTConnection(
+    dataDir,
+    host.protectedStorage,
+    host.openBrowser,
+    fetch,
+    new CapacityRegistry(repos.intelligenceArtifacts),
+  )
+  const intelligenceOperations = new IntelligenceOperations()
+  const taskAdmission = new TaskAdmissionService(repos, git, chatgpt, intelligenceOperations)
   const programs = new ProgramEngine({
     repos,
     bus,
     git,
     host: orchestrator,
+    admission: taskAdmission,
     usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
     evidence: () => {
       const evidence = policy.overview().evidence
@@ -436,6 +447,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     bus,
     git,
     host: orchestrator,
+    admission: taskAdmission,
     projects: new ProjectService(repos, git, logger),
     usage: { canDispatch: () => usage.canDispatch(), onChange: (listener) => usage.onChange(listener) },
     push,
@@ -745,11 +757,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     isPackaged: host.isPackaged,
   })
 
-  const chatgpt = new ChatGPTConnection(dataDir, host.protectedStorage, host.openBrowser, fetch, new CapacityRegistry(repos.intelligenceArtifacts))
-  const intelligenceOperations = new IntelligenceOperations()
   const handlers = createIpcHandlers({
     chatgpt,
     intelligenceOperations,
+    taskAdmission,
     repos,
     git,
     runtime,

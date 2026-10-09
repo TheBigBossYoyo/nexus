@@ -28,7 +28,19 @@ export function createV4Handlers(ctx: V4Context): V4Handlers {
     'program.list': ({ projectId, limit, offset }) => programs().list({ ...(projectId ? { projectId } : {}), ...(limit !== undefined ? { limit } : {}), ...(offset !== undefined ? { offset } : {}) }),
     'program.get': ({ programId }) => programs().detail(programId),
     'program.presets': () => PROGRAM_POLICY_PRESETS,
-    'program.create': ({ projectId, name, goal, successCriteria, constraints, preset, policy, schedule, start }) => {
+    'program.create': ({
+      projectId,
+      name,
+      goal,
+      successCriteria,
+      constraints,
+      preset,
+      policy,
+      schedule,
+      start,
+      compilationMode,
+      compiledSpecId,
+    }) => {
       // A custom policy is used as given (already validated by the channel schema); otherwise the preset.
       const chosen: ProgramPolicy = policy ?? PROGRAM_POLICY_PRESETS[preset]
       return programs().create({
@@ -40,14 +52,19 @@ export function createV4Handlers(ctx: V4Context): V4Handlers {
         ...(constraints ? { constraints } : {}),
         ...(schedule !== undefined ? { schedule } : {}),
         ...(start !== undefined ? { start } : {}),
+        ...(compilationMode ? { compilationMode } : {}),
+        ...(compiledSpecId ? { compiledSpecId } : {}),
       })
     },
-    'program.start': ({ programId }) => programs().start(programId),
+    'program.start': ({ programId, ...selection }) =>
+      programs().start(programId, Object.keys(selection).length ? selection : undefined),
     'program.pause': ({ programId }) => programs().pause(programId),
-    'program.resume': ({ programId }) => programs().resume(programId),
+    'program.resume': ({ programId, ...selection }) =>
+      programs().resume(programId, Object.keys(selection).length ? selection : undefined),
     'program.cancel': ({ programId }) => programs().cancel(programId),
     'program.decidePlan': ({ programId, revisionId, accept }) => programs().decidePlan(programId, revisionId, accept),
-    'program.replan': ({ programId, note }) => programs().requestUserReplan(programId, note),
+    'program.replan': ({ programId, note, ...selection }) =>
+      programs().requestUserReplan(programId, note, selection),
     'backlog.list': ({ projectId, programId, statuses, limit, offset }) =>
       repos.backlog.list({ ...(projectId ? { projectId } : {}), ...(programId ? { programId } : {}), ...(statuses ? { statuses } : {}), ...(limit !== undefined ? { limit } : {}), ...(offset !== undefined ? { offset } : {}) }),
     'backlog.setStatus': ({ itemId, status }) => programs().setBacklogStatus(itemId, status),

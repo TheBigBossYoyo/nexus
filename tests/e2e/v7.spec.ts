@@ -168,6 +168,7 @@ test.describe('NEXUS 0.7 control plane', () => {
       const program = await invoke(page, 'program.create', {
         projectId,
         name: 'Queued program',
+        compilationMode: 'EXACT',
         goal: 'Build the modules and harden them.',
         preset: 'autonomous',
         start: false,
@@ -414,6 +415,7 @@ test.describe('NEXUS 0.7 control plane', () => {
       const program = await invoke(page, 'program.create', {
         projectId,
         name: 'Worker program',
+        compilationMode: 'EXACT',
         goal: 'Build the modules and harden them.',
         preset: 'autonomous',
         start: false,

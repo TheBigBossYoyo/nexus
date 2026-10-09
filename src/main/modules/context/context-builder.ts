@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import type { CompiledTaskSpec } from '@shared/intelligence'
+import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 import { renderOriginalIntent, renderCompiledAdvice } from './compiled'
 import type {
   AgentPurpose,
@@ -61,6 +63,7 @@ export interface ContextPackInput {
   facts?: RepositoryFact[]
   /** v0.7.1: the Context Graph section (map, selected nodes, tool hint), already rendered as data. */
   graphText?: string | null
+  admittedTaskRequests?: CompiledTaskSpec[]
   /** v0.2: significant findings of the task's latest review that this session must address. */
   reviewFindings?: ReviewFinding[]
   messages: Message[]
@@ -162,8 +165,16 @@ export function buildContextPack(input: ContextPackInput): {
 
   return assemble([
     { name: 'Task', body: `Purpose: ${input.purpose}\n\n${renderTaskSpec(task)}` },
-    { name: 'Original user request', body: input.run.config.compiledTaskSpec ? renderOriginalIntent(input.run) : null },
+    {
+      name: 'Original user request', body: input.run.config.compiledTaskSpec ? renderOriginalIntent(input.run) : null,
+    },
     { name: 'Compiled specification with provenance', body: renderCompiledAdvice(input.run) },
+    {
+      name: 'Admitted user task requests',
+      body:
+          input.admittedTaskRequests?.length ? 'Ordered user amendments, oldest first. A later explicit correction supersedes only what the user clearly changed; unresolved conflicts require a user decision.\n' + input.admittedTaskRequests.map((spec) => withAdmittedIntent('', spec)).join('\n\n') :
+        null,
+    },
     { name: 'Acceptance criteria', body: criteriaSection(task, input.missionCriteria) },
     { name: 'Results of dependency tasks', body: dependencies },
     { name: 'Relevant decisions', body: decisions },
@@ -175,7 +186,9 @@ export function buildContextPack(input: ContextPackInput): {
     { name: 'Repository state', body: truncate(repoText, SECTION_LIMITS.repo) },
     { name: 'Attempt', body: attempt },
     { name: 'Failure to address', body: failure },
-    { name: 'Handoff from previous session', body: extra?.handoff ? renderHandoff(extra.handoff) : null },
+    {
+      name: 'Handoff from previous session', body: extra?.handoff ? renderHandoff(extra.handoff) : null,
+    },
     { name: 'User instructions', body: instructions },
   ])
 }

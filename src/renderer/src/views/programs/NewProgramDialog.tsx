@@ -1,9 +1,20 @@
 import { useEffect, useState } from 'react'
+import type { CompilationMode, CompiledTaskSpec } from '@shared/intelligence'
+import { CompilationPreview } from '../projects/CompilationPreview'
 import { PROGRAM_POLICY_PRESETS, PROGRAM_PRESETS, type ProgramPreset } from '@shared/program'
 import { useProjects } from '../../lib/queries'
 import { useCreateProgram, useProgramPresets } from '../../lib/queries-v4'
 import { useCurrentProject } from '../../app/useCurrent'
-import { Button, Dialog, Field, Input, Select, SegmentedControl, Textarea } from '../../components/ui'
+import {
+  Button,
+  Dialog,
+  ErrorNote,
+  Field,
+  Input,
+  Select,
+  SegmentedControl,
+  Textarea,
+} from '../../components/ui'
 import { Check } from '../projects/OvernightPanel'
 import {
   buildCreateInput,
@@ -37,13 +48,25 @@ export function NewProgramDialog({
   const create = useCreateProgram()
   const [form, setForm] = useState<ProgramForm>(() => defaultProgramForm(current?.id ?? null))
   const [touched, setTouched] = useState<ReadonlySet<FormField>>(new Set())
+  const [compilationMode, setCompilationMode] = useState<CompilationMode>('AUTO')
+  const [spec, setSpec] = useState<CompiledTaskSpec | null>(null)
+  const input = buildCreateInput(form, false)
+  const metadata = {
+    entryPoint: 'PROGRAM' as const,
+    goals: [form.goal],
+    constraints: input.constraints ?? [],
+    acceptanceCriteria: input.successCriteria ?? [],
+  }
 
   // A project that becomes known (or changes) after the dialog was first rendered is the default.
   useEffect(() => {
     if (open) setForm((f) => (f.projectId ? f : { ...f, projectId: current?.id ?? null }))
   }, [open, current?.id])
 
-  const patch = (p: Partial<ProgramForm>) => setForm((f) => ({ ...f, ...p }))
+  const patch = (p: Partial<ProgramForm>) => {
+    setSpec(null)
+    setForm((f) => ({ ...f, ...p }))
+  }
   const touch = (f: FormField) => setTouched((t) => new Set(t).add(f))
   const check = validateProgramForm(form)
   const err = (f: FormField) => (touched.has(f) ? check.errors[f] : undefined)
@@ -56,14 +79,22 @@ export function NewProgramDialog({
       setTouched(new Set<FormField>(['project', 'name', 'goal', 'successCriteria', 'constraints', 'days', 'start', 'end']))
       return
     }
-    create.mutate(buildCreateInput(form, start), {
-      onSuccess: (p) => {
-        setForm(defaultProgramForm(form.projectId))
-        setTouched(new Set())
-        onClose()
-        onCreated(p.id)
+    create.mutate(
+      {
+        ...buildCreateInput(form, start),
+        compilationMode,
+        ...(spec ? { compiledSpecId: spec.id } : {}),
       },
-    })
+      {
+        onSuccess: (p) => {
+        setForm(defaultProgramForm(form.projectId))
+          setTouched(new Set())
+          setSpec(null)
+          onClose()
+          onCreated(p.id)
+        },
+      },
+    )
   }
 
   return (
@@ -88,7 +119,10 @@ export function NewProgramDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-3">
+      <fieldset
+        disabled={create.isPending}
+        className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0"
+      >
         <p className="m-0 text-small text-text-secondary">
           A program pursues one engineering goal across several milestones. NEXUS plans the milestones, runs a mission for each, verifies the result and
           reassesses the plan as it goes. The work accumulates on a program branch; your working tree is never touched.
@@ -261,7 +295,22 @@ export function NewProgramDialog({
             </div>
           ) : null}
         </section>
-      </div>
+        {form.projectId ? (
+          <CompilationPreview
+            projectId={form.projectId}
+            raw={form.goal}
+            mode={compilationMode}
+            onModeChange={(mode) => {
+              setCompilationMode(mode)
+              setSpec(null)
+            }}
+            spec={spec}
+            onSpec={setSpec}
+            metadata={metadata}
+          />
+        ) : null}
+        {create.isError ? <ErrorNote error={create.error} /> : null}
+      </fieldset>
     </Dialog>
   )
 }

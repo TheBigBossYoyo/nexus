@@ -27,6 +27,8 @@ export interface StrategyResolver {
 
 /** Everything the orchestration layer needs, injected so scenarios can run with a fake runtime. */
 export interface OrchestratorDeps {
+  /** Production recovery/dispatch requires canonical admission; isolated legacy scenarios opt in. */
+  requireEngineeringAdmission?: boolean
   repos: Repositories
   bus: EventBus
   runtime: AgentRuntime

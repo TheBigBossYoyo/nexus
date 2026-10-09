@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import type { AcceptanceCriterion, CommandResult, Message, Review, Verification } from '@shared/domain'
-import { Badge, Button, CodeBlock, Input } from '../../components/ui'
+import { Badge, Button, CodeBlock, Input, ErrorNote } from '../../components/ui'
 import { formatDateTime, formatDuration } from '../../lib/format'
 import { severityStatus, type Tone } from '../../lib/status'
-import { useUpdateCriterion } from '../../lib/queries'
+import { useUpdateCriterion, useRunDetail } from '../../lib/queries'
+import { CompilationPreview } from '../projects/CompilationPreview'
+import { defaultIntentMetadata, type CompilationMode, type CompiledTaskSpec } from '@shared/intelligence'
 import { readArbitration } from '../../lib/v2logic'
 import { FindingCard } from './FindingCard'
 import { sortFindings } from './diffModel'
@@ -143,11 +145,33 @@ export function VerificationCard({ verification: v, label }: { verification: Ver
 
 const CRITERION_TONE: Record<AcceptanceCriterion['status'], Tone> = { pending: 'neutral', passed: 'success', failed: 'danger' }
 
+function CriterionEditor({ criterion: c, close }: { criterion: AcceptanceCriterion; close: () => void }) {
+  const update = useUpdateCriterion()
+  const detail = useRunDetail(c.runId)
+  const [text, setText] = useState(c.text)
+  const [mode, setMode] = useState<CompilationMode>('AUTO')
+  const [spec, setSpec] = useState<CompiledTaskSpec | null>(null)
+  return <form onSubmit={e => {
+    e.preventDefault()
+    if (!text.trim() || text === c.text) return close()
+    update.mutate({ criterionId: c.id, text, compilationMode: mode, ...(spec ? { compiledSpecId: spec.id } : {}) }, { onSuccess: close })
+  }}>
+    <fieldset disabled={update.isPending} className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+      <Input value={text} onChange={e => { setText(e.target.value); setSpec(null) }} maxLength={2000} aria-label="Criterion text" data-testid="criterion-input" />
+      {detail.data ? <CompilationPreview projectId={detail.data.run.projectId} raw={text} mode={mode} spec={spec}
+        metadata={{ ...defaultIntentMetadata(text, 'CRITERION_UPDATE'), acceptanceCriteria: [text] }}
+        executionScope={{ runId: c.runId, ...(c.taskId ? { taskId: c.taskId } : {}) }}
+        onModeChange={m => { setMode(m); setSpec(null) }} onSpec={setSpec} /> : null}
+      {update.error ?? detail.error ? <ErrorNote error={update.error ?? detail.error} /> : null}
+      <div className="flex gap-2"><Button type="submit" size="sm" variant="primary" disabled={!detail.data || !text.trim()} loading={update.isPending} data-testid="criterion-save">Save</Button>
+        <Button size="sm" onClick={close}>Cancel</Button></div>
+    </fieldset>
+  </form>
+}
+
 /** Acceptance criteria with status and evidence; the text can be edited in place. */
 export function CriteriaList({ criteria, emptyText }: { criteria: readonly AcceptanceCriterion[]; emptyText: string }) {
-  const update = useUpdateCriterion()
   const [editing, setEditing] = useState<string | null>(null)
-  const [text, setText] = useState('')
 
   if (criteria.length === 0) return <div className="p-3 text-text-secondary">{emptyText}</div>
   return (
@@ -155,26 +179,7 @@ export function CriteriaList({ criteria, emptyText }: { criteria: readonly Accep
       {criteria.map((c) => (
         <li key={c.id} className="flex flex-col gap-1 rounded-md border bg-surface p-2" data-testid={`criterion-${c.id}`} data-status={c.status}>
           {editing === c.id ? (
-            <form
-              className="flex items-center gap-1.5"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const next = text.trim()
-                if (next === '' || next === c.text) {
-                  setEditing(null)
-                  return
-                }
-                update.mutate({ criterionId: c.id, text: next }, { onSuccess: () => setEditing(null) })
-              }}
-            >
-              <Input value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} aria-label="Criterion text" data-testid="criterion-input" />
-              <Button type="submit" size="sm" variant="primary" loading={update.isPending} data-testid="criterion-save">
-                Save
-              </Button>
-              <Button size="sm" onClick={() => setEditing(null)}>
-                Cancel
-              </Button>
-            </form>
+            <CriterionEditor criterion={c} close={() => setEditing(null)} />
           ) : (
             <div className="flex items-start gap-2">
               <Badge tone={CRITERION_TONE[c.status]}>{c.status}</Badge>
@@ -183,7 +188,6 @@ export function CriteriaList({ criteria, emptyText }: { criteria: readonly Accep
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  setText(c.text)
                   setEditing(c.id)
                 }}
                 data-testid="criterion-edit"

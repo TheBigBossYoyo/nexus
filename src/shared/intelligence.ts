@@ -9,6 +9,43 @@ export const COMPILATION_MODES = [
   'COUNCIL',
 ] as const
 export type CompilationMode = (typeof COMPILATION_MODES)[number]
+/** Only the user-entry adapter may supply these fields; model outputs cannot claim this provenance. */
+export const UserIntentMetadataSchema = z
+  .object({
+    entryPoint: z.enum([
+      'MISSION',
+      'MISSION_REPLAN',
+      'CRITERION_UPDATE',
+      'OVERNIGHT',
+      'PROGRAM',
+      'PROGRAM_REPLAN',
+      'WORKSPACE_MISSION',
+      'WORKSPACE_PROGRAM',
+      'TASK_ADDITION',
+      'TASK_INSTRUCTION',
+    ]),
+    goals: z.array(z.string().min(1).max(32000)).max(20),
+    constraints: z.array(z.string().min(1).max(400)).max(20),
+    acceptanceCriteria: z.array(z.string().min(1).max(2000)).max(20),
+  })
+  .strict()
+  .refine((m) => JSON.stringify(m).length <= 64000, 'Explicit metadata needs bounded refinement')
+export type UserIntentMetadata = z.infer<typeof UserIntentMetadataSchema>
+export function defaultIntentMetadata(
+  raw: string,
+  entryPoint: UserIntentMetadata['entryPoint'] = 'MISSION',
+): UserIntentMetadata {
+  return { entryPoint, goals: [raw], constraints: [], acceptanceCriteria: [] }
+}
+export type CompilationExecutionScope =
+  | { runId: string; taskId?: string }
+  | { programId: string }
+  | { workspaceMissionId: string }
+  | { workspaceProgramId: string }
+export interface CompilationSelection {
+  compilationMode?: CompilationMode
+  compiledSpecId?: string
+}
 export const Text = z.string().min(1).max(4000)
 const Refs = z.array(z.string().min(1).max(200)).max(30)
 export const RecommendationSchema = z
@@ -110,6 +147,11 @@ export interface CompiledTaskSpec {
   id: string
   projectId: string
   rawIntent: string
+  /** Canonical immutable record; rawIntent is hydrated for IPC and execution compatibility. */
+  intentId?: string
+  userMetadata?: UserIntentMetadata
+  workspaceId?: string
+  executionScope?: CompilationExecutionScope
   requestedMode: CompilationMode
   mode: Exclude<CompilationMode, 'AUTO'>
   status: 'READY' | 'USER_DECISION_REQUIRED' | 'WAITING_FOR_PROVIDER'

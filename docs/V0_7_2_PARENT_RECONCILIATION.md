@@ -15,4 +15,9 @@ Advisory models cannot authorize execution, alter deterministic policy or remove
 
 The 0.7.2 additions preserve the inherited worker/provider tools and graph-retrieval defaults. The capacity policy is not yet wired to global scheduling, so no claims of multi-provider resilience or improved parent economics follow from it.
 
+2026-10-09: compiler admission now reaches Program/Workspace engines and user amendments, with immutable
+metadata, canonical context references and recovery provenance. Internal work inherits the admitted root.
+These implementation repairs do not close any parent campaign, quality, economic or release gate.
+Focused development checks are separate from the required final stable-source regression.
+
 After the reset, validate the technical adapter and bounded council mechanically before controlled real quality comparisons. Continue to distinguish token observations, account limits, local reserve policy and model-quality evidence. Do not spend Claude capacity before the agreed reset merely to convert a pending gate into a green report.

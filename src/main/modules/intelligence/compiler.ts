@@ -4,6 +4,8 @@ import {
   type CompilationMode,
   type CompiledTaskSpec,
   type IntelligenceContext,
+  type UserIntentMetadata,
+  type CompilationExecutionScope,
 } from '@shared/intelligence'
 import { CapacityWaitError } from '../capacity/registry'
 import { PlanInferenceError } from './openai'
@@ -14,7 +16,7 @@ export interface AdvisoryProvider {
   /** Adapters return parsed JSON only after terminal provider success; no host tools are exposed. */
   complete(instructions: string, data: unknown): Promise<unknown>
 }
-export const COMPILER_VERSION = '0.7.2.2'
+export const COMPILER_VERSION = '0.7.2.4'
 
 export function compilationDepth(raw: string): {
   mode: Exclude<CompilationMode, 'AUTO'>
@@ -36,6 +38,9 @@ export function compilerIdentity(
   context: readonly IntelligenceContext[],
   policyVersion: string,
   strategy: string,
+  metadata?: UserIntentMetadata,
+  workspaceId?: string,
+  executionScope?: CompilationExecutionScope,
 ): string {
   return createHash('sha256')
     .update(
@@ -48,6 +53,9 @@ export function compilerIdentity(
           .sort((a, b) => a.id.localeCompare(b.id)),
         policyVersion,
         strategy,
+        metadata,
+        workspaceId,
+        executionScope,
         compiler: COMPILER_VERSION,
       }),
     )
@@ -64,14 +72,23 @@ export async function compileTask(input: {
   context: IntelligenceContext[]
   policyVersion: string
   strategy: string
+  metadata?: UserIntentMetadata
+  workspaceId?: string
+  executionScope?: CompilationExecutionScope
   strategic?: AdvisoryProvider
   technical?: AdvisoryProvider
 }): Promise<CompiledTaskSpec> {
   if (!input.raw.trim() || input.raw.length > 32000)
     throw new Error('Intent must contain 1–32000 characters')
+  const policyText = [
+    input.raw,
+    ...(input.metadata?.goals.filter((g) => g !== input.raw) ?? []),
+    ...(input.metadata?.constraints ?? []),
+    ...(input.metadata?.acceptanceCriteria ?? []),
+  ].join('\n')
   const selected =
     input.mode === 'AUTO'
-      ? compilationDepth(input.raw)
+      ? compilationDepth(input.workspaceId ? `workspace\n${policyText}` : policyText)
       : { mode: input.mode, reasons: ['USER_SELECTED_MODE'] }
   const context = selected.mode === 'EXACT' ? [] : input.context
   if (context.length > 30 || context.reduce((n, c) => n + c.text.length, 0) > 32000)
@@ -80,6 +97,9 @@ export async function compileTask(input: {
     id: randomUUID(),
     projectId: input.projectId,
     rawIntent: input.raw,
+    ...(input.metadata ? { userMetadata: input.metadata } : {}),
+    ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    ...(input.executionScope ? { executionScope: input.executionScope } : {}),
     requestedMode: input.mode,
     mode: selected.mode,
     status: 'READY',
@@ -94,6 +114,9 @@ export async function compileTask(input: {
       context,
       input.policyVersion,
       input.strategy,
+      input.metadata,
+      input.workspaceId,
+      input.executionScope,
     ),
     createdAt: new Date().toISOString(),
   }
@@ -129,6 +152,7 @@ export async function compileTask(input: {
     let output = parse(
       await input.strategic.complete(INSTRUCTIONS, {
         rawUserIntent: input.raw,
+        explicitUserMetadata: input.metadata,
         untrustedEvidence: context,
       }),
     )
@@ -146,7 +170,12 @@ export async function compileTask(input: {
         await input.technical.complete(
           INSTRUCTIONS +
             ' Independently challenge feasibility and scope; do not merely approve the proposal.',
-          { rawUserIntent: input.raw, untrustedEvidence: context, proposal: output },
+          {
+            rawUserIntent: input.raw,
+            explicitUserMetadata: input.metadata,
+            untrustedEvidence: context,
+            proposal: output,
+          },
         ),
       )
       blockers.push(
@@ -167,7 +196,12 @@ export async function compileTask(input: {
         output = parse(
           await input.strategic.complete(
             INSTRUCTIONS + ' Synthesize without hiding unresolved disagreement.',
-            { rawUserIntent: input.raw, untrustedEvidence: context, positions: output },
+            {
+              rawUserIntent: input.raw,
+              explicitUserMetadata: input.metadata,
+              untrustedEvidence: context,
+              positions: output,
+            },
           ),
         )
       }
@@ -177,7 +211,11 @@ export async function compileTask(input: {
       output.scopeChanged ||
       output.ambiguities.length > 0 ||
       output.recommendations.some((r) => r.requiresDecision)
-    spec.driftCheck = await checkIntentDrift(input.raw, output.recommendations, input.strategic)
+    spec.driftCheck = await checkIntentDrift(
+      `${input.raw}${input.metadata ? `\nExplicit user goals, constraints and acceptance criteria:\n${JSON.stringify(input.metadata)}` : ''}`,
+      output.recommendations,
+      input.strategic,
+    )
     needsDecision ||=
       spec.driftCheck.structuredFlags.length > 0 ||
       spec.driftCheck.semantic.changesIntent ||

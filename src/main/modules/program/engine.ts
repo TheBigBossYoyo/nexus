@@ -39,6 +39,9 @@ import type { Strategy } from '@shared/v3'
 import type { EventBus } from '@main/modules/events'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
+import type { TaskAdmissionService } from '@main/modules/intelligence/admission'
+import type { CompilationSelection, CompiledTaskSpec } from '@shared/intelligence'
+import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 import { selectMemory, validateMemory } from './memory'
 import { buildMissionPrompt, buildPlanPrompt, buildReplanPrompt, buildVerifyPrompt, parseJudgment, parsePlan, parseReplan, REASONING_MARKERS } from './reasoning'
 
@@ -66,6 +69,7 @@ export interface ProgramEngineDeps {
   bus: EventBus
   git: GitService
   host: ProgramRunHost
+  admission?: TaskAdmissionService
   /** The usage dispatch gate: false while Claude is limited. */
   usage?: { canDispatch(): boolean; onChange(listener: () => void): () => void }
   /** One or two lines of Arena and policy evidence for the planner, or null. */
@@ -77,7 +81,7 @@ export interface ProgramEngineDeps {
   tickIntervalMs?: number
 }
 
-export interface CreateProgramInput {
+export interface CreateProgramInput extends CompilationSelection {
   projectId: string
   name: string
   goal: string
@@ -188,11 +192,29 @@ export class ProgramEngine {
     const schedule = input.schedule ? ProgramScheduleSchema.parse(input.schedule) : null
     const project = this.repos.projects.require(input.projectId)
     if (!(await this.deps.git.isRepository(project.rootPath))) throw new NexusError('not_a_repository', 'A program needs a Git repository: its milestones accumulate on a branch.')
-    const goal: ProgramGoal = { statement: input.goal.trim(), successCriteria: input.successCriteria ?? [], constraints: input.constraints ?? [], risks: [] }
-    if (goal.statement === '') throw new NexusError('invalid_input', 'A program needs a goal.')
+    const goal: ProgramGoal = {
+      statement: input.goal, successCriteria: input.successCriteria ?? [],
+      constraints: input.constraints ?? [],
+      risks: [],
+    }
+    if (goal.statement.trim() === '') throw new NexusError('invalid_input', 'A program needs a goal.')
+    const id = newId()
+    if (this.deps.admission)
+      await this.deps.admission.prepare('PROGRAM', id, {
+        projectId: project.id,
+        raw: input.goal,
+        metadata: {
+          entryPoint: 'PROGRAM',
+          goals: [input.goal],
+          constraints: goal.constraints,
+          acceptanceCriteria: goal.successCriteria,
+        },
+        ...(input.compilationMode ? { compilationMode: input.compilationMode } : {}),
+        ...(input.compiledSpecId ? { compiledSpecId: input.compiledSpecId } : {}),
+      })
     const at = this.iso()
     const program = this.repos.programs.insert({
-      id: newId(),
+      id,
       projectId: project.id,
       name: input.name.trim() || goal.statement.slice(0, 60),
       goal,
@@ -225,13 +247,37 @@ export class ProgramEngine {
     return input.start ? this.start(program.id) : program
   }
 
-  start(programId: string): Promise<Program> {
+  start(programId: string, selection?: CompilationSelection): Promise<Program> {
     return this.serial(programId, async () => {
-      const program = this.repos.programs.require(programId)
+    const program = this.repos.programs.require(programId)
       if (program.state !== 'DRAFT') throw new NexusError('invalid_state', `The program is ${program.state}; only a draft can be started`)
       const project = this.repos.projects.require(program.projectId)
+      let spec: CompiledTaskSpec | undefined
+      if (this.deps.admission) {
+        spec = selection
+          ? await this.deps.admission.prepare('PROGRAM', program.id, {
+              ...selection,
+              projectId: project.id,
+              raw: program.goal.statement,
+              metadata: {
+                entryPoint: 'PROGRAM',
+                goals: [program.goal.statement],
+                constraints: program.goal.constraints,
+                acceptanceCriteria: program.goal.successCriteria,
+              },
+            })
+          : await this.deps.admission.validateEntity('PROGRAM', program.id)
+      }
       const baseCommit = await this.deps.git.headCommit(project.rootPath).catch(() => null)
       if (!baseCommit) throw new NexusError('invalid_state', 'The repository has no commits yet. Create an initial commit first.')
+      const expectedHead = spec?.dependencies
+        .find((ref) => ref.id === `repository:${project.id}`)
+        ?.version.split(':')[0]
+      if (expectedHead && baseCommit !== expectedHead)
+        throw new NexusError(
+          'invalid_state',
+          'The repository changed during admission. Preview again before starting.',
+        )
       // Accepted milestones accumulate here. The branch is never checked out in the user's working tree.
       const branch = `nexus/program-${shortId(program.id)}`
       await this.deps.git.createBranch(project.rootPath, branch, baseCommit)
@@ -260,10 +306,30 @@ export class ProgramEngine {
     })
   }
 
-  resume(programId: string): Promise<Program> {
+  resume(programId: string, selection?: CompilationSelection): Promise<Program> {
     return this.serial(programId, async () => {
-      const program = this.repos.programs.require(programId)
+    const program = this.repos.programs.require(programId)
       if (program.state !== 'PAUSED' && program.state !== 'BLOCKED') throw new NexusError('invalid_state', `The program is ${program.state}; only a paused or blocked program can be resumed`)
+      if (this.deps.admission) {
+        if (selection)
+          await this.deps.admission.prepare('PROGRAM', program.id, {
+            ...selection,
+            executionScope: { programId },
+            projectId: program.projectId,
+            raw: program.goal.statement,
+            metadata: {
+              entryPoint: 'PROGRAM',
+              goals: [program.goal.statement],
+              constraints: program.goal.constraints,
+              acceptanceCriteria: program.goal.successCriteria,
+            },
+          })
+        else if (!this.repos.intelligenceArtifacts.admission('PROGRAM', program.id))
+          throw new NexusError(
+            'invalid_state',
+            'This program needs a compiled specification before it can resume.',
+          )
+      }
       if (program.pauseReason === 'approval' && this.repos.planRevisions.pending(programId)) {
         throw new NexusError('invalid_state', 'A plan is waiting for approval. Accept or reject it first.')
       }
@@ -338,16 +404,36 @@ export class ProgramEngine {
    * The user asks for a reassessment of the plan, with a note. It happens at the next point where no run is
    * in flight (before the next mission), and counts against the reassessment budget like any other.
    */
-  requestUserReplan(programId: string, note: string): Program {
+  requestUserReplan(
+    programId: string,
+    note: string,
+    selection?: CompilationSelection,
+  ): Promise<Program> {
+    return this.serial(programId, async () => {
     const program = this.repos.programs.require(programId)
     if (TERMINAL_PROGRAM_STATES.includes(program.state)) throw new NexusError('invalid_state', `The program is ${program.state}; its plan cannot be reassessed`)
-    const text = note.trim().slice(0, 2000)
-    if (text === '') throw new NexusError('invalid_input', 'Say what should change in the plan.')
+      const text = note
+      if (!text.trim() || text.length > 2000)
+        throw new NexusError('invalid_input', 'Describe the reassessment in 1–2000 characters.')
+      if (this.deps.admission)
+        await this.deps.admission.prepare('PROGRAM_REPLAN', programId, {
+          ...selection,
+          projectId: program.projectId,
+          raw: text,
+          executionScope: { programId },
+          metadata: {
+            entryPoint: 'PROGRAM_REPLAN',
+            goals: [program.goal.statement, text],
+            constraints: program.goal.constraints,
+            acceptanceCriteria: program.goal.successCriteria,
+          },
+        })
     this.repos.settings.setValue(userReplanKey(programId), text)
     this.decide(programId, 'replan_requested', `The user asked for a reassessment: ${text.replace(/\s+/g, ' ').slice(0, 200)}`, { detail: { trigger: 'user' } })
-    this.announce(programId)
-    void this.advance(programId)
-    return this.repos.programs.require(programId)
+      this.announce(programId)
+      void this.advance(programId)
+      return this.repos.programs.require(programId)
+    })
   }
 
   /** A person changes a backlog item's status. Nothing in the backlog becomes work by itself. */
@@ -408,6 +494,17 @@ export class ProgramEngine {
           await this.enterPause(current, 'restart', 'NEXUS restarted; this program waits for you to resume it.')
           return
         }
+        if (
+          this.deps.admission &&
+          !this.repos.intelligenceArtifacts.admission('PROGRAM', current.id)
+        ) {
+          await this.block(
+            current,
+            'This legacy program needs a compiled specification and an explicit user decision before continuing.',
+            'blocked',
+          )
+          return
+        }
         this.decide(current.id, 'recovered', 'NEXUS restarted; the program continues from its last checkpoint.', { runId: current.currentRunId })
         const run = current.currentRunId ? this.repos.runs.get(current.currentRunId) : null
         if (run?.state === 'paused' && run.pauseReason === 'recovery') {
@@ -425,6 +522,19 @@ export class ProgramEngine {
   }
 
   private async step(programId: string): Promise<void> {
+    const program = this.repos.programs.require(programId)
+    if (
+      this.deps.admission &&
+      (WORKING.includes(program.state) || program.state === 'WAITING_FOR_QUOTA') &&
+      !this.repos.intelligenceArtifacts.admission('PROGRAM', program.id)
+    ) {
+      await this.block(
+        program,
+        'This legacy program needs a compiled specification and an explicit user decision before continuing.',
+        'blocked',
+      )
+      return
+    }
     // Each pass handles one transition; the loop ends when a pass changes nothing.
     for (let guard = 0; guard < 40; guard++) {
       if (this.disposed) return
@@ -560,14 +670,27 @@ export class ProgramEngine {
     return [...earlier, ...runs]
   }
 
-  private async startReasoning(program: Program, kind: 'planner' | 'replanner' | 'verifier', prompt: string, baseRef?: string): Promise<void> {
+  private async startReasoning(
+    program: Program,
+    kind: 'planner' | 'replanner' | 'verifier',
+    prompt: string,
+    baseRef?: string,
+  ): Promise<void> {
     this.markStarting(program.id, kind)
     const run = await this.deps.host.createRun({
       projectId: program.projectId,
       mode: 'ask',
       preset: program.policy.missionPreset,
-      prompt,
-      overrides: { requirePlanApproval: false },
+      prompt: withAdmittedIntent(
+        withAdmittedIntent(
+          prompt,
+          this.repos.intelligenceArtifacts.admission('PROGRAM', program.id),
+        ),
+        kind === 'replanner'
+          ? this.repos.intelligenceArtifacts.admission('PROGRAM_REPLAN', program.id)
+          : null,
+      ),
+      overrides: { requirePlanApproval: false, engineeringOwner: { kind: 'PROGRAM', id: program.id } },
       ...(baseRef ? { baseRef } : {}),
     })
     this.patch(program.id, { currentRunId: run.id, currentRunKind: kind })
@@ -711,10 +834,10 @@ export class ProgramEngine {
       createdAt: this.iso(),
       decidedAt: null,
     })
-    // The user's own criteria and constraints stay; the plan may add to them.
-    const merge = (mine: string[], theirs: string[]): string[] => [...new Set([...mine, ...theirs])].slice(0, 12)
+    // Generated criteria and constraints remain on the plan revision. They must not
+    // overwrite explicit user fields or acquire user provenance.
     this.patch(program.id, {
-      goal: { ...program.goal, successCriteria: merge(program.goal.successCriteria, plan.successCriteria), constraints: merge(program.goal.constraints, plan.constraints), risks: plan.risks },
+      goal: { ...program.goal, risks: plan.risks },
     })
     this.decide(program.id, 'plan_proposed', `Plan version ${revision.version} proposed: ${plan.milestones.length} milestone(s).`, { runId: run?.id ?? null, detail: { milestones: plan.milestones.map((m) => m.key) } })
     if (program.policy.approvalPolicy === 'none') this.acceptRevision(this.repos.programs.require(program.id), revision, 'policy')
@@ -887,10 +1010,13 @@ export class ProgramEngine {
       projectId: program.projectId,
       mode: 'mission',
       preset: program.policy.missionPreset,
-      prompt,
+      prompt: withAdmittedIntent(
+        prompt,
+        this.repos.intelligenceArtifacts.admission('PROGRAM', program.id),
+      ),
       acceptanceCriteria,
       strategy,
-      overrides: { requirePlanApproval: false, maxParallelAgents: program.policy.maxAgents },
+      overrides: { requirePlanApproval: false, maxParallelAgents: program.policy.maxAgents, engineeringOwner: { kind: 'PROGRAM', id: program.id } },
       ...(baseRef ? { baseRef } : {}),
     })
     this.repos.settings.deleteValue(startingKey(program.id))

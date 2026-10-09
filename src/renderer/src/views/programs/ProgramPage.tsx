@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { ProgramDetail, ProgramPlanRevision } from '@shared/program'
+import type { CompilationSelection, CompilationMode, CompiledTaskSpec } from '@shared/intelligence'
+import { AdmissionInspector } from '../projects/CompiledTaskInspector'
+import { CompilationPreview } from '../projects/CompilationPreview'
 import {
   useCancelProgram,
   useDecidePlan,
@@ -127,9 +130,20 @@ function PlanApproval({ detail, revision }: { detail: ProgramDetail; revision: P
   )
 }
 
-function ReplanDialog({ open, onClose, programId }: { open: boolean; onClose: () => void; programId: string }) {
+function ReplanDialog({
+  open,
+  onClose,
+  programId,
+}: {
+  open: boolean
+  onClose: () => void
+  programId: string
+}) {
   const replan = useReplanProgram()
+  const program = useProgram(programId).data?.program
   const [note, setNote] = useState('')
+  const [compilationMode, setCompilationMode] = useState<CompilationMode>('AUTO')
+  const [spec, setSpec] = useState<CompiledTaskSpec | null>(null)
   const trimmed = note.trim()
   const reason = trimmed.length === 0 ? 'Say what should be reconsidered.' : trimmed.length > 2000 ? 'At most 2000 characters.' : null
   return (
@@ -151,10 +165,11 @@ function ReplanDialog({ open, onClose, programId }: { open: boolean; onClose: ()
             loading={replan.isPending}
             onClick={() =>
               replan.mutate(
-                { programId, note: trimmed },
+                { programId, note, compilationMode, ...(spec ? { compiledSpecId: spec.id } : {}) },
                 {
                   onSuccess: () => {
                     setNote('')
+                    setSpec(null)
                     onClose()
                   },
                 },
@@ -167,16 +182,50 @@ function ReplanDialog({ open, onClose, programId }: { open: boolean; onClose: ()
         </>
       }
     >
-      <div className="flex flex-col gap-3">
+      <fieldset
+        disabled={replan.isPending}
+        className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0"
+      >
         <p className="m-0 text-text-secondary">
           A read-only session reviews the remaining milestones in light of your note. It keeps the plan or proposes a revision; your approval policy decides whether you approve it. A reassessment counts against the
           reassessment budget.
         </p>
         <Field label="Note" hint="Treated as information for the planner, not as a command.">
-          {(id) => <Textarea id={id} rows={4} value={note} onChange={(e) => setNote(e.target.value)} data-testid="program-replan-note" />}
+          {(id) => (
+            <Textarea
+              id={id}
+              rows={4}
+              value={note}
+              onChange={(e) => {
+                setNote(e.target.value)
+                setSpec(null)
+              }}
+              data-testid="program-replan-note"
+            />
+          )}
         </Field>
         {replan.isError ? <ErrorNote error={replan.error} /> : null}
-      </div>
+        {program ? (
+          <CompilationPreview
+            projectId={program.projectId}
+            raw={note}
+            executionScope={{ programId }}
+            metadata={{
+              entryPoint: 'PROGRAM_REPLAN',
+              goals: [program.goal.statement, note],
+              constraints: program.goal.constraints,
+              acceptanceCriteria: program.goal.successCriteria,
+            }}
+            mode={compilationMode}
+            onModeChange={(mode) => {
+              setCompilationMode(mode)
+              setSpec(null)
+            }}
+            spec={spec}
+            onSpec={setSpec}
+          />
+        ) : null}
+      </fieldset>
     </Dialog>
   )
 }
@@ -192,6 +241,7 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
   const [tab, setTab] = useState<Tab>('roadmap')
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [replanOpen, setReplanOpen] = useState(false)
+  const [selection, setSelection] = useState<CompilationSelection>({})
   const d = q.data
   const live = !!d && ['PLANNING', 'ACTIVE', 'REPLANNING'].includes(d.program.state)
   const now = useNow(!!d && (live || !!d.program.schedule), 30_000)
@@ -242,7 +292,15 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
             {back}
             <ProgramStateBadge program={p} testId="program-state" />
             {actions.start ? (
-              <Button size="sm" variant="primary" icon={<PlayIcon size={12} />} loading={start.isPending} disabled={mutating} onClick={() => start.mutate({ programId })} data-testid="program-start">
+              <Button
+                size="sm"
+                variant="primary"
+                icon={<PlayIcon size={12} />}
+                loading={start.isPending}
+                disabled={mutating}
+                onClick={() => start.mutate({ programId, ...selection })}
+                data-testid="program-start"
+              >
                 Start
               </Button>
             ) : null}
@@ -252,7 +310,7 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
               </Button>
             ) : null}
             {actions.resume ? (
-              <Button size="sm" variant="primary" icon={<PlayIcon size={12} />} loading={resume.isPending} disabled={mutating} onClick={() => resume.mutate({ programId })} data-testid="program-resume">
+              <Button size="sm" variant="primary" icon={<PlayIcon size={12} />} loading={resume.isPending} disabled={mutating} onClick={() => resume.mutate({ programId, ...selection })} data-testid="program-resume">
                 Resume
               </Button>
             ) : null}
@@ -286,6 +344,21 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
           ) : null}
           {p.error && p.state !== 'FAILED' ? <ErrorNote error={p.error} /> : null}
           {lastError ? <ErrorNote error={lastError} /> : null}
+          <AdmissionInspector
+            kind="PROGRAM"
+            entityId={programId}
+            projectId={p.projectId}
+            raw={p.goal.statement}
+            metadata={{
+              entryPoint: 'PROGRAM',
+              goals: [p.goal.statement],
+              constraints: p.goal.constraints,
+              acceptanceCriteria: p.goal.successCriteria,
+            }}
+            draft={p.state === 'DRAFT' || p.state === 'PAUSED' || p.state === 'BLOCKED'}
+            {...(p.state !== 'DRAFT' ? { executionScope: { programId } } : {})}
+            onSelection={setSelection}
+          />
 
           {showApproval && proposed ? <PlanApproval detail={d} revision={proposed} /> : null}
 
@@ -306,13 +379,26 @@ export function ProgramPage({ programId, onBack }: { programId: string; onBack: 
                 <span data-testid="program-current-milestone">{milestone ?? 'None'}</span>
               </Meta>
               <Meta label="Current mission">
-                <span className="flex flex-wrap items-center gap-2" data-testid="program-current-mission">
+                <span
+                  className="flex flex-wrap items-center gap-2"
+                  data-testid="program-current-mission"
+                >
                   {p.currentRunKind === 'mission' && p.currentRunId ? (
                     <Button size="sm" onClick={() => openRun(p.currentRunId ?? '', p.projectId)} data-testid="program-open-mission">
                       Open mission
                     </Button>
                   ) : p.currentRunKind ? (
-                    <span>{{ planner: 'Planning session', verifier: 'Verification session', replanner: 'Reassessment session', mission: 'Mission' }[p.currentRunKind]} running</span>
+                    <span>
+                      {
+                        {
+                          planner: 'Planning session',
+                          verifier: 'Verification session',
+                          replanner: 'Reassessment session',
+                          mission: 'Mission',
+                        }[p.currentRunKind]
+                      }{' '}
+                      running
+                    </span>
                   ) : (
                     <span className="text-text-muted">None running</span>
                   )}

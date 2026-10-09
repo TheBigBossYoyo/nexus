@@ -36,6 +36,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'chatgpt.manageUsage': {},
   'compilation.preview': { projectId: 'p1', raw: 'Fix typo', mode: 'EXACT' },
   'compilation.history': { projectId: 'p1' },
+  'compilation.admission': { kind: 'PROGRAM', entityId: 'p1' },
   'compilation.validate': { projectId: 'p1', specId: 's1', raw: 'Fix typo', mode: 'EXACT' },
   'overnight.start': { projectId: 'p1', preset: 'balanced', prompt: 'do it', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT },
   'overnight.startArena': {
@@ -562,7 +563,7 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     h.runtime.script = scenarioScript({ plan: plan([plannedTask('later')]) })
     const second = await value<{ id: string }>('runs.create', { compilationMode: 'EXACT', projectId: project.id, mode: 'build', preset: 'balanced', prompt: 'Another', requirePlanApproval: true })
     await h.waitForState(second.id, 'awaiting_approval')
-    expect(await value<{ state: string }>('runs.replan', { runId: second.id, feedback: 'smaller please' })).toMatchObject({ state: 'planning' })
+    expect(await value<{ state: string }>('runs.replan', { runId: second.id, feedback: 'smaller please', compilationMode: 'EXACT' })).toMatchObject({ state: 'planning' })
     await h.waitFor(() => h.repos.runs.require(second.id).state === 'awaiting_approval', 'the revised plan')
     expect(await value<{ state: string }>('runs.pause', { runId: second.id })).toMatchObject({ state: 'paused' })
     expect(await value<{ state: string }>('runs.resume', { runId: second.id })).toMatchObject({ state: 'awaiting_approval' })
@@ -572,12 +573,24 @@ describe('IPC against a real orchestrator with the fake runtime', () => {
     // Task controls on a finished run's task: priority, instruct, criteria.
     const task = h.repos.tasks.listByRun(waiting.id)[0]
     expect(await value('tasks.setPriority', { taskId: task?.id, priority: 7 })).toMatchObject({ priority: 7 })
-    expect(await value('tasks.instruct', { taskId: task?.id, instruction: 'for next time' })).toMatchObject({ type: 'user_instruction', body: 'for next time' })
+    expect(
+      await value('tasks.instruct', {
+        taskId: task?.id,
+        instruction: 'for next time',
+        compilationMode: 'EXACT',
+      }),
+    ).toMatchObject({ type: 'user_instruction', body: 'for next time' })
     expect(await value<unknown[]>('messages.list', { runId: waiting.id, taskId: task?.id })).toHaveLength(1)
     expect(await value<unknown[]>('messages.list', { runId: waiting.id, taskId: 'other' })).toHaveLength(0)
     const criterion = h.repos.criteria.listByRun(waiting.id)[0]
-    expect(await value('criteria.update', { criterionId: criterion?.id, text: 'Edited criterion' })).toMatchObject({ text: 'Edited criterion', status: 'pending' })
-    expect(await call('tasks.add', { ...VALID_INPUTS['tasks.add'], runId: second.id })).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
+    expect(await value('criteria.update', { criterionId: criterion?.id, text: 'Edited criterion', compilationMode: 'EXACT' })).toMatchObject({ text: 'Edited criterion', status: 'pending' })
+    expect(
+      await call('tasks.add', {
+        ...VALID_INPUTS['tasks.add'],
+        runId: second.id,
+        compilationMode: 'EXACT',
+      }),
+    ).toMatchObject({ ok: false, error: { code: 'invalid_state' } })
     expect(await value('runs.cleanup', { runId: waiting.id })).toBeNull()
 
     // Memory.

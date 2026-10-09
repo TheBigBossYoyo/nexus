@@ -4,6 +4,9 @@ import {
   COMPILATION_MODES,
   type CompilationMode,
   type CompiledTaskSpec,
+  type UserIntentMetadata,
+  type CompilationExecutionScope,
+  defaultIntentMetadata,
 } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
 import { Button, ErrorNote, Field, Notice, Select } from '../../components/ui'
@@ -16,6 +19,9 @@ export function CompilationPreview({
   onModeChange,
   spec,
   onSpec,
+  metadata,
+  workspaceId,
+  executionScope,
 }: {
   projectId: string
   raw: string
@@ -23,14 +29,32 @@ export function CompilationPreview({
   onModeChange: (mode: CompilationMode) => void
   spec: CompiledTaskSpec | null
   onSpec: (spec: CompiledTaskSpec) => void
+  metadata?: UserIntentMetadata
+  workspaceId?: string
+  executionScope?: CompilationExecutionScope
 }) {
   const [tab, setTab] = useState<'original' | 'compiled' | 'evidence'>('compiled')
   const preview = useMutation({
-    mutationFn: () => api.invoke('compilation.preview', { projectId, raw, mode }),
+    mutationFn: () =>
+      api.invoke('compilation.preview', {
+        projectId,
+        raw,
+        mode,
+        ...(metadata ? { metadata } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(executionScope ? { executionScope } : {}),
+      }),
     onSuccess: onSpec,
   })
   const stale =
-    spec && (spec.rawIntent !== raw || spec.requestedMode !== mode || spec.projectId !== projectId)
+    spec &&
+    (spec.rawIntent !== raw ||
+      spec.requestedMode !== mode ||
+      spec.projectId !== projectId ||
+      JSON.stringify(spec.userMetadata) !==
+        JSON.stringify(metadata ?? defaultIntentMetadata(raw)) ||
+      spec.workspaceId !== workspaceId ||
+      JSON.stringify(spec.executionScope) !== JSON.stringify(executionScope))
   return (
     <details
       className="rounded-md border bg-surface p-3"

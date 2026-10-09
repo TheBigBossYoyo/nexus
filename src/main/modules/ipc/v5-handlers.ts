@@ -51,19 +51,24 @@ export function createV5Handlers(ctx: V5Context): V5Handlers {
       return { version: captured.version, result: captured.result, created: captured.created }
     },
     'workspace.addMemory': ({ workspaceId, kind, title, content, evidence, repositories }) => engine().addMemory(workspaceId, { kind, title, content, evidence, repositories }),
-    'workspace.createMission': ({ workspaceId, goal, start }) => engine().createMission(workspaceId, { goal, ...(start !== undefined ? { start } : {}) }),
+    'workspace.createMission': ({ workspaceId, ...input }) =>
+      engine().createMission(workspaceId, input),
     'workspace.mission': ({ missionId }) => engine().missionDetail(missionId),
-    'workspace.startMission': ({ missionId }) => engine().startMission(missionId),
+    'workspace.startMission': ({ missionId, ...selection }) =>
+      engine().startMission(missionId, Object.keys(selection).length ? selection : undefined),
     'workspace.decidePlan': ({ missionId, accept }) => engine().decidePlan(missionId, accept),
     'workspace.pauseMission': ({ missionId }) => engine().pauseMission(missionId),
-    'workspace.resumeMission': ({ missionId }) => engine().resumeMission(missionId),
+    'workspace.resumeMission': ({ missionId, ...selection }) =>
+      engine().resumeMission(missionId, Object.keys(selection).length ? selection : undefined),
     'workspace.cancelMission': ({ missionId }) => engine().cancelMission(missionId),
-    'workspace.createProgram': async ({ workspaceId, program, start }) => {
-      const created = engine().createProgram(workspaceId, program)
+    'workspace.createProgram': async ({ workspaceId, program, start, ...selection }) => {
+      const created = await engine().createProgram(workspaceId, program, selection)
       return start ? engine().startProgram(created.id) : created
     },
-    'workspace.startProgram': ({ programId }) => engine().startProgram(programId),
-    'workspace.resumeProgram': ({ programId }) => engine().resumeProgram(programId),
+    'workspace.startProgram': ({ programId, ...selection }) =>
+      engine().startProgram(programId, Object.keys(selection).length ? selection : undefined),
+    'workspace.resumeProgram': ({ programId, ...selection }) =>
+      engine().resumeProgram(programId, Object.keys(selection).length ? selection : undefined),
     'workspace.cancelProgram': ({ programId }) => engine().cancelProgram(programId),
     'workspace.prepareRelease': ({ missionId }) => engine().prepareReleaseTrain(missionId),
     // Always refused: NEXUS prepares releases and does not publish them. The channel exists so the refusal is explicit and recorded.

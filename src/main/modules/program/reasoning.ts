@@ -79,14 +79,20 @@ export function buildPlanPrompt(ctx: PlanContext): string {
     'verifiable through its acceptance criteria and small enough for one mission (a few hours of agent work).',
     'Order them so that every milestone only depends on earlier ones. You may read the repository; do not change it.',
     '',
-    data('goal', program.goal.statement),
-    data('success_criteria', bullets(program.goal.successCriteria)),
-    data('constraints', bullets(program.goal.constraints)),
+    data('goal', program.goal.statement, 8000),
+    data('success_criteria', bullets(program.goal.successCriteria), 5000),
+    data('constraints', bullets(program.goal.constraints), 5000),
     data('repository', ctx.repository),
     data('project_history', bullets(ctx.history)),
     data('arena_and_policy_evidence', ctx.evidence ?? 'none'),
-    data('known_backlog', bullets(ctx.backlog.slice(0, 20).map((b) => `[${b.category}/${b.severity}] ${b.title}`))),
-    data('program_memory', bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`))),
+    data(
+      'known_backlog',
+      bullets(ctx.backlog.slice(0, 20).map((b) => `[${b.category}/${b.severity}] ${b.title}`)),
+    ),
+    data(
+      'program_memory',
+      bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`)),
+    ),
     '',
     OUTPUT_RULES,
     '',
@@ -128,15 +134,31 @@ export function buildReplanPrompt(ctx: ReplanContext): string {
     'approach. When you revise, return every remaining milestone as it should be from now on (keep the key of a',
     'milestone you keep), not only the changed ones. Milestone level only: no tasks, no file lists.',
     '',
-    data('goal', ctx.program.goal.statement),
-    data('success_criteria', bullets(ctx.program.goal.successCriteria)),
+    data('goal', ctx.program.goal.statement, 8000),
+    data('success_criteria', bullets(ctx.program.goal.successCriteria), 5000),
+    data('constraints', bullets(ctx.program.goal.constraints), 5000),
     data('trigger', ctx.trigger),
-    ...(ctx.userRequest ? ['The user asked for this reassessment. Their request is about the plan: follow it unless it contradicts the goal.', data('user_request', ctx.userRequest, 2000)] : []),
+    ...(ctx.userRequest
+      ? [
+          'The user asked for this reassessment. Their request is about the plan: follow it unless it contradicts the goal.',
+          data('user_request', ctx.userRequest, 2000),
+        ]
+      : []),
     data('situation', ctx.situation),
     data('completed_milestones', bullets(ctx.completed.map(line))),
     data('remaining_milestones', bullets(ctx.remaining.map(line))),
-    data('open_backlog', bullets(ctx.backlog.slice(0, 20).map((b) => `[${b.category}/${b.severity}] ${b.title}: ${b.description.slice(0, 200)}`))),
-    data('program_memory', bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`))),
+    data(
+      'open_backlog',
+      bullets(
+        ctx.backlog
+          .slice(0, 20)
+          .map((b) => `[${b.category}/${b.severity}] ${b.title}: ${b.description.slice(0, 200)}`),
+      ),
+    ),
+    data(
+      'program_memory',
+      bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`)),
+    ),
     '',
     OUTPUT_RULES,
     '',

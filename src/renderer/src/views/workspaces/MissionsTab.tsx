@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import type { CompilationMode, CompiledTaskSpec, CompilationSelection } from '@shared/intelligence'
+import { CompilationPreview } from '../projects/CompilationPreview'
+import { AdmissionInspector } from '../projects/CompiledTaskInspector'
 import type {
   CrossRepoTask,
   WorkspaceDetail,
@@ -54,16 +57,20 @@ function NewMissionDialog({
   open,
   onClose,
   workspaceId,
+  projectId,
   onCreated,
 }: {
   open: boolean
   onClose: () => void
   workspaceId: string
+  projectId: string | undefined
   onCreated: (missionId: string) => void
 }) {
   const create = useCreateWorkspaceMission()
   const [goal, setGoal] = useState('')
   const [touched, setTouched] = useState(false)
+  const [compilationMode, setCompilationMode] = useState<CompilationMode>('AUTO')
+  const [spec, setSpec] = useState<CompiledTaskSpec | null>(null)
   const check = validateGoal(goal)
   const submit = (start: boolean) => {
     if (!check.ok) {
@@ -71,11 +78,12 @@ function NewMissionDialog({
       return
     }
     create.mutate(
-      { workspaceId, goal: goal.trim(), start },
+      { workspaceId, goal, start, compilationMode, ...(spec ? { compiledSpecId: spec.id } : {}) },
       {
         onSuccess: (m) => {
           setGoal('')
           setTouched(false)
+          setSpec(null)
           onClose()
           onCreated(m.id)
         },
@@ -117,7 +125,10 @@ function NewMissionDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-3">
+      <fieldset
+        disabled={create.isPending}
+        className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0"
+      >
         <p className="m-0 text-small text-text-secondary">
           Describe one goal. NEXUS plans which repositories change and in what order, then waits for
           your approval before anything runs. Only repositories allowed by the workspace policy can
@@ -134,7 +145,10 @@ function NewMissionDialog({
               rows={6}
               value={goal}
               maxLength={LIMITS.goal + 100}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={(e) => {
+                setSpec(null)
+                setGoal(e.target.value)
+              }}
               onBlur={() => setTouched(true)}
               aria-invalid={touched && !check.ok}
               data-testid="workspace-mission-goal"
@@ -142,7 +156,27 @@ function NewMissionDialog({
           )}
         </Field>
         {create.isError ? <ErrorNote error={create.error} /> : null}
-      </div>
+        {projectId ? (
+          <CompilationPreview
+            projectId={projectId}
+            workspaceId={workspaceId}
+            raw={goal}
+            mode={compilationMode}
+            onModeChange={(mode) => {
+              setCompilationMode(mode)
+              setSpec(null)
+            }}
+            spec={spec}
+            onSpec={setSpec}
+            metadata={{
+              entryPoint: 'WORKSPACE_MISSION',
+              goals: [goal],
+              constraints: [],
+              acceptanceCriteria: [],
+            }}
+          />
+        ) : null}
+      </fieldset>
     </Dialog>
   )
 }
@@ -410,10 +444,12 @@ function Verification({ mission }: { mission: WorkspaceMission }) {
 
 export function MissionDetail({
   missionId,
+  projectId,
   onBack,
   onOpenReleases,
 }: {
   missionId: string
+  projectId?: string
   onBack: () => void
   onOpenReleases: () => void
 }) {
@@ -424,6 +460,7 @@ export function MissionDetail({
   const cancel = useCancelWorkspaceMission()
   const prepare = usePrepareRelease()
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [selection, setSelection] = useState<CompilationSelection>({})
   const back = (
     <Button
       size="sm"
@@ -471,7 +508,7 @@ export function MissionDetail({
               icon={<PlayIcon size={12} />}
               loading={start.isPending}
               disabled={busy}
-              onClick={() => start.mutate({ missionId })}
+              onClick={() => start.mutate({ missionId, ...selection })}
               data-testid="mission-start"
             >
               Start
@@ -496,7 +533,7 @@ export function MissionDetail({
               icon={<PlayIcon size={12} />}
               loading={resume.isPending}
               disabled={busy}
-              onClick={() => resume.mutate({ missionId })}
+              onClick={() => resume.mutate({ missionId, ...selection })}
               data-testid="mission-resume"
             >
               Resume
@@ -532,6 +569,24 @@ export function MissionDetail({
         </p>
       </Card>
 
+      {projectId ? (
+        <AdmissionInspector
+          kind={mission.programId ? 'WORKSPACE_PROGRAM' : 'WORKSPACE_MISSION'}
+          entityId={mission.programId ?? mission.id}
+          projectId={projectId}
+          raw={mission.goal}
+          workspaceId={mission.workspaceId}
+          metadata={{
+            entryPoint: 'WORKSPACE_MISSION',
+            goals: [mission.goal],
+            constraints: [],
+            acceptanceCriteria: [],
+          }}
+          draft={['DRAFT', 'PAUSED', 'BLOCKED'].includes(mission.state) && !mission.programId}
+          {...(mission.state !== 'DRAFT' ? { executionScope: { workspaceMissionId: mission.id } } : {})}
+          onSelection={setSelection}
+        />
+      ) : null}
       {notice ? (
         <Notice tone={notice.tone} title={notice.title} data-testid="mission-state-notice">
           {notice.text}
@@ -591,6 +646,7 @@ export function MissionsTab({
     return (
       <MissionDetail
         missionId={missionId}
+        projectId={[...detail.repositories].sort((a, b) => a.id.localeCompare(b.id))[0]?.projectId}
         onBack={() => setMissionId(null)}
         onOpenReleases={onOpenReleases}
       />
@@ -658,6 +714,7 @@ export function MissionsTab({
         open={dialog}
         onClose={() => setDialog(false)}
         workspaceId={detail.workspace.id}
+        projectId={[...detail.repositories].sort((a, b) => a.id.localeCompare(b.id))[0]?.projectId}
         onCreated={setMissionId}
       />
     </div>
