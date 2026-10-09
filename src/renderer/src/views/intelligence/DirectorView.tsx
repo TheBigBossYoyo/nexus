@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DirectorInvocation } from '@shared/intelligence'
+import type { DirectorInvocation, StrategicEscalation } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
 import { useProjects } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
@@ -42,6 +42,12 @@ function Claims({ groups }: { groups: [string, string[]][] }) {
   )
 }
 function Material({ invocation: r }: { invocation: DirectorInvocation }) {
+  const [routingOpen, setRoutingOpen] = useState(false)
+  const routing = useQuery({
+    queryKey: ['director-routing', r.projectId, r.id],
+    queryFn: () => api.invoke('director.routing', { projectId: r.projectId, operationId: r.id }),
+    enabled: routingOpen,
+  })
   return (
     <Card
       title={r.objective}
@@ -63,8 +69,10 @@ function Material({ invocation: r }: { invocation: DirectorInvocation }) {
           <>
             <p className="whitespace-pre-wrap break-words font-medium">{r.memo.recommendation}</p>
             <p className="text-text-muted">
-              Confidence: {r.memo.confidence} · {r.provider ?? 'Unknown provider'} ·{' '}
-              {r.model ?? 'Unknown model'}
+              Confidence: {r.memo.confidence}
+              {r.provider
+                ? ` · ${r.provider} · ${r.model ?? 'Unknown model'}`
+                : ' · Provider and model are recorded per stage below'}
             </p>
             {(
               [
@@ -135,6 +143,42 @@ function Material({ invocation: r }: { invocation: DirectorInvocation }) {
             </p>
           ))}
         </details>
+        <details onToggle={(e) => setRoutingOpen(e.currentTarget.open)}>
+          <summary className="cursor-pointer">Provider routing and outcome</summary>
+          <p>
+            Advice cannot authorize execution. Interrupted requests are never replayed
+            automatically.
+          </p>
+          {r.decisionId ? <p className="break-all">Decision {r.decisionId}</p> : null}
+          {r.outcomeId ? <p className="break-all">Outcome {r.outcomeId}</p> : null}
+          {routing.error ? <ErrorNote error={routing.error} /> : null}
+          {routing.isLoading ? <p role="status">Loading routing…</p> : null}
+          {routing.data?.map((route) => (
+            <div key={route.id} className="my-2 rounded border border-border p-3 break-words">
+              <p className="font-medium">
+                {route.stage} · {route.state.replaceAll('_', ' ')}
+              </p>
+              <p>
+                {route.provider ?? 'No admitted provider'} · {route.model ?? 'No admitted model'}
+              </p>
+              <p>{route.reasons.join(' · ')}</p>
+              <p>
+                Usage:{' '}
+                {route.usage
+                  ? `${route.usage.inputTokens ?? 'unknown'} input · ${route.usage.outputTokens ?? 'unknown'} output tokens`
+                  : route.consumption === 'NOT_SENT'
+                    ? 'No model request sent'
+                    : 'Not reported'}
+              </p>
+              <p className="text-text-muted">
+                {route.qualityEvidence.join(' · ') || 'No quality-safe admission evidence'}
+              </p>
+            </div>
+          ))}
+          {routing.data?.length === 0 ? (
+            <p>Historical request has no per-stage routing records.</p>
+          ) : null}
+        </details>
       </div>
     </Card>
   )
@@ -154,14 +198,43 @@ export function DirectorView() {
     enabled: !!projectId,
     refetchInterval: 5000,
   })
+  const records = useQuery({
+    queryKey: ['director-records', projectId, offset],
+    queryFn: () => api.invoke('director.records', { projectId: projectId!, offset }),
+    enabled: !!projectId,
+    refetchInterval: 5000,
+  })
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: ['director-history'] }),
+      client.invalidateQueries({ queryKey: ['director-records'] }),
+      client.invalidateQueries({ queryKey: ['director-routing'] }),
+    ])
   const invoke = useMutation({
     mutationFn: (input: {
       projectId: string
       objective: string
       level: DirectorInvocation['level']
+      escalationId?: string
     }) => api.invoke('director.invoke', input),
-    onSettled: () => client.invalidateQueries({ queryKey: ['director-history'] }),
+    onSettled: refresh,
   })
+  const escalate = useMutation({
+    mutationFn: () =>
+      api.invoke('director.escalate', {
+        projectId: projectId!,
+        objective,
+        level: Number(level) as StrategicEscalation['level'],
+        reasons: ['USER_REQUESTED_ESCALATION'],
+      }),
+    onSettled: refresh,
+  })
+  const dismiss = useMutation({
+    mutationFn: (escalationId: string) =>
+      api.invoke('director.dismissEscalation', { projectId: projectId!, escalationId }),
+    onSettled: refresh,
+  })
+  const pending = invoke.isPending || escalate.isPending || dismiss.isPending
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="director-page">
       <PageHeader title="Director" context="Intelligence" />
@@ -169,8 +242,9 @@ export function DirectorView() {
         <div className="mx-auto max-w-[1120px] space-y-5 p-6">
           <Notice tone="neutral" title="Develop direction before execution">
             Directors propose strategy and challenge assumptions. Their advice cannot authorize work
-            or override project policy. The technical Director adapter and council validation are
-            deferred in this development build, independently of Claude worker availability.
+            or override project policy. Every stage requires provider capacity and role quality
+            admission. Real technical and Council quality validation remains deferred, independently
+            of Claude worker availability.
           </Notice>
           <Card
             title="Request advice"
@@ -190,7 +264,7 @@ export function DirectorView() {
                       selectProject(id)
                       setOffset(0)
                     }}
-                    disabled={invoke.isPending}
+                    disabled={pending}
                   />
                 )}
               </Field>
@@ -203,7 +277,7 @@ export function DirectorView() {
                     rows={5}
                     maxLength={32000}
                     placeholder="What decision needs a clearer direction?"
-                    disabled={invoke.isPending}
+                    disabled={pending}
                   />
                 )}
               </Field>
@@ -214,12 +288,12 @@ export function DirectorView() {
                     value={level}
                     options={levels}
                     onChange={setLevel}
-                    disabled={invoke.isPending}
+                    disabled={pending}
                   />
                 )}
               </Field>
               <Button
-                disabled={!projectId || !objective.trim()}
+                disabled={pending || !projectId || !objective.trim()}
                 loading={invoke.isPending}
                 onClick={() => {
                   setOffset(0)
@@ -232,9 +306,91 @@ export function DirectorView() {
               >
                 Request advice
               </Button>
+              <Button
+                disabled={pending || !projectId || !objective.trim() || level === '0'}
+                loading={escalate.isPending}
+                onClick={() => escalate.mutate()}
+              >
+                Save escalation
+              </Button>
+              <p className="text-text-muted">
+                Saving an escalation sends no model request. Review it below before requesting
+                advice.
+              </p>
               {invoke.isPending ? <p role="status">Developing advisory material…</p> : null}
               {invoke.error ? <ErrorNote error={invoke.error} /> : null}
+              {escalate.error ? <ErrorNote error={escalate.error} /> : null}
             </div>
+          </Card>
+          <Card
+            title="Strategic escalations and decisions"
+            description="Saved requests and advisory outcomes for this project."
+          >
+            {records.error ? <ErrorNote error={records.error} /> : null}
+            {dismiss.error ? <ErrorNote error={dismiss.error} /> : null}
+            {!records.data?.length ? (
+              <p className="text-text-muted">No escalations or decisions saved.</p>
+            ) : (
+              records.data.map((record) => (
+                <details
+                  key={record.id}
+                  className="my-2 rounded border border-border p-3 text-small break-words"
+                >
+                  <summary className="cursor-pointer font-medium">
+                    {record.kind === 'ESCALATION'
+                      ? `Escalation · ${record.state.replaceAll('_', ' ')}`
+                      : record.kind === 'DECISION'
+                        ? 'Advisory decision'
+                        : `Outcome · ${record.state.replaceAll('_', ' ')}`}
+                  </summary>
+                  {record.kind === 'ESCALATION' ? (
+                    <div className="space-y-2">
+                      <p className="whitespace-pre-wrap">{record.objective}</p>
+                      <p>{record.reasons.join(' · ')}</p>
+                      {record.state === 'REQUESTED' ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            disabled={pending}
+                            onClick={() =>
+                              invoke.mutate({
+                                projectId: record.projectId,
+                                objective: record.objective,
+                                level: record.level,
+                                escalationId: record.id,
+                              })
+                            }
+                          >
+                            Request escalation advice
+                          </Button>
+                          <Button disabled={pending} onClick={() => dismiss.mutate(record.id)}>
+                            Dismiss
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : record.kind === 'DECISION' ? (
+                    <>
+                      <p className="whitespace-pre-wrap">{record.recommendation}</p>
+                      <Claims
+                        groups={[
+                          ['Unresolved disagreement', record.unresolvedDisagreements],
+                          ['Evidence', record.evidenceRefs],
+                        ]}
+                      />
+                    </>
+                  ) : (
+                    <p>
+                      Completed stages: {record.completedStages.join(' · ') || 'None'} ·
+                      Consumption: {record.consumption.replaceAll('_', ' ').toLowerCase()} · No
+                      automatic replay
+                    </p>
+                  )}
+                  <p className="text-text-muted">
+                    Advisory only. Execution requires the normal task and policy gates.
+                  </p>
+                </details>
+              ))
+            )}
           </Card>
           <h2 className="text-lg font-semibold">Saved advisory history</h2>
           {history.error ? <ErrorNote error={history.error} /> : null}
@@ -253,7 +409,10 @@ export function DirectorView() {
             <Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>
               Newer
             </Button>
-            <Button disabled={history.data?.length !== 50} onClick={() => setOffset(offset + 50)}>
+            <Button
+              disabled={history.data?.length !== 50 && records.data?.length !== 50}
+              onClick={() => setOffset(offset + 50)}
+            >
               Older
             </Button>
           </div>

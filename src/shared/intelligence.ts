@@ -142,7 +142,51 @@ export interface DirectorInvocation {
   executionAuthorized: false
   createdAt: string
   updatedAt: string
+  decisionId?: string | null
+  escalationId?: string | null
+  outcomeId?: string | null
 }
+/** A model recommendation is never a policy approval or a user decision. */
+export interface DirectorDecision {
+  id: string
+  invocationId: string
+  projectId: string
+  kind: 'DECISION'
+  recommendation: string
+  unresolvedDisagreements: string[]
+  evidenceRefs: string[]
+  executionAuthorized: false
+  createdAt: string
+}
+export interface StrategicEscalation {
+  id: string
+  invocationId: string | null
+  projectId: string
+  kind: 'ESCALATION'
+  objective: string
+  reasons: string[]
+  level: 1 | 2 | 3
+  runId: string | null
+  taskId: string | null
+  state: 'REQUESTED' | 'INVOKING' | 'WAITING_FOR_PROVIDER' | 'COMPLETED' | 'FAILED' | 'DISMISSED'
+  executionAuthorized: false
+  createdAt: string
+  updatedAt: string
+}
+export interface DirectorOutcome {
+  id: string
+  invocationId: string
+  projectId: string
+  kind: 'OUTCOME'
+  state: Exclude<DirectorInvocation['state'], 'PENDING'>
+  completedStages: ('MEMO' | 'CHALLENGE' | 'SYNTHESIS')[]
+  routingIds: string[]
+  consumption: 'RECORDED_BY_PROVIDER_ADAPTER' | 'NONE' | 'UNKNOWN'
+  replayAllowed: false
+  executionAuthorized: false
+  createdAt: string
+}
+export type DirectorRecord = DirectorDecision | StrategicEscalation | DirectorOutcome
 export interface CompiledTaskSpec {
   id: string
   projectId: string

@@ -9,12 +9,18 @@ import {
 } from '@shared/intelligence'
 import { CapacityWaitError } from '../capacity/registry'
 import { PlanInferenceError } from './openai'
+import { CapacityRoutingWaitError } from '../capacity/router'
 import { checkIntentDrift } from './drift'
 import { parseAdvisoryArtifact } from './artifact-validation'
+import type { ProviderUsageReceipt } from '@shared/capacity'
+import { ChatGPTBusyError } from './connection'
 
 export interface AdvisoryProvider {
   /** Adapters return parsed JSON only after terminal provider success; no host tools are exposed. */
   complete(instructions: string, data: unknown): Promise<unknown>
+  usage?(): ProviderUsageReceipt | null
+  stopConfirmed?(): boolean
+  dispose?(): Promise<void>
 }
 export const COMPILER_VERSION = '0.7.2.4'
 
@@ -239,6 +245,18 @@ export async function compileTask(input: {
     }
     return spec
   } catch (error) {
+    if (error instanceof ChatGPTBusyError)
+      return {
+        ...spec,
+        status: 'WAITING_FOR_PROVIDER',
+        reasons: [...spec.reasons, 'PROVIDER_SESSION_BUSY'],
+      }
+    if (error instanceof CapacityRoutingWaitError)
+      return {
+        ...spec,
+        status: 'WAITING_FOR_PROVIDER',
+        reasons: [...spec.reasons, ...error.decision.reasons],
+      }
     if (error instanceof CapacityWaitError || error instanceof PlanInferenceError) {
       const state = error instanceof CapacityWaitError ? error.pool.state : error.state
       return {

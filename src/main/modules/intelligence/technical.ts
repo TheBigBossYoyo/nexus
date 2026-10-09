@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentRuntime, AgentSessionHandle, TurnResult } from '../agent-runtime'
 import type { AdvisoryProvider } from './compiler'
+import type { ProviderUsageReceipt } from '@shared/capacity'
 
 const FAILURE_MESSAGES = {
   SESSION_START: 'Technical advisory session could not be started',
@@ -37,6 +38,13 @@ export class ClaudeTechnicalDirector implements AdvisoryProvider {
   private readonly sessions = new Set<AgentSessionHandle>()
   private readonly unconfirmedStops = new Set<AgentSessionHandle>()
   private disposed = false
+  private receipt: ProviderUsageReceipt | null = null
+  stopConfirmed(): boolean {
+    return this.sessions.size === 0 && this.unconfirmedStops.size === 0
+  }
+  usage(): ProviderUsageReceipt | null {
+    return this.receipt ? structuredClone(this.receipt) : null
+  }
   constructor(
     private readonly options: {
       runtime: AgentRuntime
@@ -52,6 +60,7 @@ export class ClaudeTechnicalDirector implements AdvisoryProvider {
   ) {}
 
   async complete(instructions: string, data: unknown): Promise<unknown> {
+    this.receipt = null
     if (this.disposed || !this.options.admitted())
       throw new Error('Technical Director is deferred until provider and quality admission pass')
     const prompt = JSON.stringify({ untrustedMaterial: data })
@@ -88,6 +97,19 @@ export class ClaudeTechnicalDirector implements AdvisoryProvider {
       for await (const event of handle.events) {
         if (event.type === 'tool.started') throw new TechnicalAdvisoryError('TOOL_BOUNDARY')
         if (event.type === 'turn.completed') {
+          const usage = event.result.usage
+          if (usage.length)
+            this.receipt = {
+              models: usage.map((u) => u.model),
+              inputTokens: usage.reduce((n, u) => n + u.inputTokens, 0),
+              outputTokens: usage.reduce((n, u) => n + u.outputTokens, 0),
+              totalTokens: null,
+              cacheReadTokens: usage.reduce((n, u) => n + u.cacheReadTokens, 0),
+              cacheWriteTokens: usage.reduce((n, u) => n + u.cacheCreationTokens, 0),
+              reasoningTokens: usage.every((u) => u.thinkingTokens !== undefined)
+                ? usage.reduce((n, u) => n + u.thinkingTokens!, 0)
+                : null,
+            }
           this.options.onOutcome?.({
             outcome: event.result.outcome,
             durationMs: event.result.durationMs,

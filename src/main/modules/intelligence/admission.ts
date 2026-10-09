@@ -15,6 +15,7 @@ import type { Repositories } from '@main/modules/persistence'
 import type { ChatGPTConnection } from './connection'
 import { assertFresh, compileTask, compilerIdentity, type AdvisoryProvider } from './compiler'
 import { IntelligenceOperations } from './operations'
+import type { AdvisoryRoutingService } from './routing'
 
 export interface CompilationRequest {
   projectId: string
@@ -46,6 +47,7 @@ export class TaskAdmissionService {
     private readonly connection?: ChatGPTConnection,
     private readonly operations = new IntelligenceOperations(),
     private readonly technical?: () => AdvisoryProvider | undefined,
+    private readonly routing?: AdvisoryRoutingService,
   ) {
     this.graph = new ContextGraphService({ repos })
   }
@@ -94,58 +96,87 @@ export class TaskAdmissionService {
       const program = this.repos.programs.require(input.executionScope.programId)
       if (program.projectId !== input.projectId)
         throw new NexusError('invalid_input', 'The target program belongs to another project.')
-      const effectiveHead = program.branch && this.git
-        ? await this.git.resolveCommit(this.repos.projects.require(program.projectId).rootPath, program.branch)
-        : program.baseCommit
+      const effectiveHead =
+        program.branch && this.git
+          ? await this.git.resolveCommit(
+              this.repos.projects.require(program.projectId).rootPath,
+              program.branch,
+            )
+          : program.baseCommit
       if (effectiveHead) snapshots = { [program.projectId]: effectiveHead }
       const material = {
         goal: program.goal,
         executionHead: effectiveHead,
         planVersion: program.planVersion,
-        milestones: this.repos.milestones
-          .listByProgram(program.id)
-          .map((m) => ({
-            id: m.id,
-            objective: m.objective,
-            acceptanceCriteria: m.acceptanceCriteria,
-            state: m.state,
-          })),
+        milestones: this.repos.milestones.listByProgram(program.id).map((m) => ({
+          id: m.id,
+          objective: m.objective,
+          acceptanceCriteria: m.acceptanceCriteria,
+          state: m.state,
+        })),
       }
       scope.push({
         id: `program:${program.id}`,
         version: hash(material),
         text: `Existing program and milestones (untrusted data): ${JSON.stringify(material)}`,
       })
-    } else if (input.executionScope && ('workspaceMissionId' in input.executionScope || 'workspaceProgramId' in input.executionScope)) {
-      const mission = 'workspaceMissionId' in input.executionScope
-        ? this.repos.workspaceMissions.require(input.executionScope.workspaceMissionId) : null
-      const program = 'workspaceProgramId' in input.executionScope
-        ? this.repos.workspacePrograms.require(input.executionScope.workspaceProgramId) : null
+    } else if (
+      input.executionScope &&
+      ('workspaceMissionId' in input.executionScope || 'workspaceProgramId' in input.executionScope)
+    ) {
+      const mission =
+        'workspaceMissionId' in input.executionScope
+          ? this.repos.workspaceMissions.require(input.executionScope.workspaceMissionId)
+          : null
+      const program =
+        'workspaceProgramId' in input.executionScope
+          ? this.repos.workspacePrograms.require(input.executionScope.workspaceProgramId)
+          : null
       const entity = mission ?? program!
       if (entity.workspaceId !== input.workspaceId)
         throw new NexusError('invalid_input', 'The target workload belongs to another workspace.')
       const kind = mission ? 'mission' : 'program'
-      snapshots = this.repos.settings.getValue<Record<string, string>>(`workspace-${kind}-bases:${entity.id}`) ?? {}
+      snapshots =
+        this.repos.settings.getValue<Record<string, string>>(
+          `workspace-${kind}-bases:${entity.id}`,
+        ) ?? {}
       if (mission?.programId && !Object.keys(snapshots).length)
-        snapshots = this.repos.settings.getValue<Record<string, string>>(`workspace-program-bases:${mission.programId}`) ?? {}
-      const priorMissions = (program || mission?.programId)
-        ? this.repos.workspaceMissions.listByProgram((program?.id ?? mission?.programId)!).filter(m => m.state === 'COMPLETED')
-        : []
+        snapshots =
+          this.repos.settings.getValue<Record<string, string>>(
+            `workspace-program-bases:${mission.programId}`,
+          ) ?? {}
+      const priorMissions =
+        program || mission?.programId
+          ? this.repos.workspaceMissions
+              .listByProgram((program?.id ?? mission?.programId)!)
+              .filter((m) => m.state === 'COMPLETED')
+          : []
       const tasks = [...priorMissions, ...(mission ? [mission] : [])]
-        .flatMap(m => this.repos.workspaceTasks.listByMission(m.id))
-        .filter(t => t.state === 'COMPLETED' && t.resultCommit)
+        .flatMap((m) => this.repos.workspaceTasks.listByMission(m.id))
+        .filter((t) => t.state === 'COMPLETED' && t.resultCommit)
       for (const task of tasks) snapshots[task.repositoryId] = task.resultCommit!
-      snapshots = Object.fromEntries(this.repos.enrolledRepositories.listByWorkspace(entity.workspaceId)
-        .filter(r => snapshots[r.id]).map(r => [r.projectId, snapshots[r.id]!]))
-      scope.push({ id: `workspace-${kind}:${entity.id}`, version: hash([entity.goal, snapshots]),
-        text: `Existing workspace workload (untrusted data): ${JSON.stringify({ goal: entity.goal, snapshots })}` })
+      snapshots = Object.fromEntries(
+        this.repos.enrolledRepositories
+          .listByWorkspace(entity.workspaceId)
+          .filter((r) => snapshots[r.id])
+          .map((r) => [r.projectId, snapshots[r.id]!]),
+      )
+      scope.push({
+        id: `workspace-${kind}:${entity.id}`,
+        version: hash([entity.goal, snapshots]),
+        text: `Existing workspace workload (untrusted data): ${JSON.stringify({ goal: entity.goal, snapshots })}`,
+      })
     } else if (input.executionScope && 'runId' in input.executionScope) {
       const run = this.repos.runs.require(input.executionScope.runId)
       if (run.projectId !== input.projectId)
         throw new NexusError('invalid_input', 'The target workload belongs to another project.')
-      const executionHead = run.integrationBranch && this.git
-        ? await this.git.resolveCommit(this.repos.projects.require(run.projectId).rootPath, run.integrationBranch)
-        : run.baseCommit
+      const executionHead =
+        run.integrationBranch && this.git
+          ? await this.git.resolveCommit(
+              this.repos.projects.require(run.projectId).rootPath,
+              run.integrationBranch,
+            )
+          : run.baseCommit
       if (executionHead) snapshots = { [run.projectId]: executionHead }
       const task = input.executionScope.taskId
         ? this.repos.tasks.require(input.executionScope.taskId)
@@ -156,10 +187,22 @@ export class TaskAdmissionService {
         originalGoal: run.config.compiledTaskSpec?.rawIntent ?? run.prompt,
         executionHead,
         explicitRootMetadata: run.config.compiledTaskSpec?.userMetadata,
-        priorRunInstructions: this.repos.intelligenceArtifacts.admissionHistory('RUN_INSTRUCTION', run.id)
-          .map(s => ({ intentId: s.intentId, rawUserIntent: s.rawIntent, explicitUserMetadata: s.userMetadata })),
-        priorInstructions: task ? this.repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', task.id)
-          .map(s => ({ intentId: s.intentId, rawUserIntent: s.rawIntent, explicitUserMetadata: s.userMetadata })) : [],
+        priorRunInstructions: this.repos.intelligenceArtifacts
+          .admissionHistory('RUN_INSTRUCTION', run.id)
+          .map((s) => ({
+            intentId: s.intentId,
+            rawUserIntent: s.rawIntent,
+            explicitUserMetadata: s.userMetadata,
+          })),
+        priorInstructions: task
+          ? this.repos.intelligenceArtifacts
+              .admissionHistory('TASK_INSTRUCTION', task.id)
+              .map((s) => ({
+                intentId: s.intentId,
+                rawUserIntent: s.rawIntent,
+                explicitUserMetadata: s.userMetadata,
+              }))
+          : [],
         currentTask: task
           ? {
               title: task.title,
@@ -189,13 +232,11 @@ export class TaskAdmissionService {
       projects = [...new Set(enrolled.map((r) => r.projectId))].sort()
       // A workspace reference binds enrollment, policy, graph and contract records, including changes
       // in repositories which did not happen to match the bounded semantic retrieval.
-      const contracts = this.repos.workspaceContracts
-        .listByWorkspace(workspace.id)
-        .map((c) => ({
-          contract: c,
-          version: this.repos.contractVersions.latest(c.id),
-          consumers: this.repos.contractConsumers.listByContract(c.id),
-        }))
+      const contracts = this.repos.workspaceContracts.listByWorkspace(workspace.id).map((c) => ({
+        contract: c,
+        version: this.repos.contractVersions.latest(c.id),
+        consumers: this.repos.contractConsumers.listByContract(c.id),
+      }))
       scope.push({
         id: `workspace:${workspace.id}`,
         version: hash([
@@ -217,7 +258,8 @@ export class TaskAdmissionService {
         ? await this.git.headCommit(project.rootPath)
         : (project.profile?.headCommit ?? null)
       const head = snapshots[projectId] ?? checkout
-      if (snapshots[projectId] && snapshots[projectId] !== checkout) differentCheckouts.add(projectId)
+      if (snapshots[projectId] && snapshots[projectId] !== checkout)
+        differentCheckouts.add(projectId)
       scope.push({
         id: `repository:${projectId}`,
         version: `${head ?? 'no-head'}:${hash([project.profile?.commands ?? {}, project.profile?.profiledAt ?? null, project.respectProjectClaudeConfig])}`,
@@ -231,7 +273,9 @@ export class TaskAdmissionService {
       )
     const evidence = new Map<string, IntelligenceContext>()
     for (const projectId of projects)
-      for (const ref of differentCheckouts.has(projectId) ? [] : this.retrieve(projectId, input.raw, input.workspaceId)) {
+      for (const ref of differentCheckouts.has(projectId)
+        ? []
+        : this.retrieve(projectId, input.raw, input.workspaceId)) {
         const prior = evidence.get(ref.id)
         if (prior && prior.version !== ref.version)
           throw new NexusError(
@@ -269,16 +313,21 @@ export class TaskAdmissionService {
       if (cached) return cached
       const pending = this.compiling.get(identity)
       if (pending) return pending
-      const strategic = this.connection?.provider()
-      const technical = this.technical?.()
-      const work = compileTask({
-        ...input,
-        context,
-        policyVersion: POLICY,
-        strategy,
-        ...(strategic ? { strategic } : {}),
-        ...(technical ? { technical } : {}),
-      }).then((spec) =>
+      const work = (async () => {
+        const providers =
+          this.routing && input.mode !== 'EXACT' && input.mode !== 'LIGHT'
+            ? await this.routing.providers(input.projectId, intentId, 'COMPILER')
+            : { strategic: this.connection?.provider(), technical: this.technical?.() }
+        const { strategic, technical } = providers
+        return compileTask({
+          ...input,
+          context,
+          policyVersion: POLICY,
+          strategy,
+          ...(strategic ? { strategic } : {}),
+          ...(technical ? { technical } : {}),
+        })
+      })().then((spec) =>
         this.repos.intelligenceArtifacts.saveCompilation(
           input.mode === 'EXACT'
             ? {

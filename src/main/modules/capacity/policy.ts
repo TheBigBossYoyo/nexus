@@ -25,6 +25,8 @@ export function routeCapacity(input: {
   activeSession?: { provider: IntelligenceProvider; model: string }
   coherentBoundary: boolean
   allowPaid?: boolean
+  /** An explicit advisory retry may probe a due pool; its adapter still owns the durable probe lease. */
+  probePoolIds?: readonly string[]
 }): CapacityRoutingDecision {
   const reasons: string[] = []
   const eligible = input.candidates.filter((c) => {
@@ -41,7 +43,15 @@ export function routeCapacity(input: {
     if (
       c.poolIds.some((id) => {
         const p = input.pools.find((p) => p.id === id)
-        return !p || !p.consumers.includes(c.provider) || !ADMISSIBLE.has(p.state)
+        const explicitProbe =
+          p &&
+          c.provider === 'openai' &&
+          ['strategic', 'compiler', 'technical'].includes(input.role) &&
+          p.state !== 'AUTH_REQUIRED' &&
+          input.probePoolIds?.includes(id)
+        return (
+          !p || !p.consumers.includes(c.provider) || (!ADMISSIBLE.has(p.state) && !explicitProbe)
+        )
       })
     )
       return reject('CAPACITY_NOT_ADMISSIBLE')
@@ -71,7 +81,13 @@ export function routeCapacity(input: {
     action: 'ROUTE',
     provider: selected.provider,
     model: selected.model,
-    reasons: [...reasons, sticky ? 'PRESERVE_VALUABLE_SESSION' : 'QUALITY_APPROVED_PROVIDER'],
+    reasons: [
+      ...reasons,
+      sticky ? 'PRESERVE_VALUABLE_SESSION' : 'QUALITY_APPROVED_PROVIDER',
+      ...(selected.poolIds.some((id) => input.probePoolIds?.includes(id))
+        ? ['EXPLICIT_PROBE_DUE']
+        : []),
+    ],
     qualityEvidence: [...selected.qualityEvidence],
   }
 }

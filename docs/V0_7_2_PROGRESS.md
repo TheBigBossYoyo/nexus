@@ -14,6 +14,8 @@ does not satisfy that requirement.
    Implemented: shared engine admission and scheduler starts; immutable metadata, canonical refs,
    inspector/history, resume snapshot binding and ordered amendments. Final breadth/E2E review remains.
 2. Production Director orchestration and durable decisions, escalations and outcomes.
+   In progress: production advisory routing, pinned Claude adapter and durable records are wired;
+   real technical quality admission remains closed. Current changes are not yet a committed acceptance block.
 3. Capacity and quality admission controlling actual dispatch, waits and recovery.
 4. Complete UI 2.0 pass across all product surfaces.
 5. Diagnose Windows security-fixture teardown and performance evaluator timeout; obtain
@@ -59,3 +61,29 @@ admission, root/queue admission, user amendments, full internal Program executio
 Workspace execution through verification and release preparation. The rendered inspector was inspected.
 These are development checks,
 not stable final-source release acceptance. No new package or live inference claim is made.
+
+## Current Director/capacity implementation
+
+After local admission commit `2c85abb`, migration 15 adds durable routing and Director decision,
+escalation and outcome records. User-requested escalations persist without inference and require an
+explicit request to invoke; dismissal is limited to unclaimed requests. Council keeps each stage and
+unresolved disagreement. The production Director and Task Compiler use one advisory admission kernel.
+Claude advice is pinned to its runtime and scoped quality evidence; worker review policy cannot redirect it.
+The user-selected GPT primary policy is recorded separately from comparative fallback-quality evidence.
+No real technical approval or live inference was granted by these changes.
+
+The router enforces local session reserves, a separate exclusive OpenAI slot, durable claims and
+per-call outcomes. Unknown plan allowance stays unknown. Explicit due GPT probes retain the adapter's
+probe lease. Confirmed dead process-owned HTTP leases can be reclaimed after restart; hosted child
+sessions stay quarantined until stop confirmation. Authoritative usage recovery updates Claude pools;
+optimistic startup, account checks and wait expiry do not prove quota recovery.
+
+Independent review found stale Claude recovery, excess OpenAI concurrency and permanent HTTP lease
+quarantine; repairs and focused fake-provider integration scenarios now cover them. It also confirmed
+that actual worker occupancy is not yet connected to these leases: global scheduler/worker admission,
+provider-scoped waits, coherent provider handoff and recovery remain independently doable next work.
+Development evidence: 409 tests across 21 intelligence, usage and IPC files passed. Node and renderer
+type checks, lint and the development build passed. Five Electron scenarios passed on this build,
+including saved escalation, explicit waiting advice, routing inspection and canonical workload admission.
+The rendered escalation screen was inspected. Independent repair verification found no additional
+confirmed material regression in these three repairs. This is not final stable-source acceptance.

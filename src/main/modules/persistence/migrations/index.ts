@@ -12,6 +12,7 @@ import { securitySchema } from './011-security'
 import { contextGraphSchema } from './012-context-graph'
 import { intelligenceSchema } from './013-intelligence'
 import { canonicalIntentsSchema } from './014-canonical-intents'
+import { capacityDirectorSchema } from './015-capacity-director'
 
 export interface Migration {
   version: number
@@ -35,4 +36,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 12, name: 'context-graph', sql: contextGraphSchema },
   { version: 13, name: 'intelligence', sql: intelligenceSchema },
   { version: 14, name: 'canonical-intents', sql: canonicalIntentsSchema },
+  { version: 15, name: 'capacity-director', sql: capacityDirectorSchema },
 ]

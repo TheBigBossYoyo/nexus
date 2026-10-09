@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { AdvisoryProvider } from './compiler'
 import { classifyOpenAIError } from '../capacity/policy'
 import { readBoundedJSON } from './transport'
+import type { ProviderUsageReceipt } from '@shared/capacity'
 
 export const OPENAI_API = 'https://api.openai.com/v1'
 export class PlanInferenceError extends Error {
@@ -31,6 +32,10 @@ const Catalog = z.object({
 
 /** The caller supplies a runtime-owned, consent-checked token; no API-key fallback exists. */
 export class OpenAIPlanProvider implements AdvisoryProvider {
+  private receipt: ProviderUsageReceipt | null = null
+  usage(): ProviderUsageReceipt | null {
+    return this.receipt ? structuredClone(this.receipt) : null
+  }
   constructor(
     private readonly accessToken: () => Promise<string>,
     private readonly model: string,
@@ -53,6 +58,7 @@ export class OpenAIPlanProvider implements AdvisoryProvider {
       .map(({ slug, display_name }) => ({ slug, display_name }))
   }
   async complete(instructions: string, data: unknown): Promise<unknown> {
+    this.receipt = null
     const content = JSON.stringify(data)
     if (content.length > 128000 || instructions.length > 16000 || !this.model.trim())
       throw new Error('Invalid advisory request')
@@ -120,6 +126,24 @@ export class OpenAIPlanProvider implements AdvisoryProvider {
               response: z
                 .object({
                   status: z.string().optional(),
+                  model: z.string().max(200).optional(),
+                  usage: z
+                    .object({
+                      input_tokens: z.number().int().nonnegative(),
+                      output_tokens: z.number().int().nonnegative(),
+                      total_tokens: z.number().int().nonnegative(),
+                      input_tokens_details: z
+                        .object({
+                          cached_tokens: z.number().int().nonnegative().optional(),
+                          cache_write_tokens: z.number().int().nonnegative().optional(),
+                        })
+                        .optional(),
+                      output_tokens_details: z
+                        .object({ reasoning_tokens: z.number().int().nonnegative().optional() })
+                        .optional(),
+                    })
+                    .nullable()
+                    .optional(),
                   error: z
                     .object({ code: z.string().max(160).optional() })
                     .nullable()
@@ -140,6 +164,18 @@ export class OpenAIPlanProvider implements AdvisoryProvider {
           if (event.type === 'response.completed') {
             if (event.response?.status && event.response.status !== 'completed')
               throw new Error('Contradictory terminal provider status')
+            if (event.response?.usage) {
+              const u = event.response.usage
+              this.receipt = {
+                models: event.response.model ? [event.response.model] : [],
+                inputTokens: u.input_tokens,
+                outputTokens: u.output_tokens,
+                totalTokens: u.total_tokens,
+                cacheReadTokens: u.input_tokens_details?.cached_tokens ?? null,
+                cacheWriteTokens: u.input_tokens_details?.cache_write_tokens ?? null,
+                reasoningTokens: u.output_tokens_details?.reasoning_tokens ?? null,
+              }
+            }
             try {
               return JSON.parse(output) as unknown
             } catch {

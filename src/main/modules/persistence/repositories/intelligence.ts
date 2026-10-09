@@ -1,11 +1,85 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from '../database'
-import type { CompiledTaskSpec, DirectorInvocation, UserIntentMetadata } from '@shared/intelligence'
+import type {
+  CompiledTaskSpec,
+  DirectorInvocation,
+  DirectorRecord,
+  DirectorOutcome,
+  UserIntentMetadata,
+} from '@shared/intelligence'
 import type { AdmissionKind } from '@main/modules/intelligence/admission'
+import type { CapacityRoutingRecord } from '@shared/capacity'
 
 export class IntelligenceStore {
   constructor(private readonly db: Database) {}
-  reconcileInterrupted(): number {
+  atomic<T>(work: () => T): T {
+    return this.db.transaction(work)()
+  }
+  saveDirectorRecord(record: DirectorRecord): void {
+    const body = JSON.stringify(record)
+    if (body.length > 128000 || record.executionAuthorized !== false)
+      throw new Error('Invalid bounded advisory record')
+    const existing = this.db
+      .prepare('SELECT project_id,kind,body FROM director_records WHERE id=?')
+      .get(record.id) as { project_id: string; kind: string; body: string } | undefined
+    if (
+      existing &&
+      (existing.project_id !== record.projectId ||
+        existing.kind !== record.kind ||
+        (record.kind !== 'ESCALATION' && existing.body !== body))
+    )
+      throw new Error('Director artifacts are immutable and project-bound')
+    if (record.invocationId) {
+      const invocation = this.db
+        .prepare("SELECT project_id FROM intelligence_artifacts WHERE id=? AND kind='director'")
+        .get(record.invocationId) as { project_id: string } | undefined
+      if (invocation?.project_id !== record.projectId)
+        throw new Error('Director record invocation belongs to another project')
+    }
+    this.db
+      .prepare(
+        'INSERT INTO director_records(id,invocation_id,project_id,kind,body,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET invocation_id=excluded.invocation_id,body=excluded.body WHERE project_id=excluded.project_id AND kind=excluded.kind',
+      )
+      .run(record.id, record.invocationId, record.projectId, record.kind, body, record.createdAt)
+  }
+  directorRecord(projectId: string, id: string): DirectorRecord | null {
+    const row = this.db
+      .prepare('SELECT body FROM director_records WHERE project_id=? AND id=?')
+      .get(projectId, id) as { body: string } | undefined
+    return row ? (JSON.parse(row.body) as DirectorRecord) : null
+  }
+  directorRecords(projectId: string, offset = 0): DirectorRecord[] {
+    const rows = this.db
+      .prepare(
+        'SELECT body FROM director_records WHERE project_id=? ORDER BY created_at DESC,rowid DESC LIMIT 50 OFFSET ?',
+      )
+      .all(projectId, Math.max(0, Math.floor(offset))) as { body: string }[]
+    return rows.map((r) => JSON.parse(r.body) as DirectorRecord)
+  }
+  saveRouting(record: CapacityRoutingRecord): void {
+    const body = JSON.stringify(record)
+    if (body.length > 128000) throw new Error('Routing record exceeds durable limit')
+    this.db
+      .prepare(
+        'INSERT INTO capacity_routing_records(id,project_id,operation_id,body,created_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE project_id=excluded.project_id AND operation_id=excluded.operation_id',
+      )
+      .run(record.id, record.projectId, record.operationId, body, record.createdAt)
+  }
+  routingHistory(projectId: string, operationId?: string): CapacityRoutingRecord[] {
+    const rows = operationId
+      ? this.db
+          .prepare(
+            'SELECT body FROM capacity_routing_records WHERE project_id=? AND operation_id=? ORDER BY created_at,rowid',
+          )
+          .all(projectId, operationId)
+      : this.db
+          .prepare(
+            'SELECT body FROM capacity_routing_records WHERE project_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100',
+          )
+          .all(projectId)
+    return (rows as { body: string }[]).map((r) => JSON.parse(r.body) as CapacityRoutingRecord)
+  }
+  reconcileInterrupted(isProcessStopped?: (pid: number) => boolean): number {
     return this.db.transaction(() => {
       const rows = this.db
         .prepare("SELECT id,body FROM intelligence_artifacts WHERE kind='director'")
@@ -18,9 +92,68 @@ export class IntelligenceStore {
         invocation.message =
           'Runtime stopped before the outcome was saved. Provider consumption is unknown. Review the saved request before explicitly retrying; it was not replayed automatically.'
         invocation.updatedAt = new Date().toISOString()
+        const outcome: DirectorOutcome = {
+          id: randomUUID(),
+          invocationId: invocation.id,
+          projectId: invocation.projectId,
+          kind: 'OUTCOME',
+          state: 'FAILED',
+          completedStages: [
+            ...(invocation.memo ? ['MEMO' as const] : []),
+            ...(invocation.challenge ? ['CHALLENGE' as const] : []),
+            ...(invocation.synthesis ? ['SYNTHESIS' as const] : []),
+          ],
+          routingIds: this.routingHistory(invocation.projectId, invocation.id).map((r) => r.id),
+          consumption: 'UNKNOWN',
+          replayAllowed: false,
+          executionAuthorized: false,
+          createdAt: invocation.updatedAt,
+        }
+        invocation.outcomeId = outcome.id
         changed += this.db
           .prepare('UPDATE intelligence_artifacts SET body=? WHERE id=?')
           .run(JSON.stringify(invocation), row.id).changes
+        this.saveDirectorRecord(outcome)
+        if (invocation.escalationId) {
+          const escalation = this.directorRecord(invocation.projectId, invocation.escalationId)
+          if (escalation?.kind === 'ESCALATION')
+            this.saveDirectorRecord({
+              ...escalation,
+              state: 'FAILED',
+              updatedAt: invocation.updatedAt,
+            })
+        }
+      }
+      const routes = this.db.prepare('SELECT body FROM capacity_routing_records').all() as {
+        body: string
+      }[]
+      for (const row of routes) {
+        const record = JSON.parse(row.body) as CapacityRoutingRecord
+        if (record.state === 'ADMITTED')
+          this.saveRouting({ ...record, state: 'INTERRUPTED', endedAt: new Date().toISOString() })
+      }
+      // A new boot does not prove an earlier child process stopped. Retain its slot until confirmed.
+      const checkpoints = this.db
+        .prepare(
+          "SELECT id,body,revision FROM capacity_checkpoints WHERE id LIKE 'capacity-leases:%'",
+        )
+        .all() as { id: string; body: string; revision: number }[]
+      for (const row of checkpoints) {
+        const body = JSON.parse(row.body) as {
+          leases: { state: string; owner?: { kind: string; pid: number } }[]
+        }
+        if (body.leases.some((l) => l.state === 'HELD' || l.state === 'QUARANTINED'))
+          this.checkpoint(row.id, row.revision, {
+            leases: body.leases.map((l) => {
+              if (l.state !== 'HELD' && l.state !== 'QUARANTINED') return l
+              const stoppedHTTP =
+                l.owner?.kind === 'PROCESS_HTTP' &&
+                Number.isInteger(l.owner.pid) &&
+                l.owner.pid > 0 &&
+                isProcessStopped?.(l.owner.pid)
+              return { ...l, state: stoppedHTTP ? 'INTERRUPTED' : 'QUARANTINED' }
+            }),
+          })
       }
       return changed
     })()
@@ -94,13 +227,21 @@ export class IntelligenceStore {
         'INSERT INTO engineering_admissions(kind,entity_id,project_id,spec_id) VALUES (?,?,?,?) ON CONFLICT(kind,entity_id) DO UPDATE SET project_id=excluded.project_id,spec_id=excluded.spec_id',
       )
       .run(kind, entityId, spec.projectId, spec.id)
-    this.db.prepare('INSERT OR IGNORE INTO engineering_admission_history(kind,entity_id,project_id,spec_id) VALUES (?,?,?,?)')
+    this.db
+      .prepare(
+        'INSERT OR IGNORE INTO engineering_admission_history(kind,entity_id,project_id,spec_id) VALUES (?,?,?,?)',
+      )
       .run(kind, entityId, spec.projectId, spec.id)
   }
   admissionHistory(kind: AdmissionKind, entityId: string): CompiledTaskSpec[] {
-    const rows = this.db.prepare('SELECT project_id,spec_id FROM engineering_admission_history WHERE kind=? AND entity_id=? ORDER BY ordinal')
+    const rows = this.db
+      .prepare(
+        'SELECT project_id,spec_id FROM engineering_admission_history WHERE kind=? AND entity_id=? ORDER BY ordinal',
+      )
       .all(kind, entityId) as { project_id: string; spec_id: string }[]
-    return rows.map(r => this.compilation(r.project_id, r.spec_id)).filter((s): s is CompiledTaskSpec => s !== null)
+    return rows
+      .map((r) => this.compilation(r.project_id, r.spec_id))
+      .filter((s): s is CompiledTaskSpec => s !== null)
   }
   admission(kind: AdmissionKind, entityId: string): CompiledTaskSpec | null {
     const row = this.db

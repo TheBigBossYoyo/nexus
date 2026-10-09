@@ -6,6 +6,7 @@ import { DirectorGateway } from '@main/modules/intelligence/gateway'
 import type { GitService } from '@main/modules/git'
 import { IntelligenceOperations } from '../intelligence/operations'
 import { TaskAdmissionService } from '../intelligence/admission'
+import type { AdvisoryRoutingService } from '../intelligence/routing'
 
 type Channel = Extract<
   IpcChannel,
@@ -22,8 +23,9 @@ export function createV72Handlers(
   git?: GitService,
   operations = new IntelligenceOperations(),
   admission = new TaskAdmissionService(repos, git, connection, operations),
+  routing?: AdvisoryRoutingService,
 ): V72Handlers {
-  const director = new DirectorGateway(repos.intelligenceArtifacts)
+  const director = new DirectorGateway(repos.intelligenceArtifacts, routing)
   const chatgpt = () => {
     if (!connection)
       throw new NexusError(
@@ -33,7 +35,7 @@ export function createV72Handlers(
     return connection
   }
   return {
-    'director.invoke': ({ projectId, objective, level }) =>
+    'director.invoke': ({ projectId, objective, level, escalationId }) =>
       operations.run(() => {
         repos.projects.require(projectId)
         const strategic = connection?.provider()
@@ -47,8 +49,45 @@ export function createV72Handlers(
           provider: strategic ? 'openai' : null,
           model: status?.model ?? null,
           ...(strategic ? { strategic } : {}),
+          ...(escalationId ? { escalationId } : {}),
         })
       }),
+    'director.escalate': (input) => {
+      repos.projects.require(input.projectId)
+      if (input.runId) {
+        const run = repos.runs.require(input.runId)
+        if (run.projectId !== input.projectId)
+          throw new NexusError('invalid_input', 'Escalation workload belongs to another project')
+      }
+      if (input.taskId && (!input.runId || repos.tasks.require(input.taskId).runId !== input.runId))
+        throw new NexusError('invalid_input', 'Escalation task belongs to another workload')
+      return director.escalate({
+        ...input,
+        runId: input.runId ?? null,
+        taskId: input.taskId ?? null,
+      })
+    },
+    'director.records': ({ projectId, offset }) => {
+      repos.projects.require(projectId)
+      return repos.intelligenceArtifacts.directorRecords(projectId, offset)
+    },
+    'director.dismissEscalation': ({ projectId, escalationId }) => {
+      repos.projects.require(projectId)
+      const record = repos.intelligenceArtifacts.directorRecord(projectId, escalationId)
+      if (record?.kind !== 'ESCALATION' || record.state !== 'REQUESTED')
+        throw new NexusError('invalid_state', 'Only an unclaimed escalation can be dismissed')
+      const dismissed = {
+        ...record,
+        state: 'DISMISSED' as const,
+        updatedAt: new Date().toISOString(),
+      }
+      repos.intelligenceArtifacts.saveDirectorRecord(dismissed)
+      return dismissed
+    },
+    'director.routing': ({ projectId, operationId }) => {
+      repos.projects.require(projectId)
+      return repos.intelligenceArtifacts.routingHistory(projectId, operationId)
+    },
     'director.history': ({ projectId, offset }) => {
       repos.projects.require(projectId)
       return repos.intelligenceArtifacts.listDirectors(projectId, offset)

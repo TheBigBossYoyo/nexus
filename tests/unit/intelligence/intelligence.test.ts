@@ -421,6 +421,50 @@ describe('official Responses stream', () => {
       ).complete('', {}),
     ).rejects.toThrow('without response.completed')
   })
+  it('retains only provider-reported usage and clears an earlier receipt when usage is absent', async () => {
+    let calls = 0
+    const provider = new OpenAIPlanProvider(
+      async () => 'test-token',
+      'requested-model',
+      async () => {
+        calls++
+        const response =
+          calls === 1
+            ? {
+                status: 'completed',
+                model: 'reported-model',
+                usage: {
+                  input_tokens: 12,
+                  output_tokens: 4,
+                  total_tokens: 16,
+                  input_tokens_details: { cached_tokens: 0 },
+                  output_tokens_details: { reasoning_tokens: 2 },
+                },
+              }
+            : { status: 'completed' }
+        return new Response(
+          [
+            { type: 'response.output_text.delta', delta: '{"ok":true}' },
+            { type: 'response.completed', response },
+          ]
+            .map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+            .join(''),
+        )
+      },
+    )
+    await provider.complete('Bounded advice', {})
+    expect(provider.usage()).toEqual({
+      models: ['reported-model'],
+      inputTokens: 12,
+      outputTokens: 4,
+      totalTokens: 16,
+      cacheReadTokens: 0,
+      cacheWriteTokens: null,
+      reasoningTokens: 2,
+    })
+    await provider.complete('Bounded advice', {})
+    expect(provider.usage()).toBeNull()
+  })
   it('rejects late stream quota and incomplete output', async () => {
     for (const frame of [
       {

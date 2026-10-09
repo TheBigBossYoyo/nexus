@@ -108,3 +108,56 @@ test('Director waiting history, exact compiler preview and protected provider co
     removeDir(repo)
   }
 })
+
+test('saved strategic escalations require explicit advice and preserve waiting outcomes and routing', async () => {
+  const repo = createRepo(),
+    dataDir = tempDir('director-escalation-v72')
+  const { app, page } = await launchApp(dataDir, repo)
+  try {
+    await page.getByTestId('nav-projects').click()
+    await page.getByTestId('open-project').click()
+    await expect(page.getByTestId('project-detail')).toBeVisible()
+    const project = (await invoke(page, 'projects.list', {}))[0]!
+    await page.getByTestId('nav-director').click()
+    const raw = '  Review conflicting engineering evidence\n'
+    await page.getByLabel('Objective', { exact: true }).fill(raw)
+    await page.getByLabel('Director level').selectOption('3')
+    await page.getByRole('button', { name: 'Save escalation', exact: true }).click()
+    const saved = page.getByText('Escalation · REQUESTED', { exact: true })
+    await expect(saved).toBeVisible()
+    expect(await invoke(page, 'director.history', { projectId: project.id })).toEqual([])
+    await saved.focus()
+    await saved.press('Enter')
+    await page.getByRole('button', { name: 'Request escalation advice', exact: true }).click()
+    await expect(page.getByText('Escalation · WAITING FOR PROVIDER', { exact: true })).toBeVisible()
+    const invocation = (await invoke(page, 'director.history', { projectId: project.id }))[0]!
+    expect(invocation.objective).toBe(raw)
+    expect(invocation.executionAuthorized).toBe(false)
+    expect(
+      (await invoke(page, 'director.records', { projectId: project.id })).some(
+        (r) =>
+          r.kind === 'OUTCOME' && r.state === 'WAITING_FOR_PROVIDER' && r.consumption === 'NONE',
+      ),
+    ).toBe(true)
+    await page.getByText('Provider routing and outcome', { exact: true }).click()
+    await expect(page.getByText('No admitted provider', { exact: false }).first()).toBeVisible()
+    expect(
+      (
+        await invoke(page, 'director.routing', {
+          projectId: project.id,
+          operationId: invocation.id,
+        })
+      ).every((r) => r.action === 'WAIT' && r.consumption === 'NOT_SENT'),
+    ).toBe(true)
+    await page.screenshot({ path: 'test-results/v72-director-escalation-routing.png' })
+    await page.getByRole('button', { name: 'Save escalation', exact: true }).click()
+    await page.getByText('Escalation · REQUESTED', { exact: true }).click()
+    await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
+    await expect(page.getByText('Escalation · DISMISSED', { exact: true })).toBeVisible()
+    expect((await invoke(page, 'director.history', { projectId: project.id })).length).toBe(1)
+  } finally {
+    await closeApp(app)
+    removeDir(dataDir)
+    removeDir(repo)
+  }
+})

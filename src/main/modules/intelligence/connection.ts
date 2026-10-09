@@ -18,6 +18,7 @@ import { OpenAIPlanProvider, PlanInferenceError } from './openai'
 import type { AdvisoryProvider } from './compiler'
 import { CapacityRegistry } from '../capacity/registry'
 import { readBoundedJSON } from './transport'
+import type { ProviderUsageReceipt } from '@shared/capacity'
 
 export interface ProtectedStorage {
   encrypt(value: string): Buffer
@@ -51,6 +52,12 @@ const SavedSchema = z.object({
     .max(50),
 })
 type Saved = z.infer<typeof SavedSchema>
+export class ChatGPTBusyError extends Error {
+  constructor() {
+    super('A ChatGPT operation is in progress. Try again after it finishes.')
+    this.name = 'ChatGPTBusyError'
+  }
+}
 
 /** All credential transitions and inference are serialized at the runtime owner. */
 export class ChatGPTConnection {
@@ -115,9 +122,17 @@ export class ChatGPTConnection {
     if (this.disposed) throw new Error('ChatGPT connection is shutting down')
     if (this.storageFault || !this.protection?.available())
       throw new Error('Protected credential storage unavailable')
-    if (this.busy)
-      throw new Error('A ChatGPT operation is in progress. Try again after it finishes.')
+    if (this.busy) throw new ChatGPTBusyError()
     this.busy = true
+  }
+  canInfer(): boolean {
+    return (
+      !this.disposed &&
+      !this.busy &&
+      !this.connecting &&
+      !this.storageFault &&
+      !!this.protection?.available()
+    )
   }
   status(): ChatGPTStatus {
     const profile = this.saved.profiles.find((p) => p.id === this.saved.active)
@@ -362,10 +377,13 @@ export class ChatGPTConnection {
       return undefined
     const id = selected.id,
       model = selected.model
+    let receipt: ProviderUsageReceipt | null = null
     return {
+      usage: () => (receipt ? structuredClone(receipt) : null),
       complete: (instructions, data) => {
         const work = (async () => {
           this.claim()
+          receipt = null
           try {
             const current = this.saved.profiles.find((p) => p.id === id)
             if (
@@ -377,12 +395,18 @@ export class ChatGPTConnection {
             const binding = this.capacity.binding(current.registration)
             this.capacity.admit(binding)
             try {
-              const result = await new OpenAIPlanProvider(
+              const provider = new OpenAIPlanProvider(
                 () => this.session(id).accessToken(),
                 model,
                 this.transport,
                 this.abort.signal,
-              ).complete(instructions, data)
+              )
+              let result: unknown
+              try {
+                result = await provider.complete(instructions, data)
+              } finally {
+                receipt = provider.usage()
+              }
               this.capacity.success(binding)
               return result
             } catch (error) {

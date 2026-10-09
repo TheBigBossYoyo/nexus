@@ -50,3 +50,46 @@ export interface CapacityRoutingDecision {
   reasons: string[]
   qualityEvidence: string[]
 }
+export interface CapacityRoutingRecord extends CapacityRoutingDecision {
+  id: string
+  projectId: string
+  operationId: string
+  role: IntelligenceRole
+  stage: string
+  state: 'ADMITTED' | 'WAITING_FOR_CAPACITY' | 'COMPLETED' | 'FAILED' | 'INTERRUPTED'
+  poolIds: string[]
+  policyVersion: string
+  reservePolicy?: ProviderReservePolicy
+  createdAt: string
+  endedAt: string | null
+  failure: 'CAPACITY' | 'PROVIDER' | 'STOP_UNCONFIRMED' | null
+  consumption?: 'NOT_SENT' | 'PROVIDER_REPORTED' | 'UNKNOWN'
+  usage?: ProviderUsageReceipt | null
+}
+/** Numeric fields are reported by the adapter; absence stays null, never an estimate of allowance. */
+export interface ProviderUsageReceipt {
+  models: string[]
+  inputTokens: number | null
+  outputTokens: number | null
+  totalTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+  reasoningTokens: number | null
+}
+export interface ProviderReservePolicy {
+  version: string
+  maxConcurrent: number
+  /** A local session-slot reserve, never an estimate of plan allowance. */
+  advisorySlots: number
+  poolLimits?: Record<string, { maxConcurrent: number; advisorySlots: number }>
+}
+export interface ProviderCapacityLease {
+  id: string
+  poolId: string
+  operationId: string
+  role: IntelligenceRole
+  bootId: string
+  state: 'HELD' | 'RELEASED' | 'QUARANTINED' | 'INTERRUPTED'
+  createdAt: string
+  owner?: { kind: 'PROCESS_HTTP' | 'HOSTED_SESSION'; pid: number }
+}
