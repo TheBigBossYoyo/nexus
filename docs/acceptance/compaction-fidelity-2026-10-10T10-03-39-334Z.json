@@ -1,0 +1,462 @@
+{
+  "kind": "compaction-fidelity",
+  "startedAt": "2026-10-10T10:03:39.334Z",
+  "finishedAt": "2026-10-10T10:04:54.537Z",
+  "model": "sonnet",
+  "mechanism": "The runtime's own compaction of a streaming session, started deliberately by sending /compact (trigger 'manual'). The automatic trigger at a full context window was not exercised.",
+  "compactionOccurred": true,
+  "compaction": {
+    "trigger": "manual",
+    "preTokens": 21822,
+    "postTokens": 2422,
+    "durationMs": 7989
+  },
+  "observableContext": {
+    "tokensBeforeCompaction": 21167,
+    "tokensAfterCompaction": 18020
+  },
+  "facts": {
+    "total": 28,
+    "establishedBefore": 28,
+    "retainedAfter": 27,
+    "lost": [
+      "test window.test.js"
+    ],
+    "notEstablishedBefore": [],
+    "onlyInConversation": {
+      "established": 15,
+      "retained": 15
+    },
+    "byGroup": [
+      {
+        "group": "objective",
+        "established": 1,
+        "retained": 1
+      },
+      {
+        "group": "acceptance criteria",
+        "established": 3,
+        "retained": 3
+      },
+      {
+        "group": "numeric values",
+        "established": 4,
+        "retained": 4
+      },
+      {
+        "group": "paths",
+        "established": 4,
+        "retained": 4
+      },
+      {
+        "group": "decisions",
+        "established": 2,
+        "retained": 2
+      },
+      {
+        "group": "open bugs",
+        "established": 2,
+        "retained": 2
+      },
+      {
+        "group": "security constraints",
+        "established": 2,
+        "retained": 2
+      },
+      {
+        "group": "files changed",
+        "established": 5,
+        "retained": 5
+      },
+      {
+        "group": "tests",
+        "established": 3,
+        "retained": 2
+      },
+      {
+        "group": "Context Graph references",
+        "established": 2,
+        "retained": 2
+      }
+    ],
+    "detail": [
+      {
+        "key": "objective",
+        "group": "objective",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "AC1 burst and refill",
+        "group": "acceptance criteria",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "AC2 injected clock, no sleeping",
+        "group": "acceptance criteria",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "AC3 tests pass, refill after empty",
+        "group": "acceptance criteria",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "capacity 37",
+        "group": "numeric values",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "refill 250 ms",
+        "group": "numeric values",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "burst multiplier 1.6",
+        "group": "numeric values",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "maximum retries 6",
+        "group": "numeric values",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "path src/limiter/bucket.js",
+        "group": "paths",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "path src/limiter/schedule.js",
+        "group": "paths",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "path src/limiter/retry.js",
+        "group": "paths",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "path config/limits.json",
+        "group": "paths",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "D1 integer tokens",
+        "group": "decisions",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "D2 injected clock now()",
+        "group": "decisions",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "BUG-412 not to be fixed, file not edited",
+        "group": "open bugs",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "BUG-431 out of scope",
+        "group": "open bugs",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "S1 key never logged, 12 hex of SHA-256",
+        "group": "security constraints",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "S2 limits never loaded from a request path",
+        "group": "security constraints",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "changed config/limits.json",
+        "group": "files changed",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "changed src/limiter/bucket.js",
+        "group": "files changed",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "changed src/limiter/bucket.test.js",
+        "group": "files changed",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "changed src/limiter/schedule.js",
+        "group": "files changed",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "changed src/limiter/schedule.test.js",
+        "group": "files changed",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "test bucket.test.js",
+        "group": "tests",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "test schedule.test.js",
+        "group": "tests",
+        "alsoInRepository": true,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "test window.test.js",
+        "group": "tests",
+        "alsoInRepository": true,
+        "before": true,
+        "after": false
+      },
+      {
+        "key": "ref context://project/ratelimit/decisions/integer-token-arithmetic",
+        "group": "Context Graph references",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      },
+      {
+        "key": "ref notes/limiter/burst-factor-origin-3fa9c1",
+        "group": "Context Graph references",
+        "alsoInRepository": false,
+        "before": true,
+        "after": true
+      }
+    ]
+  },
+  "probeUsedTools": {
+    "before": [],
+    "after": []
+  },
+  "taskQualityAfterCompaction": {
+    "continuedOutcome": "success",
+    "hiddenPassed": true,
+    "hiddenOutput": "✔ the retry schedule uses the interval, the multiplier and the maximum of the brief (0.8742ms)\n✔ a log line carries 12 hex characters of the SHA-256 of the key, never the key (0.4729ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 76.7437\n",
+    "suitePassed": true,
+    "bug412FileUntouched": true,
+    "toolsUsedInContinuation": 2
+  },
+  "turns": [
+    {
+      "label": "step 1: brief and first implementation",
+      "outcome": "success",
+      "tools": 11,
+      "denied": 1,
+      "requests": 7,
+      "cacheRead": 94813,
+      "cacheWrite": 18272,
+      "uncached": 14,
+      "contextTokens": 18274,
+      "ms": 27940
+    },
+    {
+      "label": "step 2: more work",
+      "outcome": "success",
+      "tools": 4,
+      "denied": 0,
+      "requests": 3,
+      "cacheRead": 57306,
+      "cacheWrite": 2180,
+      "uncached": 6,
+      "contextTokens": 20454,
+      "ms": 11006
+    },
+    {
+      "label": "probe before the compaction",
+      "outcome": "success",
+      "tools": 0,
+      "denied": 0,
+      "requests": 1,
+      "cacheRead": 20452,
+      "cacheWrite": 713,
+      "uncached": 2,
+      "contextTokens": 21167,
+      "ms": 3734
+    },
+    {
+      "label": "/compact",
+      "outcome": "success",
+      "tools": 0,
+      "denied": 0,
+      "requests": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "uncached": 0,
+      "contextTokens": 18770,
+      "ms": 8067
+    },
+    {
+      "label": "probe after the compaction",
+      "outcome": "success",
+      "tools": 0,
+      "denied": 0,
+      "requests": 1,
+      "cacheRead": 12440,
+      "cacheWrite": 5013,
+      "uncached": 2,
+      "contextTokens": 18020,
+      "ms": 7742
+    },
+    {
+      "label": "step 3: continue the task",
+      "outcome": "success",
+      "tools": 2,
+      "denied": 0,
+      "requests": 3,
+      "cacheRead": 56195,
+      "cacheWrite": 2841,
+      "uncached": 6,
+      "contextTokens": 20296,
+      "ms": 15990
+    }
+  ],
+  "probeAnswers": {
+    "before": {
+      "objective": "Add a token-bucket rate limiter per client key to the gateway, with a retry schedule clients can follow.",
+      "acceptanceCriteria": [
+        "AC1. A client key gets at most the bucket capacity of requests in a burst, and tokens refill one at a time at the refill interval.",
+        "AC2. All time comes from an injected clock; no test sleeps.",
+        "AC3. node --test passes, including a test for refill after an empty bucket."
+      ],
+      "capacity": 37,
+      "refillMs": 250,
+      "burstMultiplier": 1.6,
+      "maxRetries": 6,
+      "paths": [
+        "src/limiter/bucket.js",
+        "src/limiter/schedule.js",
+        "src/limiter/retry.js",
+        "config/limits.json"
+      ],
+      "decisions": [
+        "D1: token counts are integers; no fractional tokens are ever stored.",
+        "D2: the clock is injected as a function now() returning milliseconds; Date.now is only its default."
+      ],
+      "openBugs": [
+        "BUG-412: src/limiter/window.js counts a request exactly on the window boundary in both windows. Do not fix it and do not edit that file; another team owns it.",
+        "BUG-431: the gateway's health endpoint is rate limited like any other. Out of scope; do nothing."
+      ],
+      "securityConstraints": [
+        "S1: a client key is never written to a log. A log line carries the first 12 hexadecimal characters of the SHA-256 of the key instead.",
+        "S2: config/limits.json is read from its fixed path only; a path that comes from a request is never used to load limits."
+      ],
+      "filesChanged": [
+        "config/limits.json",
+        "src/limiter/bucket.js",
+        "src/limiter/bucket.test.js",
+        "src/limiter/schedule.js",
+        "src/limiter/schedule.test.js"
+      ],
+      "tests": [
+        "src/limiter/bucket.test.js",
+        "src/limiter/schedule.test.js",
+        "src/limiter/window.test.js"
+      ],
+      "contextRefs": [
+        "context://project/ratelimit/decisions/integer-token-arithmetic",
+        "notes/limiter/burst-factor-origin-3fa9c1"
+      ]
+    },
+    "after": {
+      "objective": "Add a token-bucket rate limiter per client key to the gateway, with a retry schedule clients can follow.",
+      "acceptanceCriteria": [
+        "AC1. A client key gets at most the bucket capacity of requests in a burst, and tokens refill one at a time at the refill interval.",
+        "AC2. All time comes from an injected clock; no test sleeps.",
+        "AC3. node --test passes, including a test for refill after an empty bucket."
+      ],
+      "capacity": 37,
+      "refillMs": 250,
+      "burstMultiplier": 1.6,
+      "maxRetries": 6,
+      "paths": [
+        "src/limiter/bucket.js",
+        "src/limiter/schedule.js",
+        "src/limiter/retry.js",
+        "config/limits.json",
+        "src/limiter/window.js"
+      ],
+      "decisions": [
+        "D1: token counts are integers; no fractional tokens are ever stored.",
+        "D2: the clock is injected as a function now() returning milliseconds; Date.now is only its default."
+      ],
+      "openBugs": [
+        "BUG-412: src/limiter/window.js counts a request exactly on the window boundary in both windows. Do not fix it and do not edit that file; another team owns it.",
+        "BUG-431: the gateway's health endpoint is rate limited like any other. Out of scope; do nothing."
+      ],
+      "securityConstraints": [
+        "S1: a client key is never written to a log. A log line carries the first 12 hexadecimal characters of the SHA-256 of the key instead.",
+        "S2: config/limits.json is read from its fixed path only; a path that comes from a request is never used to load limits."
+      ],
+      "filesChanged": [
+        "config/limits.json",
+        "src/limiter/bucket.js",
+        "src/limiter/bucket.test.js",
+        "src/limiter/schedule.js",
+        "src/limiter/schedule.test.js"
+      ],
+      "tests": [
+        "src/limiter/bucket.test.js",
+        "src/limiter/schedule.test.js"
+      ],
+      "contextRefs": [
+        "context://project/ratelimit/decisions/integer-token-arithmetic",
+        "notes/limiter/burst-factor-origin-3fa9c1"
+      ]
+    }
+  },
+  "verdict": "VERIFIED WITH LOSSES: see facts.lost and taskQualityAfterCompaction"
+}
