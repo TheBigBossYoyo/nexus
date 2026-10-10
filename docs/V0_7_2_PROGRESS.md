@@ -87,3 +87,42 @@ type checks, lint and the development build passed. Five Electron scenarios pass
 including saved escalation, explicit waiting advice, routing inspection and canonical workload admission.
 The rendered escalation screen was inspected. Independent repair verification found no additional
 confirmed material regression in these three repairs. This is not final stable-source acceptance.
+
+## 2026-10-10: Claude takes over as reviewer and continuing engineer
+
+Parent 0.7.1 is still PARTIAL; its real campaign is running. Nothing here is merged or tagged, and no parent
+gate is closed by it. What follows was done on this branch while that campaign ran.
+
+Handoff. The uncommitted worker-capacity work found after `522f898` was preserved unchanged as `3a86454`
+(one type error and one failing test, both in its new test file; stop and recovery handling untested).
+
+Independent review of that work found six defects, each fixed with a test or caught by an existing one:
+
+| Defect | Effect | Fix |
+| --- | --- | --- |
+| Admission required per-call tool authorization of every candidate | Codex could never be admitted; "Claude unavailable, eligible Codex work continues" was unreachable | A provider is admissible when the NEXUS policy authorizes its tool calls or its own sandbox confines it (`6af22b1`) |
+| Leases of hosted sessions were quarantined at boot with no way to release them | One crash under load left every later session waiting for capacity, for ever | Evidence-based reclamation: owner process and every worker process of that start gone, still so after 30 s; evidence saved per lease (`d26154b`) |
+| The dispatch gate no longer applied the ramp after a usage reset | All sessions restarted at once after a reset | The ramp applies while Claude is available; while it is limited, admission decides per session (`1ecddb4`) |
+| Admission skipped an account with no email or outside subscription mode | A scripted runtime, an account without an email and every API-key user had all work wait for ever (4 runtime-process tests paused) | The requested primary needs no identity; a stand-in does, because its evidence is bound to a profile (`828d211`) |
+| A provider's quota or authentication refusal also raised a capacity wait | The run paused as `capacity`: no quota banner, no countdown, no automatic resume, no overnight shutdown (3 end-to-end tests) | A capacity wait is only for work never dispatched; the refusal pauses as before (`ec031e4`) |
+| A provider the user chose for a role was treated as a stand-in | Cross-model review waited for quality evidence (1 end-to-end test) | The requested provider is primary (`ec031e4`) |
+
+Regression failures named in the earlier checkpoint:
+
+- Windows EPERM at teardown of the security corpus: an antivirus scanning the temp directory flagged the
+  corpus files (their text is attack-shaped on purpose) and locked them. Fixed on the parent branch
+  (`514a7ea`): the fixtures are built inside the checkout. It reaches this branch with the reconciliation;
+  until then the two security test files are not run here.
+- Performance evaluator at its 120 s limit: profiled. 108 s on the unoptimized fixture, spent re-timing runs
+  that are seconds long and on one 28 s run judged "far too slow" only after it returned. Now about 40 s,
+  with the ratio limit, the rounds and the verdicts unchanged (case version 4, `36da8ed`).
+
+State of the checks on this branch at `ec031e4`: type checks and lint pass; unit and integration 178 files,
+3,145 of 3,145 (the two security files excluded as said); the end-to-end run before the last fix was 30
+passed, 4 failed, and the three files that held the failures then passed 15 of 15. A full end-to-end run on
+final source is still owed.
+
+Not yet reviewed by me: OpenAI authentication and storage, the Director and Council, the Task Compiler's
+entry boundaries and snapshot consistency, instruction history, the UI. Not yet done: provider-scoped wait
+state in the UI, crash tests on a real runtime process for worker admission, everything that needs real
+providers.
