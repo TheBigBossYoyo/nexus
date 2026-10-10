@@ -262,11 +262,55 @@ each tested alone. No skip, only, fixme or added retry in the branch.
 | 13.5 | MEDIUM | Untested pairs most likely to hide a defect: capacity wait with the queue; with crash recovery; AUTO with plan approval and a stale specification; a ChatGPT 401 or quota with an overnight run; a resumed run with the Context Graph | | OPEN |
 | 13.6 | LOW | Assertions that confirm a stub (`status` READY after a stubbed answer), existence only (`toBeTruthy` on ids) or a call count (fifteen in workload-admission) | | OPEN |
 
+## 11. UI/UX, round 1
+
+Read-only review of the source on 2026-10-10 (no rendered page was seen). Coverage: no view folder uses a raw
+palette colour or a hex value; 20 of 22 folders follow UI 2.0; the two that hold the 0.7.2 screens
+(intelligence, projects) are mixed: right tokens, but bare paragraphs and disclosure elements where the design
+system has primitives.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 11.1 | HIGH | A mission that waits for capacity names no provider, no reason and no time; the header shows the raw word `capacity` | | FIXED `d8bc227`: the panel says which provider, why, and the reset time when the provider gave one |
+| 11.2 | HIGH | A compilation that waits for a provider names none and offers no next action | | FIXED `aefd772`: it says what is needed and opens Providers |
+| 11.3 | HIGH | The Director view shows states as codes, has no loading state for its records, and after an unknown outcome does not say how to go on | | FIXED `aefd772` |
+| 11.4 | HIGH | Internal names shown raw: compilation depths, statuses, provenance and kinds, consumption | | PARTLY FIXED `aefd772`: depths and states are in words. Provenance, kinds and identifiers in the inspector are still codes: OPEN |
+| 11.5 | MEDIUM | One concept, several names: capacity (three forms), the preview and the inspector, the advice buttons; the capacity section is in Usage while the connection is in Providers | | OPEN |
+| 11.6 | MEDIUM | Text that says the Technical Director is pending or deferred | | FIXED `aefd772` |
+| 11.7 | MEDIUM | "No work has been lost" stated flatly in the quota panel and banner | | OPEN |
+| 11.8 | MEDIUM | The statement of what goes to OpenAI is two dense paragraphs below the buttons | | OPEN |
+| 11.9 | MEDIUM | The 0.7.2 screens use bare paragraphs, disclosure elements and their own paging where EmptyState, Card and DataTable exist; the preview's views are pressed buttons, not tabs | | OPEN |
+| 11.10 | LOW | Two selectors that read as "mode" in the composer; a heading outside the type scale; long routing reasons wrap unbounded | | OPEN |
+
+## 12. Accessibility, round 1
+
+Read-only review of the source on 2026-10-10, WCAG 2.2 AA; contrast computed from the tokens; no screen reader
+and no rendered page. No blocker: every task can be completed with a keyboard and a screen reader. Sound:
+language, landmarks and a skip link; the dialog (role, trap, Escape, focus restored); tabs with arrow keys; a
+visible focus ring everywhere; reduced motion respected; no positive tab index; the switch (role, state, label,
+description); icon buttons need a label; tables with headers; text and badge contrast between 5.0 and 8.3 in
+both themes. There is no automated accessibility check in the tests: OPEN as 12.12.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 12.1 | HIGH | 4.1.3: the result of a preview (ready, needs a decision, waiting) is never announced | | FIXED `aefd772` |
+| 12.2 | HIGH | 4.1.3: a run paused for capacity or for quota is silent | | FIXED `aefd772` |
+| 12.3 | HIGH | 4.1.3: the quota banner is a status region with a countdown that changes every second | | FIXED `aefd772`: the countdown is hidden from assistive technology |
+| 12.4 | MEDIUM | 2.4.3: a button that disables itself while it works drops the focus | | FIXED `aefd772` for the Button primitive. Controls a view disables itself while a request runs (Director, ChatGPT card): OPEN |
+| 12.5 | MEDIUM | 2.4.3: the composer disables its form while compiling and the focus is lost | | FIXED `aefd772`: the blocker is focused once the form is back |
+| 12.6 | MEDIUM | 1.3.1, 3.3.1: a Field's hint and error are not tied to its control | | FIXED `aefd772` |
+| 12.7 | MEDIUM | 4.1.3: status regions that are mounted only when they have text are often not announced | | FIXED `aefd772` for the preview and the Director request. The inspector: OPEN |
+| 12.8 | MEDIUM | 1.4.11: the edge of inputs, selects and the off switch is 1.5:1 (1.2:1 for the switch track) | | FIXED `aefd772`: 3.3:1 in the light theme, 3.8:1 in the dark one, computed |
+| 12.9 | MEDIUM | 2.4.2: the window title never changes; the focus does not move on navigation | | PARTLY FIXED `aefd772`: the title names the view. The focus on navigation: OPEN |
+| 12.10 | MEDIUM | 2.2.1: toasts expire with no history, and some errors exist only as a toast | | OPEN |
+| 12.11 | LOW | A disabled control with no stated reason (the confirmation switch, resume with a specification); heading levels in the Director view; stale facts at reduced opacity fall to 3.5:1; a tooltip cannot be dismissed with Escape | | OPEN |
+| 12.12 | MEDIUM | No automated accessibility assertion in the end-to-end tests | | OPEN |
+
 ## Reviews not finished
 
-11 UI/UX and 12 accessibility, after the UI work.
+The second round of 11 and 12, after the fixes of the first, on rendered pages.
 
-## Count on 2026-10-10, after twelve of fourteen reviews
+## Count on 2026-10-10, after fourteen reviews (the two of the UI in their first round)
 
 First six reviews: 1 CRITICAL, 10 HIGH (two of them one defect seen twice), about 25 MEDIUM, the rest LOW.
 Second six reviews: no CRITICAL; HIGH 8.1 (with 7.1), 8.2, 9.1, 9.2, 9.3, 10.1, 10.2, 13.1, 13.2.
