@@ -297,6 +297,73 @@ Open, accepted for 0.7.1:
   "expired" cause assumes a five-minute lifetime (LOW; causes are labelled as NEXUS's inference).
 - Reading the context breakdown can delay a stop by up to 8 seconds (LOW).
 
+## Closing work, 2026-10-10
+
+The usage window reset (five-hour 3%, weekly 0%; `docs/acceptance/usage-report-2026-10-10T06-41-24-612Z.json`,
+no prompt sent). The sections below record what was closed after it, in order.
+
+### Why the graph-backed mission took six more turns
+
+45 turns against 39, 40 tool calls against 34: the difference is exactly the six `context_open` calls of the
+evidence file (`/`, `hazards`, `decisions`, `notes`, `notes/general`, the note). The note's whole text was
+already in the worker's pack. Retrieval precision was not the problem; reaching things was:
+
+- every session got the four context tools, but only a task's pack got the map and the selection. The
+  planner started with tools described as the way "to find where things are" and nothing to start from;
+- an open returned one level, without text, and listed branches that hold nothing like the others;
+- a pack entry did not say whether its text was whole and named no source file (those took an open).
+
+Changed in `a9212da`, without touching what the retriever selects:
+
+- the planner prompt carries the map and what its request retrieves (single and consensus planning);
+- an open returns a branch with what is under it: entries with their summaries, a chain of folders
+  followed down, folders that hold nothing named in one line, and the text of the entries of a small folder;
+- a selected entry is marked "(shown in full)" or "(excerpt)" and carries its evidence and source files;
+- the hint and the tool descriptions say what needs no lookup instead of inviting one.
+
+Measured without usage (`tests/integration/context-graph/navigation-benchmark.test.ts`,
+`docs/acceptance/navigation-benchmark-2026-10-10T06-37-05-929Z.json`). The reader is an oracle that never
+opens a wrong branch, so these are lower bounds for a tree walk, the same reader before and after:
+
+| Session | Cases | `context_open` calls before | after | Required records whole in the prompt, before / after |
+| --- | ---: | ---: | ---: | --- |
+| Planner | 18 tuning | 103 (mean 5.7, max 10) | 5 (mean 0.3, max 3) | 0% / 90.7% |
+| Planner | 7 held-out | 38 (mean 5.4, max 8) | 3 (mean 0.4, max 1) | 0% / 80.0% |
+| Task session, opens only to learn a selected record's files | 18 tuning | 194 | 0 | |
+| Task session, the same | 7 held-out | 46 | 0 | |
+
+Cost: about 1,260 estimated tokens of "Project knowledge" in a planner prompt that had none. Retrieval is
+unchanged (`docs/acceptance/retrieval-benchmark-2026-10-10T06-37-05-821Z.json`): V3 recall 100% on the
+tuning cases and 100% on the held-out cases, no record wrongly shown as current. Whether real agents now
+skip the walk is a question for the real campaign below, not for this benchmark.
+
+### Tool definitions: not enabled, security preserved
+
+An independent, read-only security review looked at sharing tool definitions across roles; its decisive
+claims were then checked against the code.
+
+| Design | Verdict |
+| --- | --- |
+| One tool list for every role, enforcement left to the authorizer | NOT SAFE |
+| One NEXUS tool set for every role, refusal inside the handler | NOT SAFE as proposed; no saving shown |
+| Same tools per role, one canonical representation | NO BENEFIT: read-only roles already get an identical list, and a host controls tool names only, not the definitions' text or order |
+| Read-only roles get the writers' list with an SDK-side deny | not on current evidence: the model would still see write tools, and the saving is unproven |
+
+The reason is structural. The authorizer builds its allow-set from the same `toolsForRole` list the model
+is shown (`src/main/modules/policies/authorizer.ts:178`), its only role check for Edit, Write and
+NotebookEdit is membership of that set (`:373`), and a write inside the worktree is then allowed
+(`:210-219`). The SDK is given no other restriction (`tools: spec.tools`, `claude-sdk-runtime.ts:727`).
+Widening the list would therefore widen the authorizer: a reviewer or verifier could edit the code it
+judges. For the NEXUS tools the gate allows `mcp__nexus__*` unconditionally (`authorizer.ts:365`,
+`claude-sdk-runtime.ts:274`), so presence of the handler is the control. And the saving is not shown to
+exist: a role-specific system prompt follows the tools in the cached prefix, and loading the NEXUS tools
+upfront changed nothing when measured.
+
+**TOOL DEFINITION OPTIMIZATION: NOT ENABLED — SECURITY PRESERVED.** The gate asks that the lever be
+evaluated, and it was; adopting it is not required. Not verified: where the runtime places its cache
+breakpoints, and whether two read-only roles already share a tools-only prefix (one measurement, no code
+change, would say).
+
 ## Not verified
 
 - A representative real campaign comparing 0.7.1 with 0.7.0 across bug fix, feature, debugging,
