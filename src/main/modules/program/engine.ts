@@ -631,6 +631,9 @@ export class ProgramEngine {
           await Promise.resolve(this.deps.host.recover(run.id, 'resume')).catch((e: unknown) => this.log(`recover run ${run.id}: ${errorMessage(e)}`))
           return
         }
+        // Waiting for a provider's capacity is not a problem to bring to a person: the run is resumed by the
+        // capacity recovery when a quality-approved provider is free, and the program goes on from there.
+        if (run.pauseReason === 'capacity') return
         // Somebody paused the mission itself, or it needs a person (authentication, intervention).
         if (run.pauseReason === 'user') await this.enterPause(program, 'user', 'The current run was paused.')
         else await this.block(program, `The current run is paused and needs attention${run.error ? `: ${run.error}` : ''}.`, 'blocked')
@@ -1286,7 +1289,9 @@ export class ProgramEngine {
   private async resumeCurrentRun(programId: string): Promise<void> {
     const program = this.repos.programs.require(programId)
     const run = program.currentRunId ? this.repos.runs.get(program.currentRunId) : null
-    if (!run || run.state !== 'paused' || run.pauseReason === 'quota') return
+    // A quota wait is ended by the usage recovery and a capacity wait by the capacity recovery: resuming either
+    // here would race them, and a run resumed twice can plan twice.
+    if (!run || run.state !== 'paused' || run.pauseReason === 'quota' || run.pauseReason === 'capacity') return
     const resume = run.pauseReason === 'recovery' ? this.deps.host.recover(run.id, 'resume') : this.deps.host.resumeRun(run.id)
     await Promise.resolve(resume).catch((e: unknown) => this.log(`resume run ${run.id}: ${errorMessage(e)}`))
   }

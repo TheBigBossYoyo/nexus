@@ -155,6 +155,27 @@ describe('production worker capacity admission', () => {
     }
   })
 
+  it('a dispatch that cannot start leaves no capacity behind: after many failures work is still admitted', async () => {
+    const h = await harness()
+    try {
+      // The provider binding cannot be written, so the dispatch throws after the capacity was claimed. One worker slot exists.
+      const insert = vi.spyOn(h.h.repos.providerSessions, 'insert')
+      for (let i = 0; i < 4; i++) {
+        insert.mockImplementationOnce(() => { throw new Error('controlled binding failure') })
+        const events = await collect(h.providers.router.startSession(h.spec()))
+        expect(events.some((e) => e.type === 'session.ended' && e.reason === 'crashed'), `failure ${i}`).toBe(true)
+        expect(events.some((e) => e.type === 'capacity.wait'), `failure ${i} must not be a wait`).toBe(false)
+      }
+      expect(h.start).not.toHaveBeenCalled()
+      const store = h.h.repos.intelligenceArtifacts
+      const host = hostedSessionPool('worker-fixture')
+      const held = (store.readCheckpoint(`capacity-leases:${host.id}`)?.body as { leases: { state: string }[] } | undefined)?.leases.filter((l) => l.state === 'HELD' || l.state === 'QUARANTINED') ?? []
+      expect(held).toEqual([])
+      const ok = await collect(h.providers.router.startSession(h.spec()))
+      expect(ok.find((e) => e.type === 'session.started')).toMatchObject({ provider: 'claude' })
+    } finally { await h.close() }
+  })
+
   it('does not spend when durable admission cannot be written', async () => {
     const h = await harness()
     try {

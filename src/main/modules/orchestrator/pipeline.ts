@@ -73,7 +73,8 @@ type ReviewOutcome = { status: 'approved'; summary: string } | { status: 'change
 
 type GateResult<T> = { status: 'ok'; value: T; agentId: string } | { status: 'halt' } | { status: 'failed'; error: string }
 
-const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown'])
+// 'capacity': the session waited for a provider and no work was done in it.
+const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown', 'capacity'])
 const SIGNIFICANT = new Set(['critical', 'high'])
 const HEARTBEAT_MS = 30_000
 
@@ -336,8 +337,9 @@ export class TaskPipeline {
   ): Promise<boolean> {
     const { repos, bus } = this.core.deps
     const resumeId = resume ? undefined : this.resumableSession(initial.id)
-    // A resumed session continues the same attempt; so does a restart after a yield; a fresh one consumes a new attempt.
-    const attempt = (resumeId || resume) && initial.attempt > 0 ? initial.attempt : initial.attempt + 1
+    // A resumed session continues the same attempt; so does a restart after a yield, and so does a task whose
+    // last session only waited for a provider's capacity: waiting is not a try. A fresh one consumes a new attempt.
+    const attempt = (resumeId || resume || this.lastSessionWaited(initial.id)) && initial.attempt > 0 ? initial.attempt : initial.attempt + 1
     const leaseOwner = newId()
     let task = this.core.setTaskState(initial.id, 'running', {
       attempt,
@@ -1108,6 +1110,12 @@ export class TaskPipeline {
   }
 
   /** SDK session of the task's last implementing agent, when it ended in a resumable way. */
+  /** Whether the task's last worker session ended because no provider had capacity (no request was sent in it). */
+  private lastSessionWaited(taskId: string): boolean {
+    const agent = this.lastWorkerAgent(taskId)
+    return agent ? this.core.deps.repos.sessions.latestForAgent(agent.id)?.endReason === 'capacity' : false
+  }
+
   private resumableSession(taskId: string): string | undefined {
     const { repos } = this.core.deps
     const agent = this.lastWorkerAgent(taskId)

@@ -192,6 +192,28 @@ describe('program engine', () => {
     expect(rig.repos.milestones.getByKey(program.id, 'core')!.attempts).toBe(1)
   })
 
+  it('a run that waits for provider capacity is not a problem for a person: the program is not blocked, does not resume the run itself, and goes on when capacity returns', async () => {
+    rig = makeProgramRig()
+    rig.host.answers.plan = [planJson([milestone('core')])]
+    rig.host.mission = () => 'hang'
+    const program = await rig.program()
+    await rig.untilState(program.id, ['ACTIVE'])
+    const run = rig.host.missionsOf()[0]!.run
+    // What the orchestrator does when admission finds no provider with capacity for the run's next session.
+    rig.repos.runs.update(run.id, { state: 'paused', resumeState: 'executing', pauseReason: 'capacity' })
+    rig.bus.emit({ runId: run.id, type: 'run.paused', payload: { reason: 'capacity', cause: 'capacity' } })
+    for (let i = 0; i < 3; i++) await rig.engine.tick()
+    // It used to be BLOCKED here ("the current run is paused and needs attention") and stayed so after the run went on.
+    expect(rig.get(program.id)).toMatchObject({ state: 'ACTIVE', blockedReason: null, error: null })
+    // The capacity recovery resumes the run. The program does not, or the two would race.
+    expect(rig.host.resumed).toEqual([])
+    await rig.host.resumeRun(run.id)
+    await rig.host.apply(run.id, 'complete')
+    const done = await rig.untilState(program.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+    expect(rig.repos.milestones.getByKey(program.id, 'core')!.attempts).toBe(1)
+  })
+
   it('the closed usage gate also makes the program wait; the stop policy pauses for the user; an endless wait blocks', async () => {
     rig = makeProgramRig()
     rig.host.answers.plan = [planJson([milestone('core')])]

@@ -675,6 +675,8 @@ export class OvernightSupervisor {
           this.diagnose(record, 'budget', budget)
           return this.doFinalize(runId, 'BLOCKED', budget)
         }
+        // Waiting for a provider's capacity is not a stall: the budget above still bounds it.
+        if (run.state === 'paused' && run.pauseReason === 'capacity') return
         const stalled = await this.watchdog(record, run, now)
         if (stalled) return this.doFinalize(runId, 'BLOCKED', stalled)
         const last = this.lastCheckpoint.get(runId) ?? Date.parse(record.startedAt)

@@ -843,7 +843,8 @@ export class WorkspaceEngine {
       this.setState(missionId, back)
       // Every run the pause stopped continues: the tasks in flight and, while planning, the planner session.
       for (const run of this.liveRuns(missionId)) {
-        if (run.state !== 'paused' || run.pauseReason === 'quota') continue
+        // Quota and capacity waits are ended by their own recoveries.
+        if (run.state !== 'paused' || run.pauseReason === 'quota' || run.pauseReason === 'capacity') continue
         const resume = run.pauseReason === 'recovery' ? this.deps.host.recover(run.id, 'resume') : this.deps.host.resumeRun(run.id)
         await Promise.resolve(resume).catch((e: unknown) => this.log(`resume ${run.id}: ${errorMessage(e)}`))
       }
@@ -1133,7 +1134,8 @@ export class WorkspaceEngine {
       const run = task.runId ? this.repos.runs.get(task.runId) : null
       if (run && !TERMINAL_RUN.includes(run.state)) {
         if (run.state === 'paused' && run.pauseReason === 'recovery') await Promise.resolve(this.deps.host.recover(run.id, 'resume')).catch((e: unknown) => this.log(`recover ${run.id}: ${errorMessage(e)}`))
-        else if (run.state === 'paused' && run.pauseReason !== 'quota') return this.block(mission, `The run of task ${task.key} is paused and needs attention${run.error ? `: ${run.error}` : ''}.`)
+        // A run that waits for a provider's capacity needs nobody: it is resumed when a provider is free.
+        else if (run.state === 'paused' && run.pauseReason !== 'quota' && run.pauseReason !== 'capacity') return this.block(mission, `The run of task ${task.key} is paused and needs attention${run.error ? `: ${run.error}` : ''}.`)
         continue
       }
       const repository = this.repos.enrolledRepositories.require(task.repositoryId)

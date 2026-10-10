@@ -30,6 +30,8 @@ export class WorkerCapacityRouting {
   private readonly listeners = new Set<() => void>()
   private readonly pending = new Set<Promise<void>>()
   private readonly quarantined = new Map<AgentSessionHandle, ProviderCapacityLease[]>()
+  /** Leases of sessions that never started and whose release could not be written; tried again on recovery. */
+  private unreleased: ProviderCapacityLease[][] = []
   private disposed = false
   private recovering: Promise<void> | null = null
 
@@ -186,13 +188,22 @@ export class WorkerCapacityRouting {
           terminalEvent = { type: 'session.ended', reason: 'crashed', error: 'Provider capacity dispatch could not complete safely.' }
         }
       } finally {
-        let confirmed = !sent
+        // With no handle nothing was started (the admission stopped before the dispatch, or the dispatch itself
+        // threw: a missing command line tool): there is no session whose stop is still to be confirmed.
+        let confirmed = inner === null
         if (inner) {
           try { await inner.stop(); confirmed = inner.stopConfirmed?.() ?? terminal } catch { confirmed = false }
         }
         if (leases.length) {
-          this.kernel.release(leases, !confirmed)
-          if (!confirmed && inner) this.quarantined.set(inner, leases)
+          // A failure to write the release must not take the session's end with it: the consumer still gets its
+          // terminal event and the outcome is still recorded. The leases stay as they are and are looked at again.
+          try {
+            this.kernel.release(leases, !confirmed)
+            if (!confirmed && inner) this.quarantined.set(inner, leases)
+          } catch {
+            if (inner) this.quarantined.set(inner, leases)
+            else this.unreleased.push(leases)
+          }
         }
         if (record && record.action === 'ROUTE') {
           const sum = (key: keyof UsageInfo) => usage.reduce((n, u) => n + (typeof u[key] === 'number' ? u[key] as number : 0), 0)
@@ -226,8 +237,13 @@ export class WorkerCapacityRouting {
   }
   private async recoverWaits(resume: (runId: string) => Promise<unknown>): Promise<void> {
     for (const [handle, leases] of this.quarantined) {
-      if (handle.stopConfirmed?.()) { this.kernel.confirmStopped(leases); this.quarantined.delete(handle); this.changed() }
+      if (!handle.stopConfirmed?.()) continue
+      // Held (the release was never written) or quarantined: either way the stop is now confirmed.
+      try { this.kernel.settle(leases); this.quarantined.delete(handle); this.changed() } catch { /* looked at again on the next pass */ }
     }
+    this.unreleased = this.unreleased.filter((leases) => {
+      try { this.kernel.settle(leases); this.changed(); return false } catch { return true }
+    })
     const store = this.o.repos.intelligenceArtifacts
     for (const run of this.o.repos.runs.listActive()) {
       if (this.disposed || run.state !== 'paused' || run.pauseReason !== 'capacity') continue

@@ -229,6 +229,17 @@ export class CapacityAwareProviderRouter {
   release(leases: ProviderCapacityLease[], quarantine = false): void {
     this.endLeases(leases, quarantine ? 'QUARANTINED' : 'RELEASED', false)
   }
+  /**
+   * Ends leases of this start whose session is known to have stopped, whatever state the earlier attempt left
+   * them in: still held (its release could not be written) or quarantined. Leases that already ended are left.
+   */
+  settle(leases: ProviderCapacityLease[]): void {
+    const state = (lease: ProviderCapacityLease): string | undefined => this.leases(lease.poolId).find((l) => l.id === lease.id)?.state
+    const held = leases.filter((l) => state(l) === 'HELD')
+    const quarantined = leases.filter((l) => state(l) === 'QUARANTINED')
+    if (held.length) this.endLeases(held, 'RELEASED', false)
+    if (quarantined.length) this.endLeases(quarantined, 'RELEASED', true)
+  }
   /** Called only after the owning adapter confirms stop; no IPC channel can assert that evidence. */
   confirmStopped(leases: ProviderCapacityLease[]): void {
     this.endLeases(leases, 'RELEASED', true)

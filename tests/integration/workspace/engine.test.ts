@@ -364,6 +364,30 @@ describe('workspace engine', () => {
     expect(rig.host.created.filter((c) => c.kind === 'mission').map((c) => rig.repos.projects.require(c.input.projectId).name)).toEqual(['shared-sdk', 'backend', 'backend', 'desktop'])
   })
 
+  it('a task whose run waits for provider capacity does not block the mission, and the mission goes on when capacity returns', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    rig.host.mission = (i) => (i === 0 ? 'hang' : 'complete')
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    await rig.until(() => rig.host.created.filter((c) => c.kind === 'mission').length === 1, 'the first task')
+    const first = rig.host.created.filter((c) => c.kind === 'mission')[0]!.run
+    // What the orchestrator does when admission finds no provider with capacity for the run's next session.
+    rig.repos.runs.update(first.id, { state: 'paused', resumeState: 'executing', pauseReason: 'capacity' })
+    rig.bus.emit({ runId: first.id, type: 'run.paused', payload: { reason: 'capacity', cause: 'capacity' } })
+    for (let i = 0; i < 3; i++) await rig.engine.tick()
+    // It used to be BLOCKED here: "the run of task ... is paused and needs attention".
+    expect(rig.repos.workspaceMissions.require(mission.id)).toMatchObject({ state: 'ACTIVE', blockedReason: null })
+    expect(rig.host.resumed).toEqual([])
+    await rig.host.resumeRun(first.id)
+    await rig.host.apply(first.id, 'complete')
+    const done = await rig.untilState(mission.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+  })
+
   it('a usage limit is a wait; a restart continues the same runs', async () => {
     rig = makeRig()
     const ws = await rig.workspace()

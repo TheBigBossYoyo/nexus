@@ -119,10 +119,13 @@ export class AdvisoryRoutingService {
           this.router.outcome(route, 'COMPLETED', null, adapter.usage?.() ?? null)
           return result
         } catch (error) {
+          // Without an adapter nothing was started (it could not be created): there is no session to quarantine
+          // for, and a quarantine nothing tracks would hold the slot for the life of the process.
           quarantine =
+            adapter !== undefined &&
             error instanceof TechnicalAdvisoryError &&
             !error.stopConfirmed &&
-            !adapter?.stopConfirmed?.()
+            !adapter.stopConfirmed?.()
           if (quarantine && adapter) this.quarantined.set(adapter, leases)
           this.router.outcome(
             route,

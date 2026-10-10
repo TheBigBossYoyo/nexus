@@ -220,6 +220,9 @@ export class WorkerManager {
   private endSession(session: Session, reason: 'completed' | 'stopped' | 'crashed', error: string | null): void {
     if (session.ended) return
     session.ended = true
+    // A session that never reached a worker (none could start, the grant failed, the runtime was stopping)
+    // started nothing: there is no process whose end is still to be confirmed.
+    if (session.workerId === null) session.stopConfirmed = true
     session.events.push({ type: 'session.ended', reason, error })
     session.events.close()
   }
@@ -515,7 +518,11 @@ export class WorkerManager {
     worker.record.exitCode = code
     const expected = worker.record.state === 'STOPPING' || worker.record.state === 'DRAINING'
     const why = `The worker process ended (${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}).`
-    // The exit of a process says that it is gone, not what its session achieved.
+    // The exit of a process says that it is gone, not what its session achieved. It does say that the session
+    // has stopped: the worker that hosted it no longer exists, and the provider's process it started has lost
+    // its pipes. Without this an unexpected exit left the session's capacity quarantined with nothing able to
+    // confirm it, and a few such exits left every later session waiting until the runtime was restarted.
+    if (worker.session) worker.session.stopConfirmed = true
     this.revoke(worker, why, 'crashed', 'REVOKED')
     if (LIVE_WORKER_STATES.includes(worker.record.state)) {
       if (expected) this.transition(worker, 'STOPPED')
