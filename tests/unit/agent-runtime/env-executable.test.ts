@@ -18,7 +18,7 @@ describe('buildAgentEnv', () => {
 
   it('never tells an agent where NEXUS keeps its data, in either mode and whatever the case of the name', () => {
     for (const subscriptionMode of [true, false]) {
-      const env = buildAgentEnv({ ...base, NEXUS_DATA_DIR: 'C:\data', Nexus_Data_Dir: 'C:\data2', NEXUS_OTHER: 'kept' }, { subscriptionMode })
+      const env = buildAgentEnv({ ...base, NEXUS_DATA_DIR: 'C:/data', Nexus_Data_Dir: 'C:/data2', NEXUS_OTHER: 'kept' }, { subscriptionMode })
       expect(Object.keys(env).filter((k) => k.toUpperCase() === 'NEXUS_DATA_DIR')).toEqual([])
       // A project may have variables of its own that start with NEXUS_: only this one is withheld.
       expect(env['NEXUS_OTHER']).toBe('kept')
