@@ -1,15 +1,39 @@
 # Test Status
 
-Factual status as of 2026-10-07, version 0.7.1, branch `nexus-0.7.1-token-intelligence` (not merged, not tagged:
-the release gate is PARTIAL). Details and evidence: `docs/V0_7_1_RELEASE_REPORT.md`. The released version is
-0.7.0 (`v0.7.0`). The sections of earlier versions below are their records, unchanged.
+Factual status as of 2026-10-10, version 0.7.1 (`v0.7.1`, release gate PASS). Details and evidence:
+`docs/V0_7_1_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
 
 Note, 2026-10-05: tag `v0.5.0` (commit `389d95f`) does not contain the "0.5.0" sections of this page. At that tag the
 page still describes 0.4.0. They were committed afterwards as `f8e5a67` ("they missed the release commit"), which is
 not in the history of `v0.5.0`. The tag was not moved. See "Release history and supported versions" in `README.md`;
 0.2.1 to 0.5.0 also contain security defects fixed in 0.6.0.
 
-## 0.7.1: automated (no Claude usage)
+## 0.7.1: final source, 2026-10-10
+
+Measured on commit `82671c8` (later commits change documents only). No Claude usage except where a row says so.
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck`, `pnpm lint` | pass |
+| `pnpm test`, run alone | 169 files, 3,981 of 3,981 passed |
+| `pnpm test:e2e` | 29 of 29 passed, 2 capture-only tests skipped by design |
+| Orchestrator stress, 1,000 seeds (three processes side by side) | passed |
+| Workspace and Arena stress, 5,000 seeds each | passed |
+| The other eight stress suites at release sizes | passed, on `00dcddf`; the changes since do not reach them |
+| `pnpm package` | `release/NEXUS-Setup-0.7.1.exe`, 208,109,581 bytes, SHA-256 `c86e9318...12d64f93` |
+| Navigation benchmark (`context_open` calls an oracle walker needs) | planner 103 to 5 over 18 tuning cases, 38 to 3 over 7 held-out cases |
+| Retrieval benchmark | unchanged: hybrid pack 100% and 100% recall, no non-current record shown as current |
+| Real campaign against the 0.7.0 sources (real Claude, 50 runs, 8 task categories) | no case worse; quality gate NON_INFERIOR with the Context Graph off and on; with it on, six mission categories used 16.1% fewer turns and 7.5% less input |
+| Real compaction fidelity (real Claude, one session, deliberate trigger) | compaction occurred; 27 of 28 facts kept, 15 of 15 that lived only in the conversation; the task continued correctly. Automatic trigger NOT VERIFIED |
+| Tool-definition sharing across roles | reviewed for security and NOT ENABLED |
+| Migration campaign, runtime soak | not repeated (no schema change since 2026-10-07) |
+| Installer execution | NOT VERIFIED |
+
+Two tests failed on time limits in the full run on `00dcddf`, and each led to a defect older than this release:
+the workspace schema parser took 4.8 s on a hostile contract (now one pass, a few milliseconds), and the Arena
+performance evaluator took 108 s of its 120 s limit (now about 40 s, same verdicts).
+
+## 0.7.1: automated, as measured on 2026-10-07 (no Claude usage)
 
 Measured 2026-10-07 on commit `db9c9dc` (later commits change documents and one stress invariant).
 
@@ -25,7 +49,10 @@ Measured 2026-10-07 on commit `db9c9dc` (later commits change documents and one 
 | Migration campaign on the packaged build, ten real databases 0.1 to 0.7.0 | PASS, 9 checks each; schema 12 |
 | Runtime soak, 60 minutes | not repeated for 0.7.1 |
 
-## 0.7.1: manual and with real providers
+## 0.7.1: manual and with real providers, as measured on 2026-10-07
+
+Superseded where the section "0.7.1: final source" above says otherwise: the campaign and the compaction
+check were run on 2026-10-10.
 
 | Check | Result |
 |---|---|

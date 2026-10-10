@@ -237,7 +237,7 @@ Dates are those of the tagged commit (+01:00).
 | 0.5.0 | `v0.5.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0. The tag also lacks the 0.5.0 entries of `docs/TEST_STATUS.md` and `docs/BUILD_PROGRESS.md` (see below) |
 | 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended; has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
 | 0.7.0 | `v0.7.0` | 2026-10-07 | Recommended | Secure control plane; fixes the known defects of 0.6.0 listed below. Report: `docs/V0_7_RELEASE_REPORT.md` |
-| 0.7.1 | none (branch `nexus-0.7.1-token-intelligence`) | 2026-10-07 | Not released | Context Graph and token intelligence. Tests, stress and packaging are green; the release gate is PARTIAL because the real comparison campaign against 0.7.0 was not run. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
+| 0.7.1 | `v0.7.1` | 2026-10-10 | Recommended | Context Graph and token intelligence. A real campaign of fifty runs over eight task categories found it non-inferior to 0.7.0 with no case worse; with the Context Graph, on by default, missions used 16% fewer turns. It also fixes a defect that blocked real programs in 0.7.0. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
 
 Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
 record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
