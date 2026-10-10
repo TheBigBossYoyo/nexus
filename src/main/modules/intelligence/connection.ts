@@ -144,7 +144,9 @@ export class ChatGPTConnection {
           : !profile
             ? 'SIGNED_OUT'
             : !profile.credentials ||
-                (profile.credentials.expiresAt <= Date.now() && !profile.credentials.refreshToken)
+                (profile.credentials.expiresAt <= Date.now() && !profile.credentials.refreshToken) ||
+                // The provider refused the token and a fresh one: the card must not go on saying "connected".
+                this.capacity.pool(this.capacity.binding(profile.registration)).state === 'AUTH_REQUIRED'
               ? 'AUTH_REQUIRES_RECONNECT'
               : profile.credentials.scopes.includes('chatgpt.tokens.use.direct')
                 ? 'SIGNED_IN_PLAN_USAGE'
@@ -394,16 +396,29 @@ export class ChatGPTConnection {
               throw new Error('Provider configuration changed; retry compilation')
             const binding = this.capacity.binding(current.registration)
             this.capacity.admit(binding)
+            let used: string | null = null
+            let rejected: string | null = null
             try {
               const provider = new OpenAIPlanProvider(
-                () => this.session(id).accessToken(),
+                async () => {
+                  used = rejected === null ? await this.session(id).accessToken() : await this.session(id).accessTokenAfterRejection(rejected)
+                  return used
+                },
                 model,
                 this.transport,
                 this.abort.signal,
               )
               let result: unknown
               try {
-                result = await provider.complete(instructions, data)
+                try {
+                  result = await provider.complete(instructions, data)
+                } catch (error) {
+                  // A 401 says the token was not accepted: the request was not served. The token is refreshed once
+                  // and the same request sent once more, before the pool is held for a sign-in in the browser.
+                  if (!(error instanceof PlanInferenceError) || error.status !== 401 || used === null) throw error
+                  rejected = used
+                  result = await provider.complete(instructions, data)
+                }
               } finally {
                 receipt = provider.usage()
               }
@@ -412,6 +427,8 @@ export class ChatGPTConnection {
             } catch (error) {
               if (error instanceof PlanInferenceError)
                 this.capacity.failure(binding, error.status, error.code)
+              // The refresh after a 401 was refused: the credentials are gone and only a sign-in brings them back.
+              else if (rejected !== null) this.capacity.failure(binding, 401, null)
               else this.capacity.failure(binding, 0, null)
               throw error
             }

@@ -92,6 +92,72 @@ describe('protected ChatGPT connection owner', () => {
     await rejected
     expect(transport).toHaveBeenCalledTimes(1)
   })
+  describe('a token the provider refuses', () => {
+    const sse = (): Response =>
+      new Response(
+        `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: '{"ok":true}' })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`,
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      )
+    const json = (status: number, body: unknown): Response =>
+      new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+    const fresh = { access_token: 'fresh-access', refresh_token: 'fresh-refresh', token_type: 'Bearer', expires_in: 3600 }
+    /** Answers inference by the bearer token it is sent, and the token endpoint with `refresh`. */
+    const provider = (accepted: string[], refresh: () => Response) => {
+      const calls: string[] = []
+      const transport = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+        if (String(url).includes('/oauth/token')) {
+          calls.push('refresh')
+          return refresh()
+        }
+        const bearer = String((options?.headers as Record<string, string>).Authorization).slice('Bearer '.length)
+        calls.push(`inference:${bearer}`)
+        return accepted.includes(bearer) ? sse() : json(401, { error: { code: 'invalid_token' } })
+      }) as unknown as typeof fetch
+      return { transport, calls }
+    }
+
+    it('is refreshed once and the request sent once more: one 401 does not ask for a sign-in', async () => {
+      const { transport, calls } = provider(['fresh-access'], () => json(200, fresh))
+      const { connection, path } = setup({ transport })
+      await expect(connection.provider()!.complete('Return JSON', {})).resolves.toEqual({ ok: true })
+      expect(calls).toEqual(['inference:test-access', 'refresh', 'inference:fresh-access'])
+      expect(connection.status().state).toBe('SIGNED_IN_PLAN_USAGE')
+      expect(connection.status().capacity?.state).not.toBe('AUTH_REQUIRED')
+      expect(JSON.parse(readFileSync(path, 'utf8')).profiles[0].credentials.accessToken).toBe('fresh-access')
+      // The next request uses the new token and asks for nothing.
+      await connection.provider()!.complete('Return JSON', {})
+      expect(calls.slice(3)).toEqual(['inference:fresh-access'])
+    })
+
+    it('whose refresh is refused too reads as needing a sign-in, not as connected', async () => {
+      const { transport, calls } = provider([], () => json(400, { error: 'refresh_token_invalidated' }))
+      const { connection } = setup({ transport })
+      await expect(connection.provider()!.complete('Return JSON', {})).rejects.toThrow()
+      expect(calls).toEqual(['inference:test-access', 'refresh'])
+      expect(connection.status().state).toBe('AUTH_REQUIRES_RECONNECT')
+      expect(connection.provider()).toBeUndefined()
+    })
+
+    it('refused again after a refresh is not sent a third time, and the card asks for a sign-in', async () => {
+      const { transport, calls } = provider([], () => json(200, fresh))
+      const { connection } = setup({ transport })
+      await expect(connection.provider()!.complete('Return JSON', {})).rejects.toThrow()
+      expect(calls).toEqual(['inference:test-access', 'refresh', 'inference:fresh-access'])
+      expect(connection.status().state).toBe('AUTH_REQUIRES_RECONNECT')
+      expect(connection.status().capacity?.state).toBe('AUTH_REQUIRED')
+    })
+
+    it('a refusal that is not about the token (a 429) is not retried', async () => {
+      const calls: string[] = []
+      const transport = vi.fn(async () => {
+        calls.push('inference')
+        return json(429, { error: { code: 'rate_limit_exceeded' } })
+      }) as unknown as typeof fetch
+      const { connection } = setup({ transport })
+      await expect(connection.provider()!.complete('Return JSON', {})).rejects.toThrow()
+      expect(calls).toEqual(['inference'])
+    })
+  })
   it('allows withdrawing inference consent after restart without a catalog', () => {
     const { connection } = setup()
     expect(connection.status().models).toEqual([])

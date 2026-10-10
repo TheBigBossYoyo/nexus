@@ -254,12 +254,26 @@ export class ChatGPTSession {
       this.refreshInFlight = null
     }
   }
-  private async refresh(): Promise<string> {
+  /**
+   * The provider refused `rejected` although it had not expired by the clock (revoked, rotated elsewhere, a
+   * clock that is off). One refresh is tried; if the saved token is already another one, that one is returned.
+   * A refresh the provider refuses clears the credentials, and the connection then reads as needing sign-in.
+   */
+  async accessTokenAfterRejection(rejected: string): Promise<string> {
+    if (this.refreshInFlight) await this.refreshInFlight.catch(() => undefined)
+    this.refreshInFlight = this.exclusive(() => this.refresh(rejected))
+    try {
+      return await this.refreshInFlight
+    } finally {
+      this.refreshInFlight = null
+    }
+  }
+  private async refresh(rejected?: string): Promise<string> {
     const current = await this.vault.read()
     if (!current?.refreshToken) throw new Error('AUTH_REQUIRES_RECONNECT')
     if (!current.scopes.includes('chatgpt.tokens.use.direct'))
       throw new Error('SIGNED_IN_NO_PLAN_USAGE')
-    if (current.expiresAt > this.now() + 60000) return current.accessToken
+    if (current.expiresAt > this.now() + 60000 && current.accessToken !== rejected) return current.accessToken
     const tokens = await this.tokenRequest({
       grant_type: 'refresh_token',
       client_id: current.clientId,
