@@ -299,6 +299,9 @@ test.describe('NEXUS 0.3 UI', () => {
       expect(usage.totals.inputTokens).toBeGreaterThan(0)
 
       // Inspector and agents open on the redesigned screens.
+      // What the run was when the graph is opened: read in the message of a failure of the steps below.
+      const shown = await invoke(page, 'runs.get', { runId })
+      expect(shown.tasks.length, `run ${shown.run.state}, pause reason ${String(shown.run.pauseReason)}, ${shown.tasks.length} tasks`).toBeGreaterThan(0)
       await page.getByTestId('stage-tab-graph').click()
       const node = page.locator('[data-testid^="task-node-"]').first()
       await node.click()

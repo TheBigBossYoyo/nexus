@@ -306,6 +306,27 @@ both themes. There is no automated accessibility check in the tests: OPEN as 12.
 | 12.11 | LOW | A disabled control with no stated reason (the confirmation switch, resume with a specification); heading levels in the Director view; stale facts at reduced opacity fall to 3.5:1; a tooltip cannot be dismissed with Escape | | OPEN |
 | 12.12 | MEDIUM | No automated accessibility assertion in the end-to-end tests | | OPEN |
 
+## Real acceptance on 2026-10-10
+
+Not a review: what the real providers showed. ChatGPT inference was used only after the application itself
+reported the connection signed in, a model chosen and the paid-credit confirmation switched on by the user.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| R.1 | HIGH | The Technical Director could never be admitted (5.11) | Real run | FIXED `4d2a494`; PASS, docs/acceptance/technical-director-2026-10-10T19-02-28-138Z.json |
+| R.2 | HIGH | The first real answer of the strategic provider was valid JSON of the wrong shape (objects where sentences were asked for): every STANDARD compilation with an ambiguity would have failed as "invalid structured output" | Real run | FIXED `aa1809a`: the shape is enforced by the provider (strict JSON schema) and validated here; a refusal says where the answer departs, as positions and kinds |
+| R.3 | HIGH | A TECHNICAL compilation was thrown away whole, paid for, because one recommendation cited evidence that had not been supplied | Real run | FIXED `aa1809a`: the allowed ids are in the enforced shape; a reference outside them is removed and the specification says so |
+| R.4 | MEDIUM | The Council's technical stage failed when the Claude session was given the runtime's output schema (the cause was not established further; the session has no tool and ends at the first tool event) | Real run | FIXED `aa1809a`: the schema is given in the prompt; the next two real Councils completed |
+| R.5 | LOW | In the first seconds after a start the Claude provider is not yet discovered: a TECHNICAL compilation or a Council sent then waits, and has to be asked for again | Real run | OPEN |
+| R.6 | LOW | Previewing the same request again after a restart sent the provider calls again: the cache of compilations by identity does not outlive the runtime, or does not hold a specification that needs a decision (not established which) | Real run | OPEN |
+| R.7 | LOW | A level 1 or 2 Director request leaves an admission record for the role it does not use (5.12) | Real run | OPEN |
+
+Passed, with evidence in docs/acceptance: the Technical Director alone (level 1); a STANDARD and a TECHNICAL
+compilation (`v72-live-2026-10-10T19-47-04-306Z.json`); the Strategic Director (level 2) and a Council (level 3)
+with its three stages, 14 disagreements kept and no execution authorized
+(`v72-live-2026-10-10T19-48-40-838Z.json`). The other `v72-live` files of the day are the failed runs that showed
+R.2 to R.5.
+
 ## Reviews not finished
 
 The second round of 11 and 12, after the fixes of the first, on rendered pages.
