@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from '../database'
 import type {
+  AdviceOutcome,
   CompiledTaskSpec,
+  StrategicEscalation,
   DirectorInvocation,
   DirectorRecord,
   DirectorOutcome,
@@ -47,6 +49,27 @@ export class IntelligenceStore {
       .prepare('SELECT body FROM director_records WHERE project_id=? AND id=?')
       .get(projectId, id) as { body: string } | undefined
     return row ? (JSON.parse(row.body) as DirectorRecord) : null
+  }
+  /** Written once per source of advice and run; a second write for the same pair changes nothing. */
+  saveAdviceOutcome(outcome: AdviceOutcome): boolean {
+    const body = JSON.stringify(outcome)
+    if (body.length > 8000) throw new Error('Advice outcome exceeds its bounded size')
+    return (
+      this.db
+        .prepare('INSERT OR IGNORE INTO advice_outcomes(id,project_id,run_id,source_kind,source_id,body,created_at) VALUES (?,?,?,?,?,?,?)')
+        .run(outcome.id, outcome.projectId, outcome.runId, outcome.sourceKind, outcome.sourceId, body, outcome.createdAt).changes > 0
+    )
+  }
+  adviceOutcomes(projectId: string, limit = 50): AdviceOutcome[] {
+    const rows = this.db
+      .prepare('SELECT body FROM advice_outcomes WHERE project_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?')
+      .all(projectId, Math.max(1, Math.min(500, Math.floor(limit)))) as { body: string }[]
+    return rows.map((r) => JSON.parse(r.body) as AdviceOutcome)
+  }
+  /** The escalations that name this run. */
+  escalationsOfRun(projectId: string, runId: string): StrategicEscalation[] {
+    const rows = this.db.prepare("SELECT body FROM director_records WHERE project_id=? AND kind='ESCALATION'").all(projectId) as { body: string }[]
+    return rows.map((r) => JSON.parse(r.body) as StrategicEscalation).filter((e) => e.runId === runId)
   }
   directorRecords(projectId: string, offset = 0): DirectorRecord[] {
     const rows = this.db

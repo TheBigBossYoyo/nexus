@@ -3,6 +3,7 @@ import type { BuildIdentity } from './build-identity'
 import type { ChatGPTStatus } from './chatgpt'
 import type {
   CompiledTaskSpec,
+  AdviceLearning,
   DirectorInvocation,
   DirectorRecord,
   StrategicEscalation,
@@ -250,6 +251,7 @@ export const ipcInputs = {
       escalationId: Id.optional(),
     })
     .strict(),
+  'director.learning': z.object({ projectId: Id }).strict(),
   'director.history': z
     .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
     .strict(),
@@ -1025,6 +1027,7 @@ export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcInputs)[C]>
 export interface IpcOutputs {
   'chatgpt.status': ChatGPTStatus
   'director.invoke': DirectorInvocation
+  'director.learning': AdviceLearning
   'director.history': DirectorInvocation[]
   'director.escalate': StrategicEscalation
   'director.records': DirectorRecord[]

@@ -1,13 +1,14 @@
-import { stateLabel } from '../../lib/intelligenceLabels'
+import { COMPILATION_MODE_LABEL, stateLabel } from '../../lib/intelligenceLabels'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DirectorInvocation, StrategicEscalation } from '@shared/intelligence'
+import type { AdviceLearning, DirectorInvocation, StrategicEscalation } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
 import { useProjects } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
 import {
   Button,
   Card,
+  DataTable,
   ErrorNote,
   Field,
   Notice,
@@ -200,6 +201,12 @@ export function DirectorView() {
     queryFn: () => api.invoke('director.history', { projectId: projectId!, offset }),
     enabled: !!projectId,
     refetchInterval: 5000,
+  })
+  const learning = useQuery({
+    queryKey: ['director-learning', projectId],
+    queryFn: () => api.invoke('director.learning', { projectId: projectId! }),
+    enabled: !!projectId,
+    refetchInterval: 15000,
   })
   const records = useQuery({
     queryKey: ['director-records', projectId, offset],
@@ -405,6 +412,36 @@ export function DirectorView() {
                   </p>
                 </details>
               ))
+            )}
+          </Card>
+          <Card
+            title="What became of advised work"
+            description="For each kind of advice a mission of this project was admitted with: how those missions ended. Counts of what NEXUS observed, written when a mission ends; they are also given to the Director as evidence for its next request."
+            data-testid="director-learning"
+          >
+            {learning.error ? <ErrorNote error={learning.error} /> : null}
+            {learning.isLoading ? (
+              <Loading />
+            ) : !learning.data?.total ? (
+              <EmptyState title={projectId ? 'Nothing on record yet' : 'Select a project'}>
+                A line appears here when a mission that was admitted with a specification, or asked about in an
+                escalation, has ended.
+              </EmptyState>
+            ) : (
+              <DataTable<AdviceLearning['groups'][number]>
+                caption="How missions ended, by the advice they were admitted with"
+                rows={learning.data.groups}
+                rowKey={(g) => g.label}
+                columns={[
+                  { key: 'advice', header: 'Advice', render: (g) => (g.sourceKind === 'SPECIFICATION' && g.depth ? `Specification · ${COMPILATION_MODE_LABEL[g.depth]}` : g.label) },
+                  { key: 'runs', header: 'Missions', numeric: true, render: (g) => g.runs },
+                  { key: 'verified', header: 'Verified', numeric: true, render: (g) => g.verified },
+                  { key: 'failed', header: 'Failed', numeric: true, render: (g) => g.failed },
+                  { key: 'cancelled', header: 'Cancelled', numeric: true, render: (g) => g.cancelled },
+                  { key: 'repairs', header: 'Repair attempts', numeric: true, render: (g) => g.repairs },
+                  { key: 'tasksFailed', header: 'Failed tasks', numeric: true, render: (g) => g.tasksFailed },
+                ]}
+              />
             )}
           </Card>
           <h2 className="text-heading font-semibold">Saved advice</h2>

@@ -54,6 +54,7 @@ import {
 import { buildTrayModel, type TrayAction } from '../modules/overnight/tray-model'
 import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
+import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
 import { FakePowerController, WindowsPowerController, type PowerController } from '../modules/power'
 import { killProcessTree } from '../modules/process'
 import { BackgroundEngineering, ProgramEngine } from '../modules/program'
@@ -467,6 +468,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
   policy.ensureDefault()
   attachOutcomeRecording(bus, policy)
+  attachAdviceOutcomes(bus, repos, logger)
 
   const orchestrator = new Orchestrator({
     repos,

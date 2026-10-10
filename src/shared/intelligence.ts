@@ -187,6 +187,44 @@ export interface DirectorOutcome {
   createdAt: string
 }
 export type DirectorRecord = DirectorDecision | StrategicEscalation | DirectorOutcome
+/**
+ * What became of a mission that was admitted with advice: written once, when the mission ends, from what NEXUS
+ * observed. `verified` is true when the mission completed, which it does only after its verification passed.
+ */
+export interface AdviceOutcome {
+  id: string
+  projectId: string
+  runId: string
+  /** The specification the mission was admitted with, or a Director request made about the mission. */
+  sourceKind: 'SPECIFICATION' | 'DIRECTOR'
+  sourceId: string
+  depth: Exclude<CompilationMode, 'AUTO'> | null
+  level: 1 | 2 | 3 | null
+  recommendations: number
+  runState: 'completed' | 'failed' | 'cancelled'
+  verified: boolean
+  tasks: number
+  tasksFailed: number
+  /** Repair cycles (a rejected review or verification sent back) and attempts after the first, over the mission's tasks. */
+  repairs: number
+  createdAt: string
+}
+export interface AdviceLearning {
+  groups: {
+    label: string
+    sourceKind: AdviceOutcome['sourceKind']
+    depth: AdviceOutcome['depth']
+    level: AdviceOutcome['level']
+    runs: number
+    verified: number
+    failed: number
+    cancelled: number
+    repairs: number
+    tasksFailed: number
+  }[]
+  recent: AdviceOutcome[]
+  total: number
+}
 export interface CompiledTaskSpec {
   id: string
   projectId: string

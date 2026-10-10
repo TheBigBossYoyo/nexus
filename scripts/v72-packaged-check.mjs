@@ -137,7 +137,7 @@ try {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version)
-    evidence.checks.schema = evidence.migrations.length === 13 && evidence.migrations.at(-1) === 13
+    evidence.checks.schema = evidence.migrations.length === 16 && evidence.migrations.at(-1) === 16
   } finally {
     db.close()
   }

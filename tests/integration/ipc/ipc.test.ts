@@ -38,6 +38,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'compilation.projectSending': { projectId: 'p1' },
   'compilation.setProjectSending': { projectId: 'p1', allowed: false },
   'director.history': { projectId: 'p1' },
+  'director.learning': { projectId: 'p1' },
   'director.escalate': {
     projectId: 'p1',
     objective: 'Review evidence',

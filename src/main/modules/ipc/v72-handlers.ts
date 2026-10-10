@@ -5,6 +5,7 @@ import { NexusError } from '@shared/result'
 import { DirectorGateway, RETRIABLE_ESCALATION } from '@main/modules/intelligence/gateway'
 import type { GitService } from '@main/modules/git'
 import { IntelligenceOperations } from '../intelligence/operations'
+import { adviceLearning, learningEvidence } from '../intelligence/outcomes'
 import { TaskAdmissionService } from '../intelligence/admission'
 import type { AdvisoryRoutingService } from '../intelligence/routing'
 
@@ -49,7 +50,8 @@ export function createV72Handlers(
           objective,
           level,
           reasons: ['USER_SELECTED_LEVEL'],
-          context: level === 0 ? [] : admission.retrieve(projectId, objective),
+          // With the project's knowledge: what became of the missions earlier advice was given to.
+          context: level === 0 ? [] : [...admission.retrieve(projectId, objective), ...[learningEvidence(repos, projectId)].filter((item) => item !== null)],
           // Level 1 is the Technical Director alone: nothing is asked of the strategic provider, and the record
           // of a request must not name a provider it never called.
           provider: strategic && level >= 2 ? 'openai' : null,
@@ -72,6 +74,10 @@ export function createV72Handlers(
         runId: input.runId ?? null,
         taskId: input.taskId ?? null,
       })
+    },
+    'director.learning': ({ projectId }) => {
+      repos.projects.require(projectId)
+      return adviceLearning(repos, projectId)
     },
     'director.records': ({ projectId, offset }) => {
       repos.projects.require(projectId)
