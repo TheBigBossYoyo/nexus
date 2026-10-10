@@ -10,6 +10,8 @@ describe('environment of project commands', () => {
       CLAUDE_CODE_OAUTH_TOKEN: 'oauth',
       NODE_OPTIONS: '--require ./evil.js',
       node_path: 'C:/elsewhere',
+      // 0.7.2: where NEXUS keeps its database, its endpoint and its stored credentials.
+      Nexus_Data_Dir: 'C:/Users/x/AppData/Roaming/NEXUS',
       APPDATA: 'C:/Users/x/AppData',
       EMPTY: undefined,
     })

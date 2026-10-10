@@ -59,6 +59,10 @@ export const POWER_WORDS =
 export const EXEC_API =
   /start-process|\bsaps\b|\binvoke-expression\b|\biex\b|invoke-command|diagnostics\.process|processstartinfo|wscript\.shell|shell\.application|shellexecute|new-object\s+-com|\.run\s*\(|child_process|\bos\.(?:system|popen|exec\w*|spawn\w*)|subprocess|\bpopen\b|\bexec(?:sync|file|filesync)?\s*\(|\bspawn(?:sync)?\s*\(|\bsystem\s*\(|\bgettype\s*\(|\bproc_open|\bshell_exec|\bpassthru|runtime\.getruntime\(\)\.exec|\bexecvp?e?\s*\(|\bdeno\.(?:command|run)\b|\bexec\.command\(|\bprocessbuilder\b|\bprocess\.start\s*\(|\bwinexec\b|\bcreateprocess\w*\b|std::process::command|\bcommand::new\b|\[scriptblock\]::create|invokescript|\.invoke\s*\(|add-type|dllimport|ctypes|windll|\bffi\b|marshal\.getdelegateforfunctionpointer/i
 
-/** Patterns for NEXUS's own data and its runtime endpoint (the named pipe and its descriptor file). */
+/**
+ * Patterns for NEXUS's own data and its runtime endpoint (the named pipe and its descriptor file).
+ * 0.7.2: the stored ChatGPT credentials by their file name, and the variable that says where the data
+ * directory is. A path can be built from that variable without spelling any of the names here.
+ */
 export const NEXUS_DATA_TEXT =
-  /nexus\.db(?:-wal|-shm|-journal)?|overnight\.key|runtime[\\/]+endpoint\.json|nexus[\\/]+runtime[\\/]|[\\/]runtime[\\/]+runtime\.log|nexus[\\/][^\s"']*runtime\.log|nexus-runtime|[\\/]pipe[\\/][^\n]*nexus|appdata%?\}?[\\/]+(?:(?:roaming|local)[\\/]+)?nexus(?![\w-])(?![\\/]+worktrees\b)/i
+  /nexus\.db(?:-wal|-shm|-journal)?|overnight\.key|chatgpt-credentials|nexus_data_dir|runtime[\\/]+endpoint\.json|nexus[\\/]+runtime[\\/]|[\\/]runtime[\\/]+runtime\.log|nexus[\\/][^\s"']*runtime\.log|nexus-runtime|[\\/]pipe[\\/][^\n]*nexus|appdata%?\}?[\\/]+(?:(?:roaming|local)[\\/]+)?nexus(?![\w-])(?![\\/]+worktrees\b)/i

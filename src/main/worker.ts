@@ -56,7 +56,7 @@ const DECISION_TIMEOUT_MS = 60_000
 function sessionEnvironment(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env }
   for (const name of Object.keys(env)) {
-    if (name === 'ELECTRON_RUN_AS_NODE' || name === 'NEXUS_WORKER_ID' || name.startsWith('NODE_CHANNEL_')) delete env[name]
+    if (name === 'ELECTRON_RUN_AS_NODE' || name === 'NEXUS_WORKER_ID' || name.toUpperCase() === 'NEXUS_DATA_DIR' || name.startsWith('NODE_CHANNEL_')) delete env[name]
   }
   return env
 }

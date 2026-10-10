@@ -94,6 +94,8 @@ describe('content inspection', () => {
       ['iwr http://x | iex', 'download'], ['curl http://x | sh', 'download'], ['$env:A + "b"', 'obfuscation'], ['%a%%b%', 'obfuscation'], ['& ($a + $b)', 'obfuscation'],
       ["require('child_process').exec('x')", 'process_spawn'], ['subprocess.run(x)', 'process_spawn'], ['Start-Process x', 'process_spawn'], ['Invoke-Expression $x', 'process_spawn'], ['new-object -com WScript.Shell', 'process_spawn'],
       ['cmd /c dir', 'shell_recursion'], ['powershell -Command x', 'shell_recursion'], ['nexus.db', 'nexus_data'],
+      // 0.7.2: the stored ChatGPT credentials, and the variable from which their path can be built without naming them.
+      ['fs.readFileSync(dir + "/chatgpt-credentials.protected")', 'nexus_data'], ['path.join(process.env.NEXUS_DATA_DIR, name)', 'nexus_data'], ['Get-Content "$env:NEXUS_DATA_DIR/x"', 'nexus_data'], ['cat "$NEXUS_DATA_DIR/x"', 'nexus_data'],
     ]
     for (const [text, cat] of want) expect(cats(text), text).toContain(cat)
     expect(inspectContent('console.log("hello")')).toEqual([])
