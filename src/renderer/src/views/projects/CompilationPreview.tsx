@@ -1,7 +1,7 @@
 import { COMPILATION_MODE_LABEL, kindLabel, provenanceLabel } from '../../lib/intelligenceLabels'
 import { useUiStore } from '../../store/ui'
 import { useEffect, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   COMPILATION_MODES,
   type CompilationMode,
@@ -11,7 +11,7 @@ import {
   defaultIntentMetadata,
 } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
-import { Button, ErrorNote, Field, Notice, Select } from '../../components/ui'
+import { Button, ErrorNote, Field, Notice, Select, Toggle } from '../../components/ui'
 
 /** The composer controls the admission mode and saved specification. */
 export function CompilationPreview({
@@ -36,6 +36,19 @@ export function CompilationPreview({
   executionScope?: CompilationExecutionScope
 }) {
   const [tab, setTab] = useState<'original' | 'compiled' | 'evidence'>('compiled')
+  // The project's own switch: off, nothing of this project is sent to OpenAI, whatever the connection allows.
+  const client = useQueryClient()
+  const sending = useQuery({ queryKey: ['project-sending', projectId], queryFn: () => api.invoke('compilation.projectSending', { projectId }) })
+  const setSending = useMutation({
+    mutationFn: (allowed: boolean) => api.invoke('compilation.setProjectSending', { projectId, allowed }),
+    onSettled: () => client.invalidateQueries({ queryKey: ['project-sending', projectId] }),
+  })
+  const withheld = sending.data?.allowed === false
+  // A project that sends nothing starts from the depth that needs no provider; the user can still choose another.
+  useEffect(() => {
+    if (withheld && mode === 'AUTO') onModeChange('EXACT')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [withheld])
   const preview = useMutation({
     mutationFn: () =>
       api.invoke('compilation.preview', {
@@ -77,6 +90,16 @@ export function CompilationPreview({
         Before work starts, NEXUS can develop your request into a specification. Every depth but Exact wording
         and Light sends the request and matching project knowledge to OpenAI (Providers lists what is sent).
       </p>
+      <Toggle
+        className="my-2"
+        checked={!withheld}
+        disabled={sending.isLoading || setSending.isPending}
+        label="This project may send requests to OpenAI"
+        description="Off: nothing of this project is sent to OpenAI, even while the ChatGPT connection is on. Requests are then admitted with Exact wording or Light, and the Strategic Director and the Council are not available for it."
+        data-testid="project-sending"
+        onChange={(allowed) => setSending.mutate(allowed)}
+      />
+      {setSending.isError ? <ErrorNote error={setSending.error} /> : null}
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Compilation depth">
           {(id) => (
@@ -113,10 +136,17 @@ export function CompilationPreview({
           >
             <p>Depth: {COMPILATION_MODE_LABEL[spec.mode]}</p>
             {spec.status === 'WAITING_FOR_PROVIDER' ? (
-              <p>
-                This depth needs the ChatGPT connection, and it is not ready: connect it, choose a model and switch
-                sending on in Providers, then preview again. Exact wording and Light need no provider.
-              </p>
+              spec.reasons.includes('PROJECT_DOES_NOT_SEND_TO_STRATEGIC_PROVIDER') ? (
+                <p>
+                  This depth needs ChatGPT, and this project is set not to send to OpenAI (the switch above). Choose
+                  Exact wording or Light, or switch sending on for this project, then preview again.
+                </p>
+              ) : (
+                <p>
+                  This depth needs the ChatGPT connection, and it is not ready: connect it, choose a model and switch
+                  sending on in Providers, then preview again. Exact wording and Light need no provider.
+                </p>
+              )
             ) : null}
             {spec.reasons.length ? (
               <details className="text-text-muted">

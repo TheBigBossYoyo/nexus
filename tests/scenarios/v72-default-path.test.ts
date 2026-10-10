@@ -82,6 +82,36 @@ describe('scenario: a mission in the default compilation depth', () => {
     expect(sent.length).toBe(calls)
   })
 
+  it('a project kept away from OpenAI sends nothing, whatever the connection allows, and still works', async () => {
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('alpha')]), worker: fileWorker }) })
+    const { connection, sent } = strategic()
+    expect(await invoke(connection, 'compilation.projectSending', { projectId: h.project.id })).toEqual({ allowed: true })
+    await invoke(connection, 'compilation.setProjectSending', { projectId: h.project.id, allowed: false })
+    expect(await invoke(connection, 'compilation.projectSending', { projectId: h.project.id })).toEqual({ allowed: false })
+
+    // A depth that needs the provider waits, says which switch decides, and nothing was sent.
+    const waiting = await invoke(connection, 'compilation.preview', { projectId: h.project.id, raw: REQUEST, mode: 'STANDARD' })
+    expect(waiting.status).toBe('WAITING_FOR_PROVIDER')
+    expect(waiting.reasons).toContain('PROJECT_DOES_NOT_SEND_TO_STRATEGIC_PROVIDER')
+    await expect(invoke(connection, 'runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: REQUEST, compilationMode: 'STANDARD' })).rejects.toThrow()
+    // The strategic levels of the Director are refused for it; nothing was sent there either.
+    await expect(invoke(connection, 'director.invoke', { projectId: h.project.id, objective: 'Should we do this now?', level: 2 })).rejects.toThrow(/not to send to OpenAI/)
+    await expect(invoke(connection, 'director.invoke', { projectId: h.project.id, objective: 'Should we do this now?', level: 3 })).rejects.toThrow(/not to send to OpenAI/)
+    expect(sent).toEqual([])
+
+    // With no depth chosen the request is admitted as written and carried out.
+    const run = await invoke(connection, 'runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: REQUEST })
+    expect(run.config.compiledTaskSpec).toMatchObject({ mode: 'EXACT', status: 'READY', rawIntent: REQUEST })
+    expect((await h.waitForState(run.id, ['completed', 'paused', 'failed'])).state).toBe('completed')
+    expect(sent).toEqual([])
+
+    // Switched back on, the default depth develops the request again.
+    await invoke(connection, 'compilation.setProjectSending', { projectId: h.project.id, allowed: true })
+    const developed = await invoke(connection, 'compilation.preview', { projectId: h.project.id, raw: `${REQUEST} Also add a test.`, mode: 'AUTO' })
+    expect(developed.status).toBe('READY')
+    expect(sent.length).toBeGreaterThan(0)
+  })
+
   it('with no ChatGPT connection: nothing is created and nothing runs from an uncompiled request', async () => {
     h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('alpha')]), worker: fileWorker }) })
     await expect(invoke(undefined, 'runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: REQUEST })).rejects.toThrow()

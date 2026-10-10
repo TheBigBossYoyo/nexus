@@ -79,6 +79,12 @@ In TECHNICAL and COUNCIL depth, and in a Director council, OpenAI's answer is gi
 answer to OpenAI. EXACT and LIGHT depth send nothing to OpenAI. AUTO is the default depth of the composer: with
 the switch on, the next mission started in AUTO sends the data above without a further question.
 
+A project can be kept away from OpenAI on its own: the switch "This project may send requests to OpenAI" in the
+compilation panel of its mission composer. Off, nothing of that project is sent to OpenAI whatever the
+connection's switch says; its requests are admitted in EXACT depth unless another is chosen, a depth that needs
+ChatGPT waits and says so, and the Strategic Director and the Council are refused for it. The Technical Director
+is Claude and stays available.
+
 What was sent is not kept as text: the inspector of a compiled task shows the identifiers and versions of the
 knowledge entries it was given. Requests, specifications and Director records are removed with their project;
 there is no finer deletion in 0.7.2.

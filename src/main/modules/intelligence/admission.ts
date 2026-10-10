@@ -39,6 +39,10 @@ const POLICY = '0.7.2-canonical-admission'
 const hash = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
+const advisorySendingKey = (projectId: string): string => `project-advisory-sending:${projectId}`
+/** The reason a specification carries when it waits because its project is kept away from the strategic provider. */
+export const PROJECT_WITHHELD = 'PROJECT_DOES_NOT_SEND_TO_STRATEGIC_PROVIDER'
+
 /** Shared by user IPC and workload engines. Internal worker tasks do not enter this service. */
 export class TaskAdmissionService {
   private readonly graph: ContextGraphService
@@ -52,6 +56,25 @@ export class TaskAdmissionService {
     private readonly routing?: AdvisoryRoutingService,
   ) {
     this.graph = new ContextGraphService({ repos })
+  }
+
+  /**
+   * Whether this project's requests and knowledge may be sent to the strategic provider (OpenAI). On unless the
+   * user switched it off for the project. Off: nothing of the project is sent there, whatever the connection's
+   * own switch says; a depth that needs the provider waits and says why, and the default depth is EXACT.
+   */
+  sendsToStrategicProvider(projectId: string): boolean {
+    return this.repos.settings.getValue<boolean>(advisorySendingKey(projectId)) !== false
+  }
+  setSendsToStrategicProvider(projectId: string, allowed: boolean): boolean {
+    this.repos.projects.require(projectId)
+    if (allowed) this.repos.settings.deleteValue(advisorySendingKey(projectId))
+    else this.repos.settings.setValue(advisorySendingKey(projectId), false)
+    return allowed
+  }
+  /** The depth a request gets when the user chose none. */
+  defaultMode(projectId: string): CompilationMode {
+    return this.sendsToStrategicProvider(projectId) ? 'AUTO' : 'EXACT'
   }
 
   retrieve(projectId: string, raw: string, workspaceId?: string): IntelligenceContext[] {
@@ -325,12 +348,16 @@ export class TaskAdmissionService {
       const pending = this.compiling.get(identity)
       if (pending) return pending
       const work = (async () => {
-        const providers =
-          this.routing && input.mode !== 'EXACT' && input.mode !== 'LIGHT'
+        // A project the user keeps away from the strategic provider gets none: no call is made and no slot is
+        // asked for. A depth that needs one then waits, and the specification says which switch decides.
+        const withheld = !this.sendsToStrategicProvider(input.projectId)
+        const providers = withheld
+          ? {}
+          : this.routing && input.mode !== 'EXACT' && input.mode !== 'LIGHT'
             ? await this.routing.providers(input.projectId, intentId, 'COMPILER')
             : { strategic: this.connection?.provider(), technical: this.technical?.() }
-        const { strategic, technical } = providers
-        return compileTask({
+        const { strategic, technical } = providers as { strategic?: AdvisoryProvider; technical?: AdvisoryProvider }
+        const spec = await compileTask({
           ...input,
           context,
           policyVersion: POLICY,
@@ -338,6 +365,7 @@ export class TaskAdmissionService {
           ...(strategic ? { strategic } : {}),
           ...(technical ? { technical } : {}),
         })
+        return withheld && spec.status === 'WAITING_FOR_PROVIDER' ? { ...spec, reasons: [...spec.reasons, PROJECT_WITHHELD] } : spec
       })().then((spec) =>
         this.repos.intelligenceArtifacts.saveCompilation(
           input.mode === 'EXACT'
@@ -410,7 +438,7 @@ export class TaskAdmissionService {
     entityId: string,
     input: Omit<CompilationRequest, 'mode'> & CompilationSelection,
   ): Promise<CompiledTaskSpec> {
-    const request = { ...input, mode: input.compilationMode ?? 'AUTO' }
+    const request = { ...input, mode: input.compilationMode ?? this.defaultMode(input.projectId) }
     const specId = input.compiledSpecId ?? (await this.preview(request)).id
     const spec = await this.validate(request, specId)
     this.repos.intelligenceArtifacts.bindAdmission(kind, entityId, spec)

@@ -123,7 +123,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     const input = {
       projectId: run.projectId,
       raw,
-      mode: selection.compilationMode ?? 'AUTO',
+      mode: selection.compilationMode ?? taskAdmission.defaultMode(run.projectId),
       metadata,
       executionScope: { runId, ...(taskId ? { taskId } : {}) },
     }
@@ -309,7 +309,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
         )
         let compiledHead: string | undefined
         if (mode !== 'ask') {
-          const selectedMode = compilationMode ?? 'AUTO'
+          const selectedMode = compilationMode ?? taskAdmission.defaultMode(projectId)
           const specId =
             compiledTaskSpecId ??
             (await v72['compilation.preview']({ projectId, raw: prompt, mode: selectedMode })).id
@@ -604,7 +604,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           Object.entries(input).filter(([, v]) => v !== undefined),
         ) as typeof input
         const supervisor = overnight()
-        const selectedMode = compilationMode ?? 'AUTO'
+        const selectedMode = compilationMode ?? taskAdmission.defaultMode(input.projectId)
         const metadata = defaultIntentMetadata(input.prompt, 'OVERNIGHT')
         const specId =
           compiledTaskSpecId ??

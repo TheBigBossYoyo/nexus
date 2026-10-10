@@ -38,6 +38,10 @@ export function createV72Handlers(
     'director.invoke': ({ projectId, objective, level, escalationId }) =>
       operations.run(() => {
         repos.projects.require(projectId)
+        // The Technical Director is Claude, which the project already works with. The strategic levels send the
+        // objective and project knowledge to the strategic provider, which this project may be kept away from.
+        if (level >= 2 && !admission.sendsToStrategicProvider(projectId))
+          throw new NexusError('invalid_state', 'This project is set not to send to OpenAI. Ask the Technical Director, or change the setting of the project in its mission composer.')
         const strategic = connection?.provider()
         const status = connection?.status()
         return director.invoke({
@@ -115,6 +119,11 @@ export function createV72Handlers(
       return null
     },
     'compilation.preview': (input) => admission.preview(input),
+    'compilation.projectSending': ({ projectId }) => {
+      repos.projects.require(projectId)
+      return { allowed: admission.sendsToStrategicProvider(projectId) }
+    },
+    'compilation.setProjectSending': ({ projectId, allowed }) => ({ allowed: admission.setSendsToStrategicProvider(projectId, allowed) }),
     'compilation.admission': ({ kind, entityId }) => {
       if (kind === 'PROGRAM') repos.programs.require(entityId)
       else if (kind === 'WORKSPACE_MISSION') repos.workspaceMissions.require(entityId)

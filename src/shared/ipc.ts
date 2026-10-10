@@ -332,6 +332,9 @@ export const ipcInputs = {
   'projects.get': z.object({ projectId: Id }).strict(),
   'projects.reprofile': z.object({ projectId: Id }).strict(),
   'projects.update': z.object({ projectId: Id, respectProjectClaudeConfig: z.boolean() }).strict(),
+  /** 0.7.2: whether this project's requests and knowledge may be sent to the strategic provider (OpenAI). */
+  'compilation.projectSending': z.object({ projectId: Id }).strict(),
+  'compilation.setProjectSending': z.object({ projectId: Id, allowed: z.boolean() }).strict(),
   'projects.remove': z.object({ projectId: Id }).strict(),
 
   /** Missions as the user sees them. `includeInternal` adds the read-only sessions NEXUS ran for itself (0.4). */
@@ -1049,6 +1052,8 @@ export interface IpcOutputs {
   'projects.get': Project
   'projects.reprofile': Project
   'projects.update': Project
+  'compilation.projectSending': { allowed: boolean }
+  'compilation.setProjectSending': { allowed: boolean }
   'projects.remove': null
   'runs.list': Run[]
   'runs.get': RunDetail
