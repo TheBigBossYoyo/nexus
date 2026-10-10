@@ -166,6 +166,8 @@ no MCP servers, no settings and denies every authorization.
 | 5.8 | LOW | A wait at the first stage reports consumption UNKNOWN where nothing was sent | | OPEN |
 | 5.9 | LOW | The outcome record has no requested role, no fallback flag, no verification result and no later repairs: Director outcome learning has nothing to learn from yet | | OPEN |
 | 5.10 | LOW | Account profile, pool overlay and model choice are computed separately in `production-routing.ts` and `worker-routing.ts` | | OPEN |
+| 5.11 | HIGH | Found while preparing the real acceptance: the Claude candidate of the technical role was admitted only on recorded quality evidence, and nothing in production records any. The Technical Director could never run: every level 1 and level 3 request and every TECHNICAL or COUNCIL compilation waited for ever. The tests recorded the evidence themselves | Real run | FIXED `4d2a494`: the technical role is Claude's own and needs none; real acceptance PASS `70a2464` (docs/acceptance/technical-director-2026-10-10T19-02-28-138Z.json) |
+| 5.12 | LOW | Seen in the real run: a level 1 request asks the routing for both roles and leaves a WAIT record for the strategic one, which it does not need | Real run | OPEN |
 
 ## 7. Task Compiler: prompt injection
 
@@ -268,6 +270,8 @@ each tested alone. No skip, only, fixme or added retry in the branch.
 
 First six reviews: 1 CRITICAL, 10 HIGH (two of them one defect seen twice), about 25 MEDIUM, the rest LOW.
 Second six reviews: no CRITICAL; HIGH 8.1 (with 7.1), 8.2, 9.1, 9.2, 9.3, 10.1, 10.2, 13.1, 13.2.
+
+Found after the reviews, by the real Technical Director acceptance: 5.11 (HIGH, fixed).
 
 Fixed, each with a test unless its row says otherwise: the CRITICAL (6.1); the HIGH findings 1.1, 3.1, 3.2,
 4.1, 4.2, 6.2, 6.4, 8.1, 9.1 (workers), 10.2, 13.1, 14.1, 14.2, 14.3, 14.4; 6.3 for the mission planner; and
