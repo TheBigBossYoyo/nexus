@@ -1,6 +1,6 @@
 {
   "id": "performance-optimization",
-  "version": 3,
+  "version": 4,
   "name": "Log analytics hot spots",
   "description": "A log analytics toolkit that is correct but collapses on realistic log sizes; the agent must remove the algorithmic hot spots without changing any result.",
   "category": "performance",
