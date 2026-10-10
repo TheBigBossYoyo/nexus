@@ -1,0 +1,218 @@
+{
+  "task": "security",
+  "compiledAt": "2026-10-10T22:01:38.048Z",
+  "nexusCommit": "a1559f712f7a16807d1f605f34c7d04b30adba3a",
+  "spec": {
+    "id": "caf09a84-0ce5-41af-9e83-5bf0ba69e872",
+    "projectId": "4f035664-b4f1-4a1b-b8d2-90fc04a0c103",
+    "requestedMode": "AUTO",
+    "mode": "COUNCIL",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "SECURITY_IMPACT"
+    ],
+    "recommendations": [
+      {
+        "text": "Fix src/static/resolve.js so resolvePath(root, urlPath) returns a normalized absolute path equal to the normalized absolute root or contained within it. Otherwise throw an Error with code 'EFORBIDDEN'. Use a path-component-aware containment check rather than a string-prefix check.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Percent-decode urlPath exactly once. Malformed percent-encoding, decoding failures, and NUL characters supplied literally or produced by decoding must throw an Error with code 'EBADREQUEST'. Do not decode remaining percent escapes a second time.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Treat literal and decoded backslashes as path separators regardless of host platform. Normalize separators and dot segments before checking containment. Allow '..' whenever the final resolved destination is root or inside it; do not reject traversal syntax alone.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add successful-resolution tests for root itself, ordinary nested paths, safe internal '..', traversal that leaves and re-enters root but ends inside it, names such as '..hidden', and double-encoded payloads that remain literal percent-encoded text after one decoding pass. Assert the exact absolute returned path.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add attack tests for traversal above root, repeated traversal, traversal after a legitimate prefix, sibling paths sharing root's string prefix, encoded dots and separators, and literal, encoded, and mixed backslash separators. Exercise leading-separator, drive-qualified, and UNC forms as applicable; assert that no returned path escapes root rather than assuming every such form must be rejected.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Test literal and encoded NUL characters, including embedded NULs, lone or truncated percent escapes, non-hex escapes, and invalid encoded UTF-8. Assert that failures are Error instances with exactly 'EBADREQUEST'; forbidden-path tests must similarly assert exactly 'EFORBIDDEN'.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Inspect the resolver, callers, and existing tests to establish leading-slash semantics, supported platforms, export and signature conventions, test framework, and test placement. Check upstream decoding and downstream error handling for integration risks; do not silently expand this resolver fix into a handler redesign.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Preserve the existing API and unrelated behavior. Keep implementation changes focused on the resolver and necessary regression tests, use platform-appropriate expected paths, and retain existing tests.",
+        "kind": "CONSTRAINT",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Lexical normalized-path containment does not prevent a symlink or junction inside root from pointing outside it. Filesystem-aware containment is unresolved scope, not an established non-goal; adding it may introduce filesystem access, existence requirements, and API changes.",
+        "kind": "RISK",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Where feasible, demonstrate that a new traversal regression test fails before the fix. Run the regression tests and npm test afterward, reporting results and distinguishing pre-existing failures from regressions.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:4f035664-b4f1-4a1b-b8d2-90fc04a0c103"
+        ],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [
+      "Must this fix also prevent escape through filesystem symlinks, or is normalized absolute-path containment sufficient?",
+      "Should a request that climbs above the root and comes back into it (for example root `/srv/www` and path `/../www/index.html`) be served because its final path is inside the root, or rejected with 'EFORBIDDEN' because it left the root along the way?",
+      "Must this fix also prevent filesystem escape through symlinks or junctions, or is normalized absolute-path containment sufficient?"
+    ],
+    "identity": "6a98635e8611dd975257b55907d899feee01ee3e45f534f2232014a8167b1ae8",
+    "createdAt": "2026-10-10T21:59:51.651Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "A security review found that the static file handler lets a request read files outside the served directory. Fix src/static/resolve.js: `resolvePath(root, urlPath)` returns the absolute path of the requested file, which must be `root` itself or inside it, and otherwise throws an Error with `code` set to 'EFORBIDDEN'. The URL path is percent-decoded exactly once; malformed percent-encoding and a NUL character throw an Error with `code` 'EBADREQUEST'. A backslash is treated as a path separator. A request that stays inside the root is served even when it contains `..`. Add tests that cover the attacks you can think of.",
+    "intentId": "914cbc2b-a10a-4a98-b8f1-0b46820ca648",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "A security review found that the static file handler lets a request read files outside the served directory. Fix src/static/resolve.js: `resolvePath(root, urlPath)` returns the absolute path of the requested file, which must be `root` itself or inside it, and otherwise throws an Error with `code` set to 'EFORBIDDEN'. The URL path is percent-decoded exactly once; malformed percent-encoding and a NUL character throw an Error with `code` 'EBADREQUEST'. A backslash is treated as a path separator. A request that stays inside the root is served even when it contains `..`. Add tests that cover the attacks you can think of."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:4f035664-b4f1-4a1b-b8d2-90fc04a0c103",
+        "version": "5285b2f44d722d0feb6265ea262fd1af095bc730:f6d1a7dd98e3b1cc4202a4c352ba04f6f716ca428670e96a8a9955d8845ee6a3"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "COUNCIL",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "SECURITY_IMPACT"
+    ],
+    "ms": 105818,
+    "recommendations": 10,
+    "recommendationChars": 3915,
+    "byKind": {
+      "REQUIREMENT": 3,
+      "ACCEPTANCE": 3,
+      "UNKNOWN": 1,
+      "CONSTRAINT": 1,
+      "RISK": 1,
+      "VERIFICATION": 1
+    },
+    "ambiguities": [
+      "Must this fix also prevent escape through filesystem symlinks, or is normalized absolute-path containment sufficient?",
+      "Should a request that climbs above the root and comes back into it (for example root `/srv/www` and path `/../www/index.html`) be served because its final path is inside the root, or rejected with 'EFORBIDDEN' because it left the root along the way?",
+      "Must this fix also prevent filesystem escape through symlinks or junctions, or is normalized absolute-path containment sufficient?"
+    ],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 954,
+          "outputTokens": 936,
+          "totalTokens": 1890,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 145
+        }
+      },
+      {
+        "stage": "COMPILER:technical:1",
+        "provider": "claude",
+        "model": "opus",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-opus-5-5"
+          ],
+          "inputTokens": 2144,
+          "outputTokens": 5114,
+          "totalTokens": null,
+          "cacheReadTokens": 544,
+          "cacheWriteTokens": 5605,
+          "reasoningTokens": 1995
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 3440,
+          "outputTokens": 1118,
+          "totalTokens": 4558,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 72
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:3",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 1364,
+          "outputTokens": 66,
+          "totalTokens": 1430,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 32
+        }
+      }
+    ]
+  }
+}

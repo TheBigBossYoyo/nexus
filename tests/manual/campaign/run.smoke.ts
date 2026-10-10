@@ -309,6 +309,14 @@ async function runTask(task: CampaignTask, arm: Arm) {
         const saved = JSON.parse(readFileSync(specFile(task.key), 'utf8')) as { spec: CompiledTaskSpec; record: Record<string, unknown> }
         compilation = saved.record
         spec = saved.spec
+        if (spec.status === 'USER_DECISION_REQUIRED') {
+          // The application stops here for the user. An unattended run cannot weigh the additions, so it takes the
+          // choice that adds nothing of its own: "continue with my request only". The additions are dropped, the
+          // questions are recorded as left open, exactly as `compilation.decide` with nothing kept does.
+          const questions = spec.ambiguities.filter((q) => !spec!.recommendations.some((r) => r.text === q))
+          compilation = { ...saved.record, decision: 'request only: every addition dropped, the questions left open (the unattended choice)', droppedRecommendations: spec.recommendations.length, openQuestions: questions.length }
+          spec = { ...spec, status: 'READY', recommendations: [], ambiguities: [], reasons: [...spec.reasons, 'USER_DECIDED'], decision: { decidedAt: new Date().toISOString(), from: spec.id, accepted: 0, dropped: spec.recommendations.length, acknowledged: questions } }
+        }
       }
       if (spec && spec.status !== 'READY') {
         // The application would not start this mission: it asks the user first. Nothing is run here either.

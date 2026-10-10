@@ -1,0 +1,182 @@
+{
+  "task": "architecture",
+  "compiledAt": "2026-10-10T21:59:43.283Z",
+  "nexusCommit": "a1559f712f7a16807d1f605f34c7d04b30adba3a",
+  "spec": {
+    "id": "6fd46769-176c-49db-8b45-f074a3552ac6",
+    "projectId": "fa3c2eb8-6847-4f37-8280-93951e440b45",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Replace the format-selection switch in src/export/index.js with an exporter registry. New formats must be usable by calling registerExporter without modifying existing exporter files.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Expose registerExporter(name, fn), exportData(format, rows), and listFormats() from src/export/index.js. Registered functions take rows and return a string; exportData invokes the selected function with the supplied rows and returns its result.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Registering an existing name must throw and leave the original registration unchanged. This also applies to the default json and csv names.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "An unknown format must throw an Error whose message identifies the requested format and lists the currently registered formats, including custom registrations.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "listFormats() must return the registered names sorted alphabetically.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Register json and csv by default and preserve their existing output exactly.",
+        "kind": "CONSTRAINT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Inspect the existing exporters, callers, module conventions, and test setup to establish current JSON/CSV behavior and integrate the new interface consistently.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Create docs/adr/0001-exporter-registry.md with Context, Decision, and Consequences sections. Explain the switch-maintenance problem, the registration-based interface, default exporters, duplicate and unknown-format behavior, and extension through registration.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add tests for default registration, unchanged JSON/CSV output, custom registration and dispatch, duplicate rejection without replacement, alphabetically sorted format listing, and unknown-format errors containing the requested and known formats. Ensure registry state does not make tests order-dependent.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run npm test and verify both existing and added tests pass; establish any additional applicable checks from the repository.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:fa3c2eb8-6847-4f37-8280-93951e440b45"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "Do not add automatic plugin discovery, implement the teams' unspecified formats, or introduce unregister/replace APIs; the requested extension mechanism is explicit registration.",
+        "kind": "NON_GOAL",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "0cd9afda263c774c4c33ddcf7bbfe8e92c3f2db09709c3c4ab2e91e4b11d23ee",
+    "createdAt": "2026-10-10T21:59:18.295Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "Every new report format means editing the switch in src/export/index.js, and two teams now want to add formats of their own. Redesign the exporters so that a format is added without editing an existing file. The public interface of src/export/index.js becomes: `registerExporter(name, fn)` (fn takes the rows and returns a string; registering a name twice throws), `exportData(format, rows)` (an unknown format throws an Error whose message names the format and lists the known formats), and `listFormats()` (the registered names, sorted alphabetically). `json` and `csv` are registered by default and keep their current output. Record the decision as docs/adr/0001-exporter-registry.md with the sections Context, Decision and Consequences. Include tests.",
+    "intentId": "aa7c31d0-bacf-468d-b5bd-2d71160a005d",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "Every new report format means editing the switch in src/export/index.js, and two teams now want to add formats of their own. Redesign the exporters so that a format is added without editing an existing file. The public interface of src/export/index.js becomes: `registerExporter(name, fn)` (fn takes the rows and returns a string; registering a name twice throws), `exportData(format, rows)` (an unknown format throws an Error whose message names the format and lists the known formats), and `listFormats()` (the registered names, sorted alphabetically). `json` and `csv` are registered by default and keep their current output. Record the decision as docs/adr/0001-exporter-registry.md with the sections Context, Decision and Consequences. Include tests."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:fa3c2eb8-6847-4f37-8280-93951e440b45",
+        "version": "b60a904b57bfc4949380be4b307ae72af372a9f3:f79a95ba40a91bf61edfcc466b17aa816edadcda31190a60778a29939be28f1b"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 24007,
+    "recommendations": 11,
+    "recommendationChars": 3136,
+    "byKind": {
+      "REQUIREMENT": 3,
+      "ACCEPTANCE": 3,
+      "CONSTRAINT": 1,
+      "UNKNOWN": 1,
+      "VERIFICATION": 2,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 986,
+          "outputTokens": 877,
+          "totalTokens": 1863,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 1249,
+          "outputTokens": 69,
+          "totalTokens": 1318,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 35
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "task": "localized-bug",
+  "compiledAt": "2026-10-10T21:57:08.608Z",
+  "nexusCommit": "a1559f712f7a16807d1f605f34c7d04b30adba3a",
+  "spec": {
+    "id": "de8949c5-576f-4043-8859-bc21e82aa195",
+    "projectId": "a45c3e3d-adb2-4624-ab92-48c0b835adf3",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Investigate the telemetry pipeline to identify the root cause of per-car laps appearing out of driving order after roughly eighteen hours of running, and fix the cause rather than merely reordering the displayed laps.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Establish from the repository how telemetry timing and sequence values are decoded, compared, and used to update race state and lap ordering. Investigate long-duration boundary behavior, including overflow, rollover, precision loss, and delayed or out-of-order telemetry, without assuming which is responsible.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add a deterministic regression test that reproduces the identified long-session failure through the relevant telemetry-to-race-state path. Use simulated timestamps or telemetry sequences where feasible rather than requiring an eighteen-hour real-time run.",
+        "kind": "REQUIREMENT",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "The regression test must fail against the unfixed implementation and pass with the fix, asserting that the affected car's laps retain their actual driving order across the identified failure boundary.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Keep the change focused on the identified telemetry-pipeline defect and preserve existing behavior for ordinary-duration sessions.",
+        "kind": "CONSTRAINT",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Verify the regression test's before-and-after results and run the repository's applicable test suite. The supplied snapshot lists npm test as the test command; confirm the current test setup in the repository and report any failures or verification limitations.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:a45c3e3d-adb2-4624-ab92-48c0b835adf3"
+        ],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "99f123cd1a27792f7b8baa1943eea355a283bacbb1cb6ca7493d3a070f61a90f",
+    "createdAt": "2026-10-10T21:56:48.974Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "In long sessions the race state gets corrupted: after roughly eighteen hours of running, laps of a car appear out of driving order. Find the cause in the telemetry pipeline and fix it, with a test that fails before the fix.",
+    "intentId": "59a005a3-9fc2-4cf8-b6ab-1b747ce85b0e",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "In long sessions the race state gets corrupted: after roughly eighteen hours of running, laps of a car appear out of driving order. Find the cause in the telemetry pipeline and fix it, with a test that fails before the fix."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:a45c3e3d-adb2-4624-ab92-48c0b835adf3",
+        "version": "94a8617c5003d526a360e4bce5bee4a22065e326:d1875feb147fe236702ab2f771a34dfab3a135ee6ec4cf58ce7d792b450dbc80"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 19387,
+    "recommendations": 6,
+    "recommendationChars": 2082,
+    "byKind": {
+      "REQUIREMENT": 2,
+      "UNKNOWN": 1,
+      "ACCEPTANCE": 1,
+      "CONSTRAINT": 1,
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 761,
+          "outputTokens": 562,
+          "totalTokens": 1323,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 793,
+          "outputTokens": 32,
+          "totalTokens": 825,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "task": "cross-module-bug",
+  "compiledAt": "2026-10-10T21:57:39.467Z",
+  "nexusCommit": "a1559f712f7a16807d1f605f34c7d04b30adba3a",
+  "spec": {
+    "id": "fdc127e3-2eab-4f66-894d-1a5b172b73b2",
+    "projectId": "42120bcd-86ba-44d0-8f1d-ad31cf017dd3",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Read docs/MONEY.md and establish its monetary calculation rules, including discount and tax ordering, rounding stages, precision, and any allocation rules. Use those rules as the authority for expected totals; do not infer them from the reported example.",
+        "kind": "UNKNOWN",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Trace checkout cart totals and printed invoice totals to identify and explain the cause of the cent discrepancy, including differences in calculation inputs, arithmetic precision, or rounding.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Make cart and invoice monetary calculations comply with docs/MONEY.md for every supported order configuration, with matching totals for the same order inputs.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Prefer a shared monetary calculation implementation or otherwise eliminate divergent calculation and rounding logic between cart and invoice paths, following repository architecture.",
+        "kind": "REQUIREMENT",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add a regression test for three items priced at 0.35 each with a 15% member discount and 20% tax. Assert independently determined totals from docs/MONEY.md for both checkout and printed invoice output, rather than merely asserting that they agree.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add regression coverage for relevant rounding boundaries and supported variations discovered in the repository, including quantities, discounts, and taxes. Verify both compliance with docs/MONEY.md and cart–invoice agreement.",
+        "kind": "ACCEPTANCE",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Establish the repository's monetary representations, cart and invoice entry points, supported order configurations, and test conventions before implementing the fix.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run the regression tests and existing test suite using npm test, as reported by the supplied repository snapshot, after confirming the current test configuration. Report the root cause, changes, and verification results.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [
+          "repository:42120bcd-86ba-44d0-8f1d-ad31cf017dd3"
+        ],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "28f3b1f2fbfdf5b386c170eca2e43ca528baee9427742281442966998e9e5344",
+    "createdAt": "2026-10-10T21:57:17.194Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "Customers report that the total printed on an invoice sometimes differs by a cent from the total the cart showed at checkout, for example three items at 0.35 with the 15% member discount and 20% tax. Find out why the cart and the invoice disagree, make both follow the rules in docs/MONEY.md for every order, and add regression tests.",
+    "intentId": "1d2b29e3-dabd-49c0-a504-4ad34f1e905b",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "Customers report that the total printed on an invoice sometimes differs by a cent from the total the cart showed at checkout, for example three items at 0.35 with the 15% member discount and 20% tax. Find out why the cart and the invoice disagree, make both follow the rules in docs/MONEY.md for every order, and add regression tests."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:42120bcd-86ba-44d0-8f1d-ad31cf017dd3",
+        "version": "e2ef85a9e19567dd6b61f40c0133e9b300433fa4:863553aea4156900443e239b6a3f50500ddb1547fa87875379a58b525689356c"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 21724,
+    "recommendations": 8,
+    "recommendationChars": 2556,
+    "byKind": {
+      "UNKNOWN": 2,
+      "REQUIREMENT": 3,
+      "ACCEPTANCE": 2,
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 816,
+          "outputTokens": 698,
+          "totalTokens": 1514,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 951,
+          "outputTokens": 63,
+          "totalTokens": 1014,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 29
+        }
+      }
+    ]
+  }
+}

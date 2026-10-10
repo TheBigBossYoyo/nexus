@@ -1,0 +1,300 @@
+{
+  "task": "refactor",
+  "compiledAt": "2026-10-10T21:59:09.896Z",
+  "nexusCommit": "a1559f712f7a16807d1f605f34c7d04b30adba3a",
+  "spec": {
+    "id": "ae153ef3-0f23-49da-99fc-27b27d81a7e6",
+    "projectId": "edb807a6-e94c-4edd-9c50-aae75ec1385c",
+    "requestedMode": "AUTO",
+    "mode": "TECHNICAL",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "TECHNICAL_BREADTH",
+      "SPECIFICATION_REQUIRES_BOUNDED_REFINEMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Create src/validation.js exporting validateEmail(value) and validateName(value). Each function must return null for valid values and the existing error message for invalid values.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Refactor createUser, updateUser, and inviteUser in src/handlers to use the shared validators, removing their duplicated email and name validation logic.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Preserve observable handler behavior for the same inputs, including exact error messages, validation order, handling of missing or non-string values, and any existing normalization or optional-field behavior.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Inspect the three handlers and existing tests to establish current validation rules, any differences between handlers, module export conventions, and test organization before extracting the shared logic. Preserve handler-specific behavior at call sites where necessary.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add direct tests for both shared validators covering valid inputs returning null and invalid inputs returning exact existing error messages, including boundary and unusual-input cases identified in the current implementation. Add handler regression coverage where existing tests do not establish behavior preservation.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run npm test and require both the existing tests and the new validation-module tests to pass.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [
+          "repository:edb807a6-e94c-4edd-9c50-aae75ec1385c"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "Do not introduce new validation rules, change error wording, or perform unrelated handler refactoring.",
+        "kind": "NON_GOAL",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Create src/validation.js exporting exactly validateEmail(value) and validateName(value). Each takes a single argument, returns null when the value is valid and the existing error message string otherwise, and never throws for any input type.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Refactor createUser, updateUser and inviteUser in src/handlers to call the shared validators, and remove their local copies of the email and name validation (inline checks, private helpers, duplicated regexes or constants) so that no second copy of the rules remains.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Handler behaviour is unchanged for every input: the same result shape, status or error type, exact error message text, order in which fields are validated, which error is reported when several fields are invalid, and the handling of missing, null, non-string, empty and whitespace-padded values.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Before extracting, compare the three copies of the validation rule by rule: regexes, length limits, trimming or case normalisation, type checks, treatment of absent fields, and message wording. Record every difference between handlers, because whether the copies are truly identical decides if a single shared function can preserve behaviour.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "The three copies may not be identical (for example, different wording or a stricter rule in one handler), in which case a single validateEmail(value) or validateName(value) cannot reproduce all three behaviours. If so, behaviour preservation takes priority over full deduplication: the shared module holds the common rule, each divergence stays at the call site of the handler that has it, and the final report lists it. Do not silently unify divergent behaviour.",
+        "kind": "RISK",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Any handler-specific logic around validation stays in the handler: whether a field is optional (for example, a partial update that omits name or email), normalisation applied before or after the check, and how the returned message is turned into the handler's error response. The validators only judge a value; they do not decide whether a field is required for a given handler unless all three copies agree on that.",
+        "kind": "CONSTRAINT",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Establish from the repository the module system (CommonJS or ES modules), the export style, the test framework, and the location and naming convention of test files. Write src/validation.js and its tests to match.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Do not edit, weaken, skip or delete existing tests to make them pass. They are the behavioural baseline and must pass unmodified. If one can only pass with a modification, stop and report it as evidence of a behaviour change.",
+        "kind": "CONSTRAINT",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add a test file for src/validation.js covering both validators: valid values return null, and each invalid class found in the current implementation returns its exact existing message. Cover undefined, null, non-string, empty string, whitespace-only, and the boundary on each side of every length or format limit that exists today.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Existing handler tests may not cover every validation path, so a regression could pass unnoticed. Where a path is uncovered (in particular the invalid-email and invalid-name cases for each of the three handlers), add a characterisation test against the pre-refactor code first, then confirm it still passes after the refactor.",
+        "kind": "RISK",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run npm test before the change to record the baseline and again after it. All pre-existing tests and the new validation-module tests must pass, with no fewer tests executed than at baseline.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [
+          "repository:edb807a6-e94c-4edd-9c50-aae75ec1385c"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "After the refactor, search src/handlers for leftover validation fragments (the email regex, the name rules, the message literals) and confirm each of the three handlers imports from src/validation.js.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "No new validation rules, no changed or 'improved' error wording or regexes, no new dependencies, no additional exports beyond the two named functions unless a divergence between handlers makes one unavoidable, and no refactoring of handler code unrelated to email and name validation or of handlers other than the three named.",
+        "kind": "NON_GOAL",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "No build, lint or typecheck command is configured for the project, so npm test is the only automated gate. Conformance to code style rests on matching the surrounding code.",
+        "kind": "ASSUMPTION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [
+          "repository:edb807a6-e94c-4edd-9c50-aae75ec1385c"
+        ],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [
+      "Requiring validators to never throw for any input type introduces a new behavioral guarantee. If existing validation throws for some inputs, this conflicts with the requirement to preserve behavior.",
+      "Requiring existing tests to pass unmodified and stopping whenever a modification is needed is stronger than keeping existing tests passing. Legitimate structural updates to tests need not indicate a behavior change.",
+      "Declaring npm test the only automated gate assumes that no build, lint, or typecheck commands exist. That repository claim is not established by the supplied request and should be verified rather than imposed.",
+      "The unconditional requirement that both validators never throw for any input type.",
+      "The blanket prohibition on editing existing tests, including the instruction to stop and report any necessary modification as evidence of behavior change.",
+      "Mandating npm test specifically, and treating it as the only automated gate, without establishing the repository's configured commands."
+    ],
+    "identity": "d775e0c2775b60bc8bd47469ea926404eee09e2ce544b7a0392dd382bf355610",
+    "createdAt": "2026-10-10T21:58:16.330Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": true,
+        "expandsScope": true,
+        "conflicts": [
+          "Requiring validators to never throw for any input type introduces a new behavioral guarantee. If existing validation throws for some inputs, this conflicts with the requirement to preserve behavior.",
+          "Requiring existing tests to pass unmodified and stopping whenever a modification is needed is stronger than keeping existing tests passing. Legitimate structural updates to tests need not indicate a behavior change.",
+          "Declaring npm test the only automated gate assumes that no build, lint, or typecheck commands exist. That repository claim is not established by the supplied request and should be verified rather than imposed."
+        ],
+        "unjustifiedRequirements": [
+          "The unconditional requirement that both validators never throw for any input type.",
+          "The blanket prohibition on editing existing tests, including the instruction to stop and report any necessary modification as evidence of behavior change.",
+          "Mandating npm test specifically, and treating it as the only automated gate, without establishing the repository's configured commands."
+        ]
+      }
+    },
+    "rawIntent": "The three handlers in src/handlers (createUser, updateUser, inviteUser) each carry their own copy of the email and name validation. Refactor: move the validation into one module, src/validation.js, exporting `validateEmail(value)` and `validateName(value)`, each returning null when the value is valid and the error message otherwise, and make all three handlers use it. Behaviour must not change: the same inputs give the same results, error messages included. Keep the existing tests passing and add tests for the new module.",
+    "intentId": "684dd9fb-5855-49f0-82e1-7dc5c5575f34",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "The three handlers in src/handlers (createUser, updateUser, inviteUser) each carry their own copy of the email and name validation. Refactor: move the validation into one module, src/validation.js, exporting `validateEmail(value)` and `validateName(value)`, each returning null when the value is valid and the error message otherwise, and make all three handlers use it. Behaviour must not change: the same inputs give the same results, error messages included. Keep the existing tests passing and add tests for the new module."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:edb807a6-e94c-4edd-9c50-aae75ec1385c",
+        "version": "e09ea7be20ca0373548a627e9137d3f897912f5d:c32837c42ea025025dd44c23f6b4f8de06e760205f4d5c2f4bca5123f823cce9"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "TECHNICAL",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "TECHNICAL_BREADTH",
+      "SPECIFICATION_REQUIRES_BOUNDED_REFINEMENT"
+    ],
+    "ms": 52618,
+    "recommendations": 21,
+    "recommendationChars": 7738,
+    "byKind": {
+      "REQUIREMENT": 4,
+      "ACCEPTANCE": 4,
+      "UNKNOWN": 3,
+      "VERIFICATION": 3,
+      "NON_GOAL": 2,
+      "RISK": 2,
+      "CONSTRAINT": 2,
+      "ASSUMPTION": 1
+    },
+    "ambiguities": [
+      "Requiring validators to never throw for any input type introduces a new behavioral guarantee. If existing validation throws for some inputs, this conflicts with the requirement to preserve behavior.",
+      "Requiring existing tests to pass unmodified and stopping whenever a modification is needed is stronger than keeping existing tests passing. Legitimate structural updates to tests need not indicate a behavior change.",
+      "Declaring npm test the only automated gate assumes that no build, lint, or typecheck commands exist. That repository claim is not established by the supplied request and should be verified rather than imposed.",
+      "The unconditional requirement that both validators never throw for any input type.",
+      "The blanket prohibition on editing existing tests, including the instruction to stop and report any necessary modification as evidence of behavior change.",
+      "Mandating npm test specifically, and treating it as the only automated gate, without establishing the repository's configured commands."
+    ],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 891,
+          "outputTokens": 593,
+          "totalTokens": 1484,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:technical:1",
+        "provider": "claude",
+        "model": "opus",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-opus-5-5"
+          ],
+          "inputTokens": 1863,
+          "outputTokens": 2424,
+          "totalTokens": null,
+          "cacheReadTokens": 544,
+          "cacheWriteTokens": 5108,
+          "reasoningTokens": 368
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 2145,
+          "outputTokens": 312,
+          "totalTokens": 2457,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 85
+        }
+      }
+    ]
+  }
+}
