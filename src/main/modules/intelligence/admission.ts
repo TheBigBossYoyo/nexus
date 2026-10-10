@@ -10,6 +10,7 @@ import type {
 import { defaultIntentMetadata, UserIntentMetadataSchema } from '@shared/intelligence'
 import { NexusError } from '@shared/result'
 import { ContextGraphService } from '@main/modules/context-graph'
+import { TRUST_WORD } from '@main/modules/context-graph/render'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
 import type { ChatGPTConnection } from './connection'
@@ -63,13 +64,20 @@ export class TaskAdmissionService {
       )
     return this.graph
       .search(spaces, raw.slice(0, 500), { limit: 12 })
+      // What a model reads here can come back as a recommendation of the specification, in every prompt of the
+      // run. A note an agent wrote is a lead nobody checked: it is kept out, as it is kept out of the context of
+      // high-risk work. What stays says how far it can be trusted, as it does wherever the graph is shown.
       .filter(
-        (n) => n.programId === null && n.status === 'CURRENT' && n.classification === 'normal',
+        (n) =>
+          n.programId === null &&
+          n.status === 'CURRENT' &&
+          n.classification === 'normal' &&
+          n.trust !== 'AGENT_NOTE',
       )
       .map((n) => ({
         id: n.id,
         version: `${n.version}:${n.contentHash}`,
-        text: `${n.title}\n${n.summary}`,
+        text: `[${n.type.toLowerCase()}, ${TRUST_WORD[n.trust]}] ${n.title}\n${n.summary}`,
       }))
   }
   workspaceProject(workspaceId: string): string {

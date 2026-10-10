@@ -18,7 +18,7 @@ export function handleOf(node: Pick<ContextNode, 'spaceKind' | 'spaceId' | 'path
   return contextRef(node)
 }
 
-const TRUST_WORD: Record<ContextNode['trust'], string> = {
+export const TRUST_WORD: Record<ContextNode['trust'], string> = {
   VERIFIED: 'verified',
   USER_PROVIDED: 'user-provided',
   INFERRED: 'inferred',
