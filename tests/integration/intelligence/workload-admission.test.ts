@@ -15,6 +15,8 @@ import { createIpcHandlers } from '@main/modules/ipc/handlers'
 import { Orchestrator } from '@main/modules/orchestrator'
 import { Core } from '@main/modules/orchestrator/core'
 import { composeForTask } from '@main/modules/orchestrator/context-source'
+import { instructionsInForce, renderInstructionsInForce } from '@main/modules/orchestrator/instructions'
+import { buildRepairPrompt, buildResumeFromHandoffPrompt, buildReviewPrompt, buildVerifierPrompt } from '@main/modules/context/stage-prompts'
 import type { WorktreeManager } from '@main/modules/git'
 import type { AgentRuntime } from '@main/modules/agent-runtime'
 import { defaultIntentMetadata } from '@shared/intelligence'
@@ -259,6 +261,38 @@ describe('canonical workload admission', () => {
       expect(composed.prompt).toContain('Keep <T> and x < 10'.replace(/</g, '\\u003c'))
       expect(composed.prompt).toContain(second)
       expect(composed.pack.entries.filter(e => e.sourceKind === 'user_instruction')).toHaveLength(2)
+
+      // The sessions that used to get none of it. A session that replaces a rotated one, a repair (a new child
+      // task), a reviewer and a verifier are all given what the user asked for, each instruction once, oldest first.
+      const inForce = renderInstructionsInForce(h.repos, run, existing, { withRequest: true })!
+      expect(inForce).toContain('Original request:')
+      expect(inForce.indexOf('Keep <T> and x < 10')).toBeGreaterThan(0)
+      expect(inForce.indexOf(second)).toBeGreaterThan(inForce.indexOf('Keep <T> and x < 10'))
+      expect(inForce.match(/Keep the public interface backward compatible/g)).toHaveLength(1)
+      const handoff = { completedWork: ['half of it'], commits: [], filesChanged: [], unresolvedIssues: [], importantFindings: [], nextSteps: ['the rest'] }
+      const resumed = buildResumeFromHandoffPrompt({ task: existing, handoff, worktreePath: 'C:/wt', branch: 'b', instructions: inForce, missionCriteria: ['Mission criterion'] }).prompt
+      // The handoff above does not restate either instruction; the new session has them anyway, and the mission's criteria.
+      expect(resumed).toContain('## User instructions in force')
+      expect(resumed).toContain('Keep <T> and x < 10')
+      expect(resumed).toContain(second)
+      expect(resumed).toContain('Mission criterion')
+      const repair = h.repos.tasks.insert(makeTask(run.id, 'existing-fix1', { parentTaskId: existing.id, kind: 'repair' }))
+      const forRepair = renderInstructionsInForce(h.repos, run, repair, { withRequest: true })!
+      expect(forRepair).toContain('Keep <T> and x < 10')
+      expect(forRepair).toContain(second)
+      expect(instructionsInForce(h.repos, run, repair).map((e) => [e.kind, e.taskKey])).toEqual(instructionsInForce(h.repos, run, existing).map((e) => [e.kind, e.taskKey]))
+      expect(buildRepairPrompt({ task: existing, failure: { kind: 'review', summary: 's', details: 'd' }, instructions: forRepair }).prompt).toContain(second)
+      expect(buildReviewPrompt({ task: existing, missionCriteria: [], diffStat: '1 file', patch: '', checkResults: [], attempt: 1, instructions: inForce }).prompt).toContain(second)
+      expect(buildVerifierPrompt({ task: existing, missionCriteria: [], diffStat: '1 file', checkResults: [], instructions: inForce }).prompt).toContain(second)
+      // A child task's own pack carries what was said about its parent.
+      expect(composeForTask(core, run, repair, 'implement', h.project.rootPath, null).prompt).toContain(second)
+      // Many long instructions stay bounded, and what was cut is counted, never dropped silently.
+      const many = h.repos.tasks.insert(makeTask(run.id, 'many'))
+      for (let i = 0; i < 30; i++) await handlers['tasks.instruct']({ taskId: many.id, instruction: `Constraint ${i}: ${'x'.repeat(3000)}`, compilationMode: 'EXACT' })
+      const bounded = renderInstructionsInForce(h.repos, run, many, { withRequest: false })!
+      expect(bounded.length).toBeLessThan(40_000)
+      for (let i = 0; i < 30; i++) expect(bounded).toContain(`Constraint ${i}:`)
+      expect(bounded).toMatch(/\[\.\.\. \d+ more characters omitted \.\.\.\]/)
       await expect(handlers['tasks.resolveBlocker']({ taskId: existing.id, note: 'New constraint', compilationMode: 'EXACT' })).rejects.toThrow('not blocked')
       expect(h.repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', existing.id)).toHaveLength(2)
       h.repos.tasks.update(existing.id, { state: 'blocked' })

@@ -6,6 +6,7 @@ import { dependenciesOf } from '@main/modules/task-graph'
 import { attachArbitration, effectiveFindings } from './arbitration'
 import { factNotCurrent, graphContextFor, memoryNotCurrent } from './context-graph'
 import type { Core } from './core'
+import { lineage } from './instructions'
 
 const REVIEW_PURPOSES: readonly AgentPurpose[] = ['implement', 'diagnose']
 
@@ -51,8 +52,8 @@ export function composeForTask(
     task,
     admittedTaskRequests: [
       ...repos.intelligenceArtifacts.admissionHistory('RUN_INSTRUCTION', run.id),
-      repos.intelligenceArtifacts.admission('TASK_ADDITION', task.id),
-      ...repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', task.id),
+      // The task and the tasks it descends from: a child task is still bound by what the user said about its parent.
+      ...lineage(repos, task).flatMap((t) => [repos.intelligenceArtifacts.admission('TASK_ADDITION', t.id), ...repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', t.id)]),
     ].filter((spec) => spec !== null),
     purpose,
     missionCriteria: run.plan?.acceptanceCriteria ?? [],

@@ -49,6 +49,7 @@ import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
 import { graphContextForRequest } from './context-graph'
+import { renderInstructionsInForce } from './instructions'
 import { Core } from './core'
 import { assertRunAdmission } from '@main/modules/intelligence/run-admission'
 import { buildTaskEvidence } from './evidence'
@@ -1004,6 +1005,7 @@ export class Orchestrator implements PipelineHost {
           projectRoot: this.core.project(run).rootPath,
           prompt: buildMissionVerifierPrompt({
             run,
+            instructions: renderInstructionsInForce(repos, run, null, { withRequest: false }),
             missionCriteria: criteria.map((c) => c.text),
             diffStat: stat || '(no changes)',
             checkResults: checks.commands,

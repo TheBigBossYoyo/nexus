@@ -41,6 +41,7 @@ import { dependenciesOf } from '@main/modules/task-graph'
 import type { AgentOutcome, AgentRunResult, SessionControl } from './agent-runner'
 import { ARBITRATION_ARTIFACT } from './arbitration'
 import { composeForTask } from './context-source'
+import { renderInstructionsInForce } from './instructions'
 import type { Core } from './core'
 import { buildTaskEvidence } from './evidence'
 import { renderMessage } from './messaging'
@@ -525,6 +526,8 @@ export class TaskPipeline {
     const promptFor = (lens?: string): string =>
       buildReviewPrompt({
         task,
+        // What the user asked for, later instructions included: the reviewer can only flag a broken instruction it was shown.
+        instructions: renderInstructionsInForce(repos, run, task, { withRequest: true }),
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
         patch: diff.patch,
@@ -723,6 +726,8 @@ export class TaskPipeline {
       purpose: 'verify',
       prompt: buildVerifierPrompt({
         task,
+        // The verifier judges against what the user asked for, later instructions included; none of it is the implementer's.
+        instructions: renderInstructionsInForce(repos, run, task, { withRequest: true }),
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
         checkResults: checks,
@@ -897,6 +902,8 @@ export class TaskPipeline {
 
     const built = buildRepairPrompt({
       task: parent,
+      // A repair is a new task and a new session: it starts from what the user asked for, not only from the failure.
+      instructions: renderInstructionsInForce(repos, run, parent, { withRequest: true }),
       failure: { kind: failure.kind, summary: failure.summary, details: failure.details },
       findings: failure.findings,
       failures: failure.failures,

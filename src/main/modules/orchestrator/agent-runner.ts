@@ -29,6 +29,7 @@ import type {
   UsageInfo,
 } from '@main/modules/agent-runtime/types'
 import { canProposeGraphChange, rolePrompt } from '@main/modules/context/prompts'
+import { renderInstructionsInForce } from './instructions'
 import {
   buildHandoffRequestPrompt,
   buildResumeFromHandoffPrompt,
@@ -328,6 +329,9 @@ export class AgentRunner {
         prompt = buildResumeFromHandoffPrompt({
           task: input.task as Task,
           handoff,
+          // The handoff is what a model chose to write down. What the user asked for is given again in full.
+          instructions: renderInstructionsInForce(repos, input.run, input.task, { withRequest: true }),
+          missionCriteria: input.run.plan?.acceptanceCriteria ?? [],
           worktreePath: input.cwd,
           branch: input.task?.branch ?? '',
         }).prompt

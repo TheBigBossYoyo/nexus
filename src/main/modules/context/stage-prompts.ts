@@ -145,6 +145,8 @@ export interface ReviewPromptInput {
   attempt: number
   /** Dual review: this reviewer's focus. */
   lens?: string
+  /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
+  instructions?: string | null
   /** From TaskEvidenceBuilder. The reviewer sees only the messages the task's agents sent (type, recipient, subject), never their reasoning. */
   evidence?: OrchestrationEvidence
 }
@@ -156,6 +158,7 @@ export interface ReviewPromptInput {
 export function buildReviewPrompt(input: ReviewPromptInput): Pack {
   return assemble([
     { name: 'Requirements', body: renderTaskSpec(input.task) },
+    { name: 'User instructions in force', body: input.instructions ?? null },
     { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria) },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Patch', body: input.patch.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
@@ -180,11 +183,14 @@ export interface VerifierPromptInput {
   checkOutputMode?: FilterMode
   reviewSummary?: string
   evidence?: OrchestrationEvidence
+  /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
+  instructions?: string | null
 }
 
 export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
   return assemble([
     { name: 'Task', body: renderTaskSpec(input.task) },
+    { name: 'User instructions in force', body: input.instructions ?? null },
     { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria) },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
     { name: 'Check results', body: renderChecks(input.checkResults, input.checkOutputMode) },
@@ -209,6 +215,8 @@ export interface MissionVerifierPromptInput {
   checkOutputMode?: FilterMode
   planSummary?: string
   evidence?: OrchestrationEvidence
+  /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
+  instructions?: string | null
 }
 
 /** Final acceptance of the whole mission on the integration branch (the current working directory). */
@@ -217,6 +225,7 @@ export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): P
   return assemble([
     { name: 'Original request', body: renderOriginalIntent(input.run) },
     { name: 'Compiled specification with provenance', body: renderCompiledAdvice(input.run) },
+    { name: 'User instructions in force', body: input.instructions ?? null },
     { name: 'Plan summary', body: input.planSummary ? truncate(input.planSummary, SECTION_LIMITS.criteria) : null },
     {
       name: 'Mission acceptance criteria',
@@ -250,6 +259,8 @@ export interface RepairPromptInput {
   checkResults?: CommandResult[]
   checkOutputMode?: FilterMode
   evidence?: OrchestrationEvidence
+  /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
+  instructions?: string | null
 }
 
 export function renderFinding(f: ReviewFinding): string {
@@ -269,6 +280,7 @@ export function buildRepairPrompt(input: RepairPromptInput): Pack {
   return assemble([
     { name: 'Repair request', body: header },
     { name: 'Task', body: renderTaskSpec(input.task) },
+    { name: 'User instructions in force', body: input.instructions ?? null },
     { name: 'Acceptance criteria', body: criteriaSection(input.task, []) },
     {
       name: 'Failure',
@@ -306,6 +318,10 @@ export interface ResumeFromHandoffInput {
   handoff: Handoff
   worktreePath: string
   branch: string
+  /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
+  instructions?: string | null
+  /** 0.7.2: the mission's acceptance criteria; the first session had them in its pack. */
+  missionCriteria?: string[]
 }
 
 export function buildResumeFromHandoffPrompt(input: ResumeFromHandoffInput): Pack {
@@ -315,7 +331,8 @@ export function buildResumeFromHandoffPrompt(input: ResumeFromHandoffInput): Pac
       body: 'A previous session worked on this task and was ended. Continue from its handoff rather than starting over. Verify the current state of the worktree (git status, git log, run the checks) before relying on the handoff: it may be incomplete.',
     },
     { name: 'Task', body: renderTaskSpec(input.task) },
-    { name: 'Acceptance criteria', body: criteriaSection(input.task, []) },
+    { name: 'User instructions in force', body: input.instructions ?? null },
+    { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria ?? []) },
     { name: 'Handoff', body: renderHandoff(input.handoff) ?? 'The previous session reported no progress.' },
     { name: 'Repository state', body: `Worktree: ${input.worktreePath}\nBranch: ${input.branch}` },
   ])
