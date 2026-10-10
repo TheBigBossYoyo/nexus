@@ -35,8 +35,27 @@ import { Orchestrator } from '@main/modules/orchestrator'
 import { attachOutcomeRecording, PolicyService } from '@main/modules/policy'
 import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
 import { runProcess } from '@main/modules/process'
+import type { AgentRuntime } from '@main/modules/agent-runtime/types'
+import { FakeRuntimeProvider } from '@main/modules/providers/providers'
+import { ProviderService } from '@main/modules/providers/service'
+import { CapacityAwareProviderRouter } from '@main/modules/capacity/router'
+import { WorkerCapacityRouting } from '@main/modules/capacity/worker-routing'
+import { UsageIntelligenceService } from '@main/modules/usage/service'
+
+/** 0.7.2: the production session admission (the capacity kernel) in front of the scripted runtime. */
+export interface CapacityRig {
+  routing: WorkerCapacityRouting
+  /** A kernel on the same store and boot, to hold or inspect slots as another consumer would. */
+  kernel: CapacityAwareProviderRouter
+  /** One pass of the recovery the runtime runs on a timer. */
+  recover(): Promise<void>
+  /** Every lease on record, whatever its pool. */
+  leases(): { role: string; state: string }[]
+}
 
 export interface Harness {
+  /** Present when the harness was created with `capacity`. */
+  capacity: CapacityRig | null
   dir: string
   repoDir: string
   dbPath: string
@@ -89,6 +108,12 @@ export interface HarnessOptions {
   policy?: boolean
   /** v0.7.1: a model of the prompt cache; sessions then report per-request usage and context breakdowns. */
   cache?: FakeCacheSim
+  /**
+   * v0.7.2: every session goes through the production admission (provider service, capacity kernel, leases)
+   * before it reaches the scripted runtime, as in the runtime process. `maxAgents` is the session limit the
+   * kernel is given.
+   */
+  capacity?: { maxAgents: number }
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -136,10 +161,33 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   const runtime = new FakeAgentRuntime({ script: options.script, ...(options.cache ? { cache: options.cache } : {}) })
   const policy = options.policy ? new PolicyService({ repos, nexusVersion: '0.3.0-test' }) : null
   if (policy) attachOutcomeRecording(bus, policy)
+  let capacity: CapacityRig | null = null
+  let admitted: AgentRuntime = runtime
+  let closeCapacity = async (): Promise<void> => undefined
+  if (options.capacity) {
+    const maxAgents = options.capacity.maxAgents
+    const providers = new ProviderService({ providers: [new FakeRuntimeProvider('claude', runtime)], sessions: repos.providerSessions, settings: repos.settings, runOfAgent: (id) => repos.agents.get(id)?.runId ?? null })
+    await providers.refresh()
+    const usage = new UsageIntelligenceService({ repos, bus, runtime, push: () => undefined })
+    const routing = new WorkerCapacityRouting({ repos, providers, usage, dataDir: dir, bootId: 'scenario-boot', maxAgents: () => maxAgents })
+    admitted = providers.router
+    capacity = {
+      routing,
+      kernel: new CapacityAwareProviderRouter(repos.intelligenceArtifacts, 'scenario-boot'),
+      recover: () => routing.recover((runId) => orchestrator.resumeRun(runId)),
+      leases: () =>
+        (db.prepare("SELECT body FROM capacity_checkpoints WHERE id LIKE 'capacity-leases:%'").all() as { body: string }[])
+          .flatMap((row) => (JSON.parse(row.body) as { leases?: { role: string; state: string }[] }).leases ?? []),
+    }
+    closeCapacity = async () => {
+      await routing.dispose()
+      usage.dispose()
+    }
+  }
   const orchestrator = new Orchestrator({
     repos,
     bus,
-    runtime,
+    runtime: admitted,
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
     push: (message) => void pushes.push(message),
@@ -199,6 +247,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     git: gitService,
     runtime,
     orchestrator,
+    capacity,
     project,
     policy,
     events,
@@ -245,15 +294,17 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       const snapshot = join(dir, 'crash-snapshot.db')
       if (restartOptions?.crash) await db.backup(snapshot)
       await orchestrator.shutdown()
+      await closeCapacity()
       db.close()
       if (restartOptions?.crash) {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}) })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)
+      await closeCapacity().catch(() => undefined)
       if (db.open) db.close()
       for (let i = 0; i < 10; i++) {
         try {
