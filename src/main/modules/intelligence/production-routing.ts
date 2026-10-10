@@ -70,6 +70,10 @@ export function createProductionAdvisoryRouting(input: {
         })
       }
       const runtime = input.providers.pinnedRuntime('claude')
+      // Discovery runs in the background after a start. A request that arrives before it has finished waits for
+      // it (the same detection, not a second one) instead of finding no technical provider and being told to
+      // ask again.
+      if (!disposed && !input.providers.list().some((s) => s.id === 'claude')) await input.providers.refresh().catch(() => undefined)
       const discovered = input.providers.list().find((s) => s.id === 'claude')
       if (!runtime || !discovered || disposed) return { candidates, pools: capacity }
       // No inference: only the runtime's own authenticated-account report supplies the profile binding.

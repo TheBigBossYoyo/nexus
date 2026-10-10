@@ -67,6 +67,8 @@ export class WorkerCapacityRouting {
   private changed(): void { for (const listener of this.listeners) listener() }
 
   private async snapshot(spec: Pick<SessionSpec, 'role' | 'label' | 'model' | 'resumeSessionId'>) {
+    // A session asked for before the providers were detected waits for that detection, not for capacity.
+    if (!this.disposed && this.o.providers.list().length === 0) await this.o.providers.refresh().catch(() => undefined)
     const policy = this.o.providers.policy()
     const owner = spec.resumeSessionId ? this.o.providers.sessionProvider(spec.resumeSessionId) : null
     const request = routeSession({ role: spec.role, label: spec.label ?? null, resumeProvider: owner }, policy, this.o.providers.list())
