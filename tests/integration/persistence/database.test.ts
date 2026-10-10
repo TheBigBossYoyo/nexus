@@ -46,20 +46,22 @@ describe('openDatabase', () => {
       { version: 11, name: 'security' },
       { version: 12, name: 'context-graph' },
       { version: 13, name: 'intelligence' },
+      { version: 14, name: 'canonical-intents' },
+      { version: 15, name: 'capacity-director' },
     ])
     first.close()
 
     const second = openDatabase(path)
     open.push(second)
-    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 13 })
+    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 15 })
   })
 
   it('rolls the whole migration back when one fails', () => {
     const db = openDatabase(':memory:')
     open.push(db)
     const bad = [
-      { version: 14, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
-      { version: 15, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
+      { version: 16, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
+      { version: 17, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
     ]
     expect(() =>
       runMigrations(db, [
@@ -76,12 +78,14 @@ describe('openDatabase', () => {
         { version: 11, name: 'security', sql: '' },
         { version: 12, name: 'context-graph', sql: '' },
         { version: 13, name: 'intelligence', sql: '' },
+        { version: 14, name: 'canonical-intents', sql: '' },
+        { version: 15, name: 'capacity-director', sql: '' },
         ...bad,
       ]),
     ).toThrow()
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'extra_%'").all()
     expect(tables).toEqual([])
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 13 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 15 })
   })
 
   it('refuses a database written by a newer schema', () => {

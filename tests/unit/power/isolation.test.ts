@@ -56,7 +56,8 @@ describe('power control isolation', () => {
     const uses = main.split('\n').filter((line) => /\bpower\b/.test(line) && !/^\s*(\/\/|\*)/.test(line) && !/import /.test(line) && !/logger\(/.test(line))
     expect(uses.map((l) => l.trim())).toEqual([
       'let power: PowerController | null = null',
-      "power = useFakePower ? new FakePowerController({ logFile: join(dataDir, 'fake-power.log') }) : new WindowsPowerController()",
+      'power = useFakePower',
+      "? new FakePowerController({ logFile: join(dataDir, 'fake-power.log') })",
       'const overnight = power',
       'power,',
     ])
