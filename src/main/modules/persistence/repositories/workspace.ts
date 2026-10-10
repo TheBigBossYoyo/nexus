@@ -63,6 +63,11 @@ export class EnrolledRepositoryStore extends Table<WorkspaceRepository> {
     return this.query('WHERE workspace_id = ? ORDER BY enrolled_at, rowid', [workspaceId])
   }
 
+  /** Every enrolment of a project: the workspaces whose graph a task in that project may read. */
+  listByProject(projectId: string): WorkspaceRepository[] {
+    return this.query('WHERE project_id = ? ORDER BY enrolled_at, rowid', [projectId])
+  }
+
   getByKey(workspaceId: string, key: string): WorkspaceRepository | null {
     return this.one('WHERE workspace_id = ? AND key = ?', [workspaceId, key])
   }

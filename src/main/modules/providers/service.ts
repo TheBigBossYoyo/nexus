@@ -336,7 +336,8 @@ export class ProviderService {
           // A stopped session says nothing about the provider.
           if (event.reason !== 'stopped') note(!error || (succeeded && !crashed), error ?? '')
         }
-        yield event
+        // Which provider a session landed on is known only here; the token accounting needs it.
+        yield event.type === 'session.started' ? { ...event, provider } : event
       }
     }
     return {

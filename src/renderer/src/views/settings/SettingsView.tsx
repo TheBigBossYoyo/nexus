@@ -14,13 +14,14 @@ import {
   GitSection,
   McpSection,
   MemorySection,
+  TokensSection,
   ModelsSection,
   PermissionsSection,
   UsageSection,
   type SectionProps,
 } from './sections'
 
-type SectionId = 'claude' | 'models' | 'execution' | 'usage' | 'git' | 'permissions' | 'memory' | 'mcp' | 'appearance' | 'advanced'
+type SectionId = 'claude' | 'models' | 'execution' | 'usage' | 'git' | 'permissions' | 'memory' | 'tokens' | 'mcp' | 'appearance' | 'advanced'
 
 const SECTIONS: { id: SectionId; label: string; description?: string; render: (p: SectionProps) => ReactNode; prefix: string }[] = [
   { id: 'claude', label: 'Claude', prefix: 'claude', render: (p) => <ClaudeSection {...p} /> },
@@ -30,6 +31,7 @@ const SECTIONS: { id: SectionId; label: string; description?: string; render: (p
   { id: 'git', label: 'Git', prefix: 'git', render: (p) => <GitSection {...p} /> },
   { id: 'permissions', label: 'Permissions', prefix: 'permissions', render: (p) => <PermissionsSection {...p} /> },
   { id: 'memory', label: 'Memory', prefix: 'memory', render: (p) => <MemorySection {...p} /> },
+  { id: 'tokens', label: 'Tokens', prefix: 'tokens', render: (p) => <TokensSection {...p} /> },
   { id: 'mcp', label: 'MCP', prefix: 'mcp', render: (p) => <McpSection {...p} /> },
   { id: 'appearance', label: 'Appearance', prefix: 'appearance', render: (p) => <AppearanceSection {...p} /> },
   { id: 'advanced', label: 'Advanced', prefix: 'advanced', render: (p) => <AdvancedSection {...p} /> },

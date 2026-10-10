@@ -1,5 +1,7 @@
 import type { PushMessage } from '@shared/events'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
+import type { ContextGraphService } from '@main/modules/context-graph'
+import type { TokenIntelligenceEngine } from '@main/modules/token'
 import type { EventBus } from '@main/modules/events'
 import type { GitService, WorktreeManager } from '@main/modules/git'
 import type { Preset, Project } from '@shared/domain'
@@ -35,4 +37,7 @@ export interface OrchestratorDeps {
   logger?: (line: string) => void
   /** v0.3. See StrategyResolver. */
   strategies?: StrategyResolver
+  /** v0.7.1. Created from `repos` when absent, so every orchestrator has both. */
+  contextGraph?: ContextGraphService
+  tokens?: TokenIntelligenceEngine
 }

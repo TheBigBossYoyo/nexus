@@ -1,0 +1,214 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "070",
+  "armIs": "NEXUS 0.7.0 sources, default settings",
+  "nexusVersion": "0.7.0",
+  "nexusCommit": "41fb3d68cad6fbf43b9af0191025a464eb29416c",
+  "startedAt": "2026-10-10T10:26:20.854Z",
+  "finishedAt": "2026-10-10T10:29:18.470Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/2024e0cc/integration",
+        "hiddenPassed": false,
+        "hidden": {
+          "ok": false,
+          "pass": 1,
+          "fail": 1,
+          "output": "✖ laps stay in driving order when the sequence counter wraps (1.5037ms)\n✔ packets of an ordinary batch are still ordered (0.1399ms)\nℹ tests 2\nℹ suites 0\nℹ pass 1\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 78.1052\n\n✖ failing tests:\n\ntest at hidden.test.js:6:1\n✖ laps stay in driving order when the sequence counter wraps (1.5037ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n    [\n  +   12,\n  +   13,\n      10,\n      11,\n  -   12,\n  -   13\n    ]\n  \n      at TestContext.<anonymous> (file:///C:/Users/user/AppData/Local/Temp/nexus-campaign-localized-bug-070-sMRDij/eval-racedeck-lite/hidden.test.js:9:10)\n      at Test.runInAsyncScope (node:async_hooks:228:14)\n      at Test.run (node:internal/test_runner/test:1118:25)\n      at Test.start (node:internal/test_runner/test:1015:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [ 12, 13, 10, 11 ],\n    expected: [ 10, 11, 12, 13 ],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (0.4751ms)\n✔ orders packets by sequence number (0.8511ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 99.2557\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "fix-seq-wrap-ordering-fix1",
+        "state": "failed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 3,
+      "pauses": [
+        "Intervention required: tasks fix-seq-wrap-ordering, fix-seq-wrap-ordering-fix1 failed"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"ed0be9df-10fe-4b4b-b06c-fe8a56b2e54c\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"656df3c4-77c8-44eb-91a4-d576b9f769de\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"911371b2-ef1c-4190-a218-9a89b3fb599a\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, cp, git, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "debugger: Bash: Denied by the user",
+        "debugger: Bash: Denied by the user"
+      ],
+      "taskErrors": [
+        "fix-seq-wrap-ordering: {\"what\":\"Repair failed\",\"where\":\"fix-seq-wrap-ordering-fix1\",\"why\":\"Cannot produce the pre-fix failing test output myself: both attempts to run the new tests against the original order.js were denied by the user. No code change is needed for this repair (the verifier confirmed it is a reporting gap only), so there is nothing to commit. The only pre-fix failing output available is the verifier's own in-memory reproduction.\",\"retryable\":true}",
+        "fix-seq-wrap-ordering-fix1: {\"what\":\"Repair failed\",\"where\":\"fix-seq-wrap-ordering-fix1\",\"why\":\"Cannot produce the pre-fix failing test output myself: both attempts to run the new tests against the original order.js were denied by the user. No code change is needed for this repair (the verifier confirmed it is a reporting gap only), so there is nothing to commit. The only pre-fix failing output available is the verifier's own in-memory reproduction.\",\"retryable\":true}"
+      ],
+      "verificationFailures": [
+        "{\"id\":\"2411947b-6991-4acd-8076-51035e603269\",\"runId\":\"2024e0cc-a139-4609-a699-6a36075f1b13\",\"taskId\":\"5b935571-0ab3-4cc0-9e94-645b0b121b58\",\"agentId\":\"eb5af388-302e-4802-9e9d-4078e4f7743a\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"The fix is correct and in scope, but one task criterion fails: the worker's report does not include the pre-fix failing output, and says so itself. Every other criterion passes.\\n\\nI reproduced the pre-fix failure myself. Running `node --test` with the original `a.seq - b.seq` comparator substituted in memory gave 3 pass, 2 fail, exit 1. Both new wrap tests failed with actual [12, 13, 10, 11] against expected [10, 11, 12, 13]; the existing tests passed. With the committed fix, `npm test` exits 0 with 5 of 5 passing, including `src/strategy/pace.test.js`.\\n\\nThe failing criterion is a reporting gap, not a code defect; no change to the code or tests"
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: st 12 lines of output.\n\nThe change is committed on `nexus/2024e0cc/fix-seq-wrap-ordering`. `git status` was clean afterwards.\n\n**What changed:**\n- **`src/telemetry/order.js`:** the comparator is now `a.clock - b.clock`. It is still a pure function that returns a new array, and the doc comment didn't need changing.\n- **`src/telemetry/order.test.js`:**\n  - A new test shuffles seq 65534, 65535, 0, 1 with rising clocks and expects laps `[10, 11, 12, 13]`.\n  - A second new test checks the input array is not mutated, which you didn't ask for.\n- **`src/telemetry/state.test.js` (new):** a wrap-crossing batch with two cars, expecting `laps[1]` to be `[10, 11, 12, 13]` and `laps[2]` to be `[5, 6, 7]`.",
+        "reviewer: ",
+        "verifier: ",
+        "debugger: xit 1. Both wrap tests returned `[12, 13, 10, 11]` against expected `[10, 11, 12, 13]`.\n\n**Post-fix output** from my run of `npm test` on the committed fix, exit 0:\n\n```\n✔ pace of evenly spaced laps (0.5952ms)\n✔ orders packets by sequence number (0.8773ms)\n✔ orders packets by session clock across the seq wrap (0.1162ms)\n✔ does not mutate the input array (0.123ms)\n✔ applyBatch keeps each car laps in driving order across the seq wrap (0.8337ms)\nℹ tests 5\nℹ pass 5\nℹ fail 0\n```\n\n`git status` is clean and HEAD is still `3ea3d89`.\n\nTo close the criterion, either accept the verifier's reproduction as the recorded pre-fix output, or allow one of the two commands above so I can capture it first-hand."
+      ],
+      "approvalDetails": [
+        "Worker/fix-seq-wrap-ordering [high] Run shell command (bash): npm test 2>&1 | tail -15; git stash list | head -1; git show HEAD:src/telemetry/order.js > /tmp/o.js; cp src/telemetry/order.js /tmp/fixed.js; cp /tmp/o.js src/telemetry/order.js; npm test 2>&1 | grep -E \"^(not ok|# (pass|fail))|^    not ok|^ *# (pass|fail)\"; cp /tmp/fixed.js src/telemetry/order.js; | path outside the worktree: /tmp/o.js; path outside the worktree: /tmp/fixed.js; deleting/moving path outside the worktree: /tmp/o.js; deleting/moving path outside the worktree: /tmp/fixed.js",
+        "Debugger/fix-seq-wrap-ordering-fix1 [high] Run shell command (bash): git show 02d8a98:src/telemetry/order.js > src/telemetry/order.js && git diff --stat; npm test 2>&1; echo \"EXIT=$?\"; git checkout HEAD -- src/telemetry/order.js; echo \"--- restored\"; git status --short; cat src/telemetry/order.js | git checkout can discard uncommitted changes",
+        "Debugger/fix-seq-wrap-ordering-fix1 [high] Run shell command (bash): git status --short; echo \"tree-state-above\"; node --input-type=module - <<'EOF'\nimport { spawnSync } from 'node:child_process'\n// In-memory only: serve the original (02d8a98) order.js to the test processes via a loader hook.\nconst hooks = `\nimport { execSync } from 'node:child_process'\nexport async  | path outside the worktree: //; path outside the worktree: /src/telemetry/order.js; the command name is computed at run time (variable or command substitution) and cannot be inspected; order.js does no"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 39,
+    "inputTokensUncached": 15201,
+    "outputTokens": 16478,
+    "cacheCreationTokens": 35299,
+    "cacheReadTokens": 434014,
+    "costUsdReported": 0.6586,
+    "toolCalls": 34,
+    "toolCallsRecorded": 34,
+    "filesChangedRecorded": 0,
+    "toolCallsByName": {
+      "Bash": 21,
+      "StructuredOutput": 3,
+      "Read": 7,
+      "Grep": 2,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 11,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "The 0.7.0 runtime adapter does not report compaction events; 0 here means not observable.",
+    "wallMs": 176008,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 74
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 75
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

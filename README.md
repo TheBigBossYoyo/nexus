@@ -23,7 +23,41 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [WORKSPACES](docs/WORKSPACES.md), [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md),
 [CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md),
 [V0_7_DESIGN](docs/V0_7_DESIGN.md), [CONTROL_PLANE](docs/CONTROL_PLANE.md), [GLOBAL_SCHEDULER](docs/GLOBAL_SCHEDULER.md),
-[WORKERS](docs/WORKERS.md).
+[WORKERS](docs/WORKERS.md), [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md), [MEMORY_ARCHITECTURE](docs/MEMORY_ARCHITECTURE.md),
+[CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md), [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md),
+[PROMPT_CACHING](docs/PROMPT_CACHING.md), [CONTEXT_LIFECYCLE](docs/CONTEXT_LIFECYCLE.md).
+
+## 0.7.1: context, memory and token intelligence
+
+This section describes 0.7.1 as it is implemented. What was measured, what is on by default and what is not
+verified is in [V0_7_1_RELEASE_REPORT](docs/V0_7_1_RELEASE_REPORT.md). The research behind it is in
+[TOKEN_OPTIMIZATION_RESEARCH](docs/TOKEN_OPTIMIZATION_RESEARCH.md) and
+[CONTEXT_GRAPH_RESEARCH](docs/CONTEXT_GRAPH_RESEARCH.md); the measurements of 0.7.0 it started from are in
+[V0_7_1_BASELINE](docs/V0_7_1_BASELINE.md).
+
+The rule of this release is quality first: remove wasted tokens, never reasoning. No model, effort level, agent
+count or review count changes. A technique is on by default only when it loses no information or was measured
+not to lower quality.
+
+| Area | What 0.7.1 adds | Details |
+|---|---|---|
+| Context Graph | One index over repository facts, project memory, program memory, workspace memory and contracts: a tree to browse, typed relations with evidence, trust and status on every node, freshness from file changes, conflicts, supersession, history, notes. The stores stay the source of truth | [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md), [MEMORY_ARCHITECTURE](docs/MEMORY_ARCHITECTURE.md) |
+| Context view | Intelligence, Context: the tree, search, and a node's text, sources, relations and history | [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md) |
+| Context Engine V3 | The 0.7.0 pack plus a map of the project knowledge, the related nodes from any store, and four tools for agents to read further. On by default since the real campaign of 0.7.1; one setting turns it off | [CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md) |
+| Token accounting | Every model request with its cache read and write; what each session's context was made of; every compaction; every context decision with its reason | [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md) |
+| Cache | Measured on the real runtime what is and is not shared between sessions; a local diagnosis of a prefix that was written again | [PROMPT_CACHING](docs/PROMPT_CACHING.md) |
+| Check output | A failure that lies before the tail of a long output now reaches the agent that repairs it; the complete output stays stored | [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md) |
+| Usage page | Cache, Context and Context techniques sections; an agent's Context tab answers "why this context" | [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md) |
+| Quality gate | A paired, case-by-case non-inferiority check that decides whether a technique may become a default | [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md) |
+
+What the measurements changed. Two techniques this release set out to enable were measured on the real Claude
+runtime and found to do nothing, so they are off: keeping the working directory out of the system prompt
+(sessions of one role already share the cached prefix across worktrees), and loading the NEXUS tools upfront
+(the request is the same size). The cost that does exist is one cold prefix of about 15,000 tokens per role
+per cache lifetime, because each role has its own tool list.
+
+The database gains tables (migration 12, additive). A 0.7.0 database upgrades in place; the graph is built
+the first time a mission starts or you press Refresh in the Context view.
 
 ## 0.7.0: secure control plane
 
@@ -203,6 +237,7 @@ Dates are those of the tagged commit (+01:00).
 | 0.5.0 | `v0.5.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0. The tag also lacks the 0.5.0 entries of `docs/TEST_STATUS.md` and `docs/BUILD_PROGRESS.md` (see below) |
 | 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended; has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
 | 0.7.0 | `v0.7.0` | 2026-10-07 | Recommended | Secure control plane; fixes the known defects of 0.6.0 listed below. Report: `docs/V0_7_RELEASE_REPORT.md` |
+| 0.7.1 | `v0.7.1` | 2026-10-10 | Recommended | Context Graph and token intelligence. A real campaign of fifty runs over eight task categories found it non-inferior to 0.7.0 with no case worse; with the Context Graph, on by default, missions used 16% fewer turns. It also fixes a defect that blocked real programs in 0.7.0. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
 
 Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
 record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
@@ -461,6 +496,10 @@ This is Electron's `userData` directory; the exact path is reported by the app (
 | `pnpm smoke:claude` | Manual test against the real Claude runtime. Consumes Claude usage. |
 | `pnpm smoke:power` | Manual test of the real `WindowsPowerController`: schedules a Windows shutdown one hour away, checks it was accepted, aborts it at once and checks nothing is left armed. Never part of `pnpm test`. |
 | `pnpm smoke:usage` | Manual test against the real Claude runtime: account information and the experimental usage report. No prompt is sent and no model turn runs. Writes evidence to `docs/acceptance/usage-report-*.json`. |
+| `pnpm smoke:cache` | Manual test against the real Claude runtime: seven one-turn sessions on the smallest model that record what the prompt cache read and wrote. Consumes a little usage. Writes evidence to `docs/acceptance` |
+| `pnpm accept:graph` | One mission run twice on the real Claude runtime, without and with the Context Graph, with a hidden evaluation. Consumes usage (two BUILD missions). Headless: no window |
+| `pnpm bench:retrieval` | The retrieval benchmark of the Context Graph against the 0.7.0 selection (no Claude usage). `NEXUS_WRITE_BENCHMARK=1` stores the figures |
+| `pnpm baseline:tokens` | Token figures of the real acceptance runs stored under `docs/acceptance`, and the size of the role prompts (no Claude usage) |
 | `pnpm accept:proposal` | `node scripts/dynamic-proposal-acceptance.mjs` (real Claude, see below) |
 | `pnpm accept:rotation` | `node scripts/session-rotation-acceptance.mjs` (real Claude, see below) |
 | `pnpm accept:arena` | `node scripts/arena-acceptance.mjs` (real Claude, consumes usage): a small Arena campaign |

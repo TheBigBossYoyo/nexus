@@ -1,0 +1,177 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "5cf01bac885725f071b80c16797656a96b5e1482",
+  "startedAt": "2026-10-10T06:51:17.039Z",
+  "finishedAt": "2026-10-10T06:54:19.943Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/bf65c269/integration",
+        "hiddenPassed": false,
+        "hidden": {
+          "ok": false,
+          "pass": 1,
+          "fail": 1,
+          "output": "✖ laps stay in driving order when the sequence counter wraps (1.4861ms)\n✔ packets of an ordinary batch are still ordered (0.1626ms)\nℹ tests 2\nℹ suites 0\nℹ pass 1\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 70.1026\n\n✖ failing tests:\n\ntest at hidden.test.js:6:1\n✖ laps stay in driving order when the sequence counter wraps (1.4861ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n    [\n  +   12,\n  +   13,\n      10,\n      11,\n  -   12,\n  -   13\n    ]\n  \n      at TestContext.<anonymous> (file:///C:/Users/user/AppData/Local/Temp/nexus-campaign-localized-bug-071-graph-mRX4Jd/eval-racedeck-lite/hidden.test.js:9:10)\n      at Test.runInAsyncScope (node:async_hooks:228:14)\n      at Test.run (node:internal/test_runner/test:1118:25)\n      at Test.start (node:internal/test_runner/test:1015:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [ 12, 13, 10, 11 ],\n    expected: [ 10, 11, 12, 13 ],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (0.4494ms)\n✔ orders packets by sequence number (0.9481ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 93.5638\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "fix-seq-wrap-ordering-fix1",
+        "state": "failed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 5,
+      "pauses": [
+        "Intervention required: tasks fix-seq-wrap-ordering, fix-seq-wrap-ordering-fix1 failed"
+      ]
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 44,
+    "inputTokensUncached": 15427,
+    "outputTokens": 16791,
+    "cacheCreationTokens": 106552,
+    "cacheReadTokens": 442078,
+    "costUsdReported": 1.1817,
+    "toolCalls": 39,
+    "toolCallsByName": {
+      "Bash": 26,
+      "Grep": 2,
+      "StructuredOutput": 3,
+      "Read": 6,
+      "PowerShell": 1,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 9,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 11,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 181059,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 1
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 6
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 1
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,220 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08d11443aafec8cdcf3303189e8021ad50e28c1a",
+  "startedAt": "2026-10-10T07:34:40.596Z",
+  "finishedAt": "2026-10-10T07:39:30.206Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/603989d1/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (1.0097ms)\n✔ updateUser gives the same results as before, the id checked last (0.1777ms)\n✔ inviteUser gives the same results as before, the role checked last (0.1742ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.1164ms)\n✔ the handlers use the shared module and no longer carry their own copy (0.915ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 72.0459\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 34,
+          "fail": 0,
+          "output": " malformed email is rejected (0.0552ms)\n✔ updateUser: overlong email is rejected (0.0557ms)\n✔ updateUser: missing or blank name is rejected (0.5461ms)\n✔ updateUser: overlong name is rejected (0.0701ms)\n✔ updateUser: email error is reported before name error (0.0463ms)\n✔ inviteUser: non-string email is rejected (0.0598ms)\n✔ inviteUser: malformed email is rejected (0.0274ms)\n✔ inviteUser: overlong email is rejected (0.0516ms)\n✔ inviteUser: missing or blank name is rejected (0.1041ms)\n✔ inviteUser: overlong name is rejected (0.0419ms)\n✔ inviteUser: email error is reported before name error (0.0273ms)\n✔ updateUser: name error is reported before a missing id (0.0476ms)\n✔ updateUser: valid email and name with missing or empty id reports the id (0.0454ms)\n✔ inviteUser: name error is reported before a bad role (0.0474ms)\n✔ updateUser: success returns trimmed lower-cased email and trimmed name (0.0488ms)\n✔ inviteUser: success returns trimmed lower-cased email and trimmed name (0.0544ms)\n✔ a valid email returns null (0.5678ms)\n✔ a valid email with surrounding whitespace returns null (0.1023ms)\n✔ non-string emails are not valid addresses (0.5174ms)\n✔ malformed emails are not valid addresses (0.0999ms)\n✔ email length boundary is 254 after trimming (0.1162ms)\n✔ a normal name returns null (0.077ms)\n✔ missing names are required (0.0964ms)\n✔ name length boundary is 80 after trimming (0.0738ms)\nℹ tests 34\nℹ suites 0\nℹ pass 34\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 127.8623\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "add-validation-module",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "refactor-handlers-to-shared-validation",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"3cb1763d-1408-4da4-88f8-692b485880c4\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role ((redirection), mktemp, git, tar, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, npm, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: teEmail` and `validateName`:** the conditions and error strings are copied from the inline checks in `src/handlers/createUser.js`. Each returns `null` when the value is valid, with the checks in the order you specified.\n- **Tests:** they cover valid input, whitespace padding, non-string and malformed input, and both sides of the 254 and 80 length limits, all with exact string assertions.\n- **Handlers:** I left the three handler files untouched, so they still contain their own inline checks. Switching them to import from `../validation.js` is a separate task.\n\nGit warned that LF will become CRLF in the two new files the next time it touches them. That is only a line-ending setting on Windows.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: rtions. The 3 original tests are untouched. They passed against the unchanged handlers, so I committed them first, as `c40a5c6`.\n- **Handlers:** in `createUser.js`, `updateUser.js` and `inviteUser.js` I replaced the four inline lines with the two `validateEmail`/`validateName` calls, email first. The id check in `updateUser` and the role check in `inviteUser` still come after, and the returned values and normalisation are unchanged. The refactor is committed as a separate commit after `c40a5c6`.\n- **First attempt denied:** my first attempt to apply the handler edits with a Node script was denied, so I made the edits with the edit tool instead. I didn't change anything outside the task scope.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 79,
+    "inputTokensUncached": 26485,
+    "outputTokens": 28266,
+    "cacheCreationTokens": 75553,
+    "cacheReadTokens": 617316,
+    "costUsdReported": 1.1805,
+    "toolCalls": 71,
+    "toolCallsRecorded": 71,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 31,
+      "StructuredOutput": 6,
+      "Read": 26,
+      "Edit": 6,
+      "Grep": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 10,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 20,
+        "toolCalls": 18,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 39,
+        "toolCalls": 36,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 287972,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 2
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 22
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

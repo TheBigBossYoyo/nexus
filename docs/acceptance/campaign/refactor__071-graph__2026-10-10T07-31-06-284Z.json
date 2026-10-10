@@ -1,0 +1,196 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08d11443aafec8cdcf3303189e8021ad50e28c1a",
+  "startedAt": "2026-10-10T07:31:06.284Z",
+  "finishedAt": "2026-10-10T07:34:33.099Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/7aa9dc80/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (2.2771ms)\n✔ updateUser gives the same results as before, the id checked last (0.4138ms)\n✔ inviteUser gives the same results as before, the role checked last (0.3829ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.2368ms)\n✔ the handlers use the shared module and no longer carry their own copy (1.4118ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 114.3629\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ a valid user is created with a normalised email (1.9551ms)\n✔ an invalid email is reported (0.2484ms)\n✔ an invitation needs a known role (0.2065ms)\n✔ validateEmail accepts valid and padded addresses (1.2537ms)\n✔ validateEmail rejects non-strings and malformed addresses (0.2889ms)\n✔ validateEmail enforces 254 characters on the trimmed value (0.2449ms)\n✔ validateName accepts valid and padded names (1.157ms)\n✔ validateName rejects non-strings and blank names (0.3372ms)\n✔ validateName enforces 80 characters on the trimmed value (0.2105ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 146.9343\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "extract-validation-module",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"317f7ada-2f7d-41e6-b7ea-c15a40880776\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (for, do, base64, done, node, rm, cygpath). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, node, (redirection), mktemp, for, do, done, cat, import, pathtofileurl, from, const, a.repeat, 248, +@b.com,, 249, +@b.com ,, 300, trim, return, ], 80, ,, 81, + ,, 500, f,, =, try, r:, i, catch, e, threw:, let, await, ${h}.mjs, [h], ${h}.js, if, vari"
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: ** covers valid and padded values, non-strings, malformed emails, blank names, and the 254/255 and 80/81 boundaries for both functions.\n\nI did not run the planned comparison against `6406e8d` for multi-problem inputs, or the grep for leftover regex/limit literals in the handlers. I did read all three handler files after the edit: each calls the validators in the original order and has no regex or 254/80 literals left.\n\nMy first attempt, a single shell command that wrote everything and ran the tests, was denied, so I redid it with the file tools. I created no temporary scripts. Git warned that LF line endings will become CRLF on the next touch for the new and edited files, which I left alone.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 46,
+    "inputTokensUncached": 16209,
+    "outputTokens": 19408,
+    "cacheCreationTokens": 47093,
+    "cacheReadTokens": 368387,
+    "costUsdReported": 0.7649,
+    "toolCalls": 41,
+    "toolCallsRecorded": 41,
+    "filesChangedRecorded": 5,
+    "toolCallsByName": {
+      "Bash": 18,
+      "Read": 12,
+      "StructuredOutput": 4,
+      "Write": 5,
+      "Grep": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 4,
+        "toolCalls": 3,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 22,
+        "toolCalls": 20,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 204515,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 2
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 2
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

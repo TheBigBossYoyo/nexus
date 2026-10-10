@@ -1,6 +1,6 @@
 import { ClaudeSdkRuntime } from './modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from './modules/agent-runtime/demo-script'
-import { FakeAgentRuntime } from './modules/agent-runtime/fake-runtime'
+import { FakeAgentRuntime, FakeCacheSim } from './modules/agent-runtime/fake-runtime'
 import { resolveClaudeExecutable } from './modules/agent-runtime/resolve-executable'
 import type { AgentRuntime, AgentSessionHandle, NexusToolHandlers, SessionSpec, ToolDecision } from './modules/agent-runtime/types'
 import { GitService } from './modules/git'
@@ -65,7 +65,7 @@ function buildRuntimes(config: WorkerConfig): Map<string, AgentRuntime> {
   const runtimes = new Map<string, AgentRuntime>()
   if (config.fake) {
     // The scripted runtime stands in for every provider, as it does in the runtime process.
-    const fake = new FakeAgentRuntime({ script: config.fake.script === 'probe' ? createProbeScript() : createDemoScript(), ...(config.fake.delayMs !== undefined ? { delayMs: config.fake.delayMs } : {}) })
+    const fake = new FakeAgentRuntime({ cache: new FakeCacheSim(), script: config.fake.script === 'probe' ? createProbeScript() : createDemoScript(), ...(config.fake.delayMs !== undefined ? { delayMs: config.fake.delayMs } : {}) })
     runtimes.set('claude', fake)
     runtimes.set('codex', fake)
     return runtimes
@@ -100,6 +100,7 @@ function toSpec(leaseId: string, wire: WireSessionSpec): SessionSpec {
         recordDecision: (input) => call(leaseId, 'recordDecision', [input]) as Promise<string>,
         proposeMemory: (input) => call(leaseId, 'proposeMemory', [input]) as Promise<string>,
         ...(tools.proposeGraphChange ? { proposeGraphChange: (input: unknown) => call(leaseId, 'proposeGraphChange', [input]) as Promise<string> } : {}),
+        ...(tools.contextTool ? { contextTool: (input: unknown) => call(leaseId, 'contextTool', [input]) as Promise<string> } : {}),
       }
     : undefined
   const { nexusTools: _flags, ...data } = wire

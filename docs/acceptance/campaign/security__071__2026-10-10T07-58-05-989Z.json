@@ -1,0 +1,203 @@
+{
+  "kind": "campaign-run",
+  "task": "security",
+  "category": "security-sensitive task",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08d11443aafec8cdcf3303189e8021ad50e28c1a",
+  "startedAt": "2026-10-10T07:58:05.989Z",
+  "finishedAt": "2026-10-10T08:04:21.059Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "fileserver",
+        "ref": "nexus/4ed61008/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ ordinary requests are served (1.3223ms)\n✔ dot segments that stay inside the root are served (0.1723ms)\n✔ traversal out of the root is forbidden (0.3852ms)\n✔ encoded traversal is forbidden (0.1802ms)\n✔ a backslash is a separator (0.2415ms)\n✔ a sibling directory that shares the prefix of the root is outside it (0.1636ms)\n✔ the path is decoded exactly once (0.1499ms)\n✔ malformed encoding and NUL are bad requests (0.1549ms)\n✔ the result is absolute and never leaves the root (0.2625ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 70.7713\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 6,
+          "fail": 0,
+          "output": "✔ a plain path is a file under the root (0.5884ms)\n✔ traversal outside the root is forbidden (1.08ms)\n✔ malformed requests are rejected as bad requests (0.1349ms)\n✔ paths that stay inside the root are served (0.2063ms)\n✔ the path is decoded exactly once (0.1026ms)\n✔ absolute-looking payloads cannot leave the root (0.2029ms)\nℹ tests 6\nℹ suites 0\nℹ pass 6\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 99.2621\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-resolve-path",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "security-review-resolve",
+        "state": "blocked",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": [
+        "Intervention required: tasks security-review-resolve are failed or blocked"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"2c5c0616-9fdd-4bd8-9b49-43fe1573a445\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, mkdir, git, cp, echo, cd, true, rm, cat, import, resolvepath, from, const, r,p, =, json.stringify, [r,p], ,=>,resolvepath, catch, e, {console.log, ,throw,e.code,e, for, show, 0,0, ], let, i, i++, {const, r, math.random, *7, j, ",
+        "verifier: PowerShell: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (exit=$lastexitcode, status-end). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "security_reviewer: Bash: Command not permitted for the security_reviewer role (cd, npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: d with `instanceof Error`.\n\nI ran the new tests against the original one-line implementation by swapping it in and restoring the new version afterwards. Three of the new tests failed:\n- the traversal test (`EFORBIDDEN` cases)\n- the bad-request test (`EBADREQUEST` cases)\n- the served-paths test\n\nThe double-decoding test and the absolute-looking-payload test passed against the original, so they don't catch regressions there. The original already decodes only once, and its `join` keeps `//etc/passwd` and `C:/Windows/win.ini` inside the root. I didn't try a weakened `resolvePath` to see whether those two would catch one.\n\nI only ran the tests on Windows, not Linux.\n\nI created no temporary files.",
+        "reviewer: ",
+        "verifier: Verification is done: I've read both files, re-run `npm test` (6 pass, 0 fail) and confirmed only the two expected files changed. Submitting the verdict now.",
+        "security_reviewer: ends on how the caller opens the returned path, which I could not exercise.\n- **Non-string `urlPath`:** `undefined` is coerced to the string `undefined` and served as `<root>\\undefined`. This is not an escape.\n\n## Unverified on this host\n\n- **All POSIX behaviour.** This includes the `/srv/www` versus `/srv/www-private` deployment, a root of `/`, and backslash-to-separator conversion on Linux. By reading, the logic does not depend on the platform, but nothing was run there.\n- **All Windows runtime behaviour.** With `npm` denied, the traces above for `path.win32` `join` and `relative` on drive, UNC and colon inputs are my reading of Node's documented semantics on v24.14.0, not observed output."
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 42,
+    "inputTokensUncached": 16288,
+    "outputTokens": 31189,
+    "cacheCreationTokens": 58597,
+    "cacheReadTokens": 466420,
+    "costUsdReported": 1.1178,
+    "toolCalls": 36,
+    "toolCallsRecorded": 36,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 10,
+      "Read": 12,
+      "StructuredOutput": 3,
+      "Write": 2,
+      "PowerShell": 8,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 11,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "security_reviewer": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 373417,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 28
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 30
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

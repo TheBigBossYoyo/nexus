@@ -1,0 +1,341 @@
+{
+  "kind": "campaign-run",
+  "task": "workspace",
+  "category": "Workspace / cross-repository task",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08f3cb609f4e7d77c72eb0bbc9421beec460a487",
+  "startedAt": "2026-10-10T08:40:56.092Z",
+  "finishedAt": "2026-10-10T08:47:45.049Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 75,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "BLOCKED",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "schemas",
+        "ref": "f68c7654b865e16e97b438654aff25b0d555b723",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ the contract has an optional currency with a default (4.5974ms)\n✔ the validator accepts an absent or valid currency and rejects others (0.3002ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 79.2982\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 6,
+          "fail": 0,
+          "output": "✔ a complete order is valid (0.9883ms)\n✔ a missing id is reported (0.1804ms)\n✔ an order without currency is valid (0.0786ms)\n✔ a three-letter uppercase currency is valid (0.7067ms)\n✔ a malformed currency string is reported (0.1574ms)\n✔ a non-string currency is reported (0.112ms)\nℹ tests 6\nℹ suites 0\nℹ pass 6\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 95.2789\n"
+        },
+        "note": null
+      },
+      {
+        "repository": "orders-service",
+        "ref": null,
+        "hiddenPassed": false,
+        "hidden": null,
+        "suitePassed": false,
+        "suite": null,
+        "note": "no result to evaluate"
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "sync-order-contract",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "create-order-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-orders-currency",
+        "state": "blocked",
+        "attempts": 0
+      },
+      {
+        "key": "sync-order-contract-fix1",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "add-order-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-order-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": [
+        "Intervention required: tasks sync-order-contract, verify-orders-currency, sync-order-contract-fix1 are failed or blocked"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"4ae92f2b-a5eb-4bc8-ad30-ba364063a247\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "planner: Bash: Command not permitted for the planner role (git). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (od, node, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (od, node, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Glob: Read denied: C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-workspace-071-vRU2S3 is outside the worktree, project and approved read locations. Use paths inside C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-workspace-071-vRU2S3\\worktrees\\e6f80485\\sync-order-contract.",
+        "verifier: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [
+        "sync-order-contract: {\"what\":\"Repair failed\",\"where\":\"sync-order-contract-fix1\",\"why\":\"Repair of sync-order-contract cannot be completed: the provider's contract text (the BEGIN CONTRACT / END CONTRACT block) is absent from the repair task's context too, and the schemas repository is outside the readable locations. Byte-identity with the provider's file can therefore neither be established nor repaired from inside this worktree. No file was changed in this repair cycle. To unblock: deliver the contract block verbati",
+        "sync-order-contract-fix1: {\"what\":\"Repair failed\",\"where\":\"sync-order-contract-fix1\",\"why\":\"Repair of sync-order-contract cannot be completed: the provider's contract text (the BEGIN CONTRACT / END CONTRACT block) is absent from the repair task's context too, and the schemas repository is outside the readable locations. Byte-identity with the provider's file can therefore neither be established nor repaired from inside this worktree. No file was changed in this repair cycle. To unblock: deliver the contract block verbati"
+      ],
+      "verificationFailures": [
+        "{\"id\":\"f50abf99-7b87-4b09-b17a-ee660392ceaa\",\"runId\":\"e6f80485-d32a-4485-bb20-aa613fe17a1f\",\"taskId\":\"02195a0a-d7ce-4d75-9430-f18aa2b8ea89\",\"agentId\":\"6f610774-4d17-4f10-9b2a-58bd16f315c2\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"Not verified as done: byte-identity with the provider's contract could not be checked, so the two criteria that depend on it fail. The BEGIN CONTRACT / END CONTRACT block is not in my task context (nor was it in the implementer's or reviewer's), and the provider repository is outside the readable locations. The file was built from the prose description rather than copied. A blocker has been recorded.\\n\\nEverything that can be checked locally passes: the file matches the written description (currency after total with type/pattern/default, required still id and total, 2-space indent), it is LF with no BOM and one trailing newline, the diff is only t"
+      ],
+      "lastMessages": [
+        "researcher: endsOn\": [\"schemas-currency\"],\n      \"contracts\": [\"order\"]\n    }\n  ],\n  \"risks\": [\n    \"The orders-service copy of the contract must be copied exactly from the provider after the schemas change, or the two will drift.\",\n    \"The error message must match exactly in both repositories ('currency: must be three uppercase letters').\",\n    \"Non-string currency values (null, numbers) must be rejected, not coerced or defaulted.\",\n    \"Adding currency to `required` would break older consumers and providers; it must stay optional.\",\n    \"I did not inspect the source files or the orders-service repository, so existing validation and error-format conventions are assumed rather than verified.\"\n  ]\n}\n```",
+        "planner: ",
+        "worker: ching `/^[A-Z]{3}$/`, it pushes `currency: must be three uppercase letters`. The validator doesn't apply the `EUR` default or change the order.\n- **`src/validate.test.js`:** the two existing tests are unchanged. I added four tests:\n  - an order without currency is valid;\n  - `USD` is valid;\n  - `eur`, `EURO` and `EU` are each rejected;\n  - `123` and `null` are each rejected.\n\nI didn't check `git diff` against the \"only these three files\" criterion. I added everything with `git add -A` after `git status` showed nothing unexpected, and `package.json` and `README.md` were not touched.\n\nGit also warned that LF in `src/validate.test.js` will be converted to CRLF the next time it touches the file.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: `, `order.total` and `order.currency`; it has no assignments and does not apply the `EUR` default. No test asserts this.\n- **No leftover temporary files — pass.** `git status --porcelain --ignored` printed nothing, and `git ls-files` shows only `README.md`, `package.json` and the three changed files.\n\n## Task criteria\n\n- **Each mission criterion reported with evidence:** pass, as tabled above.\n- **`npm test` reported with exit code and counts:** pass (exit 0, 6 of 6).\n- **Modified set limited to the three files:** pass.\n- **No files modified by this task:** pass. I ran only `git status`, `git diff`, `git ls-files` and `npm test`, created no scratch files, and the tree was clean when checked.",
+        "verifier: ",
+        "planner: ",
+        "worker: e `currency` block (`type` `string`, `pattern` `^[A-Z]{3}$`, `default` `EUR`).\n- `git ls-files --eol` reports `i/lf w/lf`. The file was CRLF in the working tree before, and `required` is still `[\"id\", \"total\"]`.\n- Only that file is in the commit. I didn't run `npm test` or parse the file as JSON. I also didn't touch `src/createOrder.js` or `src/createOrder.test.js`. The mission's `createOrder` currency behaviour and tests aren't covered by this task.\n\nGit warned that LF will be replaced by CRLF in the working copy the next time it touches the file. That points to an autocrlf setting on this machine. The committed blob is LF, but the working file could turn back into CRLF on a later checkout.",
+        "reviewer: ",
+        "verifier: Local checks are done; I'm recording the final verdict now — byte-identity with the provider's contract can't be confirmed, everything else checks out.",
+        "debugger: er from counting the empty segment after the final newline or from a provider file that differs from the description. I can't tell which without the provider's bytes.\n\nSo the verifier's finding stands as \"unverifiable\", not \"wrong\": the file matches the description, but nothing shows it matches the provider.\n\n## No regression test\n\nI added none. A test asserting the current content would only pin the hand-built bytes, not the provider's.\n\n## To unblock\n\nEither of these makes the fix a straight copy or compare:\n- Put the contract block verbatim in the task context.\n- Grant read access to the provider's `order.schema.json` in the schemas repository.\n\nThe blocker is recorded with this evidence.",
+        "worker: re untouched, and the order comes back as `{ id, total, currency }`. The change is in `src/createOrder.js`.\n- **Tests:** I added three tests to `src/createOrder.test.js`:\n  - the `'EUR'` default;\n  - `'USD'` returned unchanged;\n  - invalid values `'usd'`, `'US'`, `'EURO'`, `''` and `5`, each checked for an `Error` with that exact message.\n\n  The two original tests are unmodified.\n- **Scope:** only `src/createOrder.js` and `src/createOrder.test.js` were modified. I did not touch `contracts/order.schema.json`.\n- **Line endings:** git warned that LF in `src/createOrder.test.js` will be converted to CRLF the next time git touches it. That is a Windows line-ending setting, and I didn't change it.",
+        "reviewer: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Verifier/sync-order-contract [medium] Run shell command (bash): ls -la C:/Users/user/AppData/Local/Temp/nexus-campaign-workspace-071-vRU2S3 C:/Users/user/AppData/Local/Temp/nexus-campaign-workspace-071-vRU2S3/worktrees/e6f80485 | path outside the worktree: C:/Users/user/AppData/Local/Temp/nexus-campaign-workspace-071-vRU2S3; path outside the worktree: C:/Users/user/AppData/Local/Temp/nexus-campaign-workspace-071-vRU2S3/w"
+      ],
+      "blocked": [
+        "dependency: Blocked because dependency sync-order-contract failed or was cancelled"
+      ],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": "The run of task orders-service-currency is paused and needs attention.",
+      "plan": [
+        {
+          "key": "schemas-currency",
+          "repository": "schemas",
+          "dependsOn": []
+        },
+        {
+          "key": "orders-service-currency",
+          "repository": "orders-service",
+          "dependsOn": [
+            "schemas-currency"
+          ]
+        }
+      ],
+      "tasks": [
+        {
+          "key": "schemas-currency",
+          "repository": "schemas",
+          "state": "COMPLETED"
+        },
+        {
+          "key": "orders-service-currency",
+          "repository": "orders-service",
+          "state": "RUNNING"
+        }
+      ],
+      "verification": null,
+      "decisions": [
+        "mission_created: Mission created: Add an optional `currency` to orders across the platform. The order contract (contracts/order.schema.json, owned by the schemas repository) get",
+        "plan_proposed: Plan: 2 task(s) across 2 repositories, in the order schemas-currency -> orders-service-currency.",
+        "plan_accepted: The cross-repository plan was accepted by the user.",
+        "task_started: Task schemas-currency started in schemas.",
+        "task_completed: Task schemas-currency completed in schemas.",
+        "task_started: Task orders-service-currency started in orders-service.",
+        "blocked: The run of task orders-service-currency is paused and needs attention."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 3,
+    "sessions": 15,
+    "turns": 111,
+    "inputTokensUncached": 38724,
+    "outputTokens": 39483,
+    "cacheCreationTokens": 84016,
+    "cacheReadTokens": 741018,
+    "costUsdReported": 1.5291,
+    "toolCalls": 96,
+    "toolCallsRecorded": 96,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 45,
+      "Glob": 3,
+      "Read": 28,
+      "StructuredOutput": 9,
+      "Edit": 3,
+      "Grep": 6,
+      "mcp__nexus__report_blocker": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 13,
+    "byRole": {
+      "planner": {
+        "sessions": 2,
+        "turns": 20,
+        "toolCalls": 18,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 3,
+        "turns": 17,
+        "toolCalls": 14,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 3,
+        "turns": 20,
+        "toolCalls": 17,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 5,
+        "turns": 48,
+        "toolCalls": 43,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "researcher": {
+        "sessions": 1,
+        "turns": 1,
+        "toolCalls": 0,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 407175,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 41
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 4
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 43
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -46,6 +46,8 @@ export interface FakeSessionContext {
   readonly usage: FakeUsageSim
   /** Waits `ms`, or until the signal aborts. */
   sleep(ms: number): Promise<void>
+  /** Emits any runtime event as it is (a compaction, a context breakdown, a request's usage). */
+  emitEvent(event: AgentEvent): Promise<void>
 }
 
 export type FakeScript = (spec: SessionSpec, ctx: FakeSessionContext) => Promise<void>
@@ -58,6 +60,8 @@ export interface FakeRuntimeOptions {
   models?: ModelOption[]
   /** Shared with scripts through `ctx.usage`; created when omitted. */
   usage?: FakeUsageSim
+  /** When given, every turn reports per-request usage (and a context breakdown when the session asks for one) from this model of the cache. */
+  cache?: FakeCacheSim
 }
 
 export function defaultFakeAuthStatus(): AuthStatus {
@@ -125,6 +129,57 @@ export interface FakeUsageState {
  * exhausted with an exact or unknown reset, a reset that arrives, probes that fail, auth and runtime
  * failure. Every availability check (usage report or probe session) is counted in `probes`.
  */
+/**
+ * A model of the runtime's prompt cache, for tests. It follows what the real runtime was observed to do
+ * (docs/acceptance/cache-acceptance-*.json) and nothing else: a prefix is the model, the tool names and the
+ * system text; the working directory is not part of it; a session's first request reads the prefix when an
+ * identical one was used within the lifetime, and writes it otherwise; later requests read what the session
+ * itself wrote. The token sizes are invented and fixed. It proves how NEXUS handles what a runtime reports,
+ * never what Claude does.
+ */
+export class FakeCacheSim {
+  /** Tokens of the simulated runtime system prompt and built-in tool definitions. */
+  static readonly BASE_PREFIX = 6_000
+  private readonly seen = new Map<string, number>()
+  private readonly perSession = new Map<string, { requests: number; history: number }>()
+  /** What every session asked for, in order: the options each runtime adapter would have applied. */
+  readonly requested: { agentId: string; stablePrefix: boolean; alwaysLoadNexusTools: boolean; contextUsageDetail: string }[] = []
+  now = 0
+  lifetimeMs = 5 * 60_000
+
+  key(spec: SessionSpec): string {
+    return JSON.stringify([spec.model ?? 'fake-model', [...spec.tools].sort(), spec.systemPromptAppend, spec.nexusTools ? Object.keys(spec.nexusTools).sort() : [], spec.contextOptions?.stablePrefix === true])
+  }
+
+  prefixTokens(spec: SessionSpec): number {
+    const nexus = spec.nexusTools ? Object.keys(spec.nexusTools).length : 0
+    // Deferred tool definitions are outside the window; loaded ones are in it.
+    void nexus
+    return FakeCacheSim.BASE_PREFIX + Math.ceil(spec.systemPromptAppend.length / 4) + spec.tools.length * 150
+  }
+
+  /** The usage of the next request of a session. `added` is what the conversation grew by since the last request. */
+  request(sessionId: string, spec: SessionSpec, added: number): { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } {
+    const prefix = this.prefixTokens(spec)
+    const state = this.perSession.get(sessionId) ?? { requests: 0, history: 0 }
+    const first = state.requests === 0
+    const key = this.key(spec)
+    const last = this.seen.get(key)
+    const warm = last !== undefined && this.now - last <= this.lifetimeMs
+    // Uncached input stays what the scripted runtime always reported (1,000 per turn), so figures that predate the cache model do not move.
+    const usage = first
+      ? { inputTokens: 1000, cacheReadTokens: warm ? prefix : 0, cacheCreationTokens: (warm ? 0 : prefix) + added }
+      : { inputTokens: 1000, cacheReadTokens: prefix + state.history, cacheCreationTokens: added }
+    this.seen.set(key, this.now)
+    this.perSession.set(sessionId, { requests: state.requests + 1, history: state.history + added })
+    return usage
+  }
+
+  contextTokens(sessionId: string, spec: SessionSpec): number {
+    return this.prefixTokens(spec) + (this.perSession.get(sessionId)?.history ?? 0)
+  }
+}
+
 export class FakeUsageSim {
   state: FakeUsageState = {
     available: true,
@@ -240,6 +295,7 @@ class FakeHandle implements AgentSessionHandle {
   private stopRequested = false
   private readonly sdkSessionId: string
   private readonly done: Promise<void>
+  private requests = 0
 
   constructor(
     private readonly spec: SessionSpec,
@@ -249,8 +305,10 @@ class FakeHandle implements AgentSessionHandle {
     private readonly delayMs: number,
     private readonly usage: FakeUsageSim,
     private readonly onFinished: (h: FakeHandle) => void,
+    private readonly cache: FakeCacheSim | null = null,
   ) {
     this.agentId = spec.agentId
+    cache?.requested.push({ agentId: spec.agentId, stablePrefix: spec.contextOptions?.stablePrefix === true, alwaysLoadNexusTools: spec.contextOptions?.alwaysLoadNexusTools === true, contextUsageDetail: spec.contextOptions?.contextUsageDetail ?? 'off' })
     this.events = this.eventQueue
     this.sdkSessionId = sessionId
     this.emitNow({
@@ -356,6 +414,7 @@ class FakeHandle implements AgentSessionHandle {
       },
       nexusTools: this.spec.nexusTools,
       sleep: (ms) => this.sleep(ms),
+      emitEvent: (event) => this.emit(event),
       emitText: (text) => this.emit({ type: 'text', text }),
       nextMessage: async () => {
         const it = this.inbox[Symbol.asyncIterator]()
@@ -425,8 +484,39 @@ class FakeHandle implements AgentSessionHandle {
           costUsd: (prev?.costUsd ?? 0) + turnCost,
           contextWindow: 200_000,
         }
-        this.totals.byModel.set(model, usage)
         const outcome = r.outcome ?? 'success'
+        if (this.cache) {
+          // One request per turn: the first one carries the first message, later ones what the turn added.
+          const added = Math.ceil((this.requests === 0 ? this.spec.prompt.length : 0) / 4) + outputTokens
+          const u = this.cache.request(this.sdkSessionId, this.spec, added)
+          this.requests++
+          usage.inputTokens = (prev?.inputTokens ?? 0) + u.inputTokens
+          usage.cacheReadTokens = (prev?.cacheReadTokens ?? 0) + u.cacheReadTokens
+          usage.cacheCreationTokens = (prev?.cacheCreationTokens ?? 0) + u.cacheCreationTokens
+          this.emitNow({ type: 'request.usage', requestId: `${this.sdkSessionId}-req-${this.requests}-${this.totals.byModel.size}-${usage.outputTokens}`, model, inputTokens: u.inputTokens, cacheReadTokens: u.cacheReadTokens, cacheCreationTokens: u.cacheCreationTokens, outputTokens })
+          const detail = this.spec.contextOptions?.contextUsageDetail ?? 'off'
+          if (detail !== 'off') {
+            const prefix = this.cache.prefixTokens(this.spec)
+            const total = this.cache.contextTokens(this.sdkSessionId, this.spec)
+            const user = Math.ceil(this.spec.prompt.length / 4)
+            this.emitNow({
+              type: 'context.usage',
+              usage: {
+                detail,
+                model,
+                totalTokens: total,
+                maxTokens: 200_000,
+                categories: [{ name: 'System prompt', tokens: prefix - this.spec.tools.length * 150, kind: 'used' }, { name: 'System tools', tokens: this.spec.tools.length * 150, kind: 'used' }, { name: 'Messages', tokens: total - prefix, kind: 'used' }, { name: 'Free space', tokens: 200_000 - total, kind: 'free' }],
+                systemPromptSections: [{ name: 'runtime', tokens: prefix - this.spec.tools.length * 150 }],
+                systemTools: this.spec.tools.map((name) => ({ name, tokens: 150 })),
+                mcpTools: [],
+                memoryFiles: [],
+                messageBreakdown: { toolCallTokens: 0, toolResultTokens: 0, attachmentTokens: 0, assistantMessageTokens: Math.max(0, total - prefix - Math.min(user, total - prefix)), userMessageTokens: Math.min(user, total - prefix), toolCallsByType: [] },
+              },
+            })
+          }
+        }
+        this.totals.byModel.set(model, usage)
         return this.emit({
           type: 'turn.completed',
           result: {
@@ -456,6 +546,7 @@ export class FakeAgentRuntime implements AgentRuntime {
   authStatus: NonNullable<FakeRuntimeOptions['authStatus']>
   models: ModelOption[]
   readonly usage: FakeUsageSim
+  readonly cache: FakeCacheSim | null
   private readonly live = new Set<FakeHandle>()
   private readonly totals = new Map<string, SessionTotals>()
   private counter = 0
@@ -464,6 +555,7 @@ export class FakeAgentRuntime implements AgentRuntime {
     this.script = options.script
     this.delayMs = options.delayMs ?? 0
     this.usage = options.usage ?? new FakeUsageSim()
+    this.cache = options.cache ?? null
     this.authStatus = options.authStatus ?? defaultFakeAuthStatus()
     this.models = options.models ?? [
       { value: 'fake-model', displayName: 'Fake Model', description: 'Scripted test model', supportsEffort: true },
@@ -479,7 +571,7 @@ export class FakeAgentRuntime implements AgentRuntime {
       totals = { costUsd: 0, byModel: new Map() }
       this.totals.set(id, totals)
     }
-    const handle = new FakeHandle(spec, id, totals, withUsage(this.script), this.delayMs, this.usage, (h) => this.live.delete(h))
+    const handle = new FakeHandle(spec, id, totals, withUsage(this.script), this.delayMs, this.usage, (h) => this.live.delete(h), this.cache)
     if (!handle.isFinished) this.live.add(handle)
     this.handles.push(handle)
     return handle

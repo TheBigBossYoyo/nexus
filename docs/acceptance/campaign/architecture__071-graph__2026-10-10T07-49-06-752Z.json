@@ -1,0 +1,218 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08d11443aafec8cdcf3303189e8021ad50e28c1a",
+  "startedAt": "2026-10-10T07:49:06.752Z",
+  "finishedAt": "2026-10-10T07:53:09.160Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/9c48ff15/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (0.8913ms)\n✔ an unknown format names itself and the known formats (0.2773ms)\n✔ a format is added from outside, without touching the module (0.1472ms)\n✔ registering a name twice throws and keeps the first exporter (0.1027ms)\n✔ the decision is recorded with its three sections (8.1783ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 77.8155\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 11,
+          "fail": 0,
+          "output": "✔ json output (1.0889ms)\n✔ csv output (0.1275ms)\n✔ json of no rows (0.0711ms)\n✔ csv of no rows (0.0741ms)\n✔ csv null, undefined and missing cells are empty (0.0902ms)\n✔ csv columns come from the first row only (0.0868ms)\n✔ registered exporter is used and listed in sorted position (0.1417ms)\n✔ listFormats returns a new array (0.0634ms)\n✔ registering a name twice throws (0.286ms)\n✔ registering a default name throws (0.153ms)\n✔ unknown format names the format and all known formats (0.1157ms)\nℹ tests 11\nℹ suites 0\nℹ pass 11\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 94.7594\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"943863df-f994-4666-add8-33d257941b8c\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done, git). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cat, node, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, git, cat, import, registerexporter, from, tsv,, rows, =, r, .join, t, n, eof, exportdata, console.log, exports:,, mod, .sort, defaults:,, const, nm}],, for, assert.ok, buffer.from, mod.exportdata, f,c, .equals, old, ,, c, byte-",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  array, and one that an unknown format's message contains the requested name and every registered name.\n- **Defaults assertion:** the `['csv', 'json']` check runs at the top of the test file, before any test registers an exporter, so test order doesn't affect it. Each test registers its own uniquely named exporter.\n- **ADR (extra):** I added `docs/adr/0001-exporter-registry.md` with Context, Decision and Consequences sections, because the mission criteria require it.\n\nNo interfaces other tasks depend on changed, apart from the `exportData` unknown-format error message, which is now longer.\n\nOn commit, git warned that LF will be converted to CRLF in the three changed files; I left that alone.",
+        "reviewer: ",
+        "verifier: ",
+        "worker:  format throws `Unknown format \"<format>\". Known formats: <names>`.\n  - `listFormats()` returns the names sorted.\n  - A new format goes in its own file that calls `registerExporter`.\n- **Consequences:** adding a format edits no existing file. The registry is process-global, so a format exists only once its module is imported. Name collisions fail at registration, there is no unregister or override, the built-ins stay in `index.js` to avoid an import cycle, and json and csv output is unchanged.\n\nI checked the ADR against `src/export/index.js` as it stands; I did not open `src/export/index.test.js`. Git warned that line endings will be converted from LF to CRLF on this file; I left that alone.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 55,
+    "inputTokensUncached": 26076,
+    "outputTokens": 24075,
+    "cacheCreationTokens": 63043,
+    "cacheReadTokens": 478408,
+    "costUsdReported": 0.9973,
+    "toolCalls": 47,
+    "toolCallsRecorded": 47,
+    "filesChangedRecorded": 4,
+    "toolCallsByName": {
+      "Bash": 18,
+      "Read": 14,
+      "Glob": 3,
+      "StructuredOutput": 6,
+      "Write": 3,
+      "Edit": 1,
+      "Grep": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 13,
+        "toolCalls": 11,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 11,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 22,
+        "toolCalls": 19,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 240898,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 26
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 27
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

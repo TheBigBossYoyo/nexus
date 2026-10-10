@@ -40,6 +40,46 @@ export interface NexusToolHandlers {
   }): Promise<string>
   /** v0.2: propose a task-graph change. The input is validated by the orchestrator, never trusted. */
   proposeGraphChange?(input: unknown): Promise<string>
+  /**
+   * v0.7.1: the Context Graph tools (`op`: open, search, related, note). The input is validated by the
+   * orchestrator, never trusted; the answer is text for the model. Absent when the session gets no graph tools.
+   */
+  contextTool?(input: unknown): Promise<string>
+}
+
+/**
+ * v0.7.1: what a session asks of its runtime about context. Provider-neutral: a runtime applies what it
+ * supports and ignores the rest, so nothing provider-specific is ever sent to a provider that lacks it.
+ */
+export interface SessionContextOptions {
+  /** Keep per-session text (working directory, git status) out of the system prompt so sessions share a cached prefix. */
+  stablePrefix: boolean
+  /** Put the NEXUS tool definitions in the prompt instead of behind tool search. */
+  alwaysLoadNexusTools: boolean
+  /** Whether and how the runtime's context breakdown is read at the end of each turn. */
+  contextUsageDetail: 'off' | 'summary' | 'full'
+}
+
+/** The runtime's breakdown of a session's context window. Mirrors the SDK's `getContextUsage()` response; plain data. */
+export interface RuntimeContextUsage {
+  detail: 'summary' | 'full'
+  model: string | null
+  totalTokens: number
+  /** The window usage is measured against. */
+  maxTokens: number | null
+  categories: { name: string; tokens: number; kind: 'used' | 'free' | 'buffer' | 'deferred' }[]
+  systemPromptSections: { name: string; tokens: number }[]
+  systemTools: { name: string; tokens: number }[]
+  mcpTools: { name: string; serverName: string; tokens: number; isLoaded: boolean | null }[]
+  memoryFiles: { path: string; tokens: number }[]
+  messageBreakdown: {
+    toolCallTokens: number
+    toolResultTokens: number
+    attachmentTokens: number
+    assistantMessageTokens: number
+    userMessageTokens: number
+    toolCallsByType: { name: string; callTokens: number; resultTokens: number }[]
+  } | null
 }
 
 export interface ExternalMcpServer {
@@ -80,6 +120,8 @@ export interface SessionSpec {
   loadProjectSettings: boolean
   /** Strip API-key variables from the child environment. */
   subscriptionMode: boolean
+  /** v0.7.1: context options. Absent means the 0.7.0 behaviour. */
+  contextOptions?: SessionContextOptions
 }
 
 export interface UsageInfo {
@@ -90,6 +132,8 @@ export interface UsageInfo {
   cacheCreationTokens: number
   costUsd: number
   contextWindow: number | null
+  /** Thinking tokens, already counted inside `outputTokens`. Absent when the runtime did not report them. */
+  thinkingTokens?: number
 }
 
 export type TurnOutcome =
@@ -115,7 +159,16 @@ export interface TurnResult {
 }
 
 export type AgentEvent =
-  | { type: 'session.started'; sessionId: string; model: string; tools: string[]; apiKeySource: string | null }
+  | { type: 'session.started'; sessionId: string; model: string; tools: string[]; apiKeySource: string | null; /** Set by the provider router. */ provider?: string }
+  /**
+   * v0.7.1: one model request finished. `requestId` is the API message id: several assistant messages of one
+   * response share it. `outputTokens` is the count known when the response began (the turn result has the total).
+   */
+  | { type: 'request.usage'; requestId: string; model: string | null; inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number }
+  /** v0.7.1: the runtime's breakdown of the context window, read at the end of a turn. */
+  | { type: 'context.usage'; usage: RuntimeContextUsage }
+  /** v0.7.1: the runtime compacted the conversation. */
+  | { type: 'compaction'; trigger: 'manual' | 'auto'; preTokens: number | null; postTokens: number | null; durationMs: number | null }
   /** A completed assistant text block. */
   | { type: 'text'; text: string }
   /** Incremental text while a block streams. Not persisted. */

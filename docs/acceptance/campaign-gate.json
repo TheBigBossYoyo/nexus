@@ -1,0 +1,140 @@
+{
+  "kind": "campaign-gate",
+  "at": "2026-10-10T10:53:09.764Z",
+  "runs": 50,
+  "runsPerCell": {
+    "070": {
+      "localized-bug": 6,
+      "cross-module-bug": 2,
+      "feature": 1,
+      "refactor": 2,
+      "architecture": 1,
+      "security": 1,
+      "program": 3,
+      "workspace": 2
+    },
+    "071": {
+      "localized-bug": 6,
+      "cross-module-bug": 2,
+      "feature": 1,
+      "refactor": 2,
+      "architecture": 1,
+      "security": 1,
+      "program": 1,
+      "workspace": 2
+    },
+    "071-graph": {
+      "localized-bug": 6,
+      "cross-module-bug": 2,
+      "feature": 1,
+      "refactor": 2,
+      "architecture": 1,
+      "security": 1,
+      "program": 1,
+      "workspace": 2
+    }
+  },
+  "gate": {
+    "071": {
+      "pairs": 8,
+      "baselinePassRate": 0.6666666666666667,
+      "optimizedPassRate": 0.7916666666666667,
+      "passRateLowerBound": -0.080625,
+      "regressions": [],
+      "improvements": [
+        "program"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": 0.12009653759590325,
+      "outputTokenDelta": 0.1350788291000525,
+      "turnDelta": 0.12099023709902379,
+      "wallClockDelta": 0.15592603884148645,
+      "verdict": "NON_INFERIOR",
+      "mayBecomeDefault": true,
+      "reasons": [
+        "Pass rate 67% against 79% over 8 paired cases, within the margin; no rise in critical findings or repairs."
+      ]
+    },
+    "071-graph": {
+      "pairs": 8,
+      "baselinePassRate": 0.6666666666666667,
+      "optimizedPassRate": 0.8541666666666667,
+      "passRateLowerBound": -0.028860385482763456,
+      "regressions": [],
+      "improvements": [
+        "program",
+        "workspace"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": 0.11534583482049346,
+      "outputTokenDelta": 0.05427719519655493,
+      "turnDelta": 0.0010460251046025104,
+      "wallClockDelta": 0.06793419515768234,
+      "verdict": "NON_INFERIOR",
+      "mayBecomeDefault": true,
+      "reasons": [
+        "Pass rate 67% against 85% over 8 paired cases, within the margin; no rise in critical findings or repairs."
+      ]
+    }
+  },
+  "gateByHiddenEvaluationAlone": {
+    "071": {
+      "pairs": 8,
+      "baselinePassRate": 0.7916666666666667,
+      "optimizedPassRate": 0.9166666666666667,
+      "passRateLowerBound": -0.080625,
+      "regressions": [],
+      "improvements": [
+        "program"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": 0.12009653759590325,
+      "outputTokenDelta": 0.1350788291000525,
+      "turnDelta": 0.12099023709902379,
+      "wallClockDelta": 0.15592603884148645,
+      "verdict": "NON_INFERIOR",
+      "mayBecomeDefault": true,
+      "reasons": [
+        "Pass rate 79% against 92% over 8 paired cases, within the margin; no rise in critical findings or repairs."
+      ]
+    },
+    "071-graph": {
+      "pairs": 8,
+      "baselinePassRate": 0.7916666666666667,
+      "optimizedPassRate": 0.9791666666666667,
+      "passRateLowerBound": -0.028860385482763456,
+      "regressions": [],
+      "improvements": [
+        "program",
+        "workspace"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": 0.11534583482049346,
+      "outputTokenDelta": 0.05427719519655493,
+      "turnDelta": 0.0010460251046025104,
+      "wallClockDelta": 0.06793419515768234,
+      "verdict": "NON_INFERIOR",
+      "mayBecomeDefault": true,
+      "reasons": [
+        "Pass rate 79% against 98% over 8 paired cases, within the margin; no rise in critical findings or repairs."
+      ]
+    }
+  },
+  "contextToolCallsWithGraph": 1
+}

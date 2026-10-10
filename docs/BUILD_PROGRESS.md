@@ -166,3 +166,30 @@ Secure Control Plane. Report: `V0_7_RELEASE_REPORT.md` (PASS). Design: `V0_7_DES
 - Migrations 010 (workers, leases, worker events, schedule firings, scheduler decisions) and 011 (security
   decisions, file provenance), both additive.
 - Next: `V0_8_PROPOSAL.md` (isolation and reliability). Nothing of 0.8 is implemented.
+
+## v0.7.1 (2026-10-07)
+
+Context, memory and token intelligence. Report: `V0_7_1_RELEASE_REPORT.md`. Research:
+`TOKEN_OPTIMIZATION_RESEARCH.md`, `CONTEXT_GRAPH_RESEARCH.md`. Baseline: `V0_7_1_BASELINE.md`.
+
+- Context Graph (`src/main/modules/context-graph`, migration 12, additive): an index over repository facts,
+  project memory, program memory and workspace knowledge. One parent per node, typed edges with provenance,
+  trust kept apart from status, freshness from file state, incremental refresh from the git diff, conflicts by
+  subject, supersession, history and versions, notes with a write policy, hygiene. It projects the existing
+  stores and owns no fact.
+- Retrieval without embeddings: path, typed relations, full text (FTS5), hierarchy when broad; confidence and
+  widening; scope by project, workspace and program.
+- Context Engine V3: the 0.7.0 pack plus a "Project knowledge" section and four agent tools
+  (`context_open`, `context_search`, `context_related`, `context_note`). On for agents by default since the
+  real campaign of 2026-10-10; the planner gets the map and its request's selection, and an open returns a
+  branch with what is under it.
+- Token Intelligence Engine (`src/main/modules/token`): per-request cache events, context breakdowns, prefix
+  registry, cache diagnosis, prompt auditor, failure-first check output, session efficiency, quality gate,
+  provider capabilities, decision log.
+- Runtime: per-request usage, context usage and compaction events from the SDK, through the worker protocol.
+- Interface: Context view; Usage sections Cache, Context, Context techniques; agent Context tab; Tokens settings.
+- Defaults follow the measurements: failure-first check output and the graph in agent context on; stable
+  prefix, upfront tool loading and pressure rotation off.
+- Three independent reviews (security; graph and memory correctness; token accounting, SDK use and test
+  quality): 3 HIGH and 11 of 12 MEDIUM findings fixed with regression tests; the twelfth is a documented limit.
+- Nothing of 0.8 is implemented.

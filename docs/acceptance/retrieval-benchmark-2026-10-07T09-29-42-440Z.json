@@ -1,0 +1,818 @@
+{
+  "kind": "retrieval-benchmark",
+  "at": "2026-10-07T09:29:42.440Z",
+  "cases": 18,
+  "variants": [
+    {
+      "variant": "V2",
+      "cases": 18,
+      "recall": 0.8648148148148148,
+      "precision": 0.20323796573796576,
+      "tokens": 315,
+      "complete": 13,
+      "wrong": 4,
+      "missed": [
+        {
+          "case": "cross-module-bug",
+          "missed": [
+            "project:modules/src.telemetry"
+          ]
+        },
+        {
+          "case": "architecture",
+          "missed": [
+            "project:modules/src.replay",
+            "project:modules/src.telemetry",
+            "project:hazards/replay-parser-drift"
+          ]
+        },
+        {
+          "case": "database",
+          "missed": [
+            "project:memory/history-schema-is-append-only-9f713a"
+          ]
+        },
+        {
+          "case": "large-refactor",
+          "missed": [
+            "project:modules/src.ipc",
+            "project:modules/src.renderer"
+          ]
+        },
+        {
+          "case": "workspace",
+          "missed": [
+            "workspace:contracts/session-export",
+            "workspace:hazards/export-format-is-consumed-by-the-api-79d879"
+          ]
+        }
+      ],
+      "wrongDetail": [
+        {
+          "case": "database",
+          "wrong": [
+            "project:memory/persistence-engine-bbdff5"
+          ]
+        },
+        {
+          "case": "recall-superseded",
+          "wrong": [
+            "project:memory/persistence-engine-bbdff5"
+          ]
+        },
+        {
+          "case": "adversarial-stale",
+          "wrong": [
+            "project:modules/src.weather/files/src.weather.client.ts",
+            "project:modules/src.weather/interfaces/src.weather.client.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "variant": "GRAPH",
+      "cases": 18,
+      "recall": 1,
+      "precision": 0.1679365079365079,
+      "tokens": 641,
+      "complete": 18,
+      "wrong": 0,
+      "missed": [],
+      "wrongDetail": []
+    },
+    {
+      "variant": "V3",
+      "cases": 18,
+      "recall": 1,
+      "precision": 0.1385333380949425,
+      "tokens": 715,
+      "complete": 18,
+      "wrong": 0,
+      "missed": [],
+      "wrongDetail": []
+    },
+    {
+      "variant": "FULL",
+      "cases": 18,
+      "recall": 0.9444444444444444,
+      "precision": 0.02229103894654614,
+      "tokens": 4263,
+      "complete": 17,
+      "wrong": 0,
+      "missed": [
+        {
+          "case": "adversarial-stale",
+          "missed": [
+            "project:memory/weather-cache-lifetime-015dd9"
+          ]
+        }
+      ],
+      "wrongDetail": []
+    },
+    {
+      "variant": "hierarchy-only",
+      "cases": 18,
+      "recall": 0.38981481481481484,
+      "precision": 0.0888888888888889,
+      "tokens": 419,
+      "complete": 3,
+      "wrong": 0,
+      "missed": [
+        {
+          "case": "localized-bug",
+          "missed": [
+            "project:modules/src.telemetry",
+            "project:modules/src.telemetry/tests/src.telemetry.parser.test.ts"
+          ]
+        },
+        {
+          "case": "cross-module-bug",
+          "missed": [
+            "project:modules/src.strategy",
+            "project:modules/src.telemetry",
+            "project:memory/strategy-uses-fuel-corrected-laps-08eabe"
+          ]
+        },
+        {
+          "case": "architecture",
+          "missed": [
+            "project:modules/src.replay",
+            "project:modules/src.telemetry"
+          ]
+        },
+        {
+          "case": "security",
+          "missed": [
+            "project:modules/src.auth"
+          ]
+        },
+        {
+          "case": "ui",
+          "missed": [
+            "project:modules/src.renderer",
+            "project:memory/timing-tower-virtualization-979021"
+          ]
+        },
+        {
+          "case": "database",
+          "missed": [
+            "project:modules/src.persistence",
+            "project:memory/history-schema-is-append-only-9f713a"
+          ]
+        },
+        {
+          "case": "large-refactor",
+          "missed": [
+            "project:modules/src.ipc",
+            "project:modules/src.renderer"
+          ]
+        },
+        {
+          "case": "program",
+          "missed": [
+            "project:programs/reliability-1bc503/hazards/sequence-numbers-wrap-1c8c07",
+            "project:programs/reliability-1bc503/decisions/reorder-buffer-size-current-797956",
+            "project:programs/reliability-1bc503/decisions/race-state-is-rebuilt-from-an-event-log-f00ee5"
+          ]
+        },
+        {
+          "case": "workspace",
+          "missed": [
+            "workspace:contracts/session-export",
+            "project:memory/previous-attempt-streaming-csv-export-8caf57"
+          ]
+        },
+        {
+          "case": "recall-program-decision",
+          "missed": [
+            "project:programs/reliability-1bc503/decisions/race-state-is-rebuilt-from-an-event-log-f00ee5",
+            "project:programs/reliability-1bc503/interfaces/event-log-format-f2e879"
+          ]
+        },
+        {
+          "case": "recall-superseded",
+          "missed": [
+            "project:memory/persistence-engine-current-728176",
+            "project:memory/history-schema-is-append-only-9f713a"
+          ]
+        },
+        {
+          "case": "recall-failed-approach",
+          "missed": [
+            "project:memory/previous-attempt-streaming-csv-export-8caf57"
+          ]
+        },
+        {
+          "case": "recall-user-constraint",
+          "missed": [
+            "project:memory/user-constraint-no-telemetry-upload-582844"
+          ]
+        },
+        {
+          "case": "adversarial-same-name",
+          "missed": [
+            "project:modules/src.replay"
+          ]
+        },
+        {
+          "case": "adversarial-stale",
+          "missed": [
+            "project:memory/weather-cache-lifetime-015dd9"
+          ]
+        }
+      ],
+      "wrongDetail": []
+    },
+    {
+      "variant": "fts-only",
+      "cases": 18,
+      "recall": 0.9814814814814815,
+      "precision": 0.2161596119929453,
+      "tokens": 449,
+      "complete": 17,
+      "wrong": 0,
+      "missed": [
+        {
+          "case": "database",
+          "missed": [
+            "project:memory/history-schema-is-append-only-9f713a"
+          ]
+        }
+      ],
+      "wrongDetail": []
+    },
+    {
+      "variant": "path-only",
+      "cases": 18,
+      "recall": 0.7157407407407407,
+      "precision": 0.48148148148148145,
+      "tokens": 186,
+      "complete": 10,
+      "wrong": 0,
+      "missed": [
+        {
+          "case": "cross-module-bug",
+          "missed": [
+            "project:modules/src.telemetry"
+          ]
+        },
+        {
+          "case": "architecture",
+          "missed": [
+            "project:hazards/replay-parser-drift"
+          ]
+        },
+        {
+          "case": "database",
+          "missed": [
+            "project:memory/history-schema-is-append-only-9f713a"
+          ]
+        },
+        {
+          "case": "program",
+          "missed": [
+            "project:programs/reliability-1bc503/hazards/sequence-numbers-wrap-1c8c07",
+            "project:programs/reliability-1bc503/decisions/reorder-buffer-size-current-797956",
+            "project:programs/reliability-1bc503/decisions/race-state-is-rebuilt-from-an-event-log-f00ee5"
+          ]
+        },
+        {
+          "case": "workspace",
+          "missed": [
+            "workspace:contracts/session-export",
+            "workspace:hazards/export-format-is-consumed-by-the-api-79d879"
+          ]
+        },
+        {
+          "case": "recall-old-decision",
+          "missed": [
+            "project:decisions/packet-versions"
+          ]
+        },
+        {
+          "case": "recall-program-decision",
+          "missed": [
+            "project:programs/reliability-1bc503/decisions/race-state-is-rebuilt-from-an-event-log-f00ee5",
+            "project:programs/reliability-1bc503/interfaces/event-log-format-f2e879"
+          ]
+        },
+        {
+          "case": "recall-user-constraint",
+          "missed": [
+            "project:memory/user-constraint-no-telemetry-upload-582844"
+          ]
+        }
+      ],
+      "wrongDetail": []
+    },
+    {
+      "variant": "path+edges",
+      "cases": 18,
+      "recall": 0.7731481481481483,
+      "precision": 0.1525105417649277,
+      "tokens": 485,
+      "complete": 13,
+      "wrong": 0,
+      "missed": [
+        {
+          "case": "database",
+          "missed": [
+            "project:memory/history-schema-is-append-only-9f713a"
+          ]
+        },
+        {
+          "case": "program",
+          "missed": [
+            "project:programs/reliability-1bc503/hazards/sequence-numbers-wrap-1c8c07",
+            "project:programs/reliability-1bc503/decisions/reorder-buffer-size-current-797956",
+            "project:programs/reliability-1bc503/decisions/race-state-is-rebuilt-from-an-event-log-f00ee5"
+          ]
+        },
+        {
+          "case": "recall-old-decision",
+          "missed": [
+            "project:decisions/packet-versions"
+          ]
+        },
+        {
+          "case": "recall-program-decision",
+          "missed": [
+            "project:programs/reliability-1bc503/decisions/race-state-is-rebuilt-from-an-event-log-f00ee5",
+            "project:programs/reliability-1bc503/interfaces/event-log-format-f2e879"
+          ]
+        },
+        {
+          "case": "recall-user-constraint",
+          "missed": [
+            "project:memory/user-constraint-no-telemetry-upload-582844"
+          ]
+        }
+      ],
+      "wrongDetail": []
+    },
+    {
+      "variant": "graph+fts",
+      "cases": 18,
+      "recall": 1,
+      "precision": 0.1754061414943693,
+      "tokens": 574,
+      "complete": 18,
+      "wrong": 0,
+      "missed": [],
+      "wrongDetail": []
+    }
+  ],
+  "heldOut": {
+    "cases": 7,
+    "variants": [
+      {
+        "variant": "V2",
+        "cases": 7,
+        "recall": 0.5476190476190477,
+        "precision": 0.10909725195439482,
+        "tokens": 370,
+        "complete": 3,
+        "wrong": 0,
+        "missed": [
+          {
+            "case": "h-upload-field",
+            "missed": [
+              "workspace:contracts/session-export",
+              "workspace:hazards/export-format-is-consumed-by-the-api-79d879"
+            ]
+          },
+          {
+            "case": "h-schema-bump",
+            "missed": [
+              "workspace:contracts/packet-v3",
+              "workspace:decisions/schemas-are-versioned-by-suffix-8cb6ec"
+            ]
+          },
+          {
+            "case": "h-ipc-export",
+            "missed": [
+              "project:modules/src.ipc",
+              "project:modules/src.export"
+            ]
+          },
+          {
+            "case": "h-release-order",
+            "missed": [
+              "workspace:standards/api-deploys-before-the-desktop-release-b76e46"
+            ]
+          }
+        ],
+        "wrongDetail": []
+      },
+      {
+        "variant": "GRAPH",
+        "cases": 7,
+        "recall": 0.8571428571428571,
+        "precision": 0.1474358974358974,
+        "tokens": 564,
+        "complete": 6,
+        "wrong": 0,
+        "missed": [
+          {
+            "case": "h-weather-polling",
+            "missed": [
+              "project:memory/weather-cache-lifetime-015dd9"
+            ]
+          }
+        ],
+        "wrongDetail": []
+      },
+      {
+        "variant": "V3",
+        "cases": 7,
+        "recall": 1,
+        "precision": 0.11628171327419448,
+        "tokens": 715,
+        "complete": 7,
+        "wrong": 0,
+        "missed": [],
+        "wrongDetail": []
+      },
+      {
+        "variant": "FULL",
+        "cases": 7,
+        "recall": 0.8571428571428571,
+        "precision": 0.019106604811325267,
+        "tokens": 4280,
+        "complete": 6,
+        "wrong": 0,
+        "missed": [
+          {
+            "case": "h-weather-polling",
+            "missed": [
+              "project:memory/weather-cache-lifetime-015dd9"
+            ]
+          }
+        ],
+        "wrongDetail": []
+      },
+      {
+        "variant": "fts-only",
+        "cases": 7,
+        "recall": 0.9285714285714286,
+        "precision": 0.16160030445744727,
+        "tokens": 454,
+        "complete": 6,
+        "wrong": 0,
+        "missed": [
+          {
+            "case": "h-ipc-export",
+            "missed": [
+              "project:decisions/ipc-validation",
+              "project:decisions/csv-dialect"
+            ]
+          }
+        ],
+        "wrongDetail": []
+      },
+      {
+        "variant": "path+edges",
+        "cases": 7,
+        "recall": 0.7142857142857143,
+        "precision": 0.15777674706246134,
+        "tokens": 401,
+        "complete": 5,
+        "wrong": 0,
+        "missed": [
+          {
+            "case": "h-weather-polling",
+            "missed": [
+              "project:memory/weather-cache-lifetime-015dd9"
+            ]
+          },
+          {
+            "case": "h-program-throughput",
+            "missed": [
+              "project:programs/reliability-1bc503/findings/replay-throughput-55794b",
+              "project:programs/reliability-1bc503/decisions/reorder-buffer-size-current-797956"
+            ]
+          }
+        ],
+        "wrongDetail": []
+      }
+    ]
+  },
+  "byCategory": {
+    "V2": [
+      {
+        "category": "localized bug",
+        "recall": 1,
+        "precision": 0.5714285714285714,
+        "tokens": 264,
+        "cases": 1
+      },
+      {
+        "category": "cross-module bug",
+        "recall": 0.6666666666666666,
+        "precision": 0.2,
+        "tokens": 303,
+        "cases": 1
+      },
+      {
+        "category": "architecture",
+        "recall": 0.4,
+        "precision": 0.2222222222222222,
+        "tokens": 338,
+        "cases": 1
+      },
+      {
+        "category": "security",
+        "recall": 1,
+        "precision": 0.2,
+        "tokens": 323,
+        "cases": 1
+      },
+      {
+        "category": "UI",
+        "recall": 1,
+        "precision": 0.2222222222222222,
+        "tokens": 293,
+        "cases": 1
+      },
+      {
+        "category": "database",
+        "recall": 0.6666666666666666,
+        "precision": 0.2222222222222222,
+        "tokens": 317,
+        "cases": 1
+      },
+      {
+        "category": "large refactor",
+        "recall": 0.3333333333333333,
+        "precision": 0.125,
+        "tokens": 310,
+        "cases": 1
+      },
+      {
+        "category": "Program",
+        "recall": 1,
+        "precision": 0.3333333333333333,
+        "tokens": 475,
+        "cases": 1
+      },
+      {
+        "category": "Workspace",
+        "recall": 0.5,
+        "precision": 0.18181818181818182,
+        "tokens": 361,
+        "cases": 1
+      },
+      {
+        "category": "memory recall",
+        "recall": 1,
+        "precision": 0.15202991452991452,
+        "tokens": 308,
+        "cases": 6
+      },
+      {
+        "category": "adversarial",
+        "recall": 1,
+        "precision": 0.15595238095238095,
+        "tokens": 280,
+        "cases": 3
+      }
+    ],
+    "GRAPH": [
+      {
+        "category": "localized bug",
+        "recall": 1,
+        "precision": 0.3333333333333333,
+        "tokens": 460,
+        "cases": 1
+      },
+      {
+        "category": "cross-module bug",
+        "recall": 1,
+        "precision": 0.25,
+        "tokens": 461,
+        "cases": 1
+      },
+      {
+        "category": "architecture",
+        "recall": 1,
+        "precision": 0.17857142857142858,
+        "tokens": 1126,
+        "cases": 1
+      },
+      {
+        "category": "security",
+        "recall": 1,
+        "precision": 0.08,
+        "tokens": 997,
+        "cases": 1
+      },
+      {
+        "category": "UI",
+        "recall": 1,
+        "precision": 0.16666666666666666,
+        "tokens": 504,
+        "cases": 1
+      },
+      {
+        "category": "database",
+        "recall": 1,
+        "precision": 0.1,
+        "tokens": 1185,
+        "cases": 1
+      },
+      {
+        "category": "large refactor",
+        "recall": 1,
+        "precision": 0.25,
+        "tokens": 476,
+        "cases": 1
+      },
+      {
+        "category": "Program",
+        "recall": 1,
+        "precision": 0.3333333333333333,
+        "tokens": 482,
+        "cases": 1
+      },
+      {
+        "category": "Workspace",
+        "recall": 1,
+        "precision": 0.3333333333333333,
+        "tokens": 472,
+        "cases": 1
+      },
+      {
+        "category": "memory recall",
+        "recall": 1,
+        "precision": 0.1107142857142857,
+        "tokens": 659,
+        "cases": 6
+      },
+      {
+        "category": "adversarial",
+        "recall": 1,
+        "precision": 0.1111111111111111,
+        "tokens": 474,
+        "cases": 3
+      }
+    ],
+    "V3": [
+      {
+        "category": "localized bug",
+        "recall": 1,
+        "precision": 0.3076923076923077,
+        "tokens": 497,
+        "cases": 1
+      },
+      {
+        "category": "cross-module bug",
+        "recall": 1,
+        "precision": 0.17647058823529413,
+        "tokens": 570,
+        "cases": 1
+      },
+      {
+        "category": "architecture",
+        "recall": 1,
+        "precision": 0.17857142857142858,
+        "tokens": 1113,
+        "cases": 1
+      },
+      {
+        "category": "security",
+        "recall": 1,
+        "precision": 0.06896551724137931,
+        "tokens": 1104,
+        "cases": 1
+      },
+      {
+        "category": "UI",
+        "recall": 1,
+        "precision": 0.125,
+        "tokens": 584,
+        "cases": 1
+      },
+      {
+        "category": "database",
+        "recall": 1,
+        "precision": 0.0967741935483871,
+        "tokens": 1186,
+        "cases": 1
+      },
+      {
+        "category": "large refactor",
+        "recall": 1,
+        "precision": 0.25,
+        "tokens": 468,
+        "cases": 1
+      },
+      {
+        "category": "Program",
+        "recall": 1,
+        "precision": 0.2857142857142857,
+        "tokens": 557,
+        "cases": 1
+      },
+      {
+        "category": "Workspace",
+        "recall": 1,
+        "precision": 0.25,
+        "tokens": 569,
+        "cases": 1
+      },
+      {
+        "category": "memory recall",
+        "recall": 1,
+        "precision": 0.08036492374727669,
+        "tokens": 764,
+        "cases": 6
+      },
+      {
+        "category": "adversarial",
+        "recall": 1,
+        "precision": 0.09074074074074073,
+        "tokens": 547,
+        "cases": 3
+      }
+    ],
+    "FULL": [
+      {
+        "category": "localized bug",
+        "recall": 1,
+        "precision": 0.038834951456310676,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "cross-module bug",
+        "recall": 1,
+        "precision": 0.02912621359223301,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "architecture",
+        "recall": 1,
+        "precision": 0.04854368932038835,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "security",
+        "recall": 1,
+        "precision": 0.019417475728155338,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "UI",
+        "recall": 1,
+        "precision": 0.019417475728155338,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "database",
+        "recall": 1,
+        "precision": 0.02912621359223301,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "large refactor",
+        "recall": 1,
+        "precision": 0.02912621359223301,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "Program",
+        "recall": 1,
+        "precision": 0.034482758620689655,
+        "tokens": 4730,
+        "cases": 1
+      },
+      {
+        "category": "Workspace",
+        "recall": 1,
+        "precision": 0.038834951456310676,
+        "tokens": 4205,
+        "cases": 1
+      },
+      {
+        "category": "memory recall",
+        "recall": 1,
+        "precision": 0.014200424059814748,
+        "tokens": 4293,
+        "cases": 6
+      },
+      {
+        "category": "adversarial",
+        "recall": 0.6666666666666666,
+        "precision": 0.009708737864077669,
+        "tokens": 4205,
+        "cases": 3
+      }
+    ]
+  }
+}

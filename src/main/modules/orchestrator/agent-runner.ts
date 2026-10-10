@@ -46,6 +46,7 @@ import { packForPrompt } from '@main/modules/context/context-engine'
 import { canTransition } from '@main/modules/state'
 import type { ApprovalService } from './approvals'
 import type { GraphService } from './graph-service'
+import type { TokenIntelligenceEngine } from '@main/modules/token'
 import type { OrchestratorDeps } from './deps'
 import type { MemoryService } from './memory'
 import type { MessageService } from './messaging'
@@ -178,6 +179,12 @@ export function projectScriptPrefixes(profile: ProjectProfile | null): string[] 
 }
 
 /** Runs one agent (one or more SDK sessions) and records everything observable about it. */
+/** The NEXUS tools every session gets, and the Context Graph tools a session gets when the graph is on. */
+const BASE_NEXUS_TOOLS = ['send_message', 'report_blocker', 'record_decision', 'propose_memory'] as const
+const CONTEXT_TOOLS = ['context_open', 'context_search', 'context_related', 'context_note'] as const
+/** Sent to a session that reached its turn limit with room to spare, when pressure rotation keeps it. */
+export const CONTINUE_SESSION_PROMPT = 'Continue the task from where you stopped. Nothing has changed since your last turn.'
+
 export class AgentRunner {
   constructor(
     private readonly deps: OrchestratorDeps,
@@ -187,6 +194,13 @@ export class AgentRunner {
     private readonly graph: GraphService,
     private readonly routing: ModelRoutingService,
   ) {}
+
+  /** v0.7.1: token accounting and the Context Graph tools, attached by the core once both exist. */
+  private context: { tokens: TokenIntelligenceEngine; contextTool: (session: { run: Run; task: Task | null; agentId: string; role: AgentRole }) => ((input: unknown) => Promise<string>) | null } | null = null
+
+  attachContext(context: NonNullable<AgentRunner['context']>): void {
+    this.context = context
+  }
 
   /** Which files agents wrote, shared by every agent this runner starts (persisted when the repository exists). */
   private provenanceTracker: ProvenanceTracker | undefined
@@ -256,7 +270,14 @@ export class AgentRunner {
     let blocker: AgentRunResult['blocker'] = null
     const files = { read: new Set<string>(), changed: new Set<string>() }
 
-    const base = this.buildSpec(input, agent, model, (b) => (blocker = b))
+    let base: Omit<SessionSpec, 'prompt' | 'maxTurns'>
+    try {
+      base = this.buildSpec(input, agent, model, (b) => (blocker = b))
+    } catch (e) {
+      this.context?.tokens.sessionClosed(agent.id)
+      throw e
+    }
+    this.context?.tokens.attachPack(agent.id, input.contextPack ?? null)
     let last: SessionResult = { outcome: 'error', result: null, error: null, sdkSessionId: null, turns: 0 }
 
     try {
@@ -273,7 +294,25 @@ export class AgentRunner {
           remainingTurns > 0 &&
           input.task !== null &&
           !input.control.stopReason
+        // The session-efficiency decision is recorded at the end of every session. With pressure rotation off it
+        // is the turn rule above; with it on, a session whose context is still small is continued, not rotated.
+        const efficiency = this.context?.tokens.turnEnded(agent.id, last.sdkSessionId, {
+          turns: last.turns,
+          rotationTurns,
+          hitTurnLimit: last.outcome === 'max_turns',
+          canHandoff: canRotate,
+          settings: repos.settings.get().tokens,
+          ...(input.task ? { risk: input.task.risk } : {}),
+          // Cumulative for the session, as the runtime reports usage. Thinking is absent when no turn recorded it.
+          outputTokens: last.result ? last.result.usage.reduce((n, u) => n + u.outputTokens, 0) : null,
+          thinkingTokens: last.result && last.result.usage.some((u) => u.thinkingTokens !== undefined) ? last.result.usage.reduce((n, u) => n + (u.thinkingTokens ?? 0), 0) : null,
+        })
         if (!canRotate) break
+        if (efficiency && efficiency.action !== 'HANDOFF_AND_ROTATE' && last.sdkSessionId) {
+          resumeId = last.sdkSessionId
+          prompt = CONTINUE_SESSION_PROMPT
+          continue
+        }
 
         // Session rotation: structured handoff, then a fresh session with minimal context.
         const handoff = await this.requestHandoff(input, agent.id, base, last.sdkSessionId)
@@ -292,10 +331,7 @@ export class AgentRunner {
           worktreePath: input.cwd,
           branch: input.task?.branch ?? '',
         }).prompt
-        this.recordPack(
-          input,
-          agent.id,
-          packForPrompt({
+        const resumePack = packForPrompt({
             run: input.run,
             task: input.task,
             purpose: input.purpose,
@@ -304,8 +340,10 @@ export class AgentRunner {
               { section: 'Resuming task', sourceKind: 'handoff', title: 'Handoff from the rotated session', reason: 'The session reached its turn threshold and was rotated; the structured handoff replaces its history.', chars: JSON.stringify(handoff).length },
               { section: 'Task', sourceKind: 'task', sourceId: input.task?.id ?? null, title: input.task?.title ?? '', reason: 'The task being continued.', chars: input.task?.description.length ?? 0 },
             ],
-          }),
-        )
+        })
+        this.recordPack(input, agent.id, resumePack)
+        // The fresh session starts from the handoff, not from the first pack: its breakdown names these sections.
+        this.context?.tokens.attachPack(agent.id, resumePack)
       }
     } catch (e) {
       last = { outcome: 'crashed', result: null, error: errorMessage(e), sdkSessionId: last.sdkSessionId, turns: last.turns }
@@ -314,7 +352,11 @@ export class AgentRunner {
     // A usage limit or an authentication stop is not a failure of the agent: it ends 'stopped', reason recorded.
     const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth'
     const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
-    this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
+    try {
+      this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
+    } finally {
+      this.context?.tokens.sessionClosed(agent.id)
+    }
     return {
       agentId: agent.id,
       outcome: last.outcome,
@@ -381,6 +423,27 @@ export class AgentRunner {
         runId: run.id,
         taskId: task?.id ?? null,
       },
+    })
+
+    const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null
+    const systemPromptAppend = rolePrompt(role, input.purpose)
+    const builtinTools = toolsForRole(role, { allowNetworkTools })
+    const mayPropose = !!task && canProposeGraphChange(role, input.purpose)
+    const plan = this.context?.tokens.planSession({
+      runId: run.id,
+      taskId: task?.id ?? null,
+      agentId: agent.id,
+      role,
+      model: model ?? null,
+      effort: null,
+      cwd: input.cwd,
+      systemText: systemPromptAppend,
+      tools: builtinTools,
+      nexusToolNames: [...BASE_NEXUS_TOOLS, ...(mayPropose ? ['propose_graph_change'] : []), ...(contextTool ? CONTEXT_TOOLS : [])],
+      externalServers: servers.map((s) => s.name),
+      loadProjectSettings: run.config.respectProjectClaudeConfig,
+      structuredOutput: input.outputSchema !== undefined,
+      settings: settings.tokens,
     })
 
     const nexusTools: NexusToolHandlers = {
@@ -467,6 +530,7 @@ export class AgentRunner {
               this.graph.propose(run, { agentId: agent.id, label: input.label, taskId: task.parentTaskId ? null : task.id }, raw).message,
           }
         : {}),
+      ...(contextTool ? { contextTool } : {}),
     }
 
     return {
@@ -475,8 +539,9 @@ export class AgentRunner {
       label: input.label,
       cwd: input.cwd,
       model,
-      systemPromptAppend: rolePrompt(role, input.purpose),
-      tools: toolsForRole(role, { allowNetworkTools }),
+      systemPromptAppend,
+      tools: builtinTools,
+      ...(plan ? { contextOptions: plan.options } : {}),
       authorize,
       requestApproval: (request, reason, risk) => this.requestToolApproval(input, agent.id, request, reason, risk),
       outputSchema: input.outputSchema,
@@ -566,6 +631,7 @@ export class AgentRunner {
         switch (event.type) {
           case 'session.started': {
             sdkId = event.sessionId
+            this.context?.tokens.sessionStarted(agentId, { provider: event.provider ?? 'claude', model: event.model }, { resumed: spec.resumeSessionId !== undefined, handoff: opts.handoff === true })
             repos.sessions.update(session.id, { sdkSessionId: event.sessionId, model: event.model })
             repos.agents.update(agentId, { model: event.model })
             this.setState(agentId, 'working')
@@ -664,6 +730,15 @@ export class AgentRunner {
             break
           case 'status':
             repos.agents.update(agentId, { activity: event.status })
+            break
+          case 'request.usage':
+            this.context?.tokens.requestUsage(agentId, sdkId, event)
+            break
+          case 'context.usage':
+            this.context?.tokens.contextUsage(agentId, sdkId, event.usage)
+            break
+          case 'compaction':
+            this.context?.tokens.compaction(agentId, sdkId, event)
             break
           case 'turn.completed': {
             result = event.result

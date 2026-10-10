@@ -1,3 +1,4 @@
+import { AUTO_DEFAULTS, type Technique, type TechniqueSwitch } from '@shared/token'
 import { useState, type ReactNode } from 'react'
 import { AGENT_ROLES, MODEL_TIERS, PRESETS, type AgentRole, type ModelTier } from '@shared/domain'
 import type { McpServerSetting, Settings } from '@shared/settings'
@@ -272,6 +273,53 @@ export function MemorySection({ draft, set, error }: SectionProps) {
         label="Auto-approve memory proposed by the verifier"
         description="Everything else stays proposed until you approve it in the Memory view."
       />
+    </Stack>
+  )
+}
+
+const SWITCH: SelectOption<TechniqueSwitch>[] = [
+  { value: 'auto', label: 'Automatic (the release default)' },
+  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Off' },
+]
+const TECHNIQUE_FIELDS: { key: Technique; label: string; hint: string }[] = [
+  { key: 'contextGraph', label: 'Context Graph in agent context', hint: 'Agents get the map of the project knowledge, what is related to their task, and tools to browse it.' },
+  { key: 'outputFiltering', label: 'Failures first in check output', hint: 'Automatic adds the failures before the tail of a long output. On also shortens the output of passing runs. Off shows only the tail.' },
+  { key: 'pressureRotation', label: 'Rotate sessions by context pressure', hint: 'A session that reaches its turn limit with a small context continues instead of being rotated.' },
+  { key: 'stablePrefix', label: 'Stable system prefix', hint: 'Keeps the working directory out of the system prompt. Measured to make no difference to the cache on the Claude runtime.' },
+  { key: 'toolLoading', label: 'Load the NEXUS tools upfront', hint: 'Instead of leaving their definitions behind tool search. Measured to make no difference to request size.' },
+]
+
+/** 0.7.1: context and token efficiency. Automatic turns a technique on only where the release's evidence supports it. */
+export function TokensSection({ draft, set, error }: SectionProps) {
+  return (
+    <Stack>
+      <p className="m-0 text-text-secondary">
+        Quality first. None of these changes a model, an effort level, the number of agents or the number of reviews. Automatic follows the release default: {TECHNIQUE_FIELDS.filter((t) => AUTO_DEFAULTS[t.key]).map((t) => t.label.toLowerCase()).join(', ') || 'none'} on, the rest off.
+      </p>
+      {TECHNIQUE_FIELDS.map((t) => (
+        <Field key={t.key} label={t.label} hint={t.hint}>
+          {(id) => <Select id={id} data-testid={`tokens-${t.key}`} value={draft.tokens[t.key]} onChange={(v) => set('tokens', { [t.key]: v })} options={SWITCH} />}
+        </Field>
+      ))}
+      <Field label="Context breakdown" hint="How each session's context is measured at the end of a turn. Full asks the runtime to count every category, which makes extra token-count requests.">
+        {(id) => (
+          <Select
+            id={id}
+            data-testid="tokens-contextUsageDetail"
+            value={draft.tokens.contextUsageDetail}
+            onChange={(v) => set('tokens', { contextUsageDetail: v })}
+            options={[
+              { value: 'summary', label: "Summary (the runtime's estimate)" },
+              { value: 'full', label: 'Full (counted by the runtime)' },
+              { value: 'off', label: 'Off' },
+            ]}
+          />
+        )}
+      </Field>
+      <Field label="Graph context budget (tokens)" hint="200 to 20,000. Advisory: retrieval goes over it for high-risk or cross-cutting work." error={error('tokens.graphContextBudget')}>
+        {(id) => <NumberField id={id} min={200} max={20000} value={draft.tokens.graphContextBudget} onChange={(v) => set('tokens', { graphContextBudget: v })} />}
+      </Field>
     </Stack>
   )
 }

@@ -13,8 +13,9 @@ import { OutputTab } from './OutputTab'
 import { SessionTab } from './SessionTab'
 import { ToolsTab } from './ToolsTab'
 import { UsageTab } from './UsageTab'
+import { ContextTab } from './ContextTab'
 
-type TabId = 'output' | 'tools' | 'files' | 'messages' | 'usage' | 'session'
+type TabId = 'output' | 'tools' | 'files' | 'messages' | 'usage' | 'context' | 'session'
 
 const STOPPABLE = new Set<Agent['state']>(['starting', 'working', 'waiting', 'blocked'])
 
@@ -36,6 +37,7 @@ export function AgentDetail({ agent }: { agent: Agent }) {
     { id: 'files', label: 'Files', testId: 'agent-tab-files' },
     { id: 'messages', label: 'Messages', testId: 'agent-tab-messages' },
     { id: 'usage', label: 'Usage', testId: 'agent-tab-usage' },
+    { id: 'context', label: 'Context', testId: 'agent-tab-context' },
     { id: 'session', label: 'Session', testId: 'agent-tab-session' },
   ]
 
@@ -91,6 +93,7 @@ export function AgentDetail({ agent }: { agent: Agent }) {
         {tab === 'files' ? <FilesTab agent={agent} /> : null}
         {tab === 'messages' ? <MessagesTab agent={agent} /> : null}
         {tab === 'usage' ? <UsageTab agent={agent} /> : null}
+        {tab === 'context' ? <ContextTab agent={agent} /> : null}
         {tab === 'session' ? <SessionTab agent={agent} /> : null}
       </div>
       <ConfirmDialog

@@ -22,6 +22,7 @@ import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
 import {
   completeWith,
   FakeAgentRuntime,
+  type FakeCacheSim,
   scriptsByRole,
   specPurpose,
   type FakeScript,
@@ -86,6 +87,8 @@ export interface HarnessOptions {
   commands?: Partial<CheckCommands>
   /** v0.3: wire the policy service as the orchestrator's strategy resolver and record mission outcomes. */
   policy?: boolean
+  /** v0.7.1: a model of the prompt cache; sessions then report per-request usage and context breakdowns. */
+  cache?: FakeCacheSim
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -130,7 +133,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   })
 
   const gitService = new GitService()
-  const runtime = new FakeAgentRuntime({ script: options.script })
+  const runtime = new FakeAgentRuntime({ script: options.script, ...(options.cache ? { cache: options.cache } : {}) })
   const policy = options.policy ? new PolicyService({ repos, nexusVersion: '0.3.0-test' }) : null
   if (policy) attachOutcomeRecording(bus, policy)
   const orchestrator = new Orchestrator({

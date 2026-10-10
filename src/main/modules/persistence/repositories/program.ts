@@ -294,6 +294,11 @@ export class ProgramMemoryRepository extends Table<ProgramMemoryEntry> {
     return this.query("WHERE program_id = ? AND status = 'active' ORDER BY created_at, rowid", [programId])
   }
 
+  /** Every entry of a program, superseded ones included (the Context Graph keeps them as history). */
+  listAll(programId: string): ProgramMemoryEntry[] {
+    return this.query('WHERE program_id = ? ORDER BY created_at, rowid LIMIT 2000', [programId])
+  }
+
   countActive(programId: string): number {
     return (prepare(this.db, "SELECT COUNT(*) AS n FROM program_memory WHERE program_id = ? AND status = 'active'").get(programId) as { n: number }).n
   }

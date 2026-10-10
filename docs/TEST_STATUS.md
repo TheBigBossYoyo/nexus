@@ -1,12 +1,76 @@
 # Test Status
 
-Factual status as of 2026-10-05 06:45 (+01:00), version 0.6.0, branch `nexus-0.6` (released as `v0.6.0`). Details and
-evidence: `docs/V0_6_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
+Factual status as of 2026-10-10, version 0.7.1 (`v0.7.1`, release gate PASS). Details and evidence:
+`docs/V0_7_1_RELEASE_REPORT.md`. The sections of earlier versions below are their records, unchanged.
 
 Note, 2026-10-05: tag `v0.5.0` (commit `389d95f`) does not contain the "0.5.0" sections of this page. At that tag the
 page still describes 0.4.0. They were committed afterwards as `f8e5a67` ("they missed the release commit"), which is
 not in the history of `v0.5.0`. The tag was not moved. See "Release history and supported versions" in `README.md`;
 0.2.1 to 0.5.0 also contain security defects fixed in 0.6.0.
+
+## 0.7.1: final source, 2026-10-10
+
+Measured on commit `82671c8` (later commits change documents only). No Claude usage except where a row says so.
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck`, `pnpm lint` | pass |
+| `pnpm test`, run alone | 169 files, 3,981 of 3,981 passed |
+| `pnpm test:e2e` | 29 of 29 passed, 2 capture-only tests skipped by design |
+| Orchestrator stress, 1,000 seeds (three processes side by side) | passed |
+| Workspace and Arena stress, 5,000 seeds each | passed |
+| The other eight stress suites at release sizes | passed, on `00dcddf`; the changes since do not reach them |
+| `pnpm package` | `release/NEXUS-Setup-0.7.1.exe`, 208,109,581 bytes, SHA-256 `c86e9318...12d64f93` |
+| Navigation benchmark (`context_open` calls an oracle walker needs) | planner 103 to 5 over 18 tuning cases, 38 to 3 over 7 held-out cases |
+| Retrieval benchmark | unchanged: hybrid pack 100% and 100% recall, no non-current record shown as current |
+| Real campaign against the 0.7.0 sources (real Claude, 50 runs, 8 task categories) | no case worse; quality gate NON_INFERIOR with the Context Graph off and on; with it on, six mission categories used 16.1% fewer turns and 7.5% less input |
+| Real compaction fidelity (real Claude, one session, deliberate trigger) | compaction occurred; 27 of 28 facts kept, 15 of 15 that lived only in the conversation; the task continued correctly. Automatic trigger NOT VERIFIED |
+| Tool-definition sharing across roles | reviewed for security and NOT ENABLED |
+| Migration campaign, runtime soak | not repeated (no schema change since 2026-10-07) |
+| Installer execution | NOT VERIFIED |
+
+Two tests failed on time limits in the full run on `00dcddf`, and each led to a defect older than this release:
+the workspace schema parser took 4.8 s on a hostile contract (now one pass, a few milliseconds), and the Arena
+performance evaluator took 108 s of its 120 s limit (now about 40 s, same verdicts).
+
+## 0.7.1: automated, as measured on 2026-10-07 (no Claude usage)
+
+Measured 2026-10-07 on commit `db9c9dc` (later commits change documents and one stress invariant).
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck`, `pnpm lint` | pass |
+| `pnpm test` | 166 files, 3,958 of 3,958 passed, 535 s |
+| `pnpm test:e2e` | 29 of 29 passed, 2 capture-only tests skipped by design, 7.5 min; no stored screenshot changed |
+| Control plane runtime stress, 10,000 seeds; queue, Arena, overnight (two suites), policy, usage, program, workspace at 5,000 each; Context Graph and token accounting at 100,000 nodes, 499,994 edges, 5,000 histories, 125,000 accounting sessions | 10 files passed, 1,640 s together |
+| Orchestrator stress, 1,000 seeds | passed, 2,782 s, after the invariant correction described under "Intermittent failures"; the first run: 999 of 1,000 |
+| Retrieval benchmark (`pnpm bench:retrieval`), 18 tuning and 7 held-out cases | 0.7.0 selection 86.5% and 54.8% recall; hybrid pack 100% and 100%; no non-current record shown as current |
+| `pnpm package` | `release/NEXUS-Setup-0.7.1.exe`, 208,079,443 bytes, SHA-256 `1528a2ae...a4da663b` |
+| Migration campaign on the packaged build, ten real databases 0.1 to 0.7.0 | PASS, 9 checks each; schema 12 |
+| Runtime soak, 60 minutes | not repeated for 0.7.1 |
+
+## 0.7.1: manual and with real providers, as measured on 2026-10-07
+
+Superseded where the section "0.7.1: final source" above says otherwise: the campaign and the compaction
+check were run on 2026-10-10.
+
+| Check | Result |
+|---|---|
+| `pnpm smoke:cache` (7 one-turn sessions, `haiku`) | first request writes, a later one reads, a changed prompt still reads, a changed role writes again |
+| `pnpm accept:graph` (one real mission pair, graph off and on) | both completed, hidden evaluation passed, review approved, no repairs. With the graph: 45 turns against 39, cache read 345,257 against 293,515 |
+| Real comparison campaign over eight task categories | NOT VERIFIED: one pair only; the weekly usage window was at about 92% |
+| Compaction and rotation fidelity on real sessions | NOT VERIFIED |
+| Independent reviews | three (security; graph and memory correctness; token accounting, SDK use and test quality): 3 HIGH and 11 of 12 MEDIUM fixed with regression tests |
+| Installer execution | NOT VERIFIED |
+
+## Intermittent failures (0.7.1)
+
+- Orchestrator stress, seed 597, failed once in a 1,000-seed campaign and passed alone. A crashed task had its
+  retry scheduled and was then split and cancelled by another worker's approved graph proposal before the
+  retry ran; the mission completed correctly. The invariant ("a crashed task is retried") did not allow for
+  that order. It now requires the retry to have been scheduled, and to have run unless a proposal cancelled
+  the task. No change of the product was involved.
+- Scenario tests remain sensitive to other heavy work on the machine; run the suite by itself.
 
 ## 0.7.0: automated (no Claude usage)
 

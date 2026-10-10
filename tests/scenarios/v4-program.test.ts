@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PROGRAM_POLICY_PRESETS } from '@shared/program'
 import { completeWith, scriptsByRole, type FakeScript } from '@main/modules/agent-runtime/fake-runtime'
@@ -64,14 +64,20 @@ describe('v0.4 program on the real orchestrator', () => {
     }
     // The mission planner plans one task named after the milestone it was given.
     const planner: FakeScript = async (spec, ctx) => {
-      const key = spec.prompt.includes('Milestone api') ? 'api' : 'core'
-      const attempt = spec.prompt.includes('verified and rejected') ? 'fix' : 'first'
+      // Only the request says which milestone this mission is for. The rest of the prompt (the project
+      // knowledge, on by default) names the program's other milestones too.
+      const request = spec.prompt.split('\n## Mode')[0] ?? spec.prompt
+      const key = request.includes('Milestone api') ? 'api' : 'core'
+      const attempt = request.includes('verified and rejected') ? 'fix' : 'first'
       await ctx.completeTurn({ text: 'plan', structuredOutput: plan([plannedTask(`${key}-${attempt}`, { suggestedFiles: [`${key}.txt`], acceptanceCriteria: [`${key}.txt exists`] })]) })
     }
     const worker: FakeScript = async (spec, ctx) => {
-      const key = spec.prompt.includes('api-') ? 'api' : 'core'
+      // The task is read from the worktree's name, not searched for in the prompt: with the Context Graph on
+      // by default the prompt also names other tasks' knowledge (a note of the api milestone in the core task).
+      const task = basename(spec.cwd)
+      const key = task.startsWith('api-') ? 'api' : 'core'
       seenByWorker.push({ cwd: spec.cwd, coreExisted: existsSync(join(spec.cwd, 'core.txt')), prompt: spec.prompt })
-      const name = spec.prompt.includes('-fix') ? `${key}-version.txt` : `${key}.txt`
+      const name = task.endsWith('-fix') ? `${key}-version.txt` : `${key}.txt`
       await writeFiles(spec, ctx, { [name]: `${key}\n` })
       await ctx.completeTurn({ text: `Wrote ${name}` })
     }
@@ -126,6 +132,16 @@ describe('v0.4 program on the real orchestrator', () => {
     expect(revisions[1]!.diff.changed).toEqual([{ key: 'api', fields: ['objective'] }])
     expect(h.repos.backlog.list({ programId: program.id }).map((b) => [b.title, b.status, b.provenance.source])).toEqual([['No lint command configured', 'proposed', 'milestone_verifier']])
     expect(h.repos.programMemory.listActive(program.id).map((m) => m.title)).toEqual(['Core module exports'])
+    // Each reasoning session was given the shape of its answer for the runtime to enforce: the plan, the
+    // judgment or the revision. A mission's sessions are not: only a run a program reads carries one.
+    const asked = h.runtime.sessions.filter((x) => x.role === 'researcher')
+    expect(asked.length).toBeGreaterThanOrEqual(5)
+    for (const session of asked) {
+      const properties = Object.keys((session.outputSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {})
+      const marker = session.prompt.includes(REASONING_MARKERS.plan) ? 'milestones' : session.prompt.includes(REASONING_MARKERS.verify) ? 'verdict' : 'action'
+      expect(properties, session.prompt.slice(0, 40)).toContain(marker)
+    }
+    expect(h.runtime.sessions.filter((x) => x.role === 'worker').every((x) => x.outputSchema === undefined)).toBe(true)
     // Reasoning sessions were read-only runs and changed nothing.
     for (const run of h.repos.runs.listByProject(h.project.id).filter((r) => r.mode === 'ask')) expect(run.integrationBranch).toBeNull()
   })

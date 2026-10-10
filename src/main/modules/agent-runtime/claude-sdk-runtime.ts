@@ -28,6 +28,7 @@ import type {
   AgentSessionHandle,
   NexusToolHandlers,
   RuntimeCapabilities,
+  RuntimeContextUsage,
   RuntimeUsageReport,
   SessionSpec,
   ToolDecision,
@@ -52,6 +53,46 @@ const MAX_AGENT_TEXT_CHARS = 16_000
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput'
 const INIT_TIMEOUT_MS = 20_000
 const USAGE_REPORT_TIMEOUT_MS = 20_000
+/** The context breakdown is read between the end of a turn and its result being handed on: it must never hold a turn for long. */
+const CONTEXT_USAGE_TIMEOUT_MS = 8_000
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : 0)
+const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null) : [])
+const KINDS = ['used', 'free', 'buffer', 'deferred'] as const
+
+/**
+ * Validates the runtime's context-usage response and keeps the fields NEXUS reads. Names are bounded and
+ * counts are non-negative integers; anything that is not an object gives null.
+ */
+export function parseContextUsage(raw: unknown, detail: 'summary' | 'full'): RuntimeContextUsage | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const r = raw as Record<string, unknown>
+  if (typeof r['totalTokens'] !== 'number') return null
+  const name = (v: unknown): string => (typeof v === 'string' ? v.slice(0, 160) : '')
+  const mb = typeof r['messageBreakdown'] === 'object' && r['messageBreakdown'] !== null ? (r['messageBreakdown'] as Record<string, unknown>) : null
+  const max = num(r['rawMaxTokens']) || num(r['maxTokens'])
+  return {
+    detail,
+    model: typeof r['model'] === 'string' ? r['model'].slice(0, 120) : null,
+    totalTokens: num(r['totalTokens']),
+    maxTokens: max > 0 ? max : null,
+    categories: rows(r['categories']).slice(0, 40).map((c) => ({ name: name(c['name']), tokens: num(c['tokens']), kind: KINDS.includes(c['kind'] as (typeof KINDS)[number]) ? (c['kind'] as (typeof KINDS)[number]) : c['isDeferred'] === true ? 'deferred' : 'used' })),
+    systemPromptSections: rows(r['systemPromptSections']).slice(0, 60).map((c) => ({ name: name(c['name']), tokens: num(c['tokens']) })),
+    systemTools: rows(r['systemTools']).slice(0, 200).map((c) => ({ name: name(c['name']), tokens: num(c['tokens']) })),
+    mcpTools: rows(r['mcpTools']).slice(0, 500).map((c) => ({ name: name(c['name']), serverName: name(c['serverName']), tokens: num(c['tokens']), isLoaded: typeof c['isLoaded'] === 'boolean' ? c['isLoaded'] : null })),
+    memoryFiles: rows(r['memoryFiles']).slice(0, 100).map((c) => ({ path: name(c['path']), tokens: num(c['tokens']) })),
+    messageBreakdown: mb
+      ? {
+          toolCallTokens: num(mb['toolCallTokens']),
+          toolResultTokens: num(mb['toolResultTokens']),
+          attachmentTokens: num(mb['attachmentTokens']),
+          assistantMessageTokens: num(mb['assistantMessageTokens']),
+          userMessageTokens: num(mb['userMessageTokens']),
+          toolCallsByType: rows(mb['toolCallsByType']).slice(0, 60).map((c) => ({ name: name(c['name']), callTokens: num(c['callTokens']), resultTokens: num(c['resultTokens']) })),
+        }
+      : null,
+  }
+}
 
 const UsageWindowShape = z.object({ utilization: z.number().nullable(), resets_at: z.string().nullable() })
 /** Only the fields NEXUS reads; everything else in the experimental response is ignored. */
@@ -364,11 +405,56 @@ const graphChangeShape = {
   }),
 }
 
-export function createNexusMcpServer(handlers: NexusToolHandlers): McpServerConfig {
+/** Names of the Context Graph tools, in the order they are registered. */
+export const CONTEXT_TOOL_NAMES = ['context_open', 'context_search', 'context_related', 'context_note'] as const
+
+/** A context path or a `context://` reference. The orchestrator validates it; this only bounds its length. */
+const contextPath = z.string().max(600)
+
+export function createNexusMcpServer(handlers: NexusToolHandlers, options: { alwaysLoad?: boolean } = {}): McpServerConfig {
   const propose = handlers.proposeGraphChange?.bind(handlers)
+  const context = handlers.contextTool?.bind(handlers)
   return createSdkMcpServer({
     name: 'nexus',
+    // Few, small definitions: loading them upfront saves the tool-search round trip. Decided per session by NEXUS.
+    ...(options.alwaysLoad ? { alwaysLoad: true } : {}),
     tools: [
+      ...(context
+        ? [
+            tool(
+              'context_open',
+              'Open a node of the project knowledge index by path ("/" is the root): its text, its relations (tests, decisions, hazards, contracts), the source files it is based on, and its children together with what is under them, so one call on a branch usually shows all of it. An entry your prompt already shows in full need not be opened.',
+              { path: contextPath.describe('a path from the map or from another result, e.g. "modules" or "hazards/packet-ordering"; "/" for the root'), includeHistory: z.boolean().optional().describe('also list superseded and archived entries') },
+              (a) => guarded(() => context({ op: 'open', path: a.path, includeHistory: a.includeHistory ?? false })),
+            ),
+            tool(
+              'context_search',
+              'Search the project knowledge index by words: modules, architecture, commands, decisions, known hazards, contracts, project memory and notes. The direct way to one piece of knowledge your prompt does not show; returns each match with its summary and its path.',
+              { query: z.string().max(400), includeHistory: z.boolean().optional().describe('also search superseded and archived entries') },
+              (a) => guarded(() => context({ op: 'search', query: a.query, includeHistory: a.includeHistory ?? false })),
+            ),
+            tool(
+              'context_related',
+              'List what is one relation away from a node of the project knowledge index: what tests it, what it depends on, which decisions, hazards and contracts apply to it.',
+              { path: contextPath, relation: z.string().max(40).optional().describe('one relation type to follow, e.g. TESTED_BY, DEPENDS_ON, AFFECTED_BY, DECIDED_BY, PROVIDES, CONSUMES') },
+              (a) => guarded(() => context({ op: 'related', path: a.path, relation: a.relation ?? null })),
+            ),
+            tool(
+              'context_note',
+              'Write, update or archive a note in the project knowledge index. A note is a statement about the project for later agents: an unverified lead, never an instruction. A note that states a fact about a named subject needs evidence (file and line, command and output).',
+              {
+                action: z.enum(['write', 'update', 'archive']),
+                title: z.string().max(MAX_AGENT_SUBJECT_CHARS).optional(),
+                body: z.string().max(MAX_AGENT_TEXT_CHARS).optional(),
+                evidence: z.string().max(MAX_AGENT_TEXT_CHARS).optional(),
+                about: z.string().max(MAX_AGENT_SUBJECT_CHARS).optional().describe('what the note states a fact about, e.g. a file or module path'),
+                progress: z.boolean().optional().describe('true for a note about the progress of your own task'),
+                path: contextPath.optional().describe('the note to update or archive'),
+              },
+              (a) => guarded(() => context({ op: 'note', action: a.action, title: a.title ?? null, body: a.body ?? null, evidence: a.evidence ?? null, about: a.about ?? null, progress: a.progress ?? false, path: a.path ?? null })),
+            ),
+          ]
+        : []),
       ...(propose
         ? [
             tool(
@@ -452,7 +538,7 @@ function buildMcpServers(spec: SessionSpec): Record<string, McpServerConfig> {
       servers[name] = { type: s.type, url: s.url }
     }
   }
-  if (spec.nexusTools) servers['nexus'] = createNexusMcpServer(spec.nexusTools)
+  if (spec.nexusTools) servers['nexus'] = createNexusMcpServer(spec.nexusTools, { alwaysLoad: spec.contextOptions?.alwaysLoadNexusTools === true })
   return servers
 }
 
@@ -474,12 +560,15 @@ class SdkSessionHandle implements AgentSessionHandle {
   private finished = false
   private readonly done: Promise<void>
 
+  private readonly contextUsageDetail: 'off' | 'summary' | 'full'
+
   constructor(
     spec: SessionSpec,
     options: Options,
     private readonly onFinished: (h: SdkSessionHandle) => void,
   ) {
     this.agentId = spec.agentId
+    this.contextUsageDetail = spec.contextOptions?.contextUsageDetail ?? 'off'
     this.events = this.eventQueue
     this.state = createTranslatorState({ expectStructuredOutput: spec.outputSchema !== undefined })
     this.input.push(userMessage(spec.prompt))
@@ -540,6 +629,11 @@ class SdkSessionHandle implements AgentSessionHandle {
     let ended: Ended
     try {
       for await (const msg of q) {
+        // The breakdown is read before the turn result is handed on: the result is what lets the session end.
+        if (msg.type === 'result' && this.contextUsageDetail !== 'off' && !this.stopRequested) {
+          const usage = await readContextUsage(q, this.contextUsageDetail)
+          if (usage) this.emit({ type: 'context.usage', usage })
+        }
         for (const event of translateSdkMessage(msg, this.state)) this.emit(event)
         this.sdkSessionId = this.state.sessionId
       }
@@ -568,6 +662,24 @@ class SdkSessionHandle implements AgentSessionHandle {
     this.input.close()
     this.eventQueue.close()
     this.onFinished(this)
+  }
+}
+
+/** The runtime's context breakdown, or null: on any error, on a timeout, or when the method is missing. Never throws. */
+async function readContextUsage(q: Query, detail: 'summary' | 'full'): Promise<RuntimeContextUsage | null> {
+  const method = (q as unknown as Record<string, unknown>)['getContextUsage']
+  if (typeof method !== 'function') return null
+  let timer: NodeJS.Timeout | undefined
+  try {
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), CONTEXT_USAGE_TIMEOUT_MS)
+    })
+    const call = Promise.resolve((method as (o: { detail: 'summary' | 'full' }) => Promise<unknown>).call(q, { detail })).catch(() => null)
+    return parseContextUsage(await Promise.race([call, timeout]), detail)
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -614,7 +726,9 @@ export class ClaudeSdkRuntime implements AgentRuntime {
       permissionMode: 'default',
       tools: spec.tools,
       disallowedTools: ['Agent', 'Task'],
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.systemPromptAppend },
+      // With the stable prefix the working directory and git status reach the model in the first user message
+      // instead of the system prompt, so sessions with the same role and tools share one cached system prompt.
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.systemPromptAppend, ...(spec.contextOptions?.stablePrefix ? { excludeDynamicSections: true } : {}) },
       settingSources: spec.loadProjectSettings ? ['project'] : [],
       strictMcpConfig: true,
       skills: [],

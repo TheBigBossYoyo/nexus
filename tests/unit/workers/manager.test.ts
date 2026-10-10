@@ -339,7 +339,7 @@ describe('WorkerManager', () => {
     await flush()
     const worker = r.ready()
     const leaseId = worker.assignment()?.leaseId as string
-    expect(worker.assignment()?.spec.nexusTools).toEqual({ proposeGraphChange: false })
+    expect(worker.assignment()?.spec.nexusTools).toEqual({ proposeGraphChange: false, contextTool: false })
 
     worker.say({ t: 'call', id: 1, leaseId, method: 'authorize', args: [{ agentId: 'a1', toolName: 'Bash', input: { command: 'powershell foo.ps1' }, toolUseId: 't1' }] })
     worker.say({ t: 'call', id: 2, leaseId, method: 'requestApproval', args: [{ agentId: 'a1', toolName: 'Bash', input: {}, toolUseId: 't1' }, 'why', 'high'] })

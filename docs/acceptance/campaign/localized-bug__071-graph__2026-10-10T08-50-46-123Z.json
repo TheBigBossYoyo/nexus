@@ -1,0 +1,195 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08f3cb609f4e7d77c72eb0bbc9421beec460a487",
+  "startedAt": "2026-10-10T08:50:46.123Z",
+  "finishedAt": "2026-10-10T08:53:23.612Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/1f0f4a67/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ laps stay in driving order when the sequence counter wraps (1.0148ms)\n✔ packets of an ordinary batch are still ordered (0.1161ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 86.113\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (0.5925ms)\n✔ orders packets by session clock (1.2259ms)\n✔ orders a batch that straddles the seq wrap by session clock (0.1828ms)\n✔ does not mutate the input array (0.117ms)\n✔ applyBatch records laps in driven order across the seq wrap (1.2794ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 134.6004\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, cp, git, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, cp, git, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: elemetry/state.test.js` is new. It runs the same wrap batch through `applyBatch(emptyState(), batch)` and expects the car's laps in driven order.\n- **Existing test:** I only changed its title, to \"orders packets by session clock\". Its assertion (laps [1, 2, 3]) is unchanged.\n- **Failure before the fix:** I ran `npm test` against the unmodified `order.js` and both wrap tests failed. I filtered the output, so I only saw the actual/expected diff, which showed laps 3 and 4 out of place. I didn't keep the full failing output.\n- **Left alone:** `src/strategy` and `packet.js` weren't touched.\n\nGit warned that LF line endings will become CRLF on these files; I didn't change any line-ending settings.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 39,
+    "inputTokensUncached": 14384,
+    "outputTokens": 14528,
+    "cacheCreationTokens": 32280,
+    "cacheReadTokens": 367639,
+    "costUsdReported": 0.5901,
+    "toolCalls": 34,
+    "toolCallsRecorded": 34,
+    "filesChangedRecorded": 0,
+    "toolCallsByName": {
+      "Bash": 17,
+      "Glob": 1,
+      "Read": 12,
+      "StructuredOutput": 4
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 15,
+        "toolCalls": 13,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 155681,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 44
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 45
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

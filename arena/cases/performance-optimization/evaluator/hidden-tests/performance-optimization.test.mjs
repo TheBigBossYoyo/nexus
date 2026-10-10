@@ -131,12 +131,20 @@ const BATCHES = 7
 const GIVE_UP_MS = 4000
 const ROUNDS = 4
 
+// A call that already lasts LONG_CALL_MS is measured well enough by one run: a warm-up run and seven more
+// batches of it add time and no precision. The unoptimized fixture took 108 s of a 120 s limit that way, and
+// any other load on the machine made the evaluation time out instead of failing by its assertions. Fast
+// calls are measured exactly as before.
+const LONG_CALL_MS = 1500
+
 function timePerCall(fn, what) {
   let t0 = performance.now()
   fn() // warm-up, and a guard against an input that is simply far too slow
   const first = performance.now() - t0
   assert.ok(first < GIVE_UP_MS, `${what} took ${first.toFixed(0)} ms for a single run: far too slow for this input size`)
+  if (first > LONG_CALL_MS) return first
   let best = Infinity
+  let spent = 0
   for (let batch = 0; batch < BATCHES; batch++) {
     let calls = 0
     t0 = performance.now()
@@ -147,13 +155,22 @@ function timePerCall(fn, what) {
       elapsed = performance.now() - t0
     } while (elapsed < BATCH_MS)
     best = Math.min(best, elapsed / calls)
-    if (elapsed > 1500) break // one call is already long: more batches add nothing
+    spent += elapsed
+    if (spent > LONG_CALL_MS) break // the batches so far are already long: more add nothing
   }
   return best
 }
 
 function assertScalesLinearly(name, makeInput, run) {
   const small = makeInput(SMALL)
+  // The same guard as in timePerCall, applied at half the size first. A run that is already far too slow on
+  // half the input is far too slow on all of it, so this fails nothing the guard on the full input would
+  // pass; it only spares the evaluation one run that can last half a minute and proves the same thing.
+  const half = makeInput(LARGE / 2)
+  const h0 = performance.now()
+  run(half)
+  const halfMs = performance.now() - h0
+  assert.ok(halfMs < GIVE_UP_MS, `${name} (${LARGE / 2} items) took ${halfMs.toFixed(0)} ms for a single run: far too slow for this input size`)
   const large = makeInput(LARGE)
   // Load on the machine can only make a measurement slower. A ratio above the limit is therefore measured
   // again, up to ROUNDS times, and the best time of each size is kept: a linear implementation on a busy

@@ -309,6 +309,8 @@ export type ContextSourceKind =
   | 'failure'
   | 'handoff'
   | 'user_instruction'
+  /** v0.7.1: a node of the Context Graph (`sourceId` is the node id). */
+  | 'context_node'
 
 export interface ContextPackEntry {
   id: string

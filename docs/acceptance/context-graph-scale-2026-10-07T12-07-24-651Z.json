@@ -1,0 +1,20 @@
+{
+  "kind": "context-graph-scale",
+  "at": "2026-10-07T12:07:24.651Z",
+  "nodes": 100000,
+  "edges": 499994,
+  "buildMs": 21707,
+  "queryMs": {
+    "children of a module (page of 100)": 4.7,
+    "expand root, depth 3, 60 nodes": 2.1,
+    "expand root, limit above the cap": 5.6,
+    "full-text search": 115.2,
+    "neighbors of a node": 2,
+    "detail of a node": 2.5,
+    "retrieve for a task": 168.9,
+    "retrieve, high risk (broad)": 106.7,
+    "nodes for 200 changed files": 3.6,
+    "health": 636.4,
+    "render a pack section": 2.7
+  }
+}

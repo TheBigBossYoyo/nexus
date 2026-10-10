@@ -1,3 +1,4 @@
+import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import {
   ACTIVE_AGENT_STATES,
@@ -47,6 +48,7 @@ import { configureStrategy, planOverrides, type StrategyPlan } from '@main/modul
 import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
+import { graphContextForRequest } from './context-graph'
 import { Core } from './core'
 import { buildTaskEvidence } from './evidence'
 import type { OrchestratorDeps } from './deps'
@@ -377,9 +379,30 @@ export class Orchestrator implements PipelineHost {
     const run = repos.runs.require(runId)
     const result = await refreshProjectFacts(this.deps, this.core.project(run), (line) => this.core.log(line))
     if (result) bus.emit({ runId, type: 'intelligence.refreshed', payload: result })
+    await this.syncContextGraph(run.projectId)
     // Shutdown began meanwhile: nothing new may start (the run is picked up by recovery on the next launch).
     if (this.closing) return false
     return repos.runs.require(runId).state === 'planning'
+  }
+
+  /**
+   * Bring the project's Context Graph up to date with its stores, then check file evidence against the
+   * repository (only the files git reports as changed since the last check). The graph is an aid: a failure
+   * is logged and never blocks a run.
+   */
+  private async syncContextGraph(projectId: string): Promise<void> {
+    try {
+      const project = this.deps.repos.projects.require(projectId)
+      const space = { kind: 'project' as const, id: projectId }
+      await this.core.contextGraph.syncProject(projectId)
+      for (const enrolment of this.deps.repos.enrolledRepositories.listByProject(projectId)) await this.core.contextGraph.syncWorkspace(enrolment.workspaceId)
+      await this.core.contextGraph.refreshFromGit(space, project.rootPath, this.deps.git)
+      // Duplicate notes and progress notes of tasks that are no longer open leave active retrieval (archived, not deleted).
+      const open: ReadonlySet<string> = new Set(['draft', 'ready', 'blocked', 'queued', 'assigned', 'running', 'waiting', 'review', 'verification'])
+      this.core.contextGraph.collectGarbage(space, (taskId) => open.has(this.deps.repos.tasks.get(taskId)?.state ?? ''))
+    } catch (e) {
+      this.core.log(`context graph refresh failed: ${errorMessage(e)}`)
+    }
   }
 
   private async plan(runId: string, feedback?: string, previousPlan?: MissionPlan): Promise<void> {
@@ -418,10 +441,12 @@ export class Orchestrator implements PipelineHost {
     }
 
     for (let attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+      const memory = this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] })
       const prompt = buildPlannerPrompt({
         run,
         profile: project.profile,
-        memory: this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] }),
+        memory,
+        knowledge: graphContextForRequest(this.core, run, new Set(memory.map((m) => m.id))),
         feedback,
         previousErrors,
         previousPlan,
@@ -966,6 +991,7 @@ export class Orchestrator implements PipelineHost {
             missionCriteria: criteria.map((c) => c.text),
             diffStat: stat || '(no changes)',
             checkResults: checks.commands,
+            checkOutputMode: checkOutputMode(this.deps.repos.settings.get().tokens),
             planSummary: run.plan?.summary,
             evidence: buildTaskEvidence(repos, runId, null),
           }).prompt,

@@ -83,6 +83,11 @@ const INSTRUCTION_PATTERNS: readonly RegExp[] = [
   /\b(api[_ -]?key|password|secret|token)\b[^\n]{0,40}\b(send|post|upload|exfiltrate)\b/i,
 ]
 
+/** Text addressed to a later agent, or a command line to run: never stored as knowledge, in any memory store. */
+export function looksLikeInstruction(text: string): boolean {
+  return INSTRUCTION_PATTERNS.some((pattern) => pattern.test(text))
+}
+
 export type MemoryRejection = 'transcript' | 'no_evidence' | 'duplicate' | 'instruction'
 
 /**
