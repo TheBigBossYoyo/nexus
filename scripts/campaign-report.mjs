@@ -37,17 +37,21 @@ console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:
 const m = (runs, f) => mean(runs.map((r) => f(r.efficiency)))
 for (const line of each((task, arm, runs) => `| ${task} | ${arm} | ${runs.length} | ${m(runs, (e) => e.sessions).toFixed(1)} | ${m(runs, (e) => e.turns).toFixed(1)} | ${m(runs, (e) => e.toolCallsRecorded ?? e.toolCalls).toFixed(1)} | ${m(runs, (e) => e.contextToolCalls.length).toFixed(1)} | ${k(m(runs, (e) => e.inputTokensUncached))} | ${k(m(runs, (e) => e.cacheCreationTokens))} | ${k(m(runs, (e) => e.cacheReadTokens))} | ${k(m(runs, (e) => e.outputTokens))} | ${m(runs, (e) => e.sessionRotations).toFixed(1)} | ${m(runs, (e) => e.compactions).toFixed(1)} | ${Math.round(m(runs, (e) => e.wallMs) / 1000)} s |`)) console.log(line)
 
-console.log('\n### Totals over the tasks every arm has run (sum of cell means)\n')
-const shared = TASKS.filter((t) => ARMS.every((a) => cells.has(`${t}|${a}`)))
-console.log(`Tasks: ${shared.join(', ') || 'none yet'}\n`)
-console.log('| Arm | Runs | Hidden evaluation passed | Turns | Uncached input | Cache written | Cache read | Output | Wall time | Against 0.7.0: turns / all input / output / wall |')
-console.log('| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |')
-const total = (arm, f) => shared.reduce((n, t) => n + m(cells.get(`${t}|${arm}`), f), 0)
+// Missions and the two engine-level tasks are totalled apart: a Program or Workspace run that is blocked
+// early has done less work than one that finished, so its efficiency figures compare nothing.
 const input = (e) => e.inputTokensUncached + e.cacheCreationTokens + e.cacheReadTokens
 const pct = (a, b) => (b ? `${a - b >= 0 ? '+' : ''}${(((a - b) / b) * 100).toFixed(1)}%` : 'n/a')
-for (const arm of ARMS) {
-  if (shared.length === 0) break
-  const runs = shared.flatMap((t) => cells.get(`${t}|${arm}`))
-  const against = arm === '070' ? 'baseline' : `${pct(total(arm, (e) => e.turns), total('070', (e) => e.turns))} / ${pct(total(arm, input), total('070', input))} / ${pct(total(arm, (e) => e.outputTokens), total('070', (e) => e.outputTokens))} / ${pct(total(arm, (e) => e.wallMs), total('070', (e) => e.wallMs))}`
-  console.log(`| ${arm} | ${runs.length} | ${of(runs, (r) => r.quality.hiddenPassed)} | ${total(arm, (e) => e.turns).toFixed(0)} | ${k(total(arm, (e) => e.inputTokensUncached))} | ${k(total(arm, (e) => e.cacheCreationTokens))} | ${k(total(arm, (e) => e.cacheReadTokens))} | ${k(total(arm, (e) => e.outputTokens))} | ${Math.round(total(arm, (e) => e.wallMs) / 1000)} s | ${against} |`)
+for (const [title, set] of [['the six mission categories', TASKS.slice(0, 6)], ['Program and Workspace', TASKS.slice(6)]]) {
+  const shared = set.filter((t) => ARMS.every((a) => cells.has(`${t}|${a}`)))
+  console.log(`\n### Totals over ${title} (sum of cell means; tasks every arm has run: ${shared.join(', ') || 'none yet'})\n`)
+  if (shared.length === 0) continue
+  console.log('| Arm | Runs | Completed | Hidden evaluation passed | Turns | Uncached input | Cache written | Cache read | Output | Wall time | Against 0.7.0: turns / all input / output / wall |')
+  console.log('| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |')
+  const total = (arm, f) => shared.reduce((n, t) => n + m(cells.get(`${t}|${arm}`), f), 0)
+  for (const arm of ARMS) {
+    const runs = shared.flatMap((t) => cells.get(`${t}|${arm}`))
+    const against = arm === '070' ? 'baseline' : `${pct(total(arm, (e) => e.turns), total('070', (e) => e.turns))} / ${pct(total(arm, input), total('070', input))} / ${pct(total(arm, (e) => e.outputTokens), total('070', (e) => e.outputTokens))} / ${pct(total(arm, (e) => e.wallMs), total('070', (e) => e.wallMs))}`
+    console.log(`| ${arm} | ${runs.length} | ${of(runs, (r) => r.quality.completed)} | ${of(runs, (r) => r.quality.hiddenPassed)} | ${total(arm, (e) => e.turns).toFixed(0)} | ${k(total(arm, (e) => e.inputTokensUncached))} | ${k(total(arm, (e) => e.cacheCreationTokens))} | ${k(total(arm, (e) => e.cacheReadTokens))} | ${k(total(arm, (e) => e.outputTokens))} | ${Math.round(total(arm, (e) => e.wallMs) / 1000)} s | ${against} |`)
+  }
 }
+
