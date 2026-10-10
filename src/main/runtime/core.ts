@@ -836,7 +836,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       )
     },
     limit: (normal, runId) => {
-      const byUsage = normal
+      // The ramp after Claude returns (one new session at a time at first) still applies. While Claude is
+      // limited the count is not cut here: admission decides per session, so work another provider may take goes on.
+      const byUsage = usage.canDispatch() ? usage.limit(normal) : normal
       return runId
         ? Math.min(byUsage, control.allowanceForRun(runId, normal, activeAgentsOf(repos, [runId])))
         : byUsage
