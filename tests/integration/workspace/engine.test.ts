@@ -680,6 +680,21 @@ describe('workspace engine: audit regressions', () => {
     expect(extractSurface('database_schema', 'create table t ('.repeat(30_000)).parseError).not.toBeNull()
     expect(extractSurface('protobuf', `message M { int32 a = 1; } ${'x'.repeat(600_000)}`).parseError).toContain('larger than 512 KB')
     expect(Date.now() - started).toBeLessThan(5000)
+    // The schema case alone took 4.8 s of those five: its pattern looked from every unterminated statement to
+    // the end of the text. It is one pass now, and the same input with twice the statements is not four times slower.
+    const sql = (n: number): number => {
+      const t0 = performance.now()
+      expect(extractSurface('database_schema', 'create table t ('.repeat(n)).parseError).not.toBeNull()
+      return performance.now() - t0
+    }
+    expect(sql(30_000)).toBeLessThan(500)
+    expect(sql(30_000 + 1)).toBeLessThan(500)
+    // The statements a schema is read as did not change: the body ends at the first parenthesis that ends the
+    // statement, types keep their own parentheses, and what follows an unterminated statement is not read.
+    const paths = (text: string): string[] => extractSurface('database_schema', text).surface.map((e) => `${e.path}:${e.shape}`)
+    expect(paths('create table a (id integer primary key, price numeric(10, 2) not null); CREATE TABLE IF NOT EXISTS "b" (x text) without rowid; create table c (y int)')).toEqual(['a:table', 'a.id:integer', 'a.price:numeric(10, 2)', 'b:table', 'b.x:text', 'c:table', 'c.y:int'])
+    expect(paths('create table a (id int); create table broken (x int, y numeric(3')).toEqual(['a:table', 'a.id:int'])
+    expect(paths('create table a (id int) engine=innodb; create table b (z int) strict;')).toEqual(['a:table', 'a.id:int', 'b:table', 'b.z:int'])
     expect(stripBlockComments('a /* b */ c /* d')).toBe('a  c ')
     expect(stripBlockComments('no comments')).toBe('no comments')
   })
