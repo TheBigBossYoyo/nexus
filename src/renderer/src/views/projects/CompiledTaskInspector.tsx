@@ -1,3 +1,4 @@
+import { COMPILATION_MODE_LABEL, kindLabel, provenanceLabel, sentence, stateLabel } from '../../lib/intelligenceLabels'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type {
@@ -18,7 +19,7 @@ function SavedSpecification({ spec }: { spec: CompiledTaskSpec }) {
   return (
     <div className="space-y-3 text-small" data-testid="saved-specification">
       <p>
-        {spec.mode} · {spec.status.replaceAll('_', ' ')} ·{' '}
+        {COMPILATION_MODE_LABEL[spec.mode]} · {stateLabel(spec.status)} ·{' '}
         {new Date(spec.createdAt).toLocaleString()}
       </p>
       <p className="break-all font-mono text-caption text-text-muted">
@@ -35,7 +36,7 @@ function SavedSpecification({ spec }: { spec: CompiledTaskSpec }) {
             ] as const
           ).map(([label, items]) => (
             <div key={label}>
-              <dt className="font-medium">{label} · USER_EXPLICIT</dt>
+              <dt className="font-medium">{label} · {provenanceLabel('USER_EXPLICIT')}</dt>
               <dd className="m-0 whitespace-pre-wrap break-words">
                 {items.length ? items.join('\n') : 'None supplied'}
               </dd>
@@ -47,7 +48,7 @@ function SavedSpecification({ spec }: { spec: CompiledTaskSpec }) {
         <div key={i} className="border-t pt-2">
           <p className="whitespace-pre-wrap break-words">{r.text}</p>
           <p className="text-caption text-text-muted">
-            {r.kind} · {r.provenance}
+            {kindLabel(r.kind)} · {provenanceLabel(r.provenance)}
             {r.requiresDecision ? ' · Decision required' : ''}
           </p>
         </div>
@@ -186,8 +187,8 @@ export function CompilationHistory({ projectId }: { projectId: string }) {
           {history.data.map((spec) => (
             <details key={spec.id} className="rounded-md border p-3">
               <summary className="cursor-pointer break-words">
-                {spec.userMetadata?.entryPoint.replaceAll('_', ' ') ?? 'MISSION'} · {spec.mode} ·{' '}
-                {spec.status.replaceAll('_', ' ')} · {new Date(spec.createdAt).toLocaleString()}
+                {sentence(spec.userMetadata?.entryPoint ?? 'MISSION')} · {COMPILATION_MODE_LABEL[spec.mode]} ·{' '}
+                {stateLabel(spec.status)} · {new Date(spec.createdAt).toLocaleString()}
               </summary>
               <SavedSpecification spec={spec} />
             </details>

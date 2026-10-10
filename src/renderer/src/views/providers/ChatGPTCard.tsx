@@ -153,19 +153,25 @@ export function ChatGPTCard() {
             />
           </>
         ) : null}
-        <div className="text-small text-text-muted" data-testid="chatgpt-data-notice">
-          <p className="font-medium text-text">What is sent to OpenAI</p>
+        <div className="text-small text-text-secondary" data-testid="chatgpt-data-notice">
+          <p className="font-medium text-text-primary">What is sent to OpenAI</p>
           <p>
-            When the switch above is on, a request compiled in AUTO, STANDARD, TECHNICAL or COUNCIL depth, and a
-            Director request, send to OpenAI: the text of your request with its goals, constraints and criteria;
-            earlier instructions, task titles and program or workspace goals of the same work; the names of the
-            project&apos;s check commands; and up to twelve entries of the project&apos;s knowledge that match the
-            request. Notes written by agents are left out and text that looks like a credential is removed from
-            that knowledge. Your own request is sent as you wrote it. File contents are not sent.
+            Only while the switch above is on, and only when you develop a request with ChatGPT (the compilation
+            depths Automatic, Standard, Technical and Council) or ask the Strategic Director or the Council:
           </p>
+          <ul className="list-disc pl-4">
+            <li>your request as you wrote it, with its goals, constraints and criteria;</li>
+            <li>earlier instructions, task titles and the program or workspace goals of the same work;</li>
+            <li>the names of the project&apos;s check commands;</li>
+            <li>
+              up to twelve entries of the project&apos;s knowledge that match the request, without notes written
+              by agents and with text that looks like a credential removed.
+            </li>
+          </ul>
           <p>
-            In TECHNICAL and COUNCIL depth, and in a Director council, OpenAI&apos;s answer is also given to Claude
-            and Claude&apos;s answer to OpenAI. EXACT and LIGHT send nothing to OpenAI.
+            File contents are not sent. With Technical, Council and a Director council, OpenAI&apos;s answer is
+            also given to Claude and Claude&apos;s answer to OpenAI. Exact wording and Light send nothing to
+            OpenAI.
           </p>
         </div>
         <p className="text-small text-text-muted">

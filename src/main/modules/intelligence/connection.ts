@@ -382,7 +382,7 @@ export class ChatGPTConnection {
     let receipt: ProviderUsageReceipt | null = null
     return {
       usage: () => (receipt ? structuredClone(receipt) : null),
-      complete: (instructions, data) => {
+      complete: (instructions, data, shape) => {
         const work = (async () => {
           this.claim()
           receipt = null
@@ -411,13 +411,13 @@ export class ChatGPTConnection {
               let result: unknown
               try {
                 try {
-                  result = await provider.complete(instructions, data)
+                  result = await provider.complete(instructions, data, shape)
                 } catch (error) {
                   // A 401 says the token was not accepted: the request was not served. The token is refreshed once
                   // and the same request sent once more, before the pool is held for a sign-in in the browser.
                   if (!(error instanceof PlanInferenceError) || error.status !== 401 || used === null) throw error
                   rejected = used
-                  result = await provider.complete(instructions, data)
+                  result = await provider.complete(instructions, data, shape)
                 }
               } finally {
                 receipt = provider.usage()

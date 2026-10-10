@@ -35,3 +35,28 @@ export function sentence(code: string): string {
   const words = code.replaceAll('_', ' ').toLowerCase()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
+
+/** Where a line of a specification came from, as a user reads it. */
+export const PROVENANCE_LABEL: Record<string, string> = {
+  USER_EXPLICIT: 'you wrote this',
+  USER_CONFIRMED: 'you confirmed this',
+  CONTEXT_DERIVED: 'added from project knowledge',
+  DIRECTOR_RECOMMENDED: 'recommended by the strategic model',
+  TECHNICAL_REQUIREMENT: 'recommended by the technical model',
+  ASSUMPTION: 'an assumption, not confirmed',
+}
+
+/** What kind of addition a recommendation is. */
+export const KIND_LABEL: Record<string, string> = {
+  REQUIREMENT: 'Requirement',
+  ACCEPTANCE: 'Acceptance criterion',
+  CONSTRAINT: 'Constraint',
+  NON_GOAL: 'Not in scope',
+  RISK: 'Risk',
+  ASSUMPTION: 'Assumption',
+  UNKNOWN: 'Open question',
+  VERIFICATION: 'How to verify',
+}
+
+export const provenanceLabel = (code: string): string => PROVENANCE_LABEL[code] ?? sentence(code)
+export const kindLabel = (code: string): string => KIND_LABEL[code] ?? sentence(code)

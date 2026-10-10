@@ -18,7 +18,8 @@ test.describe('mission happy path', () => {
     try {
       // The main window shows.
       expect(app.windows()).toHaveLength(1)
-      expect(await page.title()).toBe('NEXUS')
+      // The title names the view the window shows, then the application.
+      expect(await page.title()).toMatch(/ · NEXUS$/)
 
       // Open the project through the real "Open Project" button (the native dialog is stubbed in main).
       await page.getByTestId('nav-projects').click()

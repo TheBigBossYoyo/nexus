@@ -1,4 +1,4 @@
-import { COMPILATION_MODE_LABEL } from '../../lib/intelligenceLabels'
+import { COMPILATION_MODE_LABEL, kindLabel, provenanceLabel } from '../../lib/intelligenceLabels'
 import { useUiStore } from '../../store/ui'
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
@@ -159,7 +159,7 @@ export function CompilationPreview({
                 <div key={i} className="border-t pt-2">
                   <p className="m-0 break-words">{r.text}</p>
                   <p className="text-caption text-text-muted">
-                    {r.kind} · {r.provenance}
+                    {kindLabel(r.kind)} · {provenanceLabel(r.provenance)}
                     {r.requiresDecision ? ' · Requires decision' : ''}
                   </p>
                 </div>

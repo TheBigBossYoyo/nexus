@@ -146,9 +146,9 @@ export function createProductionAdvisoryRouting(input: {
             usage: () => adapter.usage(),
             stopConfirmed: () => adapter.stopConfirmed(),
             dispose: () => adapter.dispose(),
-            complete: async (instructions, data) => {
+            complete: async (instructions, data, shape) => {
               try {
-                return await adapter.complete(instructions, data)
+                return await adapter.complete(instructions, data, shape)
               } finally {
                 await adapter.dispose()
                 if (adapter.stopConfirmed()) adapters.delete(adapter)

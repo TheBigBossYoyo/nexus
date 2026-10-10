@@ -88,7 +88,7 @@ export class AdvisoryRoutingService {
     )!
     let sequence = 0
     return {
-      complete: async (instructions, data) => {
+      complete: async (instructions, data, shape) => {
         const fresh = await this.deps.snapshot(role)
         const candidate = fresh.candidates.find(
           (c) =>
@@ -115,7 +115,7 @@ export class AdvisoryRoutingService {
         try {
           adapter = candidate!.create()
           this.router.dispatched(route)
-          const result = await adapter.complete(instructions, data)
+          const result = await adapter.complete(instructions, data, shape)
           this.router.outcome(route, 'COMPLETED', null, adapter.usage?.() ?? null)
           return result
         } catch (error) {

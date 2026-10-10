@@ -97,7 +97,7 @@ test('Director waiting history, exact compiler preview and protected provider co
     await page.reload()
     await page.getByTestId('nav-director').click()
     await page.getByLabel('Project', { exact: true }).selectOption(project.id)
-    await expect(page.getByText('WAITING FOR PROVIDER', { exact: true })).toBeVisible()
+    await expect(page.getByText('Waiting for a provider', { exact: true })).toBeVisible()
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.setContentSize(1024, 700),
     )
@@ -123,7 +123,7 @@ test('saved strategic escalations require explicit advice and preserve waiting o
     await page.getByLabel('Objective', { exact: true }).fill(raw)
     await page.getByLabel('Director level').selectOption('3')
     await page.getByRole('button', { name: 'Save escalation', exact: true }).click()
-    const saved = page.getByText('Escalation · REQUESTED', { exact: true })
+    const saved = page.getByText('Escalation · Saved, not sent', { exact: true })
     await expect(saved).toBeVisible()
     expect(await invoke(page, 'director.history', { projectId: project.id })).toEqual([])
     await saved.focus()
@@ -151,9 +151,9 @@ test('saved strategic escalations require explicit advice and preserve waiting o
     ).toBe(true)
     await page.screenshot({ path: 'test-results/v72-director-escalation-routing.png' })
     await page.getByRole('button', { name: 'Save escalation', exact: true }).click()
-    await page.getByText('Escalation · REQUESTED', { exact: true }).click()
+    await page.getByText('Escalation · Saved, not sent', { exact: true }).click()
     await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
-    await expect(page.getByText('Escalation · DISMISSED', { exact: true })).toBeVisible()
+    await expect(page.getByText('Escalation · Dismissed', { exact: true })).toBeVisible()
     expect((await invoke(page, 'director.history', { projectId: project.id })).length).toBe(1)
   } finally {
     await closeApp(app)

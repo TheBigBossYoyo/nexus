@@ -5,7 +5,7 @@ import {
   type IntelligenceContext,
 } from '@shared/intelligence'
 import type { AdvisoryProvider } from './compiler'
-import { parseAdvisoryArtifact } from './artifact-validation'
+import { advisoryShape, parseAdvisoryArtifact, withinScope } from './artifact-validation'
 
 export type DirectorLevel = 0 | 1 | 2 | 3
 export function estimateDirectorValue(signals: {
@@ -60,11 +60,10 @@ export async function requestDirectorMemo(input: {
       BOUNDARY +
         'Produce objective, recommendation, rationale[], alternatives[], risks[], unknowns[], requestedExperiments[], evidenceRefs[], confidence (LOW/MEDIUM/HIGH).',
       { objective: input.objective, untrustedEvidence: input.context },
+      advisoryShape('director_memo', DirectorMemoSchema, input.context.map((c) => c.id)),
     ),
   )
-  if (memo.evidenceRefs.some((r) => !input.context.some((c) => c.id === r)))
-    throw new Error('Director cited evidence outside project scope')
-  return memo
+  return withinScope(memo, new Set(input.context.map((c) => c.id)))
 }
 
 export async function conveneCouncil(input: {
@@ -93,11 +92,7 @@ export async function conveneCouncil(input: {
   )
     throw new Error('Director material exceeds the bounded request contract')
   const refs = new Set(input.context.map((c) => c.id))
-  const check = <T extends { evidenceRefs: string[] }>(artifact: T): T => {
-    if (artifact.evidenceRefs.some((r) => !refs.has(r)))
-      throw new Error('Director cited evidence outside project scope')
-    return artifact
-  }
+  const check = <T extends { evidenceRefs: string[] }>(artifact: T): T => withinScope(artifact, refs)
   const memo = check(
     parseAdvisoryArtifact(
       DirectorMemoSchema,
@@ -105,6 +100,7 @@ export async function conveneCouncil(input: {
         BOUNDARY +
           'Produce objective, recommendation, rationale[], alternatives[], risks[], unknowns[], requestedExperiments[], evidenceRefs[], confidence (LOW/MEDIUM/HIGH).',
         { objective: input.objective, untrustedEvidence: input.context },
+        advisoryShape('director_memo', DirectorMemoSchema, [...refs]),
       ),
     ),
   )
@@ -116,6 +112,7 @@ export async function conveneCouncil(input: {
         BOUNDARY +
           'Independently evaluate technical feasibility, then challenge the proposal. Do not merely approve it. Produce agreements[], disagreements[], missingEvidence[], proposedChanges[], evidenceRefs[].',
         { objective: input.objective, untrustedEvidence: input.context, proposal: memo },
+        advisoryShape('technical_challenge', DirectorChallengeSchema, [...refs]),
       ),
     ),
   )
@@ -127,6 +124,7 @@ export async function conveneCouncil(input: {
         BOUNDARY +
           'Produce decision, acceptedClaims[], rejectedClaims[], unresolvedUnknowns[], nextActions[], evidenceRefs[]. Preserve unresolved disagreement. Recommendations are proposals, not execution authorization.',
         { objective: input.objective, untrustedEvidence: input.context, memo, challenge },
+        advisoryShape('council_synthesis', DirectorSynthesisSchema, [...refs]),
       ),
     ),
   )

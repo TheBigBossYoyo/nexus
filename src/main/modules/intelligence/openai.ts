@@ -1,3 +1,4 @@
+import type { AdvisoryShape } from './compiler'
 import { z } from 'zod'
 import type { AdvisoryProvider } from './compiler'
 import { classifyOpenAIError } from '../capacity/policy'
@@ -57,7 +58,7 @@ export class OpenAIPlanProvider implements AdvisoryProvider {
       .models.filter((m) => m.visibility === 'list')
       .map(({ slug, display_name }) => ({ slug, display_name }))
   }
-  async complete(instructions: string, data: unknown): Promise<unknown> {
+  async complete(instructions: string, data: unknown, shape?: AdvisoryShape): Promise<unknown> {
     this.receipt = null
     const content = JSON.stringify(data)
     if (content.length > 128000 || instructions.length > 16000 || !this.model.trim())
@@ -79,6 +80,8 @@ export class OpenAIPlanProvider implements AdvisoryProvider {
         input: [{ role: 'user', content }],
         store: false,
         stream: true,
+        // The answer's shape is enforced by the provider, not only asked for in words.
+        ...(shape ? { text: { format: { type: 'json_schema', name: shape.name, schema: shape.schema, strict: true } } } : {}),
       }),
     })
     if (!response.ok) {

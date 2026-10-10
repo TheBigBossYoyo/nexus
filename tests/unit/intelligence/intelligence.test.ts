@@ -80,7 +80,9 @@ describe('task compilation authority', () => {
       const failure = await compileTask({ ...base, strategic }).catch((error) => error)
       expect(failure).toBeInstanceOf(Error)
       if (!(failure instanceof Error)) throw new Error('Expected a schema rejection')
-      expect(failure.message).toBe('Advisory provider returned invalid structured output')
+      // Positions and kinds may follow; no key or value of the model's answer does.
+      expect(failure.message).toMatch(/^Advisory provider returned invalid structured output/)
+      expect(failure.message).not.toContain('private value')
       expect(failure.message).not.toContain(secret)
     }
   })
@@ -133,12 +135,8 @@ describe('task compilation authority', () => {
       (await compileTask({ ...base, mode: 'TECHNICAL', strategic: fake(output) })).status,
     ).toBe('WAITING_FOR_PROVIDER')
   })
-  it('rejects forged user authority and out-of-scope evidence', async () => {
-    for (const patch of [
-      { provenance: 'USER_EXPLICIT' },
-      { provenance: 'USER_CONFIRMED' },
-      { evidenceRefs: ['other-project'] },
-    ]) {
+  it('rejects forged user authority', async () => {
+    for (const patch of [{ provenance: 'USER_EXPLICIT' }, { provenance: 'USER_CONFIRMED' }]) {
       await expect(
         compileTask({
           ...base,
@@ -146,6 +144,18 @@ describe('task compilation authority', () => {
         }),
       ).rejects.toThrow()
     }
+  })
+  it('removes a reference to evidence that was not supplied, says so, and keeps the answer', async () => {
+    const known = base.context[0]!.id
+    const spec = await compileTask({
+      ...base,
+      strategic: fake({ ...output, recommendations: [{ ...recommendation, evidenceRefs: [known, 'other-project'] }] }),
+    })
+    // Nothing stored names evidence outside the retrieved scope, and the specification is not lost for it.
+    expect(spec.recommendations).toHaveLength(1)
+    expect(spec.recommendations[0]!.evidenceRefs).toEqual([known])
+    expect(JSON.stringify(spec)).not.toContain('other-project')
+    expect(spec.reasons).toContain('EVIDENCE_REFERENCE_OUTSIDE_SCOPE_REMOVED')
   })
   it('blocks scope drift, consequential ambiguity and stale execution', async () => {
     const spec = await compileTask({ ...base, strategic: fake({ ...output, scopeChanged: true }) })
@@ -222,7 +232,9 @@ describe('Director', () => {
       }).catch((error) => error)
       expect(failure).toBeInstanceOf(Error)
       if (!(failure instanceof Error)) throw new Error('Expected a schema rejection')
-      expect(failure.message).toBe('Advisory provider returned invalid structured output')
+      // Positions and kinds may follow; no key or value of the model's answer does.
+      expect(failure.message).toMatch(/^Advisory provider returned invalid structured output/)
+      expect(failure.message).not.toContain('private value')
       expect(failure.message).not.toContain(secret)
       expect(calls).toBe(corruptStage + 1)
     }
