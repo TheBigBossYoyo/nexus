@@ -625,6 +625,8 @@ class SdkSessionHandle implements AgentSessionHandle {
     await this.done
   }
 
+  stopConfirmed(): boolean { return this.finished }
+
   private async pump(q: Query): Promise<void> {
     let ended: Ended
     try {

@@ -78,7 +78,7 @@ export type WorkerToRuntime =
   | { t: 'call'; id: number; leaseId: string; method: WorkerCallMethod; args: unknown[] }
   | { t: 'cmdResult'; id: number; ok: boolean; error?: string }
   /** The assignment is over: the session's `session.ended` event was sent before this. */
-  | { t: 'ended'; leaseId: string }
+  | { t: 'ended'; leaseId: string; stopConfirmed?: boolean }
   | { t: 'log'; line: string }
 
 export type { ToolRequest }

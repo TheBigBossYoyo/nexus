@@ -467,6 +467,10 @@ export class Orchestrator implements PipelineHost {
       })
       run = repos.runs.require(runId)
       if (control.stopReason || run.state !== 'planning') return
+      if (result.outcome === 'capacity') {
+        this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved planning capacity')
+        return
+      }
       if (result.outcome === 'quota') {
         this.core.pauseRun(runId, 'quota', 'Claude usage limit reached')
         return
@@ -1008,6 +1012,10 @@ export class Orchestrator implements PipelineHost {
           control,
         })
         if (control.stopReason || repos.runs.require(runId).state !== 'verifying') return
+        if (result.outcome === 'capacity') {
+          this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved verification capacity')
+          return
+        }
         if (result.outcome === 'quota') {
           this.core.pauseRun(runId, 'quota', 'Claude usage limit reached')
           return
@@ -1121,7 +1129,7 @@ export class Orchestrator implements PipelineHost {
 
   // ───────────────────────────── human intervention ─────────────────────────────
 
-  async pauseRun(runId: string, reason: 'user' | 'quota' | 'recovery' = 'user', detail?: string, cause?: PauseCause): Promise<Run> {
+  async pauseRun(runId: string, reason: 'user' | 'quota' | 'recovery' | 'capacity' = 'user', detail?: string, cause?: PauseCause): Promise<Run> {
     const { repos, bus } = this.deps
     const run = repos.runs.require(runId)
     if (!canPauseRun(run.state)) throw new NexusError('invalid_state', `A ${run.state} run cannot be paused`)

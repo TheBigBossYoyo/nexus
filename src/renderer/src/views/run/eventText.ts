@@ -76,6 +76,7 @@ const RENDER: Renderers = {
   'agent.tool.completed': (p) => `${p.toolName} ${p.isError ? 'failed' : 'finished'}`,
   'agent.tool.denied': (p) => `${p.toolName} denied: ${trunc(p.reason)}`,
   'agent.waiting': (p) => `Agent waiting: ${trunc(p.reason)}`,
+  'capacity.waiting': (p) => `Waiting for provider capacity${p.provider ? ` (${p.provider})` : ''}: ${trunc(p.reasons.join('; '))}`,
   'agent.failed': (p) => `Agent failed: ${trunc(p.error)}`,
   'agent.stopped': (p) => `Agent stopped: ${trunc(p.reason)}`,
   'agent.rotated': (p) => `Agent session rotated after ${plural(p.turns, 'turn')}`,

@@ -129,16 +129,20 @@ async function run(leaseId: string, provider: string, wire: WireSessionSpec): Pr
     const handle = runtime.startSession(toSpec(leaseId, wire))
     current = { leaseId, handle }
     for await (const event of handle.events) {
-      send({ t: 'event', leaseId, event })
-      if (event.type === 'session.ended') ended = true
+      if (event.type === 'session.ended') {
+        await handle.stop()
+        send({ t: 'event', leaseId, event: { ...event, stopConfirmed: handle.stopConfirmed?.() ?? false } })
+        ended = true
+      } else send({ t: 'event', leaseId, event })
     }
   } catch (e) {
     if (!ended) send({ t: 'event', leaseId, event: { type: 'session.ended', reason: 'crashed', error: errorText(e) } })
     ended = true
   }
   if (!ended) send({ t: 'event', leaseId, event: { type: 'session.ended', reason: 'crashed', error: 'The session ended without saying why.' } })
+  const stopConfirmed = current?.handle.stopConfirmed?.() ?? !current
   current = null
-  send({ t: 'ended', leaseId })
+  send({ t: 'ended', leaseId, stopConfirmed })
 }
 
 async function command(message: Extract<RuntimeToWorker, { t: 'cmd' }>): Promise<void> {

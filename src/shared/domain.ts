@@ -145,7 +145,7 @@ export const COMPLEXITIES = ['small', 'medium', 'large'] as const
 export const ComplexitySchema = z.enum(COMPLEXITIES)
 export type Complexity = z.infer<typeof ComplexitySchema>
 
-export type PauseReason = 'user' | 'quota' | 'recovery'
+export type PauseReason = 'user' | 'quota' | 'recovery' | 'capacity'
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired'
 export type ApprovalKind = 'plan' | 'tool' | 'git' | 'task' | 'merge' | 'graph'
 export type MemoryScope = 'global' | 'project' | 'run'

@@ -52,6 +52,18 @@ export interface ProviderServiceDeps {
   now?: () => number
 }
 
+export interface AdmittedSessionProvider {
+  provider: ProviderId
+  requested: ProviderId
+  model: string
+  reason: string
+  fallbackReason: string | null
+}
+export type SessionAdmission = (
+  spec: SessionSpec,
+  dispatch: (selection: AdmittedSessionProvider) => AgentSessionHandle,
+) => AgentSessionHandle
+
 /** A session the policy refused: it ends at once with the reason, like a runtime that could not start. */
 function refusedHandle(agentId: string, reason: string): AgentSessionHandle {
   const queue = new AsyncQueue<AgentEvent>()
@@ -87,6 +99,18 @@ export class ProviderService {
     { at: number; result: { ok: boolean; detail: string } }
   >()
   readonly router: AgentRuntime
+  private capacityAdmission: SessionAdmission | null = null
+
+  /** The production host installs its durable capacity admission before any engineering dispatch. */
+  setSessionAdmission(admit: SessionAdmission | null): void {
+    this.capacityAdmission = admit
+  }
+  sessionProvider(sessionId: string): ProviderId | null {
+    return this.deps.sessions.providerOfSession(sessionId)
+  }
+  defaultModel(id: ProviderId): string | null {
+    return this.byId.get(id)?.defaultModel() ?? null
+  }
 
   constructor(private readonly deps: ProviderServiceDeps) {
     for (const p of deps.providers) this.byId.set(p.id, p)
@@ -339,12 +363,14 @@ export class ProviderService {
       if (!runtime) throw new Error('The Claude runtime is missing')
       return runtime
     }
-    const start = (spec: SessionSpec): AgentSessionHandle => {
+    const start = (spec: SessionSpec, admitted?: AdmittedSessionProvider): AgentSessionHandle => {
+      if (this.capacityAdmission && !admitted)
+        return this.capacityAdmission(spec, (selection) => start(spec, selection))
       const policy = this.policy()
       const resumeProvider = spec.resumeSessionId
         ? this.deps.sessions.providerOfSession(spec.resumeSessionId)
         : null
-      const decision = routeSession(
+      const decision = admitted ?? routeSession(
         { role: spec.role, label: spec.label ?? null, resumeProvider },
         policy,
         this.list(),
@@ -353,7 +379,7 @@ export class ProviderService {
       const provider = chosen ? this.byId.get(chosen) : undefined
       const runtime = provider?.runtime() ?? null
       const status = chosen ? this.statuses.get(chosen) : undefined
-      const model =
+      const model = admitted?.model ?? (
         chosen === PRIMARY_PROVIDER
           ? (spec.model ?? null)
           : chosen
@@ -364,8 +390,8 @@ export class ProviderService {
                   : null) ??
               provider?.defaultModel() ??
               null)
-            : null
-      const record = this.safeInsert({
+            : null)
+      const sessionRecord: ProviderSession = {
         id: newId(),
         runId: this.deps.runOfAgent(spec.agentId),
         agentId: spec.agentId,
@@ -388,7 +414,9 @@ export class ProviderService {
         outputTokens: 0,
         createdAt: this.iso(),
         endedAt: chosen && runtime ? null : this.iso(),
-      })
+      }
+      // A production dispatch cannot proceed when its durable provider binding was not written.
+      const record = admitted ? this.deps.sessions.insert(sessionRecord) : this.safeInsert(sessionRecord)
       if (decision.fallbackReason)
         this.deps.logger?.(`provider: ${spec.role} ${spec.agentId}: ${decision.fallbackReason}`)
       if (!chosen || !runtime)
@@ -396,7 +424,7 @@ export class ProviderService {
       // A Claude model name means nothing to another provider, and the reverse.
       const { model: _claudeModel, ...rest } = spec
       const routed: SessionSpec =
-        chosen === PRIMARY_PROVIDER ? spec : { ...rest, ...(model ? { model } : {}) }
+        chosen === PRIMARY_PROVIDER ? { ...spec, ...(model ? { model } : {}) } : { ...rest, ...(model ? { model } : {}) }
       let inner: AgentSessionHandle
       try {
         inner = runtime.startSession(routed)
@@ -506,6 +534,7 @@ export class ProviderService {
       interrupt: () => inner.interrupt(),
       end: () => inner.end(),
       stop: () => inner.stop(),
+      ...(inner.stopConfirmed ? { stopConfirmed: () => inner.stopConfirmed!() } : {}),
     }
   }
 }

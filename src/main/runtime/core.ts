@@ -6,6 +6,7 @@ import { TaskAdmissionService } from '../modules/intelligence/admission'
 import { createProductionAdvisoryRouting } from '../modules/intelligence/production-routing'
 import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
+import { WorkerCapacityRouting } from '../modules/capacity/worker-routing'
 import { release } from 'node:os'
 import { join } from 'node:path'
 import type { PushMessage } from '@shared/events'
@@ -602,6 +603,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     dataDir,
     maxAgents: () => control.limits().maxAgents,
   })
+  const workerRouting = new WorkerCapacityRouting({
+    repos, providers, usage, bootId: identity.bootId, dataDir,
+    maxAgents: () => control.limits().maxAgents,
+  })
   const taskAdmission = new TaskAdmissionService(
     repos,
     git,
@@ -807,7 +812,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
 
   orchestrator.setDispatchGate({
     canDispatch: (runId) => {
-      if (!usage.canDispatch()) return false
+      // Physical fairness is global; provider/quality/allowance admission is enforced per session.
       if (!runId) return true
       const run = repos.runs.get(runId)
       return (
@@ -820,13 +825,20 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       )
     },
     limit: (normal, runId) => {
-      const byUsage = usage.limit(normal)
+      const byUsage = normal
       return runId
         ? Math.min(byUsage, control.allowanceForRun(runId, normal, activeAgentsOf(repos, [runId])))
         : byUsage
     },
-    onChange: (listener) => usage.onChange(listener),
+    onChange: (listener) => {
+      const offUsage = usage.onChange(listener), offWorkers = workerRouting.onChange(listener)
+      return () => { offUsage(); offWorkers() }
+    },
   })
+  const capacityRecoveryTimer = setInterval(() => {
+    void workerRouting.recover((runId) => orchestrator.resumeRun(runId)).catch((e: unknown) => logger(`capacity recovery: ${errorMessage(e)}`))
+  }, 2000)
+  capacityRecoveryTimer.unref()
 
   // Recovery runs behind the server: a window that connects meanwhile sees RECOVERING, not a frozen screen.
   const recovered = Promise.resolve()
@@ -986,6 +998,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const stop = async (): Promise<boolean> => {
     phase = 'STOPPING'
     intelligenceOperations.closeAdmission()
+    clearInterval(capacityRecoveryTimer)
+    workerRouting.closeAdmission()
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
     push({ kind: 'runtime' })
@@ -1013,6 +1027,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       await recovery.idle()
       await orchestrator.shutdown()
       await workerManager?.shutdown()
+      await workerRouting.dispose()
       usage.dispose()
     } catch (e) {
       logger(`shutdown: ${errorMessage(e)}`)

@@ -9,8 +9,9 @@ import { RuntimeCapacityPools } from '../capacity/runtime-pools'
 import { CapacityAwareProviderRouter } from '../capacity/router'
 import { AdvisoryRoutingService, type AdvisoryCandidate } from './routing'
 import { ClaudeTechnicalDirector } from './technical'
+import { DISPATCH_POLICY, hostedSessionPool, sessionReservePolicy } from '../capacity/reserves'
 
-export const ADVISORY_POLICY = '0.7.2-advisory-1'
+export const ADVISORY_POLICY = DISPATCH_POLICY
 
 /** Wiring is complete even while real technical quality acceptance remains a separate closed gate. */
 export function createProductionAdvisoryRouting(input: {
@@ -28,16 +29,7 @@ export function createProductionAdvisoryRouting(input: {
   const adapters = new Set<ClaudeTechnicalDirector>()
   let disposed = false
   const service = new AdvisoryRoutingService(new CapacityAwareProviderRouter(store, input.bootId), {
-    reserve: (capacity) => ({
-      version: `${ADVISORY_POLICY}:${input.maxAgents()}`,
-      maxConcurrent: input.maxAgents() + 1,
-      advisorySlots: 1,
-      poolLimits: Object.fromEntries(
-        capacity
-          .filter((p) => p.consumers.includes('openai'))
-          .map((p) => [p.id, { maxConcurrent: 1, advisorySlots: 0 }]),
-      ),
-    }),
+    reserve: (capacity) => sessionReservePolicy(capacity, input.maxAgents()),
     snapshot: async (role: IntelligenceRole) => {
       const candidates: AdvisoryCandidate[] = [],
         capacity: CapacityPool[] = []
@@ -122,11 +114,13 @@ export function createProductionAdvisoryRouting(input: {
           utilization: machine.utilizationPercent,
         })
       capacity.push(pool)
+      const hostPool = hostedSessionPool(input.dataDir)
+      capacity.push(hostPool)
       candidates.push({
         provider: 'claude',
         model,
         roles: [role],
-        poolIds: [pool.id],
+        poolIds: [pool.id, hostPool.id],
         available: !disposed && input.usage.canDispatch(),
         qualityApproved: evidence.length > 0,
         qualityEvidence: evidence,

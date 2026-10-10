@@ -192,8 +192,10 @@ export type AgentEvent =
   | { type: 'throttle'; kind: 'overloaded' | 'server_error' | 'rate_limit' }
   | { type: 'status'; status: string }
   | { type: 'turn.completed'; result: TurnResult }
+  /** Host admission, never emitted by an external provider. No model request was sent. */
+  | { type: 'capacity.wait'; routingId: string; provider: string | null; reasons: string[] }
   /** The session process ended. No further events follow. */
-  | { type: 'session.ended'; reason: 'completed' | 'stopped' | 'crashed'; error: string | null }
+  | { type: 'session.ended'; reason: 'completed' | 'stopped' | 'crashed'; error: string | null; stopConfirmed?: boolean }
 
 export interface AgentSessionHandle {
   readonly agentId: string
@@ -209,6 +211,8 @@ export interface AgentSessionHandle {
   end(): void
   /** Terminate the session process. */
   stop(): Promise<void>
+  /** True only after the owning adapter confirms its process/session has stopped. */
+  stopConfirmed?(): boolean
 }
 
 export interface RuntimeCapabilities {

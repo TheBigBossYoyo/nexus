@@ -486,6 +486,10 @@ export class TaskPipeline {
    */
   private haltOutcome(run: Run, outcome: AgentOutcome, control: SessionControl): boolean {
     if (outcome === 'stopped' || control.stopReason) return true
+    if (outcome === 'capacity') {
+      this.core.pauseRun(run.id, 'capacity', 'Waiting for quality-approved provider capacity')
+      return true
+    }
     if (outcome === 'quota') {
       this.core.pauseRun(run.id, 'quota', 'Claude usage limit reached')
       return true

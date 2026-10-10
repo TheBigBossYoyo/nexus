@@ -7,6 +7,7 @@ import type {
   ProviderReservePolicy,
   RoutingCandidate,
   ProviderUsageReceipt,
+  CapacityRoutingDecision,
 } from '@shared/capacity'
 import type { IntelligenceStore } from '../persistence/repositories/intelligence'
 import { routeCapacity } from './policy'
@@ -151,6 +152,12 @@ export class CapacityAwareProviderRouter {
         held.filter((l) => l.role === 'worker' || l.role === 'reviewer').length <
           limit.maxConcurrent - limit.advisorySlots)
     )
+  }
+  assess(input: Parameters<typeof routeCapacity>[0] & { policy: ProviderReservePolicy }): CapacityRoutingDecision {
+    Reserve.parse(input.policy)
+    return routeCapacity({ ...input, candidates: input.candidates.map((candidate) => ({
+      ...candidate, available: candidate.available && candidate.poolIds.every((id) => this.hasSlot(id, input.role, input.policy)),
+    })) })
   }
   claim(record: CapacityRoutingRecord, policy: ProviderReservePolicy): ProviderCapacityLease[] {
     Reserve.parse(policy)
