@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { Preset, Run, RunConfig, RunMode } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
 import { newId, shortId } from '@shared/ids'
@@ -7,9 +8,12 @@ import {
   diffPlans,
   isEmptyDiff,
   LIVE_PROGRAM_STATES,
+  MilestoneJudgmentSchema,
   programHealth,
+  ProgramPlanSchema,
   ProgramPolicySchema,
   ProgramScheduleSchema,
+  ReplanSchema,
   TERMINAL_MILESTONE_STATES,
   TERMINAL_PROGRAM_STATES,
   windowStatus,
@@ -93,6 +97,13 @@ const TERMINAL_RUN: readonly Run['state'][] = ['completed', 'failed', 'cancelled
 const MAX_CHECKPOINTS = 100
 /** A reasoning session whose answer does not parse is asked again this many times before the program is blocked. */
 const REASONING_RETRIES = 1
+/** The shape of each reasoning answer, as the JSON Schema the runtime enforces. The parsers still validate what comes back. */
+const answerSchema = (schema: z.ZodType): Record<string, unknown> => z.toJSONSchema(schema, { target: 'draft-7' }) as Record<string, unknown>
+const ANSWER_SCHEMAS = {
+  planner: answerSchema(ProgramPlanSchema),
+  verifier: answerSchema(MilestoneJudgmentSchema),
+  replanner: answerSchema(ReplanSchema),
+} as const
 const WORKING: readonly ProgramState[] = ['PLANNING', 'ACTIVE', 'REPLANNING']
 const OPEN_BACKLOG: readonly BacklogStatus[] = ['proposed', 'accepted', 'scheduled']
 
@@ -568,7 +579,8 @@ export class ProgramEngine {
       mode: 'ask',
       preset: program.policy.missionPreset,
       prompt,
-      overrides: { requirePlanApproval: false },
+      // The answer is read by this engine: the runtime is given its shape and enforces it.
+      overrides: { requirePlanApproval: false, answerSchema: ANSWER_SCHEMAS[kind] },
       ...(baseRef ? { baseRef } : {}),
     })
     this.patch(program.id, { currentRunId: run.id, currentRunKind: kind })

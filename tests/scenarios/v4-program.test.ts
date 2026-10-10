@@ -126,6 +126,16 @@ describe('v0.4 program on the real orchestrator', () => {
     expect(revisions[1]!.diff.changed).toEqual([{ key: 'api', fields: ['objective'] }])
     expect(h.repos.backlog.list({ programId: program.id }).map((b) => [b.title, b.status, b.provenance.source])).toEqual([['No lint command configured', 'proposed', 'milestone_verifier']])
     expect(h.repos.programMemory.listActive(program.id).map((m) => m.title)).toEqual(['Core module exports'])
+    // Each reasoning session was given the shape of its answer for the runtime to enforce: the plan, the
+    // judgment or the revision. A mission's sessions are not: only a run a program reads carries one.
+    const asked = h.runtime.sessions.filter((x) => x.role === 'researcher')
+    expect(asked.length).toBeGreaterThanOrEqual(5)
+    for (const session of asked) {
+      const properties = Object.keys((session.outputSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {})
+      const marker = session.prompt.includes(REASONING_MARKERS.plan) ? 'milestones' : session.prompt.includes(REASONING_MARKERS.verify) ? 'verdict' : 'action'
+      expect(properties, session.prompt.slice(0, 40)).toContain(marker)
+    }
+    expect(h.runtime.sessions.filter((x) => x.role === 'worker').every((x) => x.outputSchema === undefined)).toBe(true)
     // Reasoning sessions were read-only runs and changed nothing.
     for (const run of h.repos.runs.listByProject(h.project.id).filter((r) => r.mode === 'ask')) expect(run.integrationBranch).toBeNull()
   })
