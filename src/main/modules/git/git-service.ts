@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -278,6 +278,26 @@ function subcommandOf(args: readonly string[]): string {
 /** Subcommands of NEXUS's own that add to or rewrite the branch a working tree is on. */
 const WRITES_BRANCH = new Set(['commit', 'merge', 'reset', 'cherry-pick', 'rebase', 'revert', 'am', 'stash', 'checkout', 'switch'])
 
+/**
+ * The empty directory NEXUS names as `core.hooksPath`, so that no hook of a repository runs under NEXUS's own
+ * git commands. One per process, with a name nobody can predict, removed when the process ends: a directory
+ * per GitService was never removed, and thousands of them were left in the temp directory.
+ */
+let sharedNoHooksDir: string | null = null
+function emptyHooksDir(): string {
+  if (sharedNoHooksDir !== null && existsSync(sharedNoHooksDir)) return sharedNoHooksDir
+  const dir = mkdtempSync(join(tmpdir(), 'nexus-no-hooks-'))
+  sharedNoHooksDir = dir
+  process.once('exit', () => {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // The process is ending; an empty directory left behind harms nothing.
+    }
+  })
+  return dir
+}
+
 export class GitService {
   private readonly env: NodeJS.ProcessEnv
   /** An empty directory NEXUS owns: its git commands look for hooks there, so they run none. */
@@ -466,7 +486,7 @@ export class GitService {
     // NEXUS's own git commands do not run what a repository's configuration could make git run: no file
     // system monitor, no hooks, no pager, no `ext::` transport. Agents work in these repositories; a
     // configuration key or a hook one of them left behind must not execute in NEXUS's process context.
-    this.noHooksDir ??= mkdtempSync(join(tmpdir(), 'nexus-no-hooks-'))
+    this.noHooksDir ??= emptyHooksDir()
     // In a worktree NEXUS created, the Git directory is the one NEXUS found in the repository, named explicitly:
     // the `.git` file in the worktree is not read, so rewriting it redirects nothing, for any command. Replacement
     // objects are never used: a ref an agent could write must not stand in for a commit NEXUS names.

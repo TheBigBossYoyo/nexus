@@ -1,6 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import type { ToolDecision } from '@main/modules/agent-runtime/types'
@@ -16,6 +15,16 @@ import type { SecurityDecisionRecord } from '@shared/security'
  */
 
 export const SENTINEL_NAME = 'SHOULD_NOT_EXIST.txt'
+
+/**
+ * Where the fixture repositories are built: inside the checkout (`test-results/` is ignored by git and by the
+ * linter), not in the system temp directory. The files are harmless but their text is attack-shaped on purpose
+ * (a `regsvr32 ... scrobj.dll` line, `reg add`, `shutdown`), and an antivirus that scans the temp directory on
+ * write flags them, alerts the user and locks the file, which then fails the cleanup with EPERM. A developer
+ * who works on NEXUS excludes its checkout once; nobody should have to exclude the whole temp directory.
+ * NEXUS_TEST_FIXTURE_ROOT overrides the place.
+ */
+const FIXTURE_ROOT = process.env['NEXUS_TEST_FIXTURE_ROOT'] ?? path.resolve(import.meta.dirname, '../../../test-results/security-fixtures')
 
 const GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' }
 
@@ -40,7 +49,11 @@ export interface FixtureRepo {
 
 /** A git repository whose base commit contains `files`. */
 export function createFixtureRepo(filesOrFn: Record<string, string> | ((outside: string) => Record<string, string>)): FixtureRepo {
-  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'nexus-fixture-')))
+  mkdirSync(FIXTURE_ROOT, { recursive: true })
+  // Inside the checkout a script would inherit NEXUS's own package.json (ES modules). The fixtures are plain
+  // CommonJS, as they were under the temp directory, so the root says so.
+  if (!existsSync(path.join(FIXTURE_ROOT, 'package.json'))) writeFileSync(path.join(FIXTURE_ROOT, 'package.json'), '{ "private": true, "type": "commonjs" }\n')
+  const tmp = realpathSync.native(mkdtempSync(path.join(FIXTURE_ROOT, 'nexus-fixture-')))
   const root = path.join(tmp, 'repo')
   const outside = path.join(tmp, 'outside')
   mkdirSync(root, { recursive: true })
