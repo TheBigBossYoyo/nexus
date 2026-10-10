@@ -176,14 +176,25 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // The runtime is the only writer of the database. Windows read through it.
   const db = openDatabase(dbPath)
   const repos = createRepositories(db)
-  repos.intelligenceArtifacts.reconcileInterrupted((pid) => {
+  const processStopped = (pid: number): boolean => {
     try {
       process.kill(pid, 0)
       return false
     } catch (error) {
       return (error as NodeJS.ErrnoException).code === 'ESRCH'
     }
-  })
+  }
+  repos.intelligenceArtifacts.reconcileInterrupted(processStopped)
+  // Hosted sessions of an earlier start stay quarantined until its processes are proven gone. The first pass
+  // runs here, before the worker records of that start are closed, so that their process ids are on record.
+  const reclaimHostedLeases = (): number =>
+    repos.intelligenceArtifacts.reclaimHostedLeases({
+      currentBootId: identity.bootId,
+      isProcessStopped: processStopped,
+      childPids: (bootId) => repos.workers.listLive().flatMap((w) => (w.bootId === bootId && w.pid !== null ? [w.pid] : [])),
+      settleMs: 30_000,
+    })
+  reclaimHostedLeases()
   const bus = new EventBus(repos.events, repos.transaction)
   const git = new GitService()
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
@@ -836,6 +847,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     },
   })
   const capacityRecoveryTimer = setInterval(() => {
+    try {
+      if (reclaimHostedLeases() > 0) logger('capacity: slots of an earlier start were freed; its processes are gone')
+    } catch (e) {
+      logger(`capacity lease reclamation: ${errorMessage(e)}`)
+    }
     void workerRouting.recover((runId) => orchestrator.resumeRun(runId)).catch((e: unknown) => logger(`capacity recovery: ${errorMessage(e)}`))
   }, 2000)
   capacityRecoveryTimer.unref()

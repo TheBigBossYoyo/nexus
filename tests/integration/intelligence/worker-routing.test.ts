@@ -91,6 +91,54 @@ describe('production worker capacity admission', () => {
     } finally { await h.close() }
   })
 
+  it('after a crash the slots of its sessions stay taken until their processes are proven gone, and are then free again', async () => {
+    const waiters: (() => void)[] = []
+    const h = await harness(async (_spec, ctx) => { await new Promise<void>((resolve) => { waiters.push(resolve) }); await ctx.completeTurn({ text: 'done' }) })
+    let restarted: WorkerCapacityRouting | null = null
+    const open: Promise<unknown>[] = []
+    try {
+      open.push(collect(h.providers.router.startSession(h.spec())))
+      await vi.waitFor(() => expect(h.start).toHaveBeenCalledTimes(1))
+      const store = h.h.repos.intelligenceArtifacts
+      // The runtime dies with a worker session running. Its next start finds the leases held and quarantines them.
+      store.reconcileInterrupted(() => true)
+      restarted = new WorkerCapacityRouting({ repos: h.h.repos, providers: h.providers, usage: h.usage, dataDir: 'worker-fixture', bootId: 'boot-after-crash', maxAgents: () => 1 })
+      const waits = async (): Promise<boolean> => (await collect(h.providers.router.startSession(h.spec()))).some((e) => e.type === 'capacity.wait')
+      const reclaim = (isProcessStopped: (pid: number) => boolean, now: number): number =>
+        store.reclaimHostedLeases({ currentBootId: 'boot-after-crash', isProcessStopped, childPids: () => [4242], settleMs: 30_000, now })
+      const t0 = Date.now()
+
+      // Nothing proves the old session stopped: its slot is not given away.
+      expect(await waits()).toBe(true)
+      expect(reclaim(() => false, t0)).toBe(0)
+      // The old runtime is gone but one of its workers is not.
+      expect(reclaim((pid) => pid !== 4242, t0 + 60_000)).toBe(0)
+      // Everything is gone, but only just: a process that lost its parent is given time to end.
+      expect(reclaim(() => true, t0 + 61_000)).toBe(0)
+      expect(await waits()).toBe(true)
+      expect(h.start).toHaveBeenCalledTimes(1)
+
+      // Proven gone and settled: the provider lease and the local slot are both ended, with the evidence saved.
+      expect(reclaim(() => true, t0 + 31_000 + 60_000)).toBe(2)
+      const host = hostedSessionPool('worker-fixture')
+      const lease = (store.readCheckpoint(`capacity-leases:${host.id}`)!.body as { leases: { id: string; state: string }[] }).leases[0]!
+      expect(lease.state).toBe('INTERRUPTED')
+      expect(store.readCheckpoint(`capacity-stop-confirmed:${lease.id}`)?.body).toMatchObject({ source: 'OWNER_PROCESS_EXITED', bootId: 'worker-boot', childPids: [4242] })
+      expect(reclaim(() => true, t0 + 200_000)).toBe(0)
+
+      // Work is admitted again.
+      open.push(collect(h.providers.router.startSession(h.spec())))
+      await vi.waitFor(() => expect(h.start).toHaveBeenCalledTimes(2))
+      // A lease of the current start is never reclaimed this way, whatever the process check says.
+      expect(reclaim(() => true, t0 + 900_000)).toBe(0)
+    } finally {
+      for (const done of waiters) done()
+      await Promise.allSettled(open)
+      await restarted?.dispose()
+      await h.close()
+    }
+  })
+
   it('does not spend when durable admission cannot be written', async () => {
     const h = await harness()
     try {

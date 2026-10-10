@@ -158,6 +158,80 @@ export class IntelligenceStore {
       return changed
     })()
   }
+  /**
+   * Stop evidence for hosted sessions of an EARLIER start of the runtime. Such a lease is quarantined at boot
+   * and nothing in the new process can speak for the old one, so without this the slot would be held for
+   * ever: with workers claiming the same pool, one crash under load would leave every later session waiting.
+   *
+   * A lease is ended only on positive evidence, never on elapsed time alone: the runtime process that owned
+   * it has exited, every worker process that start recorded has exited, and that was still so after a settle
+   * interval (a process that lost its parent is given time to end). Until then it stays quarantined and is
+   * looked at again. The evidence is saved with the lease's id; a lease of the current start is never touched.
+   */
+  reclaimHostedLeases(input: {
+    currentBootId: string
+    isProcessStopped: (pid: number) => boolean
+    /** Process ids of the workers an earlier start recorded as alive. Asked once per lease, when it is first seen. */
+    childPids: (bootId: string) => number[]
+    settleMs: number
+    now?: number
+  }): number {
+    const now = input.now ?? Date.now()
+    return this.db.transaction(() => {
+      let reclaimed = 0
+      const rows = this.db
+        .prepare("SELECT id FROM capacity_checkpoints WHERE id LIKE 'capacity-leases:%'")
+        .all() as { id: string }[]
+      for (const { id } of rows) {
+        const saved = this.readCheckpoint(id)
+        if (!saved) continue
+        const body = saved.body as {
+          leases: { id: string; bootId: string; state: string; owner?: { kind: string; pid: number } }[]
+        }
+        let changed = false
+        const leases = body.leases.map((lease) => {
+          if (
+            lease.state !== 'QUARANTINED' ||
+            lease.bootId === input.currentBootId ||
+            lease.owner?.kind !== 'HOSTED_SESSION'
+          )
+            return lease
+          const watchKey = `capacity-lease-watch:${lease.id}`
+          const savedWatch = this.readCheckpoint(watchKey)
+          let watch = savedWatch?.body as { pids: number[]; goneSince: number | null } | undefined
+          if (!watch) {
+            watch = { pids: input.childPids(lease.bootId).filter((p) => Number.isInteger(p) && p > 0), goneSince: null }
+            this.checkpoint(watchKey, null, watch)
+          }
+          const gone = [lease.owner.pid, ...watch.pids].every((pid) => input.isProcessStopped(pid))
+          // The interval runs from the first time everything was seen gone, and starts again if anything reappears.
+          const goneSince = gone ? (watch.goneSince ?? now) : null
+          if (goneSince !== watch.goneSince) {
+            const current = this.readCheckpoint(watchKey)
+            if (current) this.checkpoint(watchKey, current.revision, { ...watch, goneSince })
+          }
+          if (goneSince === null || now - goneSince < input.settleMs) return lease
+          if (
+            !this.checkpoint(`capacity-stop-confirmed:${lease.id}`, null, {
+              leaseId: lease.id,
+              bootId: lease.bootId,
+              source: 'OWNER_PROCESS_EXITED',
+              ownerPid: lease.owner.pid,
+              childPids: watch.pids,
+              confirmedAt: new Date(now).toISOString(),
+            })
+          )
+            return lease
+          changed = true
+          reclaimed++
+          return { ...lease, state: 'INTERRUPTED' }
+        })
+        if (changed && !this.checkpoint(id, saved.revision, { leases }))
+          throw new Error('Capacity lease changed during reclamation')
+      }
+      return reclaimed
+    })()
+  }
   saveDirector(invocation: DirectorInvocation, intentId: string): void {
     const intent = this.db
       .prepare('SELECT project_id,raw_text FROM raw_user_intents WHERE id=?')
