@@ -102,7 +102,9 @@ describe('built-in Arena suite', () => {
 
   it('every built-in case has its recorded version and a node-version-independent, glob-free evaluation command', () => {
     // Version 3: the timing evaluator of performance-optimization measures again before it fails (0.6).
-    const VERSIONS: Record<string, number> = { 'performance-optimization': 3 }
+    // Version 4: it no longer re-times a run that is already long, and judges "far too slow" at half the size
+    // first; the unoptimized fixture is failed by its assertions in about 40 s instead of 108 s of a 120 s limit (0.7.2).
+    const VERSIONS: Record<string, number> = { 'performance-optimization': 4 }
     const repos = createRepositories(openDatabase(':memory:'))
     for (const r of registerCases(repos, CASES_DIR, 'builtin')) {
       const d = r.version.definition
