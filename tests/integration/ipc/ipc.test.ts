@@ -36,6 +36,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'chatgpt.status': {},
   'director.invoke': { projectId: 'p1', objective: 'Plan the next release', level: 2 },
   'compilation.projectSending': { projectId: 'p1' },
+  'compilation.decide': { projectId: 'p1', specId: 's1', accept: [0] },
   'compilation.setProjectSending': { projectId: 'p1', allowed: false },
   'director.history': { projectId: 'p1' },
   'director.learning': { projectId: 'p1' },

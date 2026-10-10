@@ -125,6 +125,10 @@ export function createV72Handlers(
       return null
     },
     'compilation.preview': (input) => admission.preview(input),
+    'compilation.decide': ({ projectId, specId, accept }) => {
+      repos.projects.require(projectId)
+      return admission.decide(projectId, specId, accept)
+    },
     'compilation.projectSending': ({ projectId }) => {
       repos.projects.require(projectId)
       return { allowed: admission.sendsToStrategicProvider(projectId) }

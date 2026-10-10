@@ -245,4 +245,9 @@ export interface CompiledTaskSpec {
   createdAt: string
   waitUntil?: number | null
   driftCheck?: { structuredFlags: string[]; semantic: z.infer<typeof IntentDriftSchema> }
+  /**
+   * Set on a specification the user decided: the one that asked for the decision, how many of its additions
+   * the user kept and dropped, and the questions the user saw and chose to go on without answering.
+   */
+  decision?: { decidedAt: string; from: string; accepted: number; dropped: number; acknowledged: string[] }
 }

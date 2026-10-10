@@ -112,6 +112,57 @@ describe('scenario: a mission in the default compilation depth', () => {
     expect(sent.length).toBeGreaterThan(0)
   })
 
+  it('a specification that asks for a decision is decided by the user, and only then starts', async () => {
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('alpha')]), worker: fileWorker }) })
+    const QUESTION = 'Should the theme follow the system setting by default?'
+    const sent: unknown[] = []
+    const complete = async (instructions: string, data: unknown): Promise<unknown> => {
+      sent.push(data)
+      return instructions.startsWith('INTENT_DRIFT_CHECK')
+        ? { changesIntent: false, expandsScope: false, conflicts: [], unjustifiedRequirements: [] }
+        : { recommendations: [
+            { text: ADVICE, kind: 'CONSTRAINT', provenance: 'DIRECTOR_RECOMMENDED', evidenceRefs: [], requiresDecision: false },
+            { text: PLANNING_ADVICE, kind: 'VERIFICATION', provenance: 'DIRECTOR_RECOMMENDED', evidenceRefs: [], requiresDecision: true },
+          ], scopeChanged: false, ambiguities: [QUESTION] }
+    }
+    const connection = { status: () => ({ state: 'SIGNED_IN_PLAN_USAGE', activeProfile: 'test', model: 'fake-gpt', capacity: null, includedOnlyConfirmed: true, profiles: [], models: [], error: null }), provider: () => ({ complete, usage: () => null }), canInfer: () => true } as unknown as ChatGPTConnection
+
+    const asked = await invoke(connection, 'compilation.preview', { projectId: h.project.id, raw: REQUEST, mode: 'AUTO' })
+    expect(asked.status).toBe('USER_DECISION_REQUIRED')
+    // Undecided, nothing starts.
+    await expect(invoke(connection, 'runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: REQUEST, compiledTaskSpecId: asked.id })).rejects.toThrow()
+    expect(h.runtime.sessions).toEqual([])
+    // A decision names additions the specification has, and only a specification that asks can be decided.
+    await expect(invoke(connection, 'compilation.decide', { projectId: h.project.id, specId: asked.id, accept: [5] })).rejects.toThrow()
+
+    // The user keeps the first addition and drops the second.
+    const calls = sent.length
+    const decided = await invoke(connection, 'compilation.decide', { projectId: h.project.id, specId: asked.id, accept: [0] })
+    expect(decided).toMatchObject({ status: 'READY', rawIntent: REQUEST, ambiguities: [] })
+    expect(decided.id).not.toBe(asked.id)
+    expect(decided.recommendations.map((r) => r.text)).toEqual([ADVICE])
+    expect(decided.decision).toMatchObject({ from: asked.id, accepted: 1, dropped: 1, acknowledged: expect.arrayContaining([QUESTION]) })
+    expect(decided.reasons).toContain('USER_DECIDED')
+    // Deciding asks no provider, and cannot be done twice.
+    expect(sent.length).toBe(calls)
+    await expect(invoke(connection, 'compilation.decide', { projectId: h.project.id, specId: asked.id, accept: [] })).rejects.toThrow()
+    await expect(invoke(connection, 'compilation.decide', { projectId: h.project.id, specId: decided.id, accept: [] })).rejects.toThrow()
+    // The same request previewed again is the decided specification, with no new call.
+    expect((await invoke(connection, 'compilation.preview', { projectId: h.project.id, raw: REQUEST, mode: 'AUTO' })).id).toBe(decided.id)
+    expect(sent.length).toBe(calls)
+
+    const run = await invoke(connection, 'runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: REQUEST, compiledTaskSpecId: decided.id })
+    expect((await h.waitForState(run.id, ['completed', 'paused', 'failed'])).state).toBe('completed')
+    const planner = sessionsOf(h, 'planner')[0]!.prompt
+    expect(planner).toContain(ADVICE)
+    expect(planner).toContain('The user read these additions and chose to keep them')
+    expect(planner).toContain(QUESTION)
+    expect(planner).not.toContain(PLANNING_ADVICE)
+    expect(sessionsOf(h, 'worker')[0]!.prompt).not.toContain(PLANNING_ADVICE)
+    // The specification that asked stays on record.
+    expect((await invoke(connection, 'compilation.history', { projectId: h.project.id })).map((s) => s.id)).toEqual(expect.arrayContaining([asked.id, decided.id]))
+  })
+
   it('with no ChatGPT connection: nothing is created and nothing runs from an uncompiled request', async () => {
     h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('alpha')]), worker: fileWorker }) })
     await expect(invoke(undefined, 'runs.create', { projectId: h.project.id, mode: 'build', preset: 'balanced', prompt: REQUEST })).rejects.toThrow()

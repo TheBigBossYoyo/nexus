@@ -151,7 +151,7 @@ export function MissionComposer({ project }: { project: Project }) {
         setConfirmOpen(false)
         setBlockerMessage(spec.status === 'WAITING_FOR_PROVIDER'
           ? 'Overnight mission has not started. Configure the required provider, then preview again.'
-          : 'Overnight mission has not started. Clarify the request and preview again to resolve the required decision.')
+          : 'Overnight mission has not started. The specification needs your decision: open the specification preview above, keep or drop what would be added, then start again.')
         requestAnimationFrame(() => blocker.current?.focus())
         return
       }
@@ -198,7 +198,7 @@ export function MissionComposer({ project }: { project: Project }) {
       if (spec && spec.status !== 'READY') {
         setBlockerMessage(spec.status === 'WAITING_FOR_PROVIDER'
           ? 'Mission has not started. Configure the required provider, then preview again.'
-          : 'Mission has not started. Clarify the request and preview again to resolve the required decision.')
+          : 'Mission has not started. The specification needs your decision: open the specification preview above, keep or drop what would be added, then start again.')
         requestAnimationFrame(() => blocker.current?.focus())
         return
       }

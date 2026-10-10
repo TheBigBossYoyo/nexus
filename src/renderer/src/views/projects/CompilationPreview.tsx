@@ -44,6 +44,19 @@ export function CompilationPreview({
     onSettled: () => client.invalidateQueries({ queryKey: ['project-sending', projectId] }),
   })
   const withheld = sending.data?.allowed === false
+  // The decision on a specification that asks for one: which of its additions the user keeps. All are kept
+  // unless unchecked; the choice is the user's and is made here, nowhere else.
+  const [kept, setKept] = useState<Set<number>>(new Set())
+  useEffect(() => {
+    setKept(new Set(spec?.status === 'USER_DECISION_REQUIRED' ? spec.recommendations.map((_, i) => i) : []))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec?.id])
+  // An addition that needs a decision is listed with the questions as well; here it is shown once, as an addition.
+  const questions = spec ? spec.ambiguities.filter((q) => !spec.recommendations.some((r) => r.text === q)) : []
+  const decide = useMutation({
+    mutationFn: (accept: number[]) => api.invoke('compilation.decide', { projectId, specId: spec!.id, accept }),
+    onSuccess: onSpec,
+  })
   // A project that sends nothing starts from the depth that needs no provider; the user can still choose another.
   useEffect(() => {
     if (withheld && mode === 'AUTO') onModeChange('EXACT')
@@ -130,7 +143,7 @@ export function CompilationPreview({
                 : spec.status === 'WAITING_FOR_PROVIDER'
                   ? 'Waiting for a provider'
                   : spec.status === 'USER_DECISION_REQUIRED'
-                    ? 'A user decision is required'
+                    ? 'Your decision is needed before this starts'
                     : 'Specification preview ready'
             }
           >
@@ -155,9 +168,59 @@ export function CompilationPreview({
               </details>
             ) : null}
             {spec.status === 'USER_DECISION_REQUIRED' ? (
-              <p>
-                Clarify the original request and preview again before starting. Generated
-                recommendations are not treated as confirmed user requirements.
+              <div className="mt-1 space-y-2" data-testid="spec-decision">
+                {questions.length ? (
+                  <>
+                    <p className="font-medium text-text-primary">Questions this raised</p>
+                    <ul className="list-disc pl-4">
+                      {questions.map((question) => (
+                        <li key={question} className="break-words">{question}</li>
+                      ))}
+                    </ul>
+                    <p>If one of them matters, answer it in your request and preview again. Otherwise decide below: the questions are then recorded as seen and left open.</p>
+                  </>
+                ) : null}
+                {spec.recommendations.length ? (
+                  <fieldset className="space-y-1">
+                    <legend className="font-medium text-text-primary">What would be added to your request</legend>
+                    {spec.recommendations.map((r, i) => (
+                      <label key={i} className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={kept.has(i)}
+                          onChange={(event) => {
+                            const next = new Set(kept)
+                            if (event.currentTarget.checked) next.add(i)
+                            else next.delete(i)
+                            setKept(next)
+                          }}
+                        />
+                        <span className="break-words">
+                          {r.text} <span className="text-text-muted">({kindLabel(r.kind)}, {provenanceLabel(r.provenance)})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="primary" loading={decide.isPending} onClick={() => decide.mutate([...kept])} data-testid="spec-decide-keep">
+                    {kept.size > 0 ? `Keep the ${kept.size} checked and continue` : 'Continue with my request only'}
+                  </Button>
+                  {kept.size > 0 ? (
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate([])} data-testid="spec-decide-none">
+                      Continue with my request only
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="text-text-muted">Your request stays as you wrote it. What you keep is given to the agents as additions you accepted; what you leave out is dropped.</p>
+                {decide.isError ? <ErrorNote error={decide.error} /> : null}
+              </div>
+            ) : null}
+            {spec.decision ? (
+              <p data-testid="spec-decided">
+                You decided this specification: {spec.decision.accepted} addition(s) kept, {spec.decision.dropped} dropped
+                {spec.decision.acknowledged.length ? `, ${spec.decision.acknowledged.length} question(s) left open` : ''}.
               </p>
             ) : null}
             {spec.waitUntil ? (

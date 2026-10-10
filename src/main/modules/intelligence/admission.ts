@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   CompilationMode,
   CompilationSelection,
@@ -384,6 +384,38 @@ export class TaskAdmissionService {
       } finally {
         this.compiling.delete(identity)
       }
+    })
+  }
+  /**
+   * The user's decision on a specification that asked for one. The request stays as written. Of what was
+   * added to it the user keeps the additions they name and drops the rest; the questions the specification
+   * raised are recorded as seen and left unanswered. The result is ready, and says it was decided.
+   * Only a user entry point calls this: no model and no engine can decide for the user.
+   */
+  decide(projectId: string, specId: string, accept: readonly number[]): Promise<CompiledTaskSpec> {
+    return this.operations.run(async () => {
+      const spec = this.repos.intelligenceArtifacts.compilation(projectId, specId)
+      if (!spec || spec.status !== 'USER_DECISION_REQUIRED')
+        throw new NexusError('invalid_state', 'This specification does not ask for a decision.')
+      const keep = new Set(accept)
+      if ([...keep].some((i) => !Number.isInteger(i) || i < 0 || i >= spec.recommendations.length))
+        throw new NexusError('invalid_input', 'The decision names an addition the specification does not have.')
+      const recommendations = spec.recommendations.filter((_, i) => keep.has(i)).map((r) => ({ ...r, requiresDecision: false }))
+      // An addition that needed a decision is listed with the questions too; it is an addition, kept or dropped
+      // above, and a dropped one must not come back to the agents as an open question.
+      const questions = spec.ambiguities.filter((q) => !spec.recommendations.some((r) => r.text === q))
+      const now = new Date().toISOString()
+      const decided: CompiledTaskSpec = {
+        ...spec,
+        id: randomUUID(),
+        status: 'READY',
+        reasons: [...spec.reasons.filter((r) => r !== 'SPECIFICATION_REQUIRES_BOUNDED_REFINEMENT'), 'USER_DECIDED'],
+        recommendations,
+        ambiguities: [],
+        decision: { decidedAt: now, from: spec.id, accepted: recommendations.length, dropped: spec.recommendations.length - recommendations.length, acknowledged: questions },
+        createdAt: now,
+      }
+      return this.repos.intelligenceArtifacts.decideCompilation(decided, spec.id)
     })
   }
   validate(request: CompilationRequest, specId: string): Promise<CompiledTaskSpec> {

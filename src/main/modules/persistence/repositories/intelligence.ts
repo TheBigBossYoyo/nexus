@@ -408,6 +408,30 @@ export class IntelligenceStore {
       return this.hydrateCompilation(JSON.stringify(body), intentId)
     })()
   }
+  /**
+   * The user decided a specification that asked for a decision. The decided one becomes the specification of
+   * that request (same identity, same intent, same context references); the one that asked stays on record
+   * under its own id.
+   */
+  decideCompilation(decided: CompiledTaskSpec, fromId: string): CompiledTaskSpec {
+    return this.db.transaction(() => {
+      const row = this.db
+        .prepare("SELECT body,intent_id,identity FROM intelligence_artifacts WHERE project_id=? AND id=? AND kind='compilation'")
+        .get(decided.projectId, fromId) as { body: string; intent_id: string | null; identity: string } | undefined
+      if (!row) throw new Error('The specification to decide is not on record')
+      const from = this.hydrateCompilation(row.body, row.intent_id)
+      if (from.status !== 'USER_DECISION_REQUIRED' || row.identity !== decided.identity || decided.status !== 'READY')
+        throw new Error('Only a specification that asks for a decision can be decided')
+      this.db.prepare('UPDATE intelligence_artifacts SET identity=? WHERE id=?').run(`decided:${fromId}`, fromId)
+      const { rawIntent: _raw, dependencies: _refs, userMetadata: _metadata, intentId: _intent, ...body } = decided
+      this.db
+        .prepare("INSERT INTO intelligence_artifacts(id,project_id,intent_id,kind,identity,body,created_at) VALUES (?,?,?,'compilation',?,?,?)")
+        .run(decided.id, decided.projectId, row.intent_id, decided.identity, JSON.stringify(body), decided.createdAt)
+      const put = this.db.prepare('INSERT INTO compilation_context_refs(artifact_id,context_id,context_version) VALUES (?,?,?)')
+      for (const ref of from.dependencies) put.run(decided.id, ref.id, ref.version)
+      return this.hydrateCompilation(JSON.stringify(body), row.intent_id)
+    })()
+  }
   listCompilations(projectId: string, offset = 0): CompiledTaskSpec[] {
     const rows = this.db
       .prepare(

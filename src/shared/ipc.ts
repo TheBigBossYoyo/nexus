@@ -278,6 +278,8 @@ export const ipcInputs = {
     .strict(),
   'chatgpt.disconnect': Empty,
   'chatgpt.manageUsage': Empty,
+  /** The user's decision on a specification that asked for one: the additions to keep, by position. */
+  'compilation.decide': z.object({ projectId: Id, specId: Id, accept: z.array(z.number().int().min(0).max(39)).max(40) }).strict(),
   'compilation.preview': z
     .object({
       projectId: Id,
@@ -1040,6 +1042,7 @@ export interface IpcOutputs {
   'chatgpt.disconnect': ChatGPTStatus
   'chatgpt.manageUsage': null
   'compilation.preview': CompiledTaskSpec
+  'compilation.decide': CompiledTaskSpec
   'compilation.admission': CompiledTaskSpec | null
   'compilation.history': CompiledTaskSpec[]
   'compilation.validate': CompiledTaskSpec
