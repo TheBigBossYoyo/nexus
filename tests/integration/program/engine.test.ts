@@ -452,6 +452,38 @@ describe('program engine: findings of the 0.4 audit', () => {
   const files = (ref: string): string[] => execFileSync('git', ['ls-tree', '--name-only', '-r', ref], { cwd: rig.repo, encoding: 'utf8' }).trim().split('\n')
   const fileOf = (runId: string): string => `mission-${runId.replace(/-/g, '').slice(0, 8)}.txt`
 
+  it('a judgment written as prose is asked for again with what was wrong, and the program goes on when the answer is usable', async () => {
+    rig = makeProgramRig()
+    rig.host.answers.plan = [planJson([milestone('core')])]
+    // What a real verifier wrote: a correct judgment, as a report. Then, asked again, the JSON object.
+    const PROSE = ['**Verdict: milestone met. All acceptance criteria are satisfied.**', '', '| Criterion | Status | Evidence |', '|---|---|---|', '| core works | Met | src/core.js |', '', '**Proposed memory entry**', '- Title: Core interface'].join('\n')
+    rig.host.answers.verify = [PROSE, judgmentJson('accepted')]
+    const program = await rig.program()
+    const done = await rig.untilState(program.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+    const verifies = rig.host.created.filter((c) => c.kind === 'verify').map((c) => c.input.prompt)
+    expect(verifies).toHaveLength(2)
+    // The first request carries no correction; the second says what was wrong and how to answer.
+    expect(verifies[0]).not.toContain('YOUR PREVIOUS ANSWER')
+    expect(verifies[0]).toContain('A program reads your answer, not a person')
+    expect(verifies[1]).toContain('YOUR PREVIOUS ANSWER TO THIS REQUEST COULD NOT BE USED')
+    expect(verifies[1]).toContain('did not return a JSON object')
+    expect(verifies[1]).toContain('no headings, no table')
+    expect(rig.repos.milestones.getByKey(program.id, 'core')?.state).toBe('COMPLETED')
+  })
+
+  it('a second unusable judgment still blocks the program: nothing is accepted without one', async () => {
+    rig = makeProgramRig()
+    rig.host.answers.plan = [planJson([milestone('core')])]
+    rig.host.answers.verify = ['The milestone looks fine to me.']
+    const program = await rig.program()
+    const done = await rig.untilState(program.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state).toBe('BLOCKED')
+    expect(done.blockedReason).toContain('did not return a JSON object')
+    expect(rig.repos.milestones.getByKey(program.id, 'core')?.state).toBe('VERIFYING')
+    expect(rig.host.created.filter((c) => c.kind === 'verify')).toHaveLength(2)
+  })
+
   it('a retry after other milestones were accepted starts from the accepted work, and the branch never loses a milestone', async () => {
     rig = makeProgramRig()
     rig.host.answers.plan = [planJson([milestone('a'), milestone('b')])]
