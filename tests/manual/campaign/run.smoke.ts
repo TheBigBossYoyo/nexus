@@ -4,6 +4,10 @@
 //   NEXUS_CAMPAIGN_ARM    070        the 0.7.0 sources (run from a checkout of v0.7.0)
 //                         071        the 0.7.1 sources with their default settings
 //                         071-graph  the 0.7.1 sources with the Context Graph in agent context
+//                         072        the 0.7.2 sources, mission admitted in EXACT depth
+//                         072-auto   the 0.7.2 sources, mission admitted in the default depth; the specification is
+//                                    compiled by the built application on the profile NEXUS_CAMPAIGN_LIVE_PROFILE
+//                                    (a data directory signed in to ChatGPT, with the user's confirmation on)
 //   NEXUS_CAMPAIGN_OUT    directory for the evidence file (default docs/acceptance/campaign)
 //
 // The same file runs against both versions: it uses only what 0.7.0 already had, and it measures through
@@ -16,6 +20,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { _electron as electron } from '@playwright/test'
+import type { CompiledTaskSpec } from '@shared/intelligence'
+import { TaskAdmissionService } from '@main/modules/intelligence/admission'
 import type { Project } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
 import { PROGRAM_POLICY_PRESETS } from '@shared/program'
@@ -32,11 +39,17 @@ import { ProgramEngine } from '@main/modules/program'
 import { WorkspaceEngine } from '@main/modules/workspace'
 import { CAMPAIGN_TASKS, type CampaignTask, type Files, type Repo } from './tasks'
 
-type Arm = '070' | '071' | '071-graph'
+type Arm = '070' | '071' | '071-graph' | '072' | '072-auto'
 const ARMS: Record<Arm, { version: string; what: string }> = {
   '070': { version: '0.7.0', what: 'NEXUS 0.7.0 sources, default settings' },
   '071': { version: '0.7.1', what: 'NEXUS 0.7.1 sources, Context Graph off for agents (the default until the campaign ended)' },
   '071-graph': { version: '0.7.1', what: 'NEXUS 0.7.1 sources, Context Graph in agent context' },
+  // 0.7.2. Its defaults (the Context Graph on, as 0.7.1 released it). A mission is admitted with a specification:
+  // `072` in EXACT depth, which asks no provider and is what a project kept away from OpenAI gets; `072-auto` in
+  // the default depth, compiled by the real application on the user's ChatGPT connection before the mission runs.
+  // A program or a workspace task runs on the 0.7.2 engines as this runner builds them, without admission.
+  '072': { version: '0.7.2-development', what: 'NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)' },
+  '072-auto': { version: '0.7.2-development', what: 'NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection' },
 }
 
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
@@ -166,6 +179,67 @@ async function usageWindows(real: ClaudeSdkRuntime): Promise<{ limitType: string
   }
 }
 
+class NotStarted extends Error {}
+
+const specFile = (taskKey: string): string => join(resolve(process.env['NEXUS_CAMPAIGN_SPECS'] ?? join(process.cwd(), 'docs/acceptance/campaign/specs-072')), `${taskKey}.json`)
+
+/**
+ * Compiles the request in the default depth with the built application, on the profile that is signed in to
+ * ChatGPT. Nothing is sent unless the application itself reports the connection signed in, a model chosen and
+ * the paid-credit confirmation switched on by the user; this function never changes that switch. The project is
+ * removed from the profile again. Returns the specification and what the compilation cost.
+ */
+async function compileWithApplication(repoDir: string, prompt: string): Promise<{ spec: CompiledTaskSpec; record: Record<string, unknown> }> {
+  const dataDir = process.env['NEXUS_CAMPAIGN_LIVE_PROFILE']
+  if (!dataDir) throw new Error('Set NEXUS_CAMPAIGN_LIVE_PROFILE to the data directory signed in to ChatGPT.')
+  const env: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== 'NEXUS_FAKE_RUNTIME' && k !== 'NEXUS_FAKE_POWER') env[k] = v
+  env['NEXUS_DATA_DIR'] = resolve(dataDir)
+  env['NEXUS_WINDOW_OFFSCREEN'] = '1'
+  const app = await electron.launch({ args: ['.'], cwd: process.cwd(), env })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForSelector('[data-testid="app-shell"]', { timeout: 60_000 })
+    const call = async <T,>(channel: string, input: unknown = {}): Promise<T> => {
+      const result = (await page.evaluate(([c, i]) => (globalThis as unknown as { nexus: { invoke(c: unknown, i: unknown): Promise<{ ok: boolean; value: unknown; error?: { code: string; message: string } }> } }).nexus.invoke(c, i), [channel, input] as const))
+      if (!result.ok) throw new Error(`${channel}: ${result.error?.code} ${result.error?.message}`)
+      return result.value as T
+    }
+    for (const began = Date.now(); ; await sleep(250)) {
+      const state = await page.evaluate(() => (globalThis as unknown as { nexus: { invoke(c: string, i: unknown): Promise<{ ok: boolean; value: { phase: string } }> } }).nexus.invoke('desktop.connection', {}))
+      if (state.ok && state.value.phase === 'READY') break
+      if (Date.now() - began > 120_000) throw new Error('The runtime of the live profile did not become ready')
+    }
+    const status = await call<{ state: string; model: string | null; includedOnlyConfirmed: boolean }>('chatgpt.status')
+    if (status.state !== 'SIGNED_IN_PLAN_USAGE' || !status.model || status.includedOnlyConfirmed !== true) throw new Error('The application does not report a ChatGPT connection the user has switched on for sending')
+    const project = await call<{ id: string }>('projects.open', { path: repoDir })
+    try {
+      const began = Date.now()
+      const spec = await call<CompiledTaskSpec>('compilation.preview', { projectId: project.id, raw: prompt, mode: 'AUTO' })
+      const ms = Date.now() - began
+      const routing = spec.intentId ? await call<{ stage: string; provider: string | null; model: string | null; state: string; consumption: string; usage?: unknown }[]>('director.routing', { projectId: project.id, operationId: spec.intentId }) : []
+      return {
+        spec,
+        record: {
+          requestedMode: spec.requestedMode, mode: spec.mode, status: spec.status, reasons: spec.reasons, ms,
+          recommendations: spec.recommendations.length, recommendationChars: JSON.stringify(spec.recommendations).length,
+          byKind: spec.recommendations.reduce<Record<string, number>>((n, r) => ({ ...n, [r.kind]: (n[r.kind] ?? 0) + 1 }), {}),
+          ambiguities: spec.ambiguities,
+          contextItems: spec.dependencies.length,
+          note: 'The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.',
+          providerCalls: routing.filter((r) => r.consumption !== 'NOT_SENT').map((r) => ({ stage: r.stage, provider: r.provider, model: r.model, state: r.state, usage: r.usage ?? null })),
+        },
+      }
+    } finally {
+      await call('projects.remove', { projectId: project.id }).catch(() => undefined)
+    }
+  } finally {
+    await app.firstWindow().then((page) => page.evaluate(() => (globalThis as unknown as { nexus: { invoke(c: string, i: unknown): Promise<unknown> } }).nexus.invoke('runtime.stop', {}))).catch(() => undefined)
+    await sleep(3000)
+    await app.close().catch(() => undefined)
+  }
+}
+
 async function runTask(task: CampaignTask, arm: Arm) {
   const root = mkdtempSync(join(tmpdir(), `nexus-campaign-${task.key}-${arm}-`))
   const repoDirs = task.repos.map((r) => initRepo(root, r))
@@ -215,17 +289,33 @@ async function runTask(task: CampaignTask, arm: Arm) {
   const windowsBefore = await usageWindows(real)
   const started = Date.now()
   const deadline = started + task.budgetMinutes * 60_000
-  let finalState: string
+  let finalState: string = 'not started'
   let timedOut = false
   let detail: Record<string, unknown> = {}
   const refs: (string | null)[] = task.repos.map(() => null)
   let disposeEngine: (() => Promise<void>) | null = null
+  let compilation: Record<string, unknown> | null = null
 
   try {
     if (task.kind === 'mission') {
       const project = await projectService.open(repoDirs[0] as string)
       seed(project, task.repos[0] as Repo)
-      const run = await orchestrator.createRun({ projectId: project.id, mode: task.mode, preset: 'balanced', prompt: task.prompt })
+      // 0.7.2: a mission is admitted with a specification before it runs.
+      let spec: CompiledTaskSpec | null = null
+      if (arm === '072') spec = await new TaskAdmissionService(repos, gitService).preview({ projectId: project.id, raw: task.prompt, mode: 'EXACT' })
+      if (arm === '072-auto') {
+        // Compiled beforehand by the built application (NEXUS_CAMPAIGN_COMPILE=1, in the checkout that has it),
+        // so that the agents' run can happen in another checkout while that one is worked on.
+        const saved = JSON.parse(readFileSync(specFile(task.key), 'utf8')) as { spec: CompiledTaskSpec; record: Record<string, unknown> }
+        compilation = saved.record
+        spec = saved.spec
+      }
+      if (spec && spec.status !== 'READY') {
+        // The application would not start this mission: it asks the user first. Nothing is run here either.
+        finalState = `not started: the specification is ${spec.status}`
+        throw new NotStarted()
+      }
+      const run = await orchestrator.createRun({ projectId: project.id, mode: task.mode, preset: 'balanced', prompt: task.prompt, ...(spec ? { overrides: { compiledTaskSpec: spec } } : {}) })
       for (;;) {
         const state = repos.runs.require(run.id).state
         finalState = state
@@ -321,7 +411,7 @@ async function runTask(task: CampaignTask, arm: Arm) {
       }
     }
   } catch (e) {
-    finalState = `harness error: ${String(e).slice(0, 600)}`
+    if (!(e instanceof NotStarted)) finalState = `harness error: ${String(e).slice(0, 600)}`
   }
   const durationMs = Date.now() - started
 
@@ -378,6 +468,8 @@ async function runTask(task: CampaignTask, arm: Arm) {
     category: task.category,
     arm,
     armIs: ARMS[arm].what,
+    // 0.7.2, default depth: what the compilation was and cost, before any agent ran.
+    compilation,
     nexusVersion: (JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }).version,
     nexusCommit: git(process.cwd(), 'rev-parse', 'HEAD'),
     startedAt: new Date(started).toISOString(),
@@ -452,6 +544,22 @@ describe('real quality campaign: one task, one arm', () => {
     const task = CAMPAIGN_TASKS.find((t) => t.key === process.env['NEXUS_CAMPAIGN_TASK'])
     if (!task || !ARMS[arm]) throw new Error(`Set NEXUS_CAMPAIGN_TASK (${CAMPAIGN_TASKS.map((t) => t.key).join(', ')}) and NEXUS_CAMPAIGN_ARM (${Object.keys(ARMS).join(', ')}).`)
     const version = (JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }).version
+    if (process.env['NEXUS_CAMPAIGN_COMPILE'] === '1') {
+      // The first half of the `072-auto` arm: the request of the task, compiled in the default depth on the task's
+      // own repository by the built application. The specification and its cost are kept for the run.
+      expect(version).toBe(ARMS['072-auto'].version)
+      if (task.kind !== 'mission') throw new Error('Only a mission is admitted this way by this runner.')
+      const root = mkdtempSync(join(tmpdir(), `nexus-campaign-compile-${task.key}-`))
+      try {
+        const compiled = await compileWithApplication(initRepo(root, task.repos[0] as Repo), task.prompt)
+        mkdirSync(dirname(specFile(task.key)), { recursive: true })
+        writeFileSync(specFile(task.key), `${JSON.stringify({ task: task.key, compiledAt: new Date().toISOString(), nexusCommit: git(process.cwd(), 'rev-parse', 'HEAD'), ...compiled }, null, 2)}\n`)
+        console.log(`${task.key} compiled: ${String(compiled.record['status'])}, ${String(compiled.record['recommendations'])} recommendations, ${(compiled.record['ambiguities'] as string[]).length} questions`)
+      } finally {
+        rmSync(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
+      }
+      return
+    }
     // An arm measured on the wrong sources is worse than no measurement.
     expect(version, `arm ${arm} must run on NEXUS ${ARMS[arm].version}`).toBe(ARMS[arm].version)
 
