@@ -16,7 +16,7 @@ saved schema, and every inference call site goes through one provider factory th
 
 | # | Sev | Finding | Checked | State |
 | --- | --- | --- | --- | --- |
-| 1.1 | HIGH | One 401 latches the capacity pool in AUTH_REQUIRED until a full browser sign-in; no token refresh or retry is tried, and the card still says "Connected" | | OPEN |
+| 1.1 | HIGH | One 401 latches the capacity pool in AUTH_REQUIRED until a full browser sign-in; no token refresh or retry is tried, and the card still says "Connected" | | FIXED `7d2af7d`: one refresh and one more send after a 401; if either is refused the pool is held and the card reads as needing a sign-in. Four tests |
 | 1.2 | MEDIUM | Local or deterministic failures (output that is not JSON, a schema error on a usage field, an oversize request, a refresh network error, a shutdown abort) are recorded as provider capacity failures with a 5 minute to 6 hour backoff | | OPEN |
 | 1.3 | MEDIUM | A pending sign-in cannot be cancelled: every button is disabled for up to 600 s after the browser tab is closed | | OPEN |
 | 1.4 | MEDIUM | A storage fault or an undecryptable credential file cannot be recovered inside the app; one transient write failure makes it stick until restart | | OPEN |
@@ -111,7 +111,7 @@ passed: `runs.resume`, `recover(resume)`, `program.resume`, the workspace resume
 | 6.1 | CRITICAL | A rotated worker loses the earlier instructions: the prompt that resumes from a handoff holds the task, its criteria and the model-written handoff, and not the admitted history, the original request or the mission criteria. "Never touch the public API" survives a rotation only if the handoff happens to restate it | | FIXED `dc8e0a8`: `orchestrator/instructions.ts`; the resume from a handoff carries the request, every amendment and the mission criteria |
 | 6.2 | HIGH | A repair worker is a new child task whose prompt gets only the instructions not yet delivered to its parent; the history is keyed on the parent and never read. Reviewer and verifier prompts have no admitted-request input, so no reviewer can flag a violated instruction | | FIXED `dc8e0a8`: a repair, the reviewer, the verifier and the mission verifier are given the instructions in force; a child task's pack carries its parent's |
 | 6.3 | HIGH | Snapshot: the mission planner runs in the live checkout while the spec, the base commit and the workers' worktrees are at the admitted commit. If the checkout moves during planning, a pause or a wait, the plan is written against the new state and executed on the old. The workspace planner's read-only run has no base reference either | | PARTLY FIXED: the mission planner reads the run's integration worktree at the base commit, with a test that moves the checkout while it plans. The workspace planner's read-only run still reads the checkout: OPEN |
-| 6.4 | HIGH | A program replan note is one slot: a second note before the replanner starts overwrites the first, the note is deleted when the replan budget is exhausted, and only the latest reaches the replanner; milestone missions never see it | | OPEN |
+| 6.4 | HIGH | A program replan note is one slot: a second note before the replanner starts overwrites the first, the note is deleted when the replan budget is exhausted, and only the latest reaches the replanner; milestone missions never see it | | FIXED `8339119`: notes are a list; all pending ones reach the reassessment, all of them the following missions; a note is refused at once when the budget is used. Two tests |
 | 6.5 | MEDIUM | The instruction history is an unbounded transcript, not a current state: every amendment is concatenated with no cap, each carries the raw text twice, and order is first-seen when a cached spec is reused | | PARTLY FIXED `dc8e0a8`: the new section is bounded, each instruction once, what is cut is counted. The older "Admitted user task requests" section of a worker's first pack is unchanged: OPEN |
 | 6.6 | MEDIUM | Accepted text is cut silently later: replan feedback accepted to 10,000 characters and cut to 6,000 in the planner prompt; the request accepted to 20,000 and cut to 8,000 for the critic, the synthesizer and the audit; a task description accepted to 20,000 and cut to 8,000 | | OPEN |
 | 6.7 | MEDIUM | An amendment is bound before the action takes effect: if the orchestrator then refuses, the history keeps an instruction that never applied | | OPEN |
@@ -138,7 +138,7 @@ on four calls, which means those kill-and-restart scenarios do not exercise the 
 | 14.1 | HIGH | A slot leaks for the life of the runtime after an unexpected worker exit: `onExit` ends the session as crashed and never sets the stop as confirmed (only `failWorker` does), so the lease is quarantined and nothing can confirm it. Also when no worker could start or the grant failed. After a few such exits every session waits | | FIXED `edc5577`: a worker's exit confirms the stop of its session, as does a session that never reached a worker |
 | 14.2 | HIGH | A capacity wait consumes a task attempt: the end reason `capacity` is not resumable, so every resume counts as a new attempt (a quota wait does not). After a few waits the first real failure gives up, and the model tier is escalated from the second attempt | | FIXED `edc5577`: a session that only waited keeps the task's attempt; scenario test with three waits |
 | 14.3 | HIGH | Programs and workspace missions block on a capacity pause (as 4.1 and 4.2). Related race: the engines resume a capacity-paused run themselves while the recovery timer does too, and `resumeRun` checks the state once, awaits, then sets it; two resumes of a planning run can start planning twice | partly: see 4.1, 4.2 | FIXED `edc5577`: see 4.1 and 4.2; the engines no longer resume a capacity-paused run themselves |
-| 14.4 | HIGH/MEDIUM | Shutdown: admission is closed first, then up to 30 s of other waits pass before the orchestrator sets a stop reason. A session started in that window ends stopped with no reason, which is read as crashed: the task fails and an attempt is consumed | | OPEN |
+| 14.4 | HIGH/MEDIUM | Shutdown: admission is closed first, then up to 30 s of other waits pass before the orchestrator sets a stop reason. A session started in that window ends stopped with no reason, which is read as crashed: the task fails and an attempt is consumed | | FIXED `a42bec2` by the order of the stop: admission closes after the orchestrator has given its sessions a stop reason. No test: the stop sequence of the runtime core has no harness below the runtime process |
 | 14.5 | MEDIUM | Wait checkpoints go stale: the ENDED state is declared and never written; a crash or a failed write after a resume leaves a WAITING record that a later pause of the run re-reads; the loop has no per-run try, so one run whose resume throws starves the others every 2 s | | FIXED `1403123`: per-run try, leftover waits closed (ENDED is now written), a wait is marked before the resume and put back if it fails |
 | 14.6 | MEDIUM | During an outage the recovery asks the runtime for the account every 2 s for every wait (a child process each time, no cache), and with fewer free slots than waiting runs it resumes them all | | FIXED `1403123`: the account answer is kept for 30 s; one run per pass |
 | 14.7 | MEDIUM | After a hard kill of the runtime the old worker can still be alive for some seconds; the next start may resume the task on the same worktree while it runs (not reproduced) | | OPEN |
@@ -178,7 +178,7 @@ bounded by the authorizer, the command classifier and the content inspector, not
 
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
-| 7.1 | MEDIUM | The compiler is given graph notes as title and summary without their trust word: an unverified agent note stands beside a verified fact, and can come back as a recommendation of provenance CONTEXT_DERIVED that needs no decision, in every planner and worker prompt of the run | | OPEN |
+| 7.1 | MEDIUM | The compiler is given graph notes as title and summary without their trust word: an unverified agent note stands beside a verified fact, and can come back as a recommendation of provenance CONTEXT_DERIVED that needs no decision, in every planner and worker prompt of the run | | FIXED `8253cb5`: agent notes are not given to the compiler; what is given carries its type and trust word. Test |
 | 7.2 | MEDIUM | READY rests on what the model reports (scope changed, ambiguities, decision needed); the drift check is asked of the same provider, and its code half is five patterns that know nothing of a new dependency, a secret file, disabled tests or a network call | | OPEN |
 | 7.3 | LOW | In TECHNICAL and COUNCIL the synthesis replaces the output: a constraint or non-goal of the technical pass can be dropped. Decision flags and blockers accumulate and are not lost | | OPEN |
 | 7.4 | LOW | `renderCompiledAdvice` serializes with no replacement of `<`, format characters or U+2028/2029, unlike `withAdmittedIntent` | | OPEN |
@@ -195,8 +195,8 @@ tools; the inspector shows what was bound, not a fresh query.
 
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
-| 8.1 | HIGH | An unverified agent note reaches a compiled specification unlabelled: the compiler's retrieval keeps every CURRENT node, a note of a mission outside a program is one, and the text sent on carries no trust word. The rule that keeps agent notes out of high-risk retrieval is not applied by the compiler (the same defect as 7.1, seen by a second reviewer) | | OPEN |
-| 8.2 | HIGH | The planner's graph section is always retrieved at medium risk, with the widening to every current hazard and decision: agent notes and stale statements can steer the plan of a critical mission, where a task pack of the same mission would leave them out | | OPEN |
+| 8.1 | HIGH | An unverified agent note reaches a compiled specification unlabelled: the compiler's retrieval keeps every CURRENT node, a note of a mission outside a program is one, and the text sent on carries no trust word. The rule that keeps agent notes out of high-risk retrieval is not applied by the compiler (the same defect as 7.1, seen by a second reviewer) | | FIXED `8253cb5`, see 7.1 |
+| 8.2 | HIGH | The planner's graph section is always retrieved at medium risk, with the widening to every current hazard and decision: agent notes and stale statements can steer the plan of a critical mission, where a task pack of the same mission would leave them out | | ACCEPTED as designed: in the planner's section an agent note is listed as `agent note` with the line "UNVERIFIED: an agent wrote this note; it is a lead to check, not a fact", and the saving measured in 0.7.1 came from the planner seeing the note of the mission before. A stricter rule for missions the user marks critical is not in 0.7.2 |
 | 8.3 | MEDIUM | The compiler reads the graph whether or not the Context Graph technique is on, and with its own rules (CURRENT only) where task packs allow conflicted and stale statements | | OPEN |
 | 8.4 | MEDIUM | A Program mission's planner prompt holds the goal, the milestones and the program memory in its body and again as graph nodes: only project memory is removed from the graph section | | OPEN |
 | 8.5 | MEDIUM | A Program run is created before its mission row: graph reads in between see no program. Workspace runs read every workspace the project is enrolled in, not the mission's own. Neither was reproduced | | OPEN |
@@ -215,13 +215,13 @@ of 2,000 characters, about 50,000 for one of 20,000.
 
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
-| 9.1 | HIGH | With a compiled specification the request is rendered without the 8,000 character limit, and is added to every worker's first pack, which never carried it: a 20,000 character request is in the planner, every worker session and the mission verifier (32,000 is the only bound) | | OPEN |
+| 9.1 | HIGH | With a compiled specification the request is rendered without the 8,000 character limit, and is added to every worker's first pack, which never carried it: a 20,000 character request is in the planner, every worker session and the mission verifier (32,000 is the only bound) | | FIXED `b66f758` for workers: their copy keeps the 8,000 character limit and says so. The planner and the mission verifier read the request whole, on purpose: they answer for all of it. Tests on size and on copies |
 | 9.2 | HIGH | The compiled advice (up to 8,000 characters) is added to every worker pack, the planner and the mission verifier, although the planner has already turned it into tasks | | OPEN |
 | 9.3 | HIGH | The default AUTO path costs two ChatGPT calls before planning, three for TECHNICAL and four for COUNCIL (chosen by common words), the last two with a Claude session on the strongest model; without ChatGPT a mission in AUTO cannot start | | OPEN |
 | 9.4 | MEDIUM | A session that only waited for capacity writes a session-efficiency row with no turns, and the campaign runner counts it as a session | | OPEN |
 | 9.5 | MEDIUM | Compiler and Director spend is kept only as receipts on routing records, with no run or mission, and appears nowhere in the Usage page | | OPEN |
 | 9.6 | MEDIUM | `withAdmittedIntent` carries the raw text twice (as intent and as the first goal); Program and Workspace runs embed that blob in the run's prompt, which every later prompt repeats; the new sections are not itemized as pack entries | | OPEN |
-| 9.7 | LOW | No test bounds the size of a prompt or the number of copies of the request in it | | OPEN |
+| 9.7 | LOW | No test bounds the size of a prompt or the number of copies of the request in it | | FIXED `b66f758` for the worker pack and the planner prompt |
 
 ## 10. Privacy
 
@@ -232,11 +232,11 @@ nothing; removing a project removes its intelligence data through the foreign ke
 
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
-| 10.1 | HIGH | Consent: the only confirmation before project data goes to OpenAI is about billing. After the sign-in the next mission in the default AUTO mode sends the request, program and task text and graph notes, and no screen names OpenAI as their destination. There is no switch, per project or global, that keeps data away from OpenAI while signed in | | OPEN |
-| 10.2 | HIGH | No redaction: notes and workload text are sent unscanned. The filter on the classification `normal` filters nothing, because the graph writes `normal` on every node. A secret in a request, a note or an agent's summary goes to OpenAI, or to Claude through a council | | OPEN |
-| 10.3 | MEDIUM | In COUNCIL and TECHNICAL, OpenAI's output goes to Claude and Claude's back to OpenAI, with no notice | | OPEN |
+| 10.1 | HIGH | Consent: the only confirmation before project data goes to OpenAI is about billing. After the sign-in the next mission in the default AUTO mode sends the request, program and task text and graph notes, and no screen names OpenAI as their destination. There is no switch, per project or global, that keeps data away from OpenAI while signed in | | PARTLY FIXED `59c92f3`: the card, the compilation preview and docs/PROVIDERS.md say what is sent to OpenAI and when; the confirmation switch is described as what allows any sending (off: nothing is sent, signed in). A switch per project is OPEN |
+| 10.2 | HIGH | No redaction: notes and workload text are sent unscanned. The filter on the classification `normal` filters nothing, because the graph writes `normal` on every node. A secret in a request, a note or an agent's summary goes to OpenAI, or to Claude through a council | | FIXED `59c92f3` for stored knowledge: entries sent as context go through the security log's redaction; agent notes are not sent (7.1). The user's own request is sent as written, which the card says. Test |
+| 10.3 | MEDIUM | In COUNCIL and TECHNICAL, OpenAI's output goes to Claude and Claude's back to OpenAI, with no notice | | FIXED `59c92f3`: stated on the card and in docs/PROVIDERS.md |
 | 10.4 | MEDIUM | The inspector shows the ids and versions of what was sent, not the text; nothing can be deleted short of removing the project | | OPEN |
-| 10.5 | MEDIUM | README and docs/PROVIDERS.md do not name OpenAI as a destination; "Nothing is sent to a provider you have not enabled" does not cover it | | OPEN |
+| 10.5 | MEDIUM | README and docs/PROVIDERS.md do not name OpenAI as a destination; "Nothing is sent to a provider you have not enabled" does not cover it | | FIXED `59c92f3` in docs/PROVIDERS.md; the README gets its 0.7.2 section with the release report |
 | 10.6 | LOW | The Claude and Codex account profile is a plain SHA-256 of address, organization and mode, kept in pool ids in SQLite: an address can be confirmed by guessing, locally | | OPEN |
 | 10.7 | LOW | Routing records and checkpoints are never pruned | | OPEN |
 
@@ -252,10 +252,10 @@ each tested alone. No skip, only, fixme or added retry in the branch.
 
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
-| 13.1 | HIGH | No scenario runs the real capacity kernel under the real orchestrator: an unexpected worker exit, a throw from the dispatch, a wait followed by a resume are tested with a hand-made stand-in on one side or the other | | OPEN |
+| 13.1 | HIGH | No scenario runs the real capacity kernel under the real orchestrator: an unexpected worker exit, a throw from the dispatch, a wait followed by a resume are tested with a hand-made stand-in on one side or the other | | FIXED: `tests/scenarios/v72-capacity-kernel.test.ts`, the scenario harness with the production admission in front of the scripted runtime: a mission to its end, a worker that dies, a wait while another consumer holds the slot and its recovery |
 | 13.2 | HIGH | The default path (AUTO, then a run) is exercised nowhere end to end: with no ChatGPT one e2e asserts the form is blocked; with ChatGPT connected, nothing | | OPEN |
 | 13.3 | MEDIUM | No contract test holds the real provider adapters' capability flags against what admission requires (the Codex defect) | | OPEN |
-| 13.4 | MEDIUM | The paid-credit rule and the admission rule are tested as refusals on the main path only; lease accounting has no test with a forced unexpected exit | | OPEN |
+| 13.4 | MEDIUM | The paid-credit rule and the admission rule are tested as refusals on the main path only; lease accounting has no test with a forced unexpected exit | | PARTLY FIXED: the forced unexpected exit is covered by the scenario of 13.1. The refusals on secondary paths are OPEN |
 | 13.5 | MEDIUM | Untested pairs most likely to hide a defect: capacity wait with the queue; with crash recovery; AUTO with plan approval and a stale specification; a ChatGPT 401 or quota with an overnight run; a resumed run with the Context Graph | | OPEN |
 | 13.6 | LOW | Assertions that confirm a stub (`status` READY after a stubbed answer), existence only (`toBeTruthy` on ids) or a call count (fifteen in workload-admission) | | OPEN |
 
@@ -266,10 +266,19 @@ each tested alone. No skip, only, fixme or added retry in the branch.
 ## Count on 2026-10-10, after twelve of fourteen reviews
 
 First six reviews: 1 CRITICAL, 10 HIGH (two of them one defect seen twice), about 25 MEDIUM, the rest LOW.
-Fixed the same day, each with a test: the CRITICAL (6.1) and the HIGH findings 3.1, 3.2, 4.1, 4.2, 6.2, 14.1,
-14.2, 14.3; 6.3 for the mission planner; and the MEDIUM findings 3.3, 3.7, 4.5, 14.5, 14.6.
-
 Second six reviews: no CRITICAL; HIGH 8.1 (with 7.1), 8.2, 9.1, 9.2, 9.3, 10.1, 10.2, 13.1, 13.2.
 
-Open and HIGH: 1.1, 6.4, 14.4, the workspace half of 6.3, and the nine above.
+Fixed, each with a test unless its row says otherwise: the CRITICAL (6.1); the HIGH findings 1.1, 3.1, 3.2,
+4.1, 4.2, 6.2, 6.4, 8.1, 9.1 (workers), 10.2, 13.1, 14.1, 14.2, 14.3, 14.4; 6.3 for the mission planner; and
+the MEDIUM findings 3.3, 3.7, 4.5, 7.1, 10.3, 10.5, 14.5, 14.6. 8.2 is accepted as designed.
+
+Open and HIGH:
+
+- 6.3, the workspace half: the workspace planner's read-only run reads the checkout.
+- 9.2: the compiled advice is in every worker pack.
+- 9.3: the default AUTO depth costs two to four provider calls before planning. This is what the feature is;
+  what is open is that nothing measured says the 0.7.1 saving survives it. The release report may not claim it.
+- 10.1: no switch per project.
+- 13.2: the default path (AUTO, then a run) is exercised nowhere end to end.
+
 0.7.2 cannot pass its gate while a CRITICAL or a HIGH that contradicts a release claim is open.
