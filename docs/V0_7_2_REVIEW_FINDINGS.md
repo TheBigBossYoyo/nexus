@@ -144,18 +144,132 @@ on four calls, which means those kill-and-restart scenarios do not exercise the 
 | 14.7 | MEDIUM | After a hard kill of the runtime the old worker can still be alive for some seconds; the next start may resume the task on the same worktree while it runs (not reproduced) | | OPEN |
 | 14.8 | LOW | A handoff session that waits for capacity yields an empty handoff; with two advisory leases the workers have fewer slots than the scheduler assumes; a resume landing after the orchestrator shut down can start a planner that ends crashed | | OPEN |
 
-## Reviews not started
+## 5. Director architecture
 
-5 Director architecture; 7 Task Compiler prompt injection; 8 Context Graph integration; 9 Token Intelligence
-regression; 10 privacy; 13 test quality. 11 UI/UX and 12 accessibility after the UI work.
+Read-only review on 2026-10-10. Sound, from the code: `executionAuthorized` is only ever written false and the
+repository refuses anything else; nothing consumes a Director's output but storage and the Director view; the
+PENDING record and each validated stage are saved before the next call; a restart marks an interrupted request
+FAILED with its completed stages and never replays it; a missing technical capability waits before any call and
+does not lower the level; failure text is fixed text with no provider body; the technical session has no tools,
+no MCP servers, no settings and denies every authorization.
 
-## Count on 2026-10-10, after six of fourteen reviews
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 5.1 | MEDIUM | An escalation that waited or failed is stuck: its state becomes WAITING_FOR_PROVIDER or FAILED, and both the invoke and the dismissal require REQUESTED. The message says "retry explicitly" and the retry is refused | | OPEN |
+| 5.2 | MEDIUM | The PENDING record of a level 1 (Claude only) request carries provider `openai` and the ChatGPT model whenever ChatGPT is connected; after a crash the view shows a provider that was never called | | OPEN |
+| 5.3 | MEDIUM | The technical challenge is given the whole strategic memo: it challenges the proposal, it is not an independent assessment. The wording of the claim must say so | | OPEN |
+| 5.4 | MEDIUM | A stage whose answer cites one evidence id outside the context is dropped whole, with its disagreements, although the call was paid for | | OPEN |
+| 5.5 | MEDIUM | A Claude candidate is built for every advisory role, strategic included, and is admitted when quality evidence exists for it; the record has no field that says it was a fallback and why | | OPEN |
+| 5.6 | LOW | The "quality evidence" of a primary provider is the policy label `PRIMARY_ROLE_POLICY`, not a measurement, and is written in two formats in two files | | OPEN |
+| 5.7 | LOW | The technical session runs in the NEXUS data directory with the full coding system prompt; whether its transcript is persisted by the runtime is not established | | OPEN |
+| 5.8 | LOW | A wait at the first stage reports consumption UNKNOWN where nothing was sent | | OPEN |
+| 5.9 | LOW | The outcome record has no requested role, no fallback flag, no verification result and no later repairs: Director outcome learning has nothing to learn from yet | | OPEN |
+| 5.10 | LOW | Account profile, pool overlay and model choice are computed separately in `production-routing.ts` and `worker-routing.ts` | | OPEN |
 
-Found: 1 CRITICAL, 10 HIGH (two of them one defect seen by two reviewers), about 25 MEDIUM, the rest LOW.
+## 7. Task Compiler: prompt injection
 
+Read-only review on 2026-10-10. Sound, from the code: the level, the scope and the criteria come from the user's
+text only; a model cannot produce the provenance USER_EXPLICIT or USER_CONFIRMED (closed enumeration, strict
+schema); evidence references must lie in what was retrieved; graph text and the instructions in force are
+rendered through `oneLine` or `quoteBlock`; the instruction history is written by IPC handlers only; an agent
+note stays AGENT_NOTE and is left out of high-risk retrieval; a compilation is at most four calls with bounded
+input; the inspector renders text, the Markdown renderer is sanitized. What a talked-into worker can do is
+bounded by the authorizer, the command classifier and the content inspector, not by prompt wording.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 7.1 | MEDIUM | The compiler is given graph notes as title and summary without their trust word: an unverified agent note stands beside a verified fact, and can come back as a recommendation of provenance CONTEXT_DERIVED that needs no decision, in every planner and worker prompt of the run | | OPEN |
+| 7.2 | MEDIUM | READY rests on what the model reports (scope changed, ambiguities, decision needed); the drift check is asked of the same provider, and its code half is five patterns that know nothing of a new dependency, a secret file, disabled tests or a network call | | OPEN |
+| 7.3 | LOW | In TECHNICAL and COUNCIL the synthesis replaces the output: a constraint or non-goal of the technical pass can be dropped. Decision flags and blockers accumulate and are not lost | | OPEN |
+| 7.4 | LOW | `renderCompiledAdvice` serializes with no replacement of `<`, format characters or U+2028/2029, unlike `withAdmittedIntent` | | OPEN |
+| 7.5 | LOW | The original request is rendered raw and unquoted when a specification exists; pasted third-party text reads as the user's own words (by design it is the user's authority) | | OPEN |
+| 7.6 | LOW | Program memory enters reasoning prompts with no trust label; a heading line can appear inside the data block | | OPEN |
+| 7.7 | LOW | Words such as "security" or "migration" in pasted text raise the level to COUNCIL (four calls); long evidence can push the output past the size that forces a decision | | OPEN |
+
+## 8. Context Graph integration
+
+Read-only review on 2026-10-10. Sound, from the code: the compiler's evidence comes from the graph only, so the
+graph and the older stores cannot disagree for it; a referenced node that becomes stale, superseded or archived
+makes the specification stale; nodes of another program are hidden from the compiler, the Director and the
+tools; the inspector shows what was bound, not a fresh query.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 8.1 | HIGH | An unverified agent note reaches a compiled specification unlabelled: the compiler's retrieval keeps every CURRENT node, a note of a mission outside a program is one, and the text sent on carries no trust word. The rule that keeps agent notes out of high-risk retrieval is not applied by the compiler (the same defect as 7.1, seen by a second reviewer) | | OPEN |
+| 8.2 | HIGH | The planner's graph section is always retrieved at medium risk, with the widening to every current hazard and decision: agent notes and stale statements can steer the plan of a critical mission, where a task pack of the same mission would leave them out | | OPEN |
+| 8.3 | MEDIUM | The compiler reads the graph whether or not the Context Graph technique is on, and with its own rules (CURRENT only) where task packs allow conflicted and stale statements | | OPEN |
+| 8.4 | MEDIUM | A Program mission's planner prompt holds the goal, the milestones and the program memory in its body and again as graph nodes: only project memory is removed from the graph section | | OPEN |
+| 8.5 | MEDIUM | A Program run is created before its mission row: graph reads in between see no program. Workspace runs read every workspace the project is enrolled in, not the mission's own. Neither was reproduced | | OPEN |
+| 8.6 | LOW | The identity of a compilation covers the twelve best-ranked nodes: a note written by an agent can move the ranking and make a draft compiled earlier ask for a new preview | | OPEN |
+| 8.7 | LOW | A context reference is a node id and a version, shown as such: the inspector cannot say which reference is superseded or gone, nor show what the model read | | OPEN |
+| 8.8 | LOW | No test writes an agent note and reads the compiled context, makes a referenced node stale, or runs the compiler with the graph switched off | | OPEN |
+
+## 9. Token Intelligence regression
+
+Read-only review on 2026-10-10; nothing was measured on a provider. Unchanged from 0.7.1: role system prompts,
+the tool list and descriptions, the token engine and the prefix registry; every addition is in the first user
+message, after the cached prefix. A compilation is cached by identity.
+
+Estimate for a mission of four tasks with a compiled specification: about 11,000 more input tokens for a request
+of 2,000 characters, about 50,000 for one of 20,000.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 9.1 | HIGH | With a compiled specification the request is rendered without the 8,000 character limit, and is added to every worker's first pack, which never carried it: a 20,000 character request is in the planner, every worker session and the mission verifier (32,000 is the only bound) | | OPEN |
+| 9.2 | HIGH | The compiled advice (up to 8,000 characters) is added to every worker pack, the planner and the mission verifier, although the planner has already turned it into tasks | | OPEN |
+| 9.3 | HIGH | The default AUTO path costs two ChatGPT calls before planning, three for TECHNICAL and four for COUNCIL (chosen by common words), the last two with a Claude session on the strongest model; without ChatGPT a mission in AUTO cannot start | | OPEN |
+| 9.4 | MEDIUM | A session that only waited for capacity writes a session-efficiency row with no turns, and the campaign runner counts it as a session | | OPEN |
+| 9.5 | MEDIUM | Compiler and Director spend is kept only as receipts on routing records, with no run or mission, and appears nowhere in the Usage page | | OPEN |
+| 9.6 | MEDIUM | `withAdmittedIntent` carries the raw text twice (as intent and as the first goal); Program and Workspace runs embed that blob in the run's prompt, which every later prompt repeats; the new sections are not itemized as pack entries | | OPEN |
+| 9.7 | LOW | No test bounds the size of a prompt or the number of copies of the request in it | | OPEN |
+
+## 10. Privacy
+
+Read-only review on 2026-10-10. Sound, from the code: EXACT and LIGHT send nothing to OpenAI; no file content, no
+author name or address and no machine path is sent unless it is in a note or in the request; requests are sent
+with `store: false` and at most 128 KB; no timer, analytics or update check was added; these modules log
+nothing; removing a project removes its intelligence data through the foreign keys.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 10.1 | HIGH | Consent: the only confirmation before project data goes to OpenAI is about billing. After the sign-in the next mission in the default AUTO mode sends the request, program and task text and graph notes, and no screen names OpenAI as their destination. There is no switch, per project or global, that keeps data away from OpenAI while signed in | | OPEN |
+| 10.2 | HIGH | No redaction: notes and workload text are sent unscanned. The filter on the classification `normal` filters nothing, because the graph writes `normal` on every node. A secret in a request, a note or an agent's summary goes to OpenAI, or to Claude through a council | | OPEN |
+| 10.3 | MEDIUM | In COUNCIL and TECHNICAL, OpenAI's output goes to Claude and Claude's back to OpenAI, with no notice | | OPEN |
+| 10.4 | MEDIUM | The inspector shows the ids and versions of what was sent, not the text; nothing can be deleted short of removing the project | | OPEN |
+| 10.5 | MEDIUM | README and docs/PROVIDERS.md do not name OpenAI as a destination; "Nothing is sent to a provider you have not enabled" does not cover it | | OPEN |
+| 10.6 | LOW | The Claude and Codex account profile is a plain SHA-256 of address, organization and mode, kept in pool ids in SQLite: an address can be confirmed by guessing, locally | | OPEN |
+| 10.7 | LOW | Routing records and checkpoints are never pruned | | OPEN |
+
+## 13. Test quality
+
+Read-only review on 2026-10-10. The verdict: each 0.7.2 subsystem is tested on its own, and the seams are faked
+by hand. The capacity kernel and the real orchestrator meet nowhere below the built app; the scenario harness
+has no admission layer (the new `v72-capacity` scenarios make the runtime emit the wait themselves); every test
+that goes on to execute work passes EXACT, so the default AUTO path followed by a run is tested nowhere; the
+fixtures grant what they then assert (an account that always has an address, quality evidence the test
+recorded, capabilities the test set). Every defect found on 2026-10-10 sat at a boundary between two modules
+each tested alone. No skip, only, fixme or added retry in the branch.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 13.1 | HIGH | No scenario runs the real capacity kernel under the real orchestrator: an unexpected worker exit, a throw from the dispatch, a wait followed by a resume are tested with a hand-made stand-in on one side or the other | | OPEN |
+| 13.2 | HIGH | The default path (AUTO, then a run) is exercised nowhere end to end: with no ChatGPT one e2e asserts the form is blocked; with ChatGPT connected, nothing | | OPEN |
+| 13.3 | MEDIUM | No contract test holds the real provider adapters' capability flags against what admission requires (the Codex defect) | | OPEN |
+| 13.4 | MEDIUM | The paid-credit rule and the admission rule are tested as refusals on the main path only; lease accounting has no test with a forced unexpected exit | | OPEN |
+| 13.5 | MEDIUM | Untested pairs most likely to hide a defect: capacity wait with the queue; with crash recovery; AUTO with plan approval and a stale specification; a ChatGPT 401 or quota with an overnight run; a resumed run with the Context Graph | | OPEN |
+| 13.6 | LOW | Assertions that confirm a stub (`status` READY after a stubbed answer), existence only (`toBeTruthy` on ids) or a call count (fifteen in workload-admission) | | OPEN |
+
+## Reviews not finished
+
+11 UI/UX and 12 accessibility, after the UI work.
+
+## Count on 2026-10-10, after twelve of fourteen reviews
+
+First six reviews: 1 CRITICAL, 10 HIGH (two of them one defect seen twice), about 25 MEDIUM, the rest LOW.
 Fixed the same day, each with a test: the CRITICAL (6.1) and the HIGH findings 3.1, 3.2, 4.1, 4.2, 6.2, 14.1,
 14.2, 14.3; 6.3 for the mission planner; and the MEDIUM findings 3.3, 3.7, 4.5, 14.5, 14.6.
 
-Still open and HIGH: 1.1 (one 401 latches ChatGPT until a browser sign-in), 6.4 (a program replan note is
-one slot), 14.4 (sessions started during shutdown end as failures), and the workspace half of 6.3.
+Second six reviews: no CRITICAL; HIGH 8.1 (with 7.1), 8.2, 9.1, 9.2, 9.3, 10.1, 10.2, 13.1, 13.2.
+
+Open and HIGH: 1.1, 6.4, 14.4, the workspace half of 6.3, and the nine above.
 0.7.2 cannot pass its gate while a CRITICAL or a HIGH that contradicts a release claim is open.
