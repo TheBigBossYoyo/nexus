@@ -9,6 +9,9 @@ import type {
 import type { IntelligenceStore } from '../persistence/repositories/intelligence'
 import type { AdvisoryProvider } from './compiler'
 import { conveneCouncil, requestDirectorMemo } from './director'
+
+/** The states in which the user may invoke an escalation, or dismiss it: not while it runs, not once done. */
+export const RETRIABLE_ESCALATION: readonly string[] = ['REQUESTED', 'WAITING_FOR_PROVIDER', 'FAILED']
 import { CapacityWaitError } from '../capacity/registry'
 import { PlanInferenceError } from './openai'
 import { CapacityRoutingWaitError } from '../capacity/router'
@@ -75,7 +78,8 @@ export class DirectorGateway {
         input.escalationId &&
         (!escalation ||
           escalation.kind !== 'ESCALATION' ||
-          escalation.state !== 'REQUESTED' ||
+          // A request that waited for a provider or failed is told to "retry explicitly": this is that retry.
+          !RETRIABLE_ESCALATION.includes(escalation.state) ||
           escalation.objective !== input.objective ||
           escalation.level !== input.level)
       )

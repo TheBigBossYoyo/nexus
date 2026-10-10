@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { CompiledTaskSpec } from '@shared/intelligence'
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
-import { renderOriginalIntentForTask, renderCompiledAdvice } from './compiled'
+import { renderOriginalIntentForTask, renderCompiledAdviceForTask } from './compiled'
 import type {
   AgentPurpose,
   CheckCommands,
@@ -168,7 +168,7 @@ export function buildContextPack(input: ContextPackInput): {
     {
       name: 'Original user request', body: input.run.config.compiledTaskSpec ? renderOriginalIntentForTask(input.run) : null,
     },
-    { name: 'Compiled specification with provenance', body: renderCompiledAdvice(input.run) },
+    { name: 'Compiled specification with provenance', body: renderCompiledAdviceForTask(input.run) },
     {
       name: 'Admitted user task requests',
       body:

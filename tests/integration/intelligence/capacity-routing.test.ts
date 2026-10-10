@@ -431,6 +431,37 @@ describe('durable capacity admission controls real advisory dispatch', () => {
       h.close()
     }
   })
+  it('an escalation whose request failed can be invoked again by the user, and is closed once it has completed', async () => {
+    const h = graphHarness()
+    try {
+      const store = h.repos.intelligenceArtifacts
+      let calls = 0
+      const strategic = {
+        complete: vi.fn(async () => {
+          if (++calls === 1) throw new Error('provider went away')
+          return memo
+        }),
+      }
+      const routing = new AdvisoryRoutingService(new CapacityAwareProviderRouter(store, 'boot'), {
+        reserve: () => policy,
+        snapshot: async (role) => ({ pools: [pool('openai')], candidates: [{ ...candidate('openai', role), binding: 'profile', create: () => strategic }] }),
+      })
+      const gateway = new DirectorGateway(store, routing)
+      const escalation = gateway.escalate({ projectId: h.project.id, objective: 'Scope', level: 2, reasons: ['Evidence conflicts'], runId: null, taskId: null })
+      const request = { projectId: h.project.id, objective: 'Scope', level: 2 as const, reasons: [], context: [], provider: null, model: null, escalationId: escalation.id }
+      const failed = await gateway.invoke(request)
+      expect(failed.state).not.toBe('COMPLETED')
+      expect(['FAILED', 'WAITING_FOR_PROVIDER']).toContain((store.directorRecord(h.project.id, escalation.id) as { state?: string }).state)
+      // The message of the failure says "retry explicitly": the same escalation takes that retry.
+      const again = await gateway.invoke(request)
+      expect(again.state).toBe('COMPLETED')
+      expect(store.directorRecord(h.project.id, escalation.id)).toMatchObject({ state: 'COMPLETED', invocationId: again.id })
+      await expect(gateway.invoke(request)).rejects.toThrow()
+      expect(strategic.complete).toHaveBeenCalledTimes(2)
+    } finally {
+      h.close()
+    }
+  })
   it('preflights all required Council capabilities and never spends the first stage while technical admission is closed', async () => {
     const h = graphHarness()
     try {

@@ -2,7 +2,7 @@ import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import type { Repositories } from '@main/modules/persistence'
 import type { ChatGPTConnection } from '@main/modules/intelligence/connection'
 import { NexusError } from '@shared/result'
-import { DirectorGateway } from '@main/modules/intelligence/gateway'
+import { DirectorGateway, RETRIABLE_ESCALATION } from '@main/modules/intelligence/gateway'
 import type { GitService } from '@main/modules/git'
 import { IntelligenceOperations } from '../intelligence/operations'
 import { TaskAdmissionService } from '../intelligence/admission'
@@ -46,8 +46,10 @@ export function createV72Handlers(
           level,
           reasons: ['USER_SELECTED_LEVEL'],
           context: level === 0 ? [] : admission.retrieve(projectId, objective),
-          provider: strategic ? 'openai' : null,
-          model: status?.model ?? null,
+          // Level 1 is the Technical Director alone: nothing is asked of the strategic provider, and the record
+          // of a request must not name a provider it never called.
+          provider: strategic && level >= 2 ? 'openai' : null,
+          model: strategic && level >= 2 ? (status?.model ?? null) : null,
           ...(strategic ? { strategic } : {}),
           ...(escalationId ? { escalationId } : {}),
         })
@@ -74,8 +76,8 @@ export function createV72Handlers(
     'director.dismissEscalation': ({ projectId, escalationId }) => {
       repos.projects.require(projectId)
       const record = repos.intelligenceArtifacts.directorRecord(projectId, escalationId)
-      if (record?.kind !== 'ESCALATION' || record.state !== 'REQUESTED')
-        throw new NexusError('invalid_state', 'Only an unclaimed escalation can be dismissed')
+      if (record?.kind !== 'ESCALATION' || !RETRIABLE_ESCALATION.includes(record.state))
+        throw new NexusError('invalid_state', 'Only an escalation that is not running and not finished can be dismissed')
       const dismissed = {
         ...record,
         state: 'DISMISSED' as const,
