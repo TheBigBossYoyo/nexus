@@ -167,7 +167,7 @@ passes when its hidden evaluation and acceptance pass with no critical finding.
 | Verdict | Condition | May become default |
 | --- | --- | --- |
 | INSUFFICIENT_EVIDENCE | fewer than 8 paired cases (16 for high or critical risk); or a baseline case has no optimized trial; or no case passed on either side | no |
-| INFERIOR | critical findings rose; or the pass rate may be lower by more than the margin (5 points; 0 for high risk); or repairs rose; or, for high risk, any case regressed | no |
+| INFERIOR | critical findings rose; or some case is worse and the pass rate may be lower by more than the margin (5 points; 0 for high risk); or repairs rose; or, for high risk, any case regressed. A variant that is worse on no case is never inferior on the spread of its improvements alone | no |
 | NON_INFERIOR | none of the above | yes |
 | IMPROVED | pass rate higher and the lower bound above zero | yes |
 

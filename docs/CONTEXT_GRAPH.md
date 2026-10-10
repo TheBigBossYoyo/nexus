@@ -222,7 +222,7 @@ Agents have four tools (`orchestrator/context-graph.ts`):
 
 | Tool | Does |
 | --- | --- |
-| `context_open` | A node by path: its text, children, relations and source files |
+| `context_open` | A node by path: its text, relations and source files, and its children together with what is under them: a branch is listed with its entries (a chain of folders is followed down), folders that hold nothing are named in one line, and a folder of a few entries shows their text. One call answers what a level-by-level walk took several for |
 | `context_search` | Nodes by words |
 | `context_related` | What is one relation away, optionally one relation type |
 | `context_note` | Write, update or archive a note |

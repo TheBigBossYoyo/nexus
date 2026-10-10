@@ -43,7 +43,7 @@ not to lower quality.
 |---|---|---|
 | Context Graph | One index over repository facts, project memory, program memory, workspace memory and contracts: a tree to browse, typed relations with evidence, trust and status on every node, freshness from file changes, conflicts, supersession, history, notes. The stores stay the source of truth | [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md), [MEMORY_ARCHITECTURE](docs/MEMORY_ARCHITECTURE.md) |
 | Context view | Intelligence, Context: the tree, search, and a node's text, sources, relations and history | [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md) |
-| Context Engine V3 | The 0.7.0 pack plus a map of the project knowledge, the related nodes from any store, and four tools for agents to read further. Off by default for agents; one setting turns it on | [CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md) |
+| Context Engine V3 | The 0.7.0 pack plus a map of the project knowledge, the related nodes from any store, and four tools for agents to read further. On by default since the real campaign of 0.7.1; one setting turns it off | [CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md) |
 | Token accounting | Every model request with its cache read and write; what each session's context was made of; every compaction; every context decision with its reason | [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md) |
 | Cache | Measured on the real runtime what is and is not shared between sessions; a local diagnosis of a prefix that was written again | [PROMPT_CACHING](docs/PROMPT_CACHING.md) |
 | Check output | A failure that lies before the tail of a long output now reaches the agent that repairs it; the complete output stays stored | [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md) |
