@@ -424,6 +424,8 @@ export class ProgramEngine {
     return this.serial(programId, async () => {
     const program = this.repos.programs.require(programId)
     if (TERMINAL_PROGRAM_STATES.includes(program.state)) throw new NexusError('invalid_state', `The program is ${program.state}; its plan cannot be reassessed`)
+      // Refused now, where the user can read why, and not accepted and dropped later.
+      if (program.replans >= program.policy.maxReplans) throw new NexusError('invalid_state', `The program used its ${program.policy.maxReplans} reassessment(s); its plan cannot be reassessed again`)
       const text = note
       if (!text.trim() || text.length > 2000)
         throw new NexusError('invalid_input', 'Describe the reassessment in 1–2000 characters.')
@@ -440,7 +442,10 @@ export class ProgramEngine {
             acceptanceCriteria: program.goal.successCriteria,
           },
         })
-    this.repos.settings.setValue(userReplanKey(programId), text)
+    // Every note is kept: one written before the reassessment of an earlier one has started is added to it,
+    // and all of them stay on record for the missions that follow.
+    this.repos.settings.setValue(userReplanKey(programId), [...this.pendingUserNotes(programId), text])
+    this.repos.settings.setValue(userNotesKey(programId), [...this.userNotes(programId), text].slice(-USER_NOTES_KEPT))
     this.decide(programId, 'replan_requested', `The user asked for a reassessment: ${text.replace(/\s+/g, ' ').slice(0, 200)}`, { detail: { trigger: 'user' } })
       this.announce(programId)
       void this.advance(programId)
@@ -732,7 +737,8 @@ export class ProgramEngine {
     const milestones = this.repos.milestones.listByProgram(program.id)
     const remaining = milestones.filter((m) => !TERMINAL_MILESTONE_STATES.includes(m.state))
     const last = this.repos.programDecisions.recent(program.id, 6).reverse()
-    const userRequest = this.repos.settings.getValue<string>(userReplanKey(program.id)) ?? null
+    const pending = this.pendingUserNotes(program.id)
+    const userRequest = pending.length === 0 ? null : pending.length === 1 ? pending[0]! : pending.map((n, i) => `Request ${i + 1} of ${pending.length}:\n${n}`).join('\n\n')
     // Recorded now so that the revision this session produces carries the trigger `user`.
     if (userRequest) this.decide(program.id, 'replan_requested', 'Reassessing the plan with the request of the user.', { detail: { trigger: 'user' } })
     const prompt = buildReplanPrompt({
@@ -749,6 +755,18 @@ export class ProgramEngine {
     // Counted, and the user's note consumed, only once the session exists.
     this.patch(program.id, { replans: program.replans + 1 })
     if (userRequest) this.repos.settings.deleteValue(userReplanKey(program.id))
+  }
+
+  /** The user's reassessment notes no reassessment has started for yet. (One string before 0.7.2.) */
+  private pendingUserNotes(programId: string): string[] {
+    const saved = this.repos.settings.getValue<string | string[]>(userReplanKey(programId))
+    return typeof saved === 'string' ? [saved] : Array.isArray(saved) ? saved.filter((n) => typeof n === 'string') : []
+  }
+
+  /** Every reassessment note the user gave this program, oldest first. */
+  private userNotes(programId: string): string[] {
+    const saved = this.repos.settings.getValue<string[]>(userNotesKey(programId))
+    return Array.isArray(saved) ? saved.filter((n) => typeof n === 'string') : []
   }
 
   private replanTrigger(programId: string): ProgramPlanRevision['trigger'] {
@@ -967,10 +985,10 @@ export class ProgramEngine {
       return this.verifyMilestone(this.repos.programs.require(program.id), verifying)
     }
     // A reassessment the user asked for happens before the next mission.
-    if (this.repos.settings.getValue<string>(userReplanKey(program.id))) {
+    if (this.pendingUserNotes(program.id).length > 0) {
       if (program.replans < program.policy.maxReplans) return this.setState(program.id, 'REPLANNING')
       this.repos.settings.deleteValue(userReplanKey(program.id))
-      this.decide(program.id, 'budget', `The plan is not reassessed: the program used its ${program.policy.maxReplans} reassessment(s).`)
+      this.decide(program.id, 'budget', `The plan is not reassessed: the program used its ${program.policy.maxReplans} reassessment(s). The request of the user is still given to the missions that follow.`)
     }
     const done = new Set(milestones.filter((m) => m.state === 'COMPLETED').map((m) => m.key))
     for (const m of milestones) {
@@ -1029,7 +1047,7 @@ export class ProgramEngine {
       continues = tip !== null && (await this.deps.git.isAncestor(project.rootPath, tip, previous.resultCommit).catch(() => false))
     }
     const baseRef = continues ? (previous?.resultCommit ?? undefined) : (program.branch ?? undefined)
-    const { prompt, acceptanceCriteria } = buildMissionPrompt({ program, milestone, completed: all.filter((m) => m.state === 'COMPLETED'), memory: memory.map((m) => m.entry), strategyNote: note, continuesPreviousAttempt: continues })
+    const { prompt, acceptanceCriteria } = buildMissionPrompt({ program, milestone, completed: all.filter((m) => m.state === 'COMPLETED'), memory: memory.map((m) => m.entry), strategyNote: note, userNotes: this.userNotes(program.id), continuesPreviousAttempt: continues })
     this.markStarting(program.id, 'mission')
     const strategy: Strategy = program.policy.missionStrategy === 'SPECULATIVE' && !program.policy.speculation ? 'BUILD' : program.policy.missionStrategy
     const run = await this.deps.host.createRun({
@@ -1329,6 +1347,7 @@ export class ProgramEngine {
     })
     this.setState(programId, state)
     this.repos.settings.deleteValue(userReplanKey(programId))
+    this.repos.settings.deleteValue(userNotesKey(programId))
     this.repos.settings.deleteValue(startingKey(programId))
     this.decide(programId, result, summary)
     this.checkpoint(programId, result)
@@ -1429,6 +1448,8 @@ export class ProgramEngine {
 }
 
 const userReplanKey = (programId: string): string => `program-user-replan:${programId}`
+const userNotesKey = (programId: string): string => `program-user-notes:${programId}`
+const USER_NOTES_KEPT = 20
 const startingKey = (programId: string): string => `program-starting:${programId}`
 
 const slug = (text: string): string =>

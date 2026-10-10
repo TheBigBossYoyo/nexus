@@ -142,7 +142,7 @@ export function buildReplanPrompt(ctx: ReplanContext): string {
     ...(ctx.userRequest
       ? [
           'The user asked for this reassessment. Their request is about the plan: follow it unless it contradicts the goal.',
-          data('user_request', ctx.userRequest, 2000),
+          data('user_request', ctx.userRequest, 8000),
         ]
       : []),
     data('situation', ctx.situation),
@@ -270,6 +270,8 @@ export function buildMissionPrompt(input: {
   completed: Milestone[]
   memory: ProgramMemoryEntry[]
   strategyNote: string | null
+  /** What the user asked for when they had the plan reassessed, oldest first. */
+  userNotes?: readonly string[]
   /** True when the mission starts from the previous attempt's result (false: from the accepted work only). */
   continuesPreviousAttempt?: boolean
 }): { prompt: string; acceptanceCriteria: string[] } {
@@ -297,6 +299,18 @@ export function buildMissionPrompt(input: {
     parts.push('', 'Already completed in this program (do not redo):', data('completed_milestones', bullets(input.completed.map((m) => `${m.title}: ${m.objective.slice(0, 200)}`)), 3000))
   }
   if (program.goal.constraints.length > 0) parts.push('', 'Constraints of the program (set by the user):', bullets(program.goal.constraints))
+  // The newest notes are kept when they do not all fit: a later request of the user overrides an earlier one.
+  if (input.userNotes && input.userNotes.length > 0) {
+    const kept: string[] = []
+    let room = 6000
+    for (const n of [...input.userNotes].reverse()) {
+      if (n.length > room) break
+      kept.unshift(n)
+      room -= n.length
+    }
+    const dropped = input.userNotes.length - kept.length
+    parts.push('', `What the user asked for when they had the plan of this program reassessed (written by the user, oldest first${dropped > 0 ? `; ${dropped} older one(s) not shown` : ''}). The plan was revised with them; where one applies to this milestone, respect it, a later one before an earlier one:`, data('user_requests', kept.map((n, i) => `${i + 1}. ${n}`).join('\n'), 6200))
+  }
   if (input.memory.length > 0) {
     parts.push('', 'Facts recorded earlier in this program and relevant to this milestone:', data('program_memory', bullets(input.memory.map((m) => `[${m.kind}] ${m.title}: ${m.content}`)), 6000))
   }
