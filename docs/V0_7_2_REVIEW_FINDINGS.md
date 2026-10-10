@@ -142,6 +142,7 @@ on four calls, which means those kill-and-restart scenarios do not exercise the 
 | 14.5 | MEDIUM | Wait checkpoints go stale: the ENDED state is declared and never written; a crash or a failed write after a resume leaves a WAITING record that a later pause of the run re-reads; the loop has no per-run try, so one run whose resume throws starves the others every 2 s | | FIXED `1403123`: per-run try, leftover waits closed (ENDED is now written), a wait is marked before the resume and put back if it fails |
 | 14.6 | MEDIUM | During an outage the recovery asks the runtime for the account every 2 s for every wait (a child process each time, no cache), and with fewer free slots than waiting runs it resumes them all | | FIXED `1403123`: the account answer is kept for 30 s; one run per pass |
 | 14.7 | MEDIUM | After a hard kill of the runtime the old worker can still be alive for some seconds; the next start may resume the task on the same worktree while it runs (not reproduced) | | OPEN |
+| 14.8 | MEDIUM | Seen once in three full runs of the suite, never in eleven runs alone: with a limit of 3 agents the control overview counted 4 active while a Program and an Arena campaign ran together. The kernel bounds engineering sessions at the limit (every session role maps to worker or reviewer), so the fourth is an agent row that waits for admission or is ending; if it waits, its run pauses for capacity and is resumed (see 4.4). The test now reports the breakdown when it fails | | OPEN |
 | 14.8 | LOW | A handoff session that waits for capacity yields an empty handoff; with two advisory leases the workers have fewer slots than the scheduler assumes; a resume landing after the orchestrator shut down can start a planner that ends crashed | | OPEN |
 
 ## 5. Director architecture
@@ -155,8 +156,8 @@ no MCP servers, no settings and denies every authorization.
 
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
-| 5.1 | MEDIUM | An escalation that waited or failed is stuck: its state becomes WAITING_FOR_PROVIDER or FAILED, and both the invoke and the dismissal require REQUESTED. The message says "retry explicitly" and the retry is refused | | OPEN |
-| 5.2 | MEDIUM | The PENDING record of a level 1 (Claude only) request carries provider `openai` and the ChatGPT model whenever ChatGPT is connected; after a crash the view shows a provider that was never called | | OPEN |
+| 5.1 | MEDIUM | An escalation that waited or failed is stuck: its state becomes WAITING_FOR_PROVIDER or FAILED, and both the invoke and the dismissal require REQUESTED. The message says "retry explicitly" and the retry is refused | | FIXED `01ebf97`: an escalation that waited or failed can be invoked again or dismissed. Test |
+| 5.2 | MEDIUM | The PENDING record of a level 1 (Claude only) request carries provider `openai` and the ChatGPT model whenever ChatGPT is connected; after a crash the view shows a provider that was never called | | FIXED `01ebf97`: a level 1 request records no strategic provider |
 | 5.3 | MEDIUM | The technical challenge is given the whole strategic memo: it challenges the proposal, it is not an independent assessment. The wording of the claim must say so | | OPEN |
 | 5.4 | MEDIUM | A stage whose answer cites one evidence id outside the context is dropped whole, with its disagreements, although the call was paid for | | OPEN |
 | 5.5 | MEDIUM | A Claude candidate is built for every advisory role, strategic included, and is admitted when quality evidence exists for it; the record has no field that says it was a fallback and why | | OPEN |
@@ -216,7 +217,7 @@ of 2,000 characters, about 50,000 for one of 20,000.
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
 | 9.1 | HIGH | With a compiled specification the request is rendered without the 8,000 character limit, and is added to every worker's first pack, which never carried it: a 20,000 character request is in the planner, every worker session and the mission verifier (32,000 is the only bound) | | FIXED `b66f758` for workers: their copy keeps the 8,000 character limit and says so. The planner and the mission verifier read the request whole, on purpose: they answer for all of it. Tests on size and on copies |
-| 9.2 | HIGH | The compiled advice (up to 8,000 characters) is added to every worker pack, the planner and the mission verifier, although the planner has already turned it into tasks | | OPEN |
+| 9.2 | HIGH | The compiled advice (up to 8,000 characters) is added to every worker pack, the planner and the mission verifier, although the planner has already turned it into tasks | | FIXED `01ebf97`: a worker reads the constraints, non-goals, risks and assumptions; the rest stays with the planner and the mission verifier. Asserted in the default-path scenario |
 | 9.3 | HIGH | The default AUTO path costs two ChatGPT calls before planning, three for TECHNICAL and four for COUNCIL (chosen by common words), the last two with a Claude session on the strongest model; without ChatGPT a mission in AUTO cannot start | | OPEN |
 | 9.4 | MEDIUM | A session that only waited for capacity writes a session-efficiency row with no turns, and the campaign runner counts it as a session | | OPEN |
 | 9.5 | MEDIUM | Compiler and Director spend is kept only as receipts on routing records, with no run or mission, and appears nowhere in the Usage page | | OPEN |
@@ -253,7 +254,7 @@ each tested alone. No skip, only, fixme or added retry in the branch.
 | # | Sev | Finding | Checked | State |
 |---|---|---|---|---|
 | 13.1 | HIGH | No scenario runs the real capacity kernel under the real orchestrator: an unexpected worker exit, a throw from the dispatch, a wait followed by a resume are tested with a hand-made stand-in on one side or the other | | FIXED: `tests/scenarios/v72-capacity-kernel.test.ts`, the scenario harness with the production admission in front of the scripted runtime: a mission to its end, a worker that dies, a wait while another consumer holds the slot and its recovery |
-| 13.2 | HIGH | The default path (AUTO, then a run) is exercised nowhere end to end: with no ChatGPT one e2e asserts the form is blocked; with ChatGPT connected, nothing | | OPEN |
+| 13.2 | HIGH | The default path (AUTO, then a run) is exercised nowhere end to end: with no ChatGPT one e2e asserts the form is blocked; with ChatGPT connected, nothing | | FIXED `01ebf97` below the built app: `tests/scenarios/v72-default-path.test.ts` creates a mission through IPC in the default depth with a scripted strategic provider and the real orchestrator carries it out; with no connection nothing is created. With the real provider it is part of the real acceptance, not done |
 | 13.3 | MEDIUM | No contract test holds the real provider adapters' capability flags against what admission requires (the Codex defect) | | OPEN |
 | 13.4 | MEDIUM | The paid-credit rule and the admission rule are tested as refusals on the main path only; lease accounting has no test with a forced unexpected exit | | PARTLY FIXED: the forced unexpected exit is covered by the scenario of 13.1. The refusals on secondary paths are OPEN |
 | 13.5 | MEDIUM | Untested pairs most likely to hide a defect: capacity wait with the queue; with crash recovery; AUTO with plan approval and a stale specification; a ChatGPT 401 or quota with an overnight run; a resumed run with the Context Graph | | OPEN |
@@ -275,10 +276,8 @@ the MEDIUM findings 3.3, 3.7, 4.5, 7.1, 10.3, 10.5, 14.5, 14.6. 8.2 is accepted 
 Open and HIGH:
 
 - 6.3, the workspace half: the workspace planner's read-only run reads the checkout.
-- 9.2: the compiled advice is in every worker pack.
 - 9.3: the default AUTO depth costs two to four provider calls before planning. This is what the feature is;
   what is open is that nothing measured says the 0.7.1 saving survives it. The release report may not claim it.
 - 10.1: no switch per project.
-- 13.2: the default path (AUTO, then a run) is exercised nowhere end to end.
 
 0.7.2 cannot pass its gate while a CRITICAL or a HIGH that contradicts a release claim is open.

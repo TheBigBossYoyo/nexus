@@ -267,9 +267,12 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
 
     let together = false
     let maxAgents = 0
+    // What the overview said when the count was at its highest: read in the message of a failure.
+    let over = ''
     const end = await until(
       async () => {
         const o = await call<ControlPlaneOverview>(c, 'control.overview')
+        if (o.agents.active > maxAgents) over = o.active.map((i) => `${i.type}: ${i.activeAgents} active, allowance ${i.allowance}`).join('; ')
         maxAgents = Math.max(maxAgents, o.agents.active)
         const types = new Set(o.active.map((i) => i.type))
         if (types.has('program') && types.has('arena')) together = true
@@ -281,7 +284,7 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
     )
     expect(together).toBe(true)
     expect(maxAgents).toBeGreaterThan(0)
-    expect(maxAgents).toBeLessThanOrEqual(3)
+    expect(maxAgents, over).toBeLessThanOrEqual(3)
     expect(end.finished.find((i) => i.id === programItem.id)?.state).toBe('COMPLETED')
     expect(['COMPLETED', 'FAILED']).toContain(end.finished.find((i) => i.id === arenaItem.id)?.state)
     const decisions = await call<{ decision: string }[]>(c, 'control.decisions', { itemId: programItem.id })
