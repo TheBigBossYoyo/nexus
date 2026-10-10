@@ -50,7 +50,7 @@ test.describe('NEXUS 0.7.1 context and tokens', () => {
       await page.getByTestId('nav-knowledge').click()
       const view = page.getByTestId('knowledge-view')
       await expect(page.getByTestId('knowledge-health')).toContainText('nodes')
-      await expect(page.getByTestId('knowledge-enabled')).toContainText('Agents do not receive this graph')
+      await expect(page.getByTestId('knowledge-enabled')).toContainText('Agents receive a selection of this graph and can browse it.')
       const tree = page.getByTestId('knowledge-tree')
       await expect(tree.locator('[data-path="commands"]')).toBeVisible()
       await expect(tree.locator('[data-path="modules"]')).toBeVisible()
@@ -114,13 +114,13 @@ test.describe('NEXUS 0.7.1 context and tokens', () => {
       await expect(page.getByTestId('agent-context-decisions')).toContainText('Tools left behind tool search')
       await screenshot(page, 'v71-agent-context')
 
-      // Settings: the Context Graph can be turned on for agents; the choice is stored.
+      // Settings: the Context Graph is on by default and can be turned off for agents; the choice is stored.
       await page.getByTestId('nav-settings').click()
       await page.getByTestId('settings-section-tokens').click()
-      await page.getByTestId('tokens-contextGraph').selectOption('on')
+      await page.getByTestId('tokens-contextGraph').selectOption('off')
       await page.getByTestId('settings-save').click()
-      await expect.poll(async () => (await invoke(page, 'settings.get', {})).tokens.contextGraph).toBe('on')
-      expect((await invoke(page, 'knowledge.health', { projectId: project.id })).enabled).toBe(true)
+      await expect.poll(async () => (await invoke(page, 'settings.get', {})).tokens.contextGraph).toBe('off')
+      expect((await invoke(page, 'knowledge.health', { projectId: project.id })).enabled).toBe(false)
     } finally {
       await closeApp(app)
     }
