@@ -109,6 +109,11 @@ export function MissionComposer({ project }: { project: Project }) {
   const [compilationError, setCompilationError] = useState<unknown>(null)
   const blocker = useRef<HTMLParagraphElement>(null)
   const [blockerMessage, setBlockerMessage] = useState('')
+  // The form is disabled while the request is compiled, which drops the keyboard focus. When a blocker is the
+  // answer, the focus goes to it once the form is back: the message is where the user has to read next.
+  useEffect(() => {
+    if (blockerMessage && !compiling) blocker.current?.focus()
+  }, [blockerMessage, compiling])
   const [strategy, setStrategy] = useState<Strategy>(DEFAULT_STRATEGY)
   const [candidates, setCandidates] = useState<2 | 3>(2)
   const [advancedOpen, setAdvancedOpen] = useState(true)

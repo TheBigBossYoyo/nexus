@@ -1,3 +1,5 @@
+import { COMPILATION_MODE_LABEL } from '../../lib/intelligenceLabels'
+import { useUiStore } from '../../store/ui'
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
@@ -46,6 +48,7 @@ export function CompilationPreview({
       }),
     onSuccess: onSpec,
   })
+  const setView = useUiStore((state) => state.setView)
   const stale =
     spec &&
     (spec.rawIntent !== raw ||
@@ -63,11 +66,11 @@ export function CompilationPreview({
     >
       <summary className="cursor-pointer font-medium">Task compilation preview</summary>
       <p className="text-small text-text-muted">
-        AUTO develops the request before work starts, by sending it and matching project knowledge to OpenAI
-        through your ChatGPT connection (the Providers page lists what is sent). EXACT and LIGHT send nothing
-        there. EXACT preserves the supplied request with
-        deterministic policy wrappers. Added recommendations keep their provenance; consequential
-        ambiguity blocks admission until the request is clarified.
+        Before work starts, NEXUS can develop your request into a specification. Automatic, Standard, Technical
+        and Council send the request and matching project knowledge to OpenAI through your ChatGPT connection
+        (the Providers page lists what is sent). Exact wording and Light send nothing there. What is added to
+        your request is shown with where it came from, and a question that changes the outcome stops the start
+        until you have answered it.
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Compilation depth">
@@ -77,7 +80,7 @@ export function CompilationPreview({
               value={mode}
               onChange={onModeChange}
               data-testid="compilation-mode"
-              options={COMPILATION_MODES.map((value) => ({ value, label: value }))}
+              options={COMPILATION_MODES.map((value) => ({ value, label: COMPILATION_MODE_LABEL[value] }))}
             />
           )}
         </Field>
@@ -85,13 +88,13 @@ export function CompilationPreview({
           Preview specification
         </Button>
       </div>
-      {preview.isPending ? (
-        <p role="status">Retrieving context and developing specification…</p>
-      ) : null}
+      {/* Always in the page, so that what appears in it is announced. */}
+      <p role="status">{preview.isPending ? 'Retrieving context and developing specification…' : ''}</p>
       {preview.isError ? <ErrorNote error={preview.error} /> : null}
       {spec ? (
         <div className="mt-3 space-y-3">
           <Notice
+            live
             tone={spec.status === 'READY' && !stale ? 'neutral' : 'warning'}
             title={
               stale
@@ -103,7 +106,14 @@ export function CompilationPreview({
                     : 'Specification preview ready'
             }
           >
-            {spec.mode} · {spec.reasons.join(' · ')}
+            <p>Depth: {COMPILATION_MODE_LABEL[spec.mode]}</p>
+            {spec.status === 'WAITING_FOR_PROVIDER' ? (
+              <p>
+                This depth needs the ChatGPT connection, and it is not ready: connect it, choose a model and switch
+                sending on in Providers, then preview again. Exact wording and Light need no provider.
+              </p>
+            ) : null}
+            {spec.reasons.length ? <p className="text-text-muted">Recorded reasons: {spec.reasons.join(' · ')}</p> : null}
             {spec.status === 'USER_DECISION_REQUIRED' ? (
               <p>
                 Clarify the original request and preview again before starting. Generated
@@ -112,9 +122,16 @@ export function CompilationPreview({
             ) : null}
             {spec.waitUntil ? (
               <p>
-                A later explicit request may probe after {new Date(spec.waitUntil).toLocaleString()}
-                . Availability is not guaranteed.
+                The provider asked to wait: previewing again is useful after{' '}
+                {new Date(spec.waitUntil).toLocaleString()}. It may still be unavailable then.
               </p>
+            ) : null}
+            {spec.status === 'WAITING_FOR_PROVIDER' ? (
+              <div className="mt-1.5">
+                <Button size="sm" onClick={() => setView('providers')}>
+                  Open Providers
+                </Button>
+              </div>
             ) : null}
           </Notice>
           <div className="flex gap-2" role="group" aria-label="Specification view">

@@ -34,16 +34,27 @@ export function Button({
   children,
   disabled,
   type = 'button',
+  onClick,
   ...rest
 }: ButtonProps) {
   return (
     <button
       type={type}
-      disabled={disabled || loading}
+      disabled={disabled}
+      // While it works, the button stays focusable and says it is busy: a button that disables itself drops the
+      // keyboard focus to the page, and the user who pressed it has to find their place again.
+      aria-disabled={loading || undefined}
       aria-busy={loading || undefined}
+      onClick={(event) => {
+        if (loading) {
+          event.preventDefault()
+          return
+        }
+        onClick?.(event)
+      }}
       className={cn(
         'inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-md border font-medium transition-colors',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
         VARIANTS[variant],
         SIZES[size],
         className,

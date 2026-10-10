@@ -79,7 +79,7 @@ test('Director waiting history, exact compiler preview and protected provider co
       .fill('Review security without starting work')
     await page.getByLabel('Director level').selectOption('3')
     await page.getByRole('button', { name: 'Request advice', exact: true }).click()
-    await expect(page.getByText('WAITING FOR PROVIDER', { exact: true })).toBeVisible()
+    await expect(page.getByText('Waiting for a provider', { exact: true })).toBeVisible()
     expect(
       (await invoke(page, 'director.history', { projectId: project.id }))[0]?.executionAuthorized,
     ).toBe(false)
@@ -129,7 +129,7 @@ test('saved strategic escalations require explicit advice and preserve waiting o
     await saved.focus()
     await saved.press('Enter')
     await page.getByRole('button', { name: 'Request escalation advice', exact: true }).click()
-    await expect(page.getByText('Escalation · WAITING FOR PROVIDER', { exact: true })).toBeVisible()
+    await expect(page.getByText('Escalation · Waiting for a provider', { exact: true })).toBeVisible()
     const invocation = (await invoke(page, 'director.history', { projectId: project.id }))[0]!
     expect(invocation.objective).toBe(raw)
     expect(invocation.executionAuthorized).toBe(false)

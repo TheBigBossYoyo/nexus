@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { assertNever } from '@shared/result'
 import { useUiStore, type View } from '../store/ui'
 import { PageHeader } from '../components/ui'
@@ -79,6 +80,9 @@ export function ViewRouter() {
   const view = useUiStore((s) => s.view)
   const meta = VIEW_META[view]
   const own = VIEWS_WITH_OWN_HEADER.includes(view)
+  useEffect(() => {
+    document.title = `${meta.title} · NEXUS`
+  }, [meta.title])
   return (
     <ErrorBoundary resetKey={view}>
       <div className="flex h-full min-h-0 flex-col" data-testid={`view-${view}`}>

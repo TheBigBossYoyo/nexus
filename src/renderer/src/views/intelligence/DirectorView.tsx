@@ -1,3 +1,4 @@
+import { stateLabel } from '../../lib/intelligenceLabels'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { DirectorInvocation, StrategicEscalation } from '@shared/intelligence'
@@ -11,6 +12,7 @@ import {
   Field,
   Notice,
   PageHeader,
+  Loading,
   Select,
   Textarea,
 } from '../../components/ui'
@@ -60,10 +62,10 @@ function Material({ invocation: r }: { invocation: DirectorInvocation }) {
         </details>
         <Notice
           tone={r.state === 'COMPLETED' ? 'neutral' : 'warning'}
-          title={r.state.replaceAll('_', ' ')}
+          title={stateLabel(r.state)}
         >
           {r.message ??
-            'Request was admitted. If the runtime restarted, its outcome is unknown; review before retrying.'}
+            'The request was accepted and has no result on record. If NEXUS restarted meanwhile, whether the provider answered is not known: read what is saved below, then request advice again if you still need it.'}
         </Notice>
         {r.memo ? (
           <>
@@ -156,7 +158,7 @@ function Material({ invocation: r }: { invocation: DirectorInvocation }) {
           {routing.data?.map((route) => (
             <div key={route.id} className="my-2 rounded border border-border p-3 break-words">
               <p className="font-medium">
-                {route.stage} · {route.state.replaceAll('_', ' ')}
+                {route.stage} · {stateLabel(route.state)}
               </p>
               <p>
                 {route.provider ?? 'No admitted provider'} · {route.model ?? 'No admitted model'}
@@ -242,9 +244,9 @@ export function DirectorView() {
         <div className="mx-auto max-w-[1120px] space-y-5 p-6">
           <Notice tone="neutral" title="Develop direction before execution">
             Directors propose strategy and challenge assumptions. Their advice cannot authorize work
-            or override project policy. Every stage requires provider capacity and role quality
-            admission. Real technical and Council quality validation remains deferred, independently
-            of Claude worker availability.
+            or override project policy. The Technical Director is Claude; the Strategic Director and
+            the Council need the ChatGPT connection (Providers). A request waits, and spends nothing,
+            while a provider it needs is not available.
           </Notice>
           <Card
             title="Request advice"
@@ -317,7 +319,8 @@ export function DirectorView() {
                 Saving an escalation sends no model request. Review it below before requesting
                 advice.
               </p>
-              {invoke.isPending ? <p role="status">Developing advisory material…</p> : null}
+              {/* Always in the page, so that what appears in it is announced. */}
+              <p role="status">{invoke.isPending ? 'Developing advisory material…' : ''}</p>
               {invoke.error ? <ErrorNote error={invoke.error} /> : null}
               {escalate.error ? <ErrorNote error={escalate.error} /> : null}
             </div>
@@ -328,7 +331,9 @@ export function DirectorView() {
           >
             {records.error ? <ErrorNote error={records.error} /> : null}
             {dismiss.error ? <ErrorNote error={dismiss.error} /> : null}
-            {!records.data?.length ? (
+            {records.isLoading ? (
+              <Loading />
+            ) : !records.data?.length ? (
               <p className="text-text-muted">No escalations or decisions saved.</p>
             ) : (
               records.data.map((record) => (
@@ -338,10 +343,10 @@ export function DirectorView() {
                 >
                   <summary className="cursor-pointer font-medium">
                     {record.kind === 'ESCALATION'
-                      ? `Escalation · ${record.state.replaceAll('_', ' ')}`
+                      ? `Escalation · ${stateLabel(record.state)}`
                       : record.kind === 'DECISION'
                         ? 'Advisory decision'
-                        : `Outcome · ${record.state.replaceAll('_', ' ')}`}
+                        : `Outcome · ${stateLabel(record.state)}`}
                   </summary>
                   {record.kind === 'ESCALATION' ? (
                     <div className="space-y-2">

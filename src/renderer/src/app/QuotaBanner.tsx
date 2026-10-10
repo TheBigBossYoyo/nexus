@@ -56,7 +56,7 @@ export function QuotaBanner() {
                 {model.resumeAtText}
               </span>
               <SourceLabel confidence="ESTIMATED" source="LOCAL_AGGREGATION" />
-              {model.countdown ? <span className="tnum text-text-muted">(in {model.countdown})</span> : null}
+              {model.countdown ? <span aria-hidden="true" className="tnum text-text-muted">(in {model.countdown})</span> : null}
             </span>
           ) : null}
         </div>

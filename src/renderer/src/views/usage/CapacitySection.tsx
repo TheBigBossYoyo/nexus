@@ -77,8 +77,10 @@ export function CapacitySection() {
               measurements; they do not establish subscription allowance.
             </p>
             <p className="text-small">
-              Technical Director integration and quality-tested worker failover are pending. Current
-              worker routing continues through the established execution providers.
+              The Technical Director runs on Claude. A worker session is moved to another provider
+              only where you chose that provider for the role, or where tested evidence of its
+              quality is on record; none is recorded by this version, so work that Claude cannot take
+              waits for Claude.
             </p>
             <Button size="sm" onClick={() => setView('providers')}>
               Manage provider connections

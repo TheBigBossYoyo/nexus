@@ -48,7 +48,7 @@ function TaskProblem({ task, canRetry }: { task: Task; canRetry: boolean }) {
 /** A quota pause is an expected wait: one calm line. Timing and actions live in the quota banner. */
 function QuotaPaused() {
   return (
-    <div className="shrink-0 border-b bg-surface-muted px-5 py-2 text-small text-text-secondary" data-testid="run-state-panel" data-kind="quota">
+    <div role="status" className="shrink-0 border-b bg-surface-muted px-5 py-2 text-small text-text-secondary" data-testid="run-state-panel" data-kind="quota">
       <span className="font-medium text-text-primary" data-testid="quota-paused-title">
         Waiting for the Claude usage limit.
       </span>{' '}
@@ -73,7 +73,7 @@ export function RunStatePanel() {
     // A capacity wait says what it waits on in words; the raw routing reasons stay in the event log.
     const detailText = waitingOn.length > 0 ? null : pauseDetailFromEvents(events)
     return (
-      <Notice tone="warning" title={reason} className="m-3 shrink-0" data-testid="run-state-panel">
+      <Notice live tone="warning" title={reason} className="m-3 shrink-0" data-testid="run-state-panel">
         {waitingOn.length > 0 ? (
           <ul className="list-disc pl-4" data-testid="capacity-wait-detail">
             {waitingOn.map((line) => (

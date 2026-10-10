@@ -15,6 +15,8 @@
   --color-surface-hover: #eaecef;
   --color-border: #e4e6ea;
   --color-border-strong: #cdd1d8;
+  /* The edge of an input, a select and a switch: 3.3:1 on surface (WCAG 1.4.11 asks 3:1). */
+  --color-control-border: #868d99;
 
   /* Text. All three pass WCAG AA (4.5:1) on background, surface and surface-muted. */
   --color-text-primary: #15181d;
@@ -141,6 +143,7 @@
   --color-surface-hover: #232830;
   --color-border: #262b32;
   --color-border-strong: #373e48;
+  --color-control-border: #6b7482;
 
   --color-text-primary: #e8eaed;
   --color-text-secondary: #b4bac4;
