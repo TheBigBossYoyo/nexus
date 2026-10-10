@@ -207,7 +207,7 @@ async function runTask(task: CampaignTask, arm: Arm) {
   const windowsBefore = await usageWindows(real)
   const started = Date.now()
   const deadline = started + task.budgetMinutes * 60_000
-  let finalState = 'unknown'
+  let finalState: string
   let timedOut = false
   let detail: Record<string, unknown> = {}
   const refs: (string | null)[] = task.repos.map(() => null)
