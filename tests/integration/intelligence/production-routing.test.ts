@@ -196,17 +196,9 @@ describe('production Director/compiler wiring with controlled fake adapters', ()
       await h.close()
     }
   })
-  it('admission really gates IPC and compiler calls, with closed technical quality and bounded primary GPT', async () => {
+  it('admission really gates IPC and compiler calls: Claude is the Technical Director with no evidence to earn, and a closed technical capability spends nothing', async () => {
     const h = await harness()
     try {
-      const waiting = await h.ipc['director.invoke']({
-        projectId: h.h.project.id,
-        objective: 'Scope',
-        level: 3,
-      })
-      expect(waiting.state).toBe('WAITING_FOR_PROVIDER')
-      expect(h.complete).not.toHaveBeenCalled()
-      expect(h.start).not.toHaveBeenCalled()
       const standard = await h.ipc['compilation.preview']({
         projectId: h.h.project.id,
         raw: 'Add a clear error message',
@@ -223,19 +215,30 @@ describe('production Director/compiler wiring with controlled fake adapters', ()
       expect(busy.state).toBe('WAITING_FOR_PROVIDER')
       expect(h.complete).toHaveBeenCalledTimes(2)
       h.setReady(true)
-      h.approveTechnical()
+      // The technical role is Claude's own: nothing was recorded about its quality, and it is admitted.
       const technical = await h.ipc['director.invoke']({
         projectId: h.h.project.id,
         objective: 'Scope',
         level: 1,
       })
       expect(technical.state).toBe('COMPLETED')
+      expect(technical.provider).toBeNull()
       expect(h.start).toHaveBeenCalledTimes(1)
       expect(
         h.h.repos.intelligenceArtifacts
           .routingHistory(h.h.project.id, technical.id)
           .some((r) => r.provider === 'claude' && r.state === 'COMPLETED'),
       ).toBe(true)
+      // Claude is limited: a Council needs it, so it waits before the strategic stage is spent.
+      h.usage.apply({ type: 'restore_wait', resetAt: null, limitType: 'test-window' })
+      const waiting = await h.ipc['director.invoke']({
+        projectId: h.h.project.id,
+        objective: 'Scope',
+        level: 3,
+      })
+      expect(waiting.state).toBe('WAITING_FOR_PROVIDER')
+      expect(h.complete).toHaveBeenCalledTimes(2)
+      expect(h.start).toHaveBeenCalledTimes(1)
     } finally {
       await h.close()
     }

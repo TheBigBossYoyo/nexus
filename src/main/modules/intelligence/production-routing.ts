@@ -98,7 +98,13 @@ export function createProductionAdvisoryRouting(input: {
         policyVersion: ADVISORY_POLICY,
         runtimeVersion: discovered.version ?? 'unknown',
       }
-      const evidence = quality.evidence(scope)
+      // The Technical Director is Claude's own role, as the strategic one is ChatGPT's: it is the provider the
+      // design names for it, not a stand-in, and needs no comparative evidence. (Nothing in production writes
+      // such evidence, so with this requirement the Technical Director could never be admitted: every level 1 and
+      // level 3 request, and every TECHNICAL or COUNCIL compilation, waited for ever.) In the strategic and
+      // compiler roles Claude would stand in for ChatGPT, and that still needs evidence.
+      const primary = role === 'technical'
+      const evidence = primary ? [`PRIMARY_ROLE_POLICY:${ADVISORY_POLICY}:claude:${model}`] : quality.evidence(scope)
       let pool = pools.pool('claude', profile)
       const machine = input.usage.machineState()
       const observed = input.usage.capacityObservation()
@@ -133,7 +139,7 @@ export function createProductionAdvisoryRouting(input: {
             model,
             cwd: input.dataDir,
             admitted: () =>
-              !disposed && input.usage.canDispatch() && quality.evidence(scope).length > 0,
+              !disposed && input.usage.canDispatch() && (primary || quality.evidence(scope).length > 0),
           })
           adapters.add(adapter)
           return {
