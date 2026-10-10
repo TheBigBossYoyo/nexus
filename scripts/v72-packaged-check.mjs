@@ -48,7 +48,7 @@ try {
     info.version === '0.7.2-development' &&
     info.build?.commit === expectedCommit &&
     info.build?.dirty === false &&
-    info.build?.databaseSchema === 13 &&
+    info.build?.databaseSchema === 16 &&
     info.build?.runtimeProtocol === 1
   const status = await call('runtime.status')
   evidence.checks.runtime = status.phase === 'READY' && status.endpointAcl === 'restricted'
