@@ -470,10 +470,13 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   attachOutcomeRecording(bus, policy)
   attachAdviceOutcomes(bus, repos, logger)
 
+  // The worker admission is built further down; the scheduler asks it before it retries a held task.
+  let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
     repos,
     bus,
     runtime,
+    capacityReady: (taskId) => (heldTaskReady ? heldTaskReady(taskId) : Promise.resolve(true)),
     git,
     worktrees: new WorktreeManager(git, worktreesDir),
     push,
@@ -620,6 +623,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     repos, providers, usage, bootId: identity.bootId, dataDir,
     maxAgents: () => control.limits().maxAgents,
   })
+  heldTaskReady = (taskId) => workerRouting.taskReady(taskId)
   const taskAdmission = new TaskAdmissionService(
     repos,
     git,

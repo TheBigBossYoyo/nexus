@@ -188,6 +188,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     repos,
     bus,
     runtime: admitted,
+    ...(capacity ? { capacityReady: (taskId: string) => capacity.routing.taskReady(taskId) } : {}),
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
     push: (message) => void pushes.push(message),

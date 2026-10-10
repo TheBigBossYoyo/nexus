@@ -1,0 +1,229 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "6404450849654ed8046788b6f9b64b764bf188fe",
+  "startedAt": "2026-10-10T22:09:44.257Z",
+  "finishedAt": "2026-10-10T22:13:53.365Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/fe45ed05/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (1.1274ms)\n✔ an unknown format names itself and the known formats (0.3263ms)\n✔ a format is added from outside, without touching the module (0.269ms)\n✔ registering a name twice throws and keeps the first exporter (0.1535ms)\n✔ the decision is recorded with its three sections (9.3274ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 101.984\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 11,
+          "fail": 0,
+          "output": "✔ json output (0.861ms)\n✔ csv output (0.3418ms)\n✔ listFormats returns the defaults (0.882ms)\n✔ csv with no rows is empty (0.1597ms)\n✔ csv renders null, undefined and missing keys as empty and uses first row columns (0.2634ms)\n✔ json with no rows (0.1894ms)\n✔ custom exporter is used and listed in sorted position (0.2489ms)\n✔ registering an existing name throws and keeps the original (0.4417ms)\n✔ registerExporter rejects a non-function (0.1417ms)\n✔ unknown format error names the format and the known formats (0.3211ms)\n✔ names from Object.prototype are not registered (0.1279ms)\nℹ tests 11\nℹ suites 0\nℹ pass 11\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 130.6806\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 2,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"f6d40037-b72c-4d73-94e0-424bda2f88eb\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}",
+        "{\"approvalId\":\"ce5e590e-5764-4790-87ba-7023d5d579df\",\"action\":\"Run PowerShell command\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (git, file, npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "worker: PowerShell: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (git, file). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (file, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: s updated.\n- **`index.test.js`:** The two original tests are untouched, and I added tests for every case on the list. The import line changed to bring in `listFormats` and `registerExporter`.\n\nThe first denied command converted both files to CRLF, ran `npm test`, and committed. The second did the CRLF conversion and ran `npm test`, without the commit. Since I don't know what the user objected to, I'm not retrying them.\n\nStill to do: convert both files to CRLF, run `npm test`, and commit. I also haven't started `docs/adr/0001-exporter-registry.md`, which the original request asks for; it wasn't in this task's list. Tell me which of these you'd like me to run, or what to change in my approach.",
+        "reviewer: ",
+        "verifier: ",
+        "worker:  that adds a `tsv` format from its own file.\n- **Consequences:** It covers both sides:\n  - A format can be added without editing an existing file.\n  - A format has to be imported before `exportData` can use it.\n  - The registry is module-global state.\n  - The built-in names can't be overridden, and there is no unregister.\n  - A name clash between teams throws at import time, and which team's module fails depends on import order.\n- **Extra consequences from the code:** `registerExporter` also throws a `TypeError` if `fn` isn't a function. `exportData` doesn't check what `fn` returns, so a non-string result is passed straight through.\n\nThe file has CRLF line endings, like `docs/adr/README.md`.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/exporter-registry [medium] Run shell command (bash): cd src/export && sed -i 's/\\r$//; s/$/\\r/' index.js index.test.js && cd ../.. && npm test 2>&1 | tail -30 && git add src && git commit -qm \"Replace exporter switch with a registry\" -m \"Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\" && git diff --stat HEAD~1 | path outside the worktree: ../..",
+        "Worker/exporter-registry [medium] Run PowerShell command: foreach ($f in 'src/export/index.js','src/export/index.test.js') { $t = [IO.File]::ReadAllText(\"$PWD/$f\") -replace \"`r`n\",\"`n\" -replace \"`n\",\"`r`n\"; [IO.File]::WriteAllText(\"$PWD/$f\", $t) }\nnpm test | writes through a .NET file API: path uses a variable or expansion and cannot be shown to stay inside the worktree: $PWD/$f"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 58,
+    "inputTokensUncached": 27193,
+    "outputTokens": 23544,
+    "cacheCreationTokens": 62251,
+    "cacheReadTokens": 538277,
+    "costUsdReported": 0.9965,
+    "toolCalls": 50,
+    "toolCallsRecorded": 50,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 24,
+      "StructuredOutput": 6,
+      "Read": 13,
+      "Write": 3,
+      "PowerShell": 2,
+      "Glob": 1,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 8,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 13,
+        "toolCalls": 11,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 26,
+        "toolCalls": 23,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 247382,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 9
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 10
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -18,6 +18,13 @@ const Wait = z.object({
   runId: z.string(), projectId: z.string(), agentId: z.string(), routingId: z.string(),
   role: z.string(), label: z.string().nullable(), model: z.string(), resumeSessionId: z.string().nullable(),
   state: z.enum(['WAITING_FOR_CAPACITY', 'RESUMED', 'ENDED']), createdAt: z.string(),
+  // What the wait is on. Absent on records written before these fields existed. A reset time is there only
+  // when the provider gave one (resetConfidence EXACT); nothing is estimated.
+  provider: z.string().nullable().optional(), reasons: z.array(z.string()).optional(),
+  waitingOn: z.object({
+    providers: z.array(z.object({ provider: z.string(), state: z.string(), resetAt: z.number().nullable(), resetConfidence: z.enum(['EXACT', 'UNKNOWN']), usable: z.boolean() }).strict()),
+    slotsFull: z.boolean(),
+  }).strict().optional(),
 }).strict()
 type WorkerWait = z.infer<typeof Wait>
 const reviewRoles = new Set<AgentRole>(['reviewer', 'security_reviewer', 'verifier'])
@@ -105,7 +112,7 @@ export class WorkerCapacityRouting {
           pool = this.pools.observe(pool, observed.state, observed)
         if (!this.o.usage.canDispatch()) {
           const machine = this.o.usage.machineState()
-          if (pool.state !== machine.status) pool = this.pools.observe(pool, machine.status, { resetAt: machine.resetAt, utilization: machine.utilizationPercent })
+          if (pool.state !== machine.status) pool = this.pools.observe(pool, machine.status, { resetAt: machine.resetAt, utilization: machine.utilizationPercent, observedAt: machine.since })
         }
       } else if (PAUSED_STATES.has(pool.state)) {
         // Claude's pool follows the usage service. A provider with no observation of its own gets its chance
@@ -141,7 +148,7 @@ export class WorkerCapacityRouting {
     return info
   }
 
-  private saveWait(spec: SessionSpec, record: CapacityRoutingRecord): void {
+  private saveWait(spec: SessionSpec, record: CapacityRoutingRecord, waitingOn?: CapacityWaitDetail): void {
     const runId = this.o.repos.agents.get(spec.agentId)?.runId
     if (!runId) return
     const key = `worker-capacity-wait:${spec.agentId}`
@@ -150,6 +157,8 @@ export class WorkerCapacityRouting {
       runId, projectId: record.projectId, agentId: spec.agentId, routingId: record.id,
       role: spec.role, label: spec.label ?? null, model: spec.model ?? record.model ?? '',
       resumeSessionId: spec.resumeSessionId ?? null, state: 'WAITING_FOR_CAPACITY', createdAt: new Date().toISOString(),
+      provider: record.provider ?? null, reasons: record.reasons,
+      ...(waitingOn ? { waitingOn: { slotsFull: waitingOn.slotsFull, providers: waitingOn.providers.map((p) => ({ ...p, resetConfidence: p.resetAt === null ? 'UNKNOWN' as const : 'EXACT' as const })) } } : {}),
     }
     if (!store.checkpoint(key, saved?.revision ?? null, Wait.parse(wait))) throw new Error('Worker capacity wait changed concurrently')
   }
@@ -164,7 +173,7 @@ export class WorkerCapacityRouting {
     // What the wait is on, as seen when it was decided: read by the user, never by the recovery.
     let waitingOn: CapacityWaitDetail | undefined
     const wait = (decision: CapacityRoutingRecord): void => {
-      this.saveWait(spec, decision)
+      this.saveWait(spec, decision, waitingOn)
       queue.push({ type: 'capacity.wait', routingId: decision.id, provider: decision.provider, reasons: decision.reasons, ...(waitingOn ? { waitingOn } : {}) })
     }
     const work = (async () => {
@@ -271,6 +280,23 @@ export class WorkerCapacityRouting {
       stop: async () => { stopped = true; await inner?.stop(); await work },
       stopConfirmed: () => !sent || (inner?.stopConfirmed?.() ?? terminal),
     }
+  }
+
+  /**
+   * Whether the task's last session, which waited, would be routed now. Asked by the scheduler before it gives
+   * a held task a new session, so that a long wait costs no session, no routing record and no checkpoint.
+   * A task with no wait on record is ready: there is nothing to wait for.
+   */
+  async taskReady(taskId: string): Promise<boolean> {
+    const agent = this.o.repos.agents.listByTask(taskId).at(-1)
+    const saved = agent ? this.o.repos.intelligenceArtifacts.readCheckpoint(`worker-capacity-wait:${agent.id}`) : null
+    if (!saved) return true
+    const wait = Wait.parse(saved.body)
+    if (wait.state !== 'WAITING_FOR_CAPACITY') return true
+    const snapshot = await this.snapshot({ role: wait.role as AgentRole, label: wait.label ?? undefined, model: wait.model, resumeSessionId: wait.resumeSessionId ?? undefined })
+    const decision = this.kernel.assess({ ...snapshot, policy: sessionReservePolicy(snapshot.pools, this.o.maxAgents()), coherentBoundary: !wait.resumeSessionId, allowPaid: false,
+      ...(wait.resumeSessionId && snapshot.owner ? { activeSession: { provider: snapshot.owner as 'claude' | 'codex', model: wait.model } } : {}) })
+    return decision.action === 'ROUTE'
   }
 
   /** Reconcile stop evidence and wait at coherent run boundaries. Never replays Director/compiler calls. */

@@ -97,7 +97,7 @@ export class RuntimeCapacityPools {
   observe(
     pool: CapacityPool,
     state: CapacityState,
-    facts?: { resetAt?: number | null; utilization?: number | null; observedAt?: number },
+    facts?: { resetAt?: number | null; utilization?: number | null; observedAt?: number; resetObservedAt?: number | null; utilizationObservedAt?: number | null },
   ): CapacityPool {
     const unknown = {
       value: null,
@@ -105,14 +105,15 @@ export class RuntimeCapacityPools {
       confidence: 'UNKNOWN',
       observedAt: this.now(),
     } as const
-    const reported = (value: number | null | undefined) =>
+    // A value is stamped with the time the provider gave it, not with the time it is copied here.
+    const reported = (value: number | null | undefined, at?: number | null) =>
       value == null
         ? unknown
         : {
             value,
             source: 'PROVIDER_RUNTIME' as const,
             confidence: 'OBSERVED' as const,
-            observedAt: this.now(),
+            observedAt: at ?? facts?.observedAt ?? this.now(),
           }
     const next: CapacityPool = {
       ...pool,
@@ -124,7 +125,7 @@ export class RuntimeCapacityPools {
         observedAt: facts?.observedAt ?? this.now(),
       },
       ...(facts
-        ? { resetAt: reported(facts.resetAt), utilization: reported(facts.utilization) }
+        ? { resetAt: reported(facts.resetAt, facts.resetObservedAt), utilization: reported(facts.utilization, facts.utilizationObservedAt) }
         : {}),
     }
     const saved = this.store.readCheckpoint(pool.id)

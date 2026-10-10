@@ -110,6 +110,9 @@ export class UsageIntelligenceService {
     observedAt: number
     resetAt: number | null
     utilization: number | null
+    /** When the provider last gave that reset time and that percentage: a value kept across later events keeps its own time. */
+    resetObservedAt: number | null
+    utilizationObservedAt: number | null
   } | null = null
   /** Only actual runtime signals/report/probe/session results; excludes optimistic startup and wait expiry. */
   capacityObservation(): {
@@ -117,6 +120,8 @@ export class UsageIntelligenceService {
     observedAt: number
     resetAt: number | null
     utilization: number | null
+    resetObservedAt: number | null
+    utilizationObservedAt: number | null
   } | null {
     return this.capacityEvidence ? { ...this.capacityEvidence } : null
   }
@@ -196,11 +201,23 @@ export class UsageIntelligenceService {
       (event.type === 'report' && event.windows.some((w) => w.utilizationPercent !== null)) ||
       (event.type === 'signal' && event.signal.availability !== 'UNKNOWN')
     ) {
+      const gavePercent =
+        (event.type === 'report' && event.windows.some((w) => w.utilizationPercent !== null)) ||
+        (event.type === 'signal' && event.signal.utilizationUnit === 'percent' && event.signal.utilization != null)
+      const gaveReset =
+        (event.type === 'report' && event.windows.some((w) => w.resetsAt !== null)) ||
+        (event.type === 'signal' && event.signal.resetAt != null) ||
+        (event.type === 'probe_result' && event.resetAt !== null)
+      const previous = this.capacityEvidence
+      const kept = (value: number | null, was: number | null | undefined, at: number | null | undefined): number | null =>
+        value === null ? null : value === was && at != null ? at : next.since
       this.capacityEvidence = {
         state: next.status,
         observedAt: this.now(),
         resetAt: next.resetAt,
         utilization: next.utilizationPercent,
+        resetObservedAt: gaveReset && next.resetAt !== null ? this.now() : kept(next.resetAt, previous?.resetAt, previous?.resetObservedAt),
+        utilizationObservedAt: gavePercent && next.utilizationPercent !== null ? this.now() : kept(next.utilizationPercent, previous?.utilization, previous?.utilizationObservedAt),
       }
     }
     const gateChanged =

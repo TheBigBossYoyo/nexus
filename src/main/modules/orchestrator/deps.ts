@@ -37,6 +37,11 @@ export interface OrchestratorDeps {
   /** Ephemeral main → renderer pushes (streaming output). Durable events go through the bus. */
   push: (message: PushMessage) => void
   logger?: (line: string) => void
+  /**
+   * v0.7.2: asked before a task held for a provider's capacity is given a new session. Absent where no
+   * admission stands in front of the runtime: the task is then simply tried again after its delay.
+   */
+  capacityReady?: (taskId: string) => Promise<boolean>
   /** v0.3. See StrategyResolver. */
   strategies?: StrategyResolver
   /** v0.7.1. Created from `repos` when absent, so every orchestrator has both. */

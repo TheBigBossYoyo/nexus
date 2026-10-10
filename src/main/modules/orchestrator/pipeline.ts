@@ -58,6 +58,11 @@ export interface PipelineHost {
   withMergeLock<T>(runId: string, fn: () => Promise<T>): Promise<T>
   /** Reports the stage a task pipeline is in (used to derive the run phase). */
   setStage(taskId: string, stage: Stage | 'repair' | 'merge'): void
+  /**
+   * The task's session found no provider with capacity. The task is held and the rest of the run goes on;
+   * the run itself waits only when nothing else of it can.
+   */
+  holdForCapacity(runId: string, taskId: string): void
 }
 
 interface Failure {
@@ -447,7 +452,7 @@ export class TaskPipeline {
   /** Shared handling for a non-successful agent outcome in the implement stage. */
   private handleAgentFailure(run: Run, task: Task, result: AgentRunResult, control: SessionControl): void {
     const { bus } = this.core.deps
-    if (this.haltOutcome(run, result.outcome, control)) {
+    if (this.haltOutcome(run, result.outcome, control, task.id)) {
       if (control.stopReason === 'user_stop') {
         const error: TaskError = { what: 'Agent stopped by user', where: label(task.role, task.key), why: null, retryable: true }
         if (this.core.tryTaskState(task.id, 'failed', { error })) {
@@ -488,12 +493,15 @@ export class TaskPipeline {
 
   /**
    * Outcomes that stop the pipeline without failing the task: user/pause stops, quota, and auth.
-   * Quota and auth pause the whole run; the task keeps its state and resumes later.
+   * Quota and auth pause the whole run; the task keeps its state and resumes later. A wait for a provider's
+   * capacity holds the task alone (`taskId`): what another provider can take goes on. Without a task (a
+   * speculative candidate) the run waits as a whole.
    */
-  private haltOutcome(run: Run, outcome: AgentOutcome, control: SessionControl): boolean {
+  private haltOutcome(run: Run, outcome: AgentOutcome, control: SessionControl, taskId?: string): boolean {
     if (outcome === 'stopped' || control.stopReason) return true
     if (outcome === 'capacity') {
-      this.core.pauseRun(run.id, 'capacity', 'Waiting for quality-approved provider capacity')
+      if (taskId) this.host.holdForCapacity(run.id, taskId)
+      else this.core.pauseRun(run.id, 'capacity', 'Waiting for quality-approved provider capacity')
       return true
     }
     if (outcome === 'quota') {
@@ -825,7 +833,7 @@ export class TaskPipeline {
         outputSchema: spec.jsonSchema,
         control,
       })
-      if (this.haltOutcome(run, result.outcome, control)) return { status: 'halt' }
+      if (this.haltOutcome(run, result.outcome, control, task.id)) return { status: 'halt' }
       if (result.outcome === 'success') {
         const parsed = spec.schema.safeParse(result.structuredOutput)
         if (parsed.success) return { status: 'ok', value: parsed.data, agentId: result.agentId }
@@ -950,7 +958,7 @@ export class TaskPipeline {
       return true
     }
     // Paused / quota: leave parent waiting and child running; the restart logic picks it up.
-    if (this.haltOutcome(run, result.outcome, control) && control.stopReason !== 'user_stop') return false
+    if (this.haltOutcome(run, result.outcome, control, parent.id) && control.stopReason !== 'user_stop') return false
     const why = result.blocker?.summary ?? result.error ?? result.outcome
     const error: TaskError = { what: 'Repair failed', where: child.key, why, retryable: true }
     bus.transaction(() => {

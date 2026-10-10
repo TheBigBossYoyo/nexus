@@ -117,11 +117,14 @@ export function createProductionAdvisoryRouting(input: {
           resetAt: observed.resetAt,
           utilization: observed.utilization,
           observedAt: observed.observedAt,
+          resetObservedAt: observed.resetObservedAt,
+          utilizationObservedAt: observed.utilizationObservedAt,
         })
       if (!input.usage.canDispatch() && pool.state !== machine.status)
         pool = pools.observe(pool, machine.status, {
           resetAt: machine.resetAt,
           utilization: machine.utilizationPercent,
+          observedAt: machine.since,
         })
       capacity.push(pool)
       const hostPool = hostedSessionPool(input.dataDir)

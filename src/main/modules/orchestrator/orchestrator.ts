@@ -129,6 +129,10 @@ interface ActivePipeline {
   done: Promise<void>
 }
 
+/** A task held for a provider's capacity is looked at again after a delay that grows with each wait. */
+export const CAPACITY_HOLD_MS = 2_000
+export const CAPACITY_HOLD_MAX_MS = 60_000
+
 /**
  * The control plane. All scheduling decisions are made here in deterministic code from durable
  * state; agents never hold orchestration state.
@@ -144,6 +148,12 @@ export class Orchestrator implements PipelineHost {
   private readonly mergeLocks = new Map<string, Promise<unknown>>()
   private readonly integrations = new Map<string, Promise<Worktree>>()
   private readonly announced = new Set<string>()
+  /**
+   * v0.7.2, provider-scoped waiting. Tasks whose last session found no provider with capacity. A held task is
+   * not restarted before `until`, and the other tasks of its run are dispatched meanwhile. In memory only:
+   * after a restart the task is an orphan like any other and is tried at once.
+   */
+  private readonly capacityHolds = new Map<string, { runId: string; until: number; count: number; held: boolean; timer: ReturnType<typeof setTimeout> }>()
   /** Set once shutdown starts: no scheduling pass may launch new work while sessions are being stopped. */
   private closing = false
   /** v0.3: the usage service's gate. Closed while Claude is limited: no new session starts. */
@@ -722,9 +732,30 @@ export class Orchestrator implements PipelineHost {
     })()
   }
 
+  holdForCapacity(runId: string, taskId: string): void {
+    const previous = this.capacityHolds.get(taskId)
+    if (previous) clearTimeout(previous.timer)
+    const count = (previous?.count ?? 0) + 1
+    const delay = Math.min(CAPACITY_HOLD_MAX_MS, CAPACITY_HOLD_MS * 2 ** (count - 1))
+    const timer = setTimeout(() => this.requestTick(runId), delay + 5)
+    timer.unref?.()
+    this.capacityHolds.set(taskId, { runId, until: Date.now() + delay, count, held: true, timer })
+    // Nobody drives the task while it is held: its lease is given back, so that it does not read as expired.
+    this.deps.repos.tasks.update(taskId, { leaseOwner: null, leaseExpiresAt: null })
+  }
+
+  private clearCapacityHolds(runId: string): void {
+    for (const [taskId, hold] of this.capacityHolds) {
+      if (hold.runId !== runId) continue
+      clearTimeout(hold.timer)
+      this.capacityHolds.delete(taskId)
+    }
+  }
+
   private async tick(runId: string): Promise<void> {
     const { repos, bus } = this.deps
     const run = repos.runs.get(runId)
+    if (!run || !ACTIVE_RUN_STATES.includes(run.state)) this.clearCapacityHolds(runId)
     if (this.closing || !run || !ACTIVE_RUN_STATES.includes(run.state)) return
     if (this.deps.requireEngineeringAdmission) {
       try { assertRunAdmission(repos, run) } catch (error) {
@@ -748,6 +779,13 @@ export class Orchestrator implements PipelineHost {
         repos.tasks.update(task.id, { leaseOwner: null, leaseExpiresAt: null })
         bus.emit({ runId, taskId: task.id, type: 'task.lease_expired', payload: { owner: task.leaseOwner } })
       })
+    }
+
+    // A held task whose delay is over is asked about before it is given a session: still no capacity, and it
+    // is held longer at the cost of nothing.
+    for (const [taskId, hold] of [...this.capacityHolds]) {
+      if (hold.runId !== runId || !hold.held || hold.until > Date.now() || !this.deps.capacityReady) continue
+      if (!(await this.deps.capacityReady(taskId).catch(() => true))) this.holdForCapacity(runId, taskId)
     }
 
     const gateClosed = this.dispatchClosed(runId)
@@ -796,8 +834,17 @@ export class Orchestrator implements PipelineHost {
       this.background(runId, () => this.finalize(runId))
       return
     }
-    // Nothing is running and nothing can start. Unless an approval can unblock it, a human must step in.
     const awaitingApproval = decision.deferred.some((d) => d.reason.kind === 'awaiting_approval')
+    // Nothing is running, and what is left waits for a provider: now the run waits as a whole, where the
+    // capacity recovery finds it and resumes it when a provider can take the work.
+    if ([...this.capacityHolds.values()].some((hold) => hold.runId === runId && hold.held)) {
+      if (!awaitingApproval) {
+        this.clearCapacityHolds(runId)
+        this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved provider capacity')
+      }
+      return
+    }
+    // Nothing is running and nothing can start. Unless an approval can unblock it, a human must step in.
     if (!awaitingApproval && decision.start.length === 0) {
       const stuck = countedTasks(tasks).filter((t) => t.state === 'failed' || t.state === 'blocked').map((t) => t.key)
       await this.pauseRun(runId, 'user', `Intervention required: ${stuck.length > 0 ? `tasks ${stuck.join(', ')} are failed or blocked` : 'no task can make progress'}`)
@@ -840,6 +887,8 @@ export class Orchestrator implements PipelineHost {
     let launched = 0
     for (const task of tasks) {
       if (this.active.has(task.id) || task.parentTaskId) continue
+      const hold = this.capacityHolds.get(task.id)
+      if (hold?.held && hold.until > Date.now()) continue
       let stage: Stage | null = null
       if ((task.state === 'assigned' || task.state === 'running') && this.core.graph.unmetPrerequisites(task).length > 0) {
         // It yielded to a prerequisite before its turn ended: wait in the queue, then resume (not relaunch).
@@ -878,6 +927,8 @@ export class Orchestrator implements PipelineHost {
 
   private launch(runId: string, taskId: string, stage: Stage): void {
     const control = new SessionControl()
+    const hold = this.capacityHolds.get(taskId)
+    if (hold) hold.held = false
     const done = this.pipeline
       .run(runId, taskId, stage, control)
       .catch((e: unknown) => this.core.log(`pipeline ${taskId}: ${errorMessage(e)}`))

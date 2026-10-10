@@ -79,16 +79,19 @@ and cannot resume twice.
 | 4.1 | HIGH | A Program is blocked when its current run pauses for capacity: `limited()` knows only the quota pause | yes: `program/engine.ts:533`, `:1289` | FIXED `edc5577`, with a test on the Program engine |
 | 4.2 | HIGH | A Workspace mission is blocked the same way | yes: `workspace/engine.ts:846`, `:958`, `:1136` | FIXED `edc5577`, with a test on the Workspace engine |
 | 4.3 | MEDIUM | Overnight treats a capacity pause as an unknown pause: no wait row, phase "paused", and the stall watchdog may finalize it blocked (the reviewer did not read the watchdog) | yes for the quota-only branches: `overnight/supervisor.ts:588`, `:672`, `:1012` | FIXED `edc5577` for the stall watchdog: a capacity wait is not a stall. The workload phase still reads "paused", not a wait of its own: OPEN as a display matter |
-| 4.4 | MEDIUM | Waiting is run-wide, not provider-scoped: one session's wait pauses the whole run. Recovery runs every 2 s with no backoff, and a resume that waits again creates an agent row, a routing record and a checkpoint each time | | PARTLY FIXED `1403123`: growing delay per run, one run per pass. Waiting is still run-wide, not per session: OPEN, see the note below |
+| 4.4 | MEDIUM | Waiting is run-wide, not provider-scoped: one session's wait pauses the whole run. Recovery runs every 2 s with no backoff, and a resume that waits again creates an agent row, a routing record and a checkpoint each time | | FIXED: `1403123` (growing delay per run, one run per pass), then per task in the commit after `8198028`: a task whose session finds no provider is held alone and the rest of its run is dispatched; the run waits as a whole only when the held work is all that is left. Before a held task is given a session again the admission is asked, so a long wait writes no agent row, routing record or checkpoint. Tests: `v72-capacity.test.ts` (two more), `v72-capacity-kernel.test.ts` (one more). See the note below |
 | 4.5 | MEDIUM | Some waits can never resume: a capacity pause raised where no wait checkpoint was written (planning, verification, consensus), and a resumed session whose owner is unknown or uninstalled | | FIXED `1403123`: a capacity-paused run with no wait on record is tried like the others; a session whose provider is not on record fails instead of waiting |
-| 4.6 | MEDIUM | The durable wait record has no provider, reason or reset time; the run-level text names no provider | | OPEN |
+| 4.6 | MEDIUM | The durable wait record has no provider, reason or reset time; the run-level text names no provider | | FIXED in the same commit: the record carries the provider decided (when one was), the role, the reasons, and per candidate provider its state, its reset time where the provider gave one and whether that time is exact or unknown. The run view shows them since `d8bc227`. The run-level pause text still names no provider: the detail is in the panel below it |
 | 4.7 | LOW | A repair or a rotated session is routed by role policy and nothing links its provider to the work it repairs | | OPEN |
 
-Note on 4.4, run-wide waiting. One session that finds no provider pauses its whole run, so work of the same
-run that another provider could take stops with it. Other runs are not affected: blocked capacity is scoped
-to the provider across runs, not across the sessions of one run. Making it per session means the scheduler
-must hold one task while it dispatches the others, which is a change to the scheduler's core and to every
-engine that reads a run's state. It is recorded as a limitation of 0.7.2, not fixed.
+Note on 4.4. Waiting was run-wide: one session that found no provider paused its whole run, so work of the
+same run that another provider could take stopped with it. It is now per task. The scheduler holds the task
+(in memory, with a delay that grows from 2 s to 60 s), keeps dispatching the others, and asks the admission
+before it gives the held task a session again. When nothing else of the run is at work the run pauses for
+capacity as before, where the recovery resumes it; Programs, Workspaces and Overnight read that state as they
+did. What stays run-wide: a wait raised by the run's own sessions (planning, consensus, mission verification),
+which have no other work beside them, and a speculative candidate. A held task still reads "running" in the
+task list while the activity feed says what it waits on: a display matter, OPEN, LOW.
 
 ## 6. Task Compiler: intent preservation
 

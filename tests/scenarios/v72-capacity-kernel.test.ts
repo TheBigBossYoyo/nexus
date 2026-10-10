@@ -71,6 +71,12 @@ describe('scenario: missions through the capacity kernel', () => {
     // The wait on record says what it is on: the provider is fine, every slot is taken.
     expect(h.eventsOfType(run.id, 'capacity.waiting').at(-1)!.payload.waitingOn).toMatchObject({ slotsFull: true, providers: [{ provider: 'claude', usable: true }] })
 
+    // So does the durable record, which outlives the event: role, reasons, and per provider its state and a
+    // reset time only where the provider gave one.
+    const waiting = h.repos.agents.listByRun(run.id).at(-1)!
+    const record = h.repos.intelligenceArtifacts.readCheckpoint(`worker-capacity-wait:${waiting.id}`)!.body as { state: string; role: string; reasons: string[]; waitingOn: { slotsFull: boolean; providers: { provider: string; resetAt: number | null; resetConfidence: string }[] } }
+    expect(record).toMatchObject({ state: 'WAITING_FOR_CAPACITY', role: 'planner', waitingOn: { slotsFull: true, providers: [{ provider: 'claude', resetAt: null, resetConfidence: 'UNKNOWN' }] } })
+    expect(record.reasons.length).toBeGreaterThan(0)
     // Recovery looks, finds the slot still taken, and leaves the run where it is.
     await h.capacity!.recover()
     expect(h.repos.runs.require(run.id).state).toBe('paused')
@@ -82,6 +88,37 @@ describe('scenario: missions through the capacity kernel', () => {
     expect(done.state).toBe('completed')
     expect(h.task(run.id, 'alpha')).toMatchObject({ state: 'completed', attempt: 1 })
     expect(h.eventsOfType(run.id, 'task.failed')).toEqual([])
+    expect(open()).toEqual([])
+  })
+
+  it('a task that waits is asked about before it is given a session again: not ready while the slot is taken, ready once it is free', async () => {
+    h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('alpha')]), worker: fileWorker }), settings: one, capacity: { maxAgents: 1 } })
+    const { kernel, routing } = h.capacity!
+    const host = hostedSessionPool(h.dir)
+    const policy = sessionReservePolicy([host], 1)
+    // Planning is over and its slot is free again: another consumer takes it before the worker asks.
+    let held: ReturnType<typeof kernel.claim> | null = null
+    h.bus.subscribe((event) => {
+      if (event.type !== 'task.assigned' || held) return
+      const other = kernel.decide({
+        projectId: h.project.id, operationId: 'another-consumer', stage: 'WORKER:other', role: 'worker', pools: [host], policy, coherentBoundary: true,
+        candidates: [{ provider: 'claude', model: 'fake-claude', roles: ['worker'], poolIds: [host.id], available: true, qualityApproved: true, qualityEvidence: ['fixture'], reserve: 'NONE', paid: false }],
+      })
+      if (other.action === 'ROUTE') held = kernel.claim(other, policy)
+    })
+    const run = await h.startRun()
+    // The held task is all that is left of the run: the run waits as a whole.
+    const paused = await h.waitForState(run.id, ['paused', 'completed', 'failed'])
+    expect(held).not.toBeNull()
+    expect(paused).toMatchObject({ state: 'paused', pauseReason: 'capacity' })
+    const alpha = h.task(run.id, 'alpha')
+    expect(alpha).toMatchObject({ state: 'running', attempt: 1, leaseOwner: null })
+    expect(await routing.taskReady(alpha.id)).toBe(false)
+    kernel.release(held!)
+    expect(await routing.taskReady(alpha.id)).toBe(true)
+    await h.capacity!.recover()
+    expect((await h.waitForState(run.id, ['completed', 'failed'])).state).toBe('completed')
+    expect(h.task(run.id, 'alpha')).toMatchObject({ state: 'completed', attempt: 1 })
     expect(open()).toEqual([])
   })
 })
