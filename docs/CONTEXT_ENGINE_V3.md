@@ -110,11 +110,17 @@ Each tool call is recorded as an `EXPAND_GRAPH_NODE` decision with the estimated
 Reviewers still receive the requirements, criteria, diff and check results and nothing of the worker's
 narration; verifiers still receive TaskEvidence. That is 0.7.0 behaviour and is pinned by tests.
 
-## Turning it on
+## Turning it on or off
 
 Settings, Tokens, "Context Graph in agent context": Automatic (the release default), On, Off. The graph
 itself is always built and browsable; the setting decides whether agents receive the section and the tools.
-The release default and the evidence behind it are in `V0_7_1_RELEASE_REPORT.md`.
+The release default is on: the real campaign of 0.7.1 found it non-inferior in quality and cheaper than
+0.7.0. The evidence is in `V0_7_1_RELEASE_REPORT.md`.
+
+A session that has no task yet, the planner, gets the same section: the map and what its request retrieves
+(by its text; a planner knows no files yet). Without it the planner used the tools to walk the tree from the
+root. A selected entry is marked "shown in full" or "excerpt" and carries the evidence given and the source
+files it rests on, so that an agent does not open an entry to learn what the pack could have said.
 
 ## What V3 does not do
 

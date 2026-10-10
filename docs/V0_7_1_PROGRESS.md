@@ -1,6 +1,10 @@
 # NEXUS 0.7.1 progress
 
-Branch `nexus-0.7.1-token-intelligence`, from `main` at `v0.7.0`. Not merged, not tagged.
+Branch `nexus-0.7.1-token-intelligence`, from `main` at `v0.7.0`. Closed on 2026-10-10: release gate PASS,
+merged into `main` and tagged `v0.7.1` (not pushed). What closed it is in `V0_7_1_RELEASE_REPORT.md`, section
+"Closing work, 2026-10-10": the real campaign against 0.7.0, compaction on a real session, the security review
+of tool-definition sharing, and the Context Graph on by default. The rest of this page is the state of
+2026-10-07.
 
 ## Done
 

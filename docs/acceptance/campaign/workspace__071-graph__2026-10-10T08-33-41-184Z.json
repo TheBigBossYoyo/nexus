@@ -1,0 +1,326 @@
+{
+  "kind": "campaign-run",
+  "task": "workspace",
+  "category": "Workspace / cross-repository task",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08f3cb609f4e7d77c72eb0bbc9421beec460a487",
+  "startedAt": "2026-10-10T08:33:41.184Z",
+  "finishedAt": "2026-10-10T08:40:49.500Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 75,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "COMPLETED",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "schemas",
+        "ref": "fb1d7ee97a0d1e6c81dd53b42322c125b28d3954",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ the contract has an optional currency with a default (4.9883ms)\n✔ the validator accepts an absent or valid currency and rejects others (0.2869ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 88.6308\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 11,
+          "fail": 0,
+          "output": "✔ a complete order is valid (1.096ms)\n✔ a missing id is reported (0.1949ms)\n✔ an order without a currency is valid (0.0905ms)\n✔ an order with a valid currency is valid (0.1105ms)\n✔ an invalid currency \"usd\" is reported (0.1163ms)\n✔ an invalid currency \"US\" is reported (0.0844ms)\n✔ an invalid currency \"USDD\" is reported (0.0595ms)\n✔ an invalid currency 123 is reported (0.0553ms)\n✔ an invalid currency null is reported (0.0678ms)\n✔ an invalid currency [\"USD\"] is reported (0.1141ms)\n✔ an invalid currency {} is reported (0.058ms)\nℹ tests 11\nℹ suites 0\nℹ pass 11\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 109.3335\n"
+        },
+        "note": null
+      },
+      {
+        "repository": "orders-service",
+        "ref": "e27c5e8c8be34945fd017748a738221109293e20",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ the copy of the contract carries the optional currency (4.8977ms)\n✔ an order without a currency gets EUR and existing fields are kept (0.7723ms)\n✔ a given currency is kept (0.213ms)\n✔ an invalid currency is refused with the shared message (0.4133ms)\n✔ the earlier refusals still hold (0.1513ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 88.8395\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ an order is created from a valid request (0.901ms)\n✔ a request without an id is refused (0.3378ms)\n✔ a request without a currency defaults to EUR (0.1195ms)\n✔ a valid currency is kept on the order (0.0787ms)\n✔ an invalid currency is refused (0.4341ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 111.5273\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": true,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "sync-contract-and-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-contract-and-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "add-order-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-order-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (exit=$lastexitcode, status_done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role ($s, convertfrom-json, $s.required, $s.properties.currency). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (od, sha256sum). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (od, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "researcher: the provider's. It must be copied from the final version in schemas, not re-written by hand.\",\n    \"The schema `default` is only documentation unless code applies it. createOrder must apply 'EUR' explicitly.\",\n    \"The two repositories may run mismatched versions, so the property must stay optional and never be added to `required`, per the additive-contract rule in project memory.\",\n    \"The error message must match exactly in both repositories. The regex must be anchored to avoid accepting lowercase letters or longer strings.\",\n    \"I did not inspect the source of orders-service or the current validate.js. The task descriptions rely on the goal text and the workspace description.\"\n  ]\n}\n```",
+        "planner: ",
+        "worker:  The type is checked before the regex, so `['USD']` is rejected. The default is not applied and the order is not mutated.\n- **`src/validate.test.js`:** the two original tests are untouched. I added a test for a missing currency (`[]`) and one for `'USD'` (`[]`). A loop covers the invalid values `'usd'`, `'US'`, `'USDD'`, `123`, `null`, `['USD']` and `{}`, each expecting exactly the currency error.\n\nI didn't run a separate `git diff` check. I only staged `contracts/order.schema.json`, `src/validate.js` and `src/validate.test.js`, which are the only files I edited.\n\nGit warned that LF will be replaced by CRLF in `src/validate.test.js` the next time it touches the file; the commit went through.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: iles:\n  ```\n  contracts/order.schema.json |  5 +++++\n  src/validate.js             |  1 +\n  src/validate.test.js        | 14 ++++++++++++++\n  3 files changed, 20 insertions(+)\n  ```\n- **No leftovers:** `git status --porcelain --ignored` prints nothing, so there are no untracked, ignored or temporary files. `git ls-files` lists only `README.md`, `contracts/order.schema.json`, `package.json`, `src/validate.js` and `src/validate.test.js`.\n- **No new dependencies:** `package.json` is not in the diff and has no `dependencies` or `devDependencies`.\n\n## Verification left the repository untouched\nI created no scratch files, and `git status --porcelain --ignored` was empty again after the last check.",
+        "verifier: ",
+        "planner: ",
+        "worker: defaults an undefined `currency` to `'EUR'`. Otherwise it requires a string matching `/^[A-Z]{3}$/` and throws `Error('currency: must be three uppercase letters')` if not. The order now includes `currency`.\n- **`src/createOrder.test.js`:** the two original tests are untouched. I added tests for the `'EUR'` default and for `'USD'` being kept. A third test checks that `'usd'`, `'US'`, `'EURO'` and `12` all throw the exact message.\n\nOnly those three files changed. The commit printed warnings that git will convert LF to CRLF in the working copy \"the next time Git touches it\". That is a Windows `core.autocrlf` setting on this machine. The committed contract is LF, so I did not change the setting.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: the three new ones are in the passing list.\n\n### (e) Changed files — pass\n`git diff --stat e2ea9e6` shows `contracts/order.schema.json` (5 added), `src/createOrder.js` (3 added, 1 removed) and `src/createOrder.test.js` (14 added). `git status --short` is clean, and no file outside those three changed.\n\n### Mission criteria\n- **Contract byte-identical with LF endings:** fail for the working copy, pass for the committed blob.\n- **All other mission criteria:** pass (EUR default, USD kept, invalid values throw the exact message, the two existing tests unchanged and passing, `npm test` exits 0 with the new cases covered, only three files changed).\n\nI modified nothing and created no scratch files.",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": null,
+      "plan": [
+        {
+          "key": "schemas-currency",
+          "repository": "schemas",
+          "dependsOn": []
+        },
+        {
+          "key": "orders-service-currency",
+          "repository": "orders-service",
+          "dependsOn": [
+            "schemas-currency"
+          ]
+        }
+      ],
+      "tasks": [
+        {
+          "key": "schemas-currency",
+          "repository": "schemas",
+          "state": "COMPLETED"
+        },
+        {
+          "key": "orders-service-currency",
+          "repository": "orders-service",
+          "state": "COMPLETED"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "contracts": [
+          {
+            "contract": "order",
+            "level": "compatible",
+            "consumersInSync": [
+              {
+                "repository": "orders-service",
+                "inSync": true,
+                "detail": "Its copy contracts/order.schema.json equals version 2."
+              }
+            ]
+          }
+        ]
+      },
+      "decisions": [
+        "mission_created: Mission created: Add an optional `currency` to orders across the platform. The order contract (contracts/order.schema.json, owned by the schemas repository) get",
+        "plan_proposed: Plan: 2 task(s) across 2 repositories, in the order schemas-currency -> orders-service-currency.",
+        "plan_accepted: The cross-repository plan was accepted by the user.",
+        "task_started: Task schemas-currency started in schemas.",
+        "task_completed: Task schemas-currency completed in schemas.",
+        "task_started: Task orders-service-currency started in orders-service.",
+        "task_completed: Task orders-service-currency completed in orders-service.",
+        "completed: Mission completed: 2 task(s) verified across 2 repositories."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 3,
+    "sessions": 13,
+    "turns": 95,
+    "inputTokensUncached": 41220,
+    "outputTokens": 37761,
+    "cacheCreationTokens": 101740,
+    "cacheReadTokens": 762952,
+    "costUsdReported": 1.6073,
+    "toolCalls": 82,
+    "toolCallsRecorded": 82,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 44,
+      "Read": 26,
+      "StructuredOutput": 8,
+      "Edit": 2,
+      "PowerShell": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 17,
+    "byRole": {
+      "planner": {
+        "sessions": 2,
+        "turns": 18,
+        "toolCalls": 16,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 7,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 6,
+        "turns": 55,
+        "toolCalls": 49,
+        "contextToolCalls": 0
+      },
+      "researcher": {
+        "sessions": 1,
+        "turns": 1,
+        "toolCalls": 0,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 425918,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 39
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 4
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 41
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 4
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -33,6 +33,8 @@
     "accept:adaptive": "node scripts/strategy-acceptance.mjs adaptive",
     "accept:v07": "node scripts/v07-acceptance.mjs",
     "accept:graph": "vitest run -c vitest.graph-accept.config.ts",
+    "accept:compaction": "vitest run -c vitest.compaction.config.ts",
+    "accept:campaign": "vitest run -c vitest.campaign.config.ts",
     "stress": "vitest run -c vitest.stress.config.ts",
     "supervisor:build": "esbuild scripts/dev-supervisor/development-overnight-supervisor.ts --bundle --platform=node --format=esm --alias:@shared=./src/shared --alias:@main=./src/main --outfile=out/dev-supervisor/development-overnight-supervisor.mjs",
     "package": "electron-vite build && electron-builder --win nsis"

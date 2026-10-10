@@ -389,6 +389,8 @@ export class TaskPipeline {
     }
 
     let lastBeat = Date.now()
+    // A read-only run asked by a program names the shape of its answer; the runtime then enforces it.
+    const answerSchema = run.mode === 'ask' ? run.config.answerSchema : undefined
     const result = await this.core.agents.run({
       run,
       task,
@@ -403,6 +405,7 @@ export class TaskPipeline {
       control,
       resumeSdkSessionId: resumeId,
       allowRotation: true,
+      ...(answerSchema ? { outputSchema: answerSchema } : {}),
       onActivity: () => {
         if (Date.now() - lastBeat < HEARTBEAT_MS) return
         lastBeat = Date.now()
@@ -419,7 +422,7 @@ export class TaskPipeline {
         bus.emit({ runId: run.id, taskId: task.id, type: 'task.blocked', payload: { reason: result.blocker.summary } })
         return false
       }
-      repos.tasks.update(task.id, { resultSummary: result.text })
+      repos.tasks.update(task.id, { resultSummary: answerSchema && result.structuredOutput !== undefined && result.structuredOutput !== null ? JSON.stringify(result.structuredOutput) : result.text })
       if (purposeFor(task) !== 'implement' && purposeFor(task) !== 'diagnose') {
         repos.artifacts.insert({
           id: newId(),

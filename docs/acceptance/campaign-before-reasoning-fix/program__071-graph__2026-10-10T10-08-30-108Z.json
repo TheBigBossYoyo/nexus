@@ -1,0 +1,256 @@
+{
+  "kind": "campaign-run",
+  "task": "program",
+  "category": "Program-style task",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "a8a2e247dd987eb6fff64cedcb93bc9690c6e790",
+  "startedAt": "2026-10-10T10:08:30.108Z",
+  "finishedAt": "2026-10-10T10:12:27.868Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 90,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "BLOCKED",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "kvlib",
+        "ref": "nexus/program-b15d0fed",
+        "hiddenPassed": false,
+        "hidden": {
+          "ok": false,
+          "pass": 0,
+          "fail": 1,
+          "output": "node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module 'C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-071-graph-09FGTC\\eval-kvlib\\src\\kv.js' imported from C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-071-graph-09FGTC\\eval-kvlib\\hidden.test.js\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\n    at #resolve (node:internal/modules/esm/loader:701:17)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\n  code: 'ERR_MODULE_NOT_FOUND',\n  url: 'file:///C:/Users/user/AppData/Local/Temp/nexus-campaign-program-071-graph-09FGTC/eval-kvlib/src/kv.js'\n}\n\nNode.js v24.14.0\n✖ hidden.test.js (64.1015ms)\nℹ tests 1\nℹ suites 0\nℹ pass 0\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 70.004\n\n✖ failing tests:\n\ntest at hidden.test.js:1:1\n✖ hidden.test.js (64.1015ms)\n  'test failed'\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 1,
+          "fail": 0,
+          "output": "✔ the package loads (4.4436ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 109.4067\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "implement-store",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-store-milestone",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (exit=$lastexitcode). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "researcher: Bash: Command not permitted for the researcher role (sed). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "researcher: st provide it.\",\n    \"Atomic rename over an existing file can behave differently on Windows, so tests must cover overwriting an existing target.\",\n    \"JSON cannot represent values such as undefined, Date or Map, so non-JSON values may not round-trip.\",\n    \"The existing src/index.js and its test may conflict with, or need to coexist with, the new modules; this was not inspected.\"\n  ],\n  \"constraints\": [\n    \"Time is injected and Date.now is used only as the default of the now option\",\n    \"Files are replaced atomically via a temp file in the same directory followed by rename\",\n    \"Tests must pass under node --test without real sleeping\",\n    \"No new dependencies; JavaScript only\"\n  ]\n}\n```",
+        "planner: ",
+        "worker:  as the default of `now`. There is no `new Date` or `performance.now`.\n- **Invalid TTL:** an invalid `ttlMs` (negative, NaN, Infinity or a non-number) throws a `RangeError`.\n- **Lazy expiry:** reads that find an expired entry also delete it from the map.\n- **Tests:** they cover all seven areas you listed, plus two extras: `delete` of an expired key returns false, and `ttlMs: Infinity` and `ttlMs: '5'` throw. The tests use a fake clock only, with no timers or waiting.\n- **Untouched files:** `package.json`, `src/index.js` and `src/index.test.js` are unchanged.\n\nGit warned that LF will become CRLF in the two new files the next time it touches them (Windows line endings); I did nothing about it.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: erwrites the whole entry (`src/kv.js:25`); tests `:36-66` |\n| Delete removes a key and size reflects it | Pass | `src/kv.js:37-41`; test `:68-78` |\n| `createStore()` works with `Date.now` as default | Pass | `src/kv.js:1`; test `:87-95` |\n| `Date.now` only as the default; tests have no timers or waiting | Pass | Search output in items 2 and 3 |\n| `npm test` exits 0 with both test files passing | Pass | Item 1 |\n| No `dependencies` or `devDependencies` | Pass | `package.json` contents in item 6 |\n\n## Repair\n\nNothing needs repair in `src/kv.js` or `src/kv.test.js`. To close item 5, either allow `node --input-type=module -e` for the verifier role or have a role that can run `node` do the probe.",
+        "verifier: ",
+        "researcher: \n- **Backlog proposal (unspecified behaviour):** `set` throws a `RangeError` for a negative, NaN, infinite or non-number `ttlMs`. The spec does not require this, and a later milestone should not rely on or contradict it without noticing. `ttlMs: 0` expires immediately, which follows the spec's \"reaches set-time plus ttlMs\".\n- **Backlog proposal (minor):** `restore` does not validate `expiresAt`, so a NaN or string value would give an entry that never expires. `persist.js` should validate the JSON it loads.\n- **Not verified:** the verifier's own `node -e` probe was blocked by a role restriction. This does not affect the verdict, because the boundary behaviour is covered by the committed test.",
+        "researcher: `expiresAt` in `restore`, or in `load`: require `null` or a finite number, and skip malformed entries.\n- When writing the persistence tests, check that `save` and `load` round-trip the absolute `expiresAt` values and drop expired entries.\n\n**Proposed memory entry**\n- **Store persistence interface:** `store.entries()` returns live entries as `{key, value, expiresAt}`, where `expiresAt` is an absolute millisecond time or `null` for no expiry. `store.restore(key, value, expiresAt)` re-inserts an entry with an absolute expiry and treats `null` or `undefined` as no expiry. `src/persist.js` should use these two methods, not store internals. `load(file, { now })` should pass `now` to `createStore`."
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": "Milestone \"In-memory store with TTL expiry\" could not be verified: The milestone judgment session did not return a JSON object.",
+      "outcome": null,
+      "replans": 0,
+      "milestones": [
+        {
+          "key": "store",
+          "state": "VERIFYING",
+          "attempts": 1
+        },
+        {
+          "key": "persistence",
+          "state": "PLANNED",
+          "attempts": 0
+        }
+      ],
+      "missions": [
+        {
+          "outcome": "completed",
+          "strategy": "BUILD"
+        }
+      ],
+      "decisions": [
+        "created: Program created with the autonomous policy.",
+        "plan_proposed: Plan version 1 proposed: 2 milestone(s).",
+        "plan_accepted: Plan version 1 accepted (policy).",
+        "milestone_started: Milestone \"In-memory store with TTL expiry\" started.",
+        "mission_generated: Mission 1 for \"In-memory store with TTL expiry\" (BUILD).",
+        "mission_ended: Mission completed.",
+        "blocked: Milestone \"In-memory store with TTL expiry\" could not be verified: The milestone judgment session did not return a JSON object."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 4,
+    "sessions": 9,
+    "turns": 39,
+    "inputTokensUncached": 34136,
+    "outputTokens": 23869,
+    "cacheCreationTokens": 67493,
+    "cacheReadTokens": 384816,
+    "costUsdReported": 0.9473,
+    "toolCalls": 30,
+    "toolCallsRecorded": 30,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 13,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Read": 7,
+      "PowerShell": 3,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 4,
+    "byRole": {
+      "researcher": {
+        "sessions": 3,
+        "turns": 6,
+        "toolCalls": 3,
+        "contextToolCalls": 0
+      },
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 4,
+        "toolCalls": 3,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 20,
+        "toolCalls": 17,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 236040,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 68
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 69
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

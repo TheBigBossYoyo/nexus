@@ -1,0 +1,200 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "5d58c46935824c8b769a0b52f7a821634ee64635",
+  "startedAt": "2026-10-10T10:40:14.859Z",
+  "finishedAt": "2026-10-10T10:43:05.031Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/038c8118/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ laps stay in driving order when the sequence counter wraps (2.0448ms)\n✔ packets of an ordinary batch are still ordered (0.2641ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 114.5814\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 4,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (0.9126ms)\n✔ orders packets by sequence number (1.7725ms)\n✔ orders packets by clock across a 16-bit seq wrap (0.353ms)\n✔ applyBatch keeps per-car laps in driving order across a seq wrap (2.1783ms)\nℹ tests 4\nℹ suites 0\nℹ pass 4\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 202.3487\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"df28c00b-ddb8-4c0f-9f79-bb7125f2f2f6\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mkdir, cp, git, cd, true, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, git, tar, cd, true, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: ix failure:** I put the `seq` comparator back temporarily and ran `npm test`. 2 tests failed and 2 passed. Both new tests failed the same way:\n\n```\n✖ orders packets by clock across a 16-bit seq wrap\n✖ applyBatch keeps per-car laps in driving order across a seq wrap\n  actual: [ 12, 13, 10, 11 ], expected: [ 10, 11, 12, 13 ]\n```\n\nI then restored the fix. `git status` shows only the three expected files. Nothing under `src/strategy` or `packet.js` and `state.js` was modified.\n\nI did not capture the failure output on my first run, so I reran it as described. A later command that copied files through `/tmp` was denied, so I did the revert and restore with `sed` instead. No temporary files remain.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/fix-seq-wrap-ordering [high] Run shell command (bash): npm test 2>&1 | tail -15; git diff src/telemetry/order.js; git stash list | head -0\ngit show HEAD:src/telemetry/order.js > /tmp/o.js; cp src/telemetry/order.js /tmp/fixed.js; cp /tmp/o.js src/telemetry/order.js; npm test 2>&1 | grep -E \"not ok|pass|fail|expected|actual|\\+|\\-  \" | head -30; cp /tmp/f | path outside the worktree: /tmp/o.js; path outside the worktree: /tmp/fixed.js; deleting/moving path outside the worktree: /tmp/o.js; deleting/moving path outside the worktree: /tmp/fixed.js"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 37,
+    "inputTokensUncached": 13729,
+    "outputTokens": 15024,
+    "cacheCreationTokens": 30773,
+    "cacheReadTokens": 354707,
+    "costUsdReported": 0.5812,
+    "toolCalls": 32,
+    "toolCallsRecorded": 32,
+    "filesChangedRecorded": 0,
+    "toolCallsByName": {
+      "Bash": 22,
+      "StructuredOutput": 4,
+      "Read": 5,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 15,
+        "toolCalls": 13,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 167885,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 81
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 8
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 83
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 8
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { Preset, Run, RunConfig, RunMode } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
 import { newId, shortId } from '@shared/ids'
@@ -7,9 +8,12 @@ import {
   diffPlans,
   isEmptyDiff,
   LIVE_PROGRAM_STATES,
+  MilestoneJudgmentSchema,
   programHealth,
+  ProgramPlanSchema,
   ProgramPolicySchema,
   ProgramScheduleSchema,
+  ReplanSchema,
   TERMINAL_MILESTONE_STATES,
   TERMINAL_PROGRAM_STATES,
   windowStatus,
@@ -43,7 +47,7 @@ import type { TaskAdmissionService } from '@main/modules/intelligence/admission'
 import type { CompilationSelection, CompiledTaskSpec } from '@shared/intelligence'
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 import { selectMemory, validateMemory } from './memory'
-import { buildMissionPrompt, buildPlanPrompt, buildReplanPrompt, buildVerifyPrompt, parseJudgment, parsePlan, parseReplan, REASONING_MARKERS } from './reasoning'
+import { buildMissionPrompt, buildPlanPrompt, buildReplanPrompt, buildVerifyPrompt, correctionNote, parseJudgment, parsePlan, parseReplan, REASONING_MARKERS } from './reasoning'
 
 /** What the engine needs from the orchestrator. Missions and reasoning sessions are ordinary runs. */
 export interface ProgramRunHost {
@@ -97,6 +101,13 @@ const TERMINAL_RUN: readonly Run['state'][] = ['completed', 'failed', 'cancelled
 const MAX_CHECKPOINTS = 100
 /** A reasoning session whose answer does not parse is asked again this many times before the program is blocked. */
 const REASONING_RETRIES = 1
+/** The shape of each reasoning answer, as the JSON Schema the runtime enforces. The parsers still validate what comes back. */
+const answerSchema = (schema: z.ZodType): Record<string, unknown> => z.toJSONSchema(schema, { target: 'draft-7' }) as Record<string, unknown>
+const ANSWER_SCHEMAS = {
+  planner: answerSchema(ProgramPlanSchema),
+  verifier: answerSchema(MilestoneJudgmentSchema),
+  replanner: answerSchema(ReplanSchema),
+} as const
 const WORKING: readonly ProgramState[] = ['PLANNING', 'ACTIVE', 'REPLANNING']
 const OPEN_BACKLOG: readonly BacklogStatus[] = ['proposed', 'accepted', 'scheduled']
 
@@ -109,6 +120,7 @@ const OPEN_BACKLOG: readonly BacklogStatus[] = ['proposed', 'accepted', 'schedul
 export class ProgramEngine {
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly retries = new Map<string, number>()
+  private readonly retryErrors = new Map<string, string>()
   private readonly unsubscribes: (() => void)[] = []
   private timer: ReturnType<typeof setInterval> | null = null
   private disposed = false
@@ -690,7 +702,8 @@ export class ProgramEngine {
           ? this.repos.intelligenceArtifacts.admission('PROGRAM_REPLAN', program.id)
           : null,
       ),
-      overrides: { requirePlanApproval: false, engineeringOwner: { kind: 'PROGRAM', id: program.id } },
+      // The answer is read by this engine: the runtime is given its shape and enforces it.
+      overrides: { requirePlanApproval: false, engineeringOwner: { kind: 'PROGRAM', id: program.id }, answerSchema: ANSWER_SCHEMAS[kind] },
       ...(baseRef ? { baseRef } : {}),
     })
     this.patch(program.id, { currentRunId: run.id, currentRunKind: kind })
@@ -708,7 +721,7 @@ export class ProgramEngine {
       backlog: this.repos.backlog.list({ projectId: program.projectId, statuses: OPEN_BACKLOG, limit: 20 }),
       memory: this.repos.programMemory.listActive(program.id),
     })
-    await this.startReasoning(program, 'planner', prompt)
+    await this.startReasoning(program, 'planner', prompt + this.correctionFor(program.id))
   }
 
   private async startReplanner(program: Program): Promise<void> {
@@ -804,11 +817,21 @@ export class ProgramEngine {
     const used = this.retries.get(program.id) ?? 0
     if (used < REASONING_RETRIES) {
       this.retries.set(program.id, used + 1)
+      this.retryErrors.set(program.id, error)
       this.log(`${program.id}: ${what} failed (${error}); trying once more`)
       return true
     }
     this.retries.delete(program.id)
+    this.retryErrors.delete(program.id)
     return false
+  }
+
+  /** On a second try of a reasoning step: what was wrong with the first answer, said to the session. Used once. */
+  private correctionFor(programId: string): string {
+    const error = this.retryErrors.get(programId)
+    if (error === undefined) return ''
+    this.retryErrors.delete(programId)
+    return correctionNote(error)
   }
 
   private async onPlannerEnded(program: Program, run: Run | null): Promise<void> {
@@ -1131,7 +1154,7 @@ export class ProgramEngine {
       ...verifications.slice(-6).map((v) => `${v.kind} (${v.taskId === null ? 'mission' : 'task'}): ${v.passed ? 'passed' : 'FAILED'}. ${v.summary.replace(/\s+/g, ' ').slice(0, 300)}`),
     ].join('\n')
     repos.milestones.update(milestone.id, { evidence: { runId: run.id, verifierRunId: null, gates, judgment: null, verdict: 'rejected', reason: 'Verification in progress.', resultCommit, createdAt: this.iso() } })
-    const prompt = buildVerifyPrompt({ program, milestone, gates, missionEvidence, changes, workingTreeIsResult: false })
+    const prompt = buildVerifyPrompt({ program, milestone, gates, missionEvidence, changes, workingTreeIsResult: false }) + this.correctionFor(program.id)
     await this.startReasoning(program, 'verifier', prompt)
   }
 

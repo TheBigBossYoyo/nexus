@@ -213,17 +213,48 @@ function protobufSurface(content: string): SurfaceElement[] {
 }
 
 /** Tables and columns of `CREATE TABLE` statements. */
+/**
+ * Every `create table name ( body )` of a schema: the body ends at the first `)` that is followed by the end
+ * of the statement (`;`, the end of the text, or `without`, `engine`, `strict`), so the parentheses of a type
+ * such as numeric(10, 2) stay inside it.
+ *
+ * One pass. This used to be a single pattern with a lazy body, which looked from every statement head to the
+ * end of the text when no body ended: a file of 30,000 unterminated statements took five seconds of the
+ * runtime's thread. Here a head whose body never ends is the last one looked at: no later head can have an
+ * ending that an earlier one did not find.
+ */
+function createTableStatements(source: string): { table: string; body: string }[] {
+  const out: { table: string; body: string }[] = []
+  const head = /create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([\w.]+)[`"\]]?\s*\(/gi
+  const ending = /\)\s*(?:;|$|without|engine|strict)/iy
+  for (let m = head.exec(source); m !== null; m = head.exec(source)) {
+    const bodyStart = head.lastIndex
+    let end = -1
+    for (let close = source.indexOf(')', bodyStart); close !== -1; close = source.indexOf(')', close + 1)) {
+      ending.lastIndex = close
+      if (ending.test(source)) {
+        end = close
+        break
+      }
+    }
+    if (end === -1) break
+    out.push({ table: m[1] ?? '', body: source.slice(bodyStart, end) })
+    head.lastIndex = ending.lastIndex
+  }
+  return out
+}
+
 function databaseSurface(content: string): SurfaceElement[] {
   const out: SurfaceElement[] = []
   const source = stripBlockComments(content.replace(/--[^\n]*/g, ''))
-  for (const m of source.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?[`"[]?([\w.]+)[`"\]]?\s*\(([\s\S]*?)\)\s*(?:;|$|without|engine|strict)/gi)) {
-    const table = (m[1] ?? '').toLowerCase()
+  for (const statement of createTableStatements(source)) {
+    const table = statement.table.toLowerCase()
     out.push({ path: table, shape: 'table', required: true })
     // Split on commas that are not inside parentheses (types such as numeric(10, 2)).
     const columns: string[] = []
     let depth = 0
     let current = ''
-    for (const ch of m[2] ?? '') {
+    for (const ch of statement.body) {
       if (ch === '(') depth++
       if (ch === ')') depth--
       if (ch === ',' && depth === 0) {

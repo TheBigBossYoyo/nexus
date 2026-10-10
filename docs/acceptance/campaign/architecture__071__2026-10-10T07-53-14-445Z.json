@@ -1,0 +1,220 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08d11443aafec8cdcf3303189e8021ad50e28c1a",
+  "startedAt": "2026-10-10T07:53:14.445Z",
+  "finishedAt": "2026-10-10T07:58:00.977Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/21e5a588/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (0.886ms)\n✔ an unknown format names itself and the known formats (0.2688ms)\n✔ a format is added from outside, without touching the module (0.1508ms)\n✔ registering a name twice throws and keeps the first exporter (0.1047ms)\n✔ the decision is recorded with its three sections (8.1008ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 76.3191\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 11,
+          "fail": 0,
+          "output": "✔ json output (0.6035ms)\n✔ csv output (0.1293ms)\n✔ listFormats defaults to the built-ins (0.4496ms)\n✔ csv with zero rows is empty (0.067ms)\n✔ json with zero rows is an empty array (0.0658ms)\n✔ csv renders null and undefined as empty and uses first row columns (0.0966ms)\n✔ registered exporter is called with the rows (0.0885ms)\n✔ listFormats stays sorted after registering (0.1049ms)\n✔ registering an existing name throws (0.2848ms)\n✔ unknown format error names the format and known formats (0.1562ms)\n✔ inherited property names are unknown formats (0.1075ms)\nℹ tests 11\nℹ suites 0\nℹ pass 11\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 91.2077\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (file). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, git, cp, cat, import, exportdata, from, console.log, exports,, n, .sort, fresh,, const, let, for, f,c, ,, if, a!==b, !buffer.from, a, .equals, buffer.from, b, diff,f,json.stringify, c, byteidentical,, json.stringify, n.exportdata, c",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (file). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, git, cat, import, registerexporter, from, tsv,, rows, =, r, .join, t, n, eof, exportdata, console.log, exports,, mod, .sort, default list,, const, let, for, f,c, ,, if, a, !buffer.from, .equals, buffer.from, b, bad++, diff,, c, diff"
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: (known formats: csv, json)`, using the sorted list. A duplicate name throws `Exporter already registered: <name>`.\n- **Tests:** I left `json output` and `csv output` unmodified and added tests for every case you listed. The default `listFormats` test runs before any test that registers, and each registration uses its own name.\n- **Line endings:** `git commit` warned that LF in `src/export/index.js` will be replaced by CRLF the next time Git touches it. I didn't check the line endings of the committed file, so the diff may show more changed lines than the edit.\n- **Not done:** `docs/adr/0001-exporter-registry.md` is a mission criterion but was outside this task's scope, so I didn't create it.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: t an unknown format throws an `Error` naming the format and listing the known ones, and that `json` and `csv` are registered by default in the same module. It also says new formats go in a new file that imports `registerExporter`.\n- **Consequences:** the three benefits and the four costs you listed. The costs are that a format exists only after its registering module is imported, there is no unregister (so tests share the registry and need distinct names), a name can be claimed by one team only, and changing json or csv still means editing `index.js`.\n\nGit warned that LF in the new file will become CRLF the next time Git touches it, so the committed line endings may differ from what I wrote.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 62,
+    "inputTokensUncached": 25748,
+    "outputTokens": 27914,
+    "cacheCreationTokens": 65457,
+    "cacheReadTokens": 518878,
+    "costUsdReported": 1.1096,
+    "toolCalls": 54,
+    "toolCallsRecorded": 54,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 30,
+      "mcp__nexus__record_decision": 2,
+      "StructuredOutput": 6,
+      "Read": 8,
+      "Write": 2,
+      "Edit": 2,
+      "Grep": 2,
+      "Glob": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 13,
+        "toolCalls": 11,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 25,
+        "toolCalls": 22,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 284944,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 27
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 28
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

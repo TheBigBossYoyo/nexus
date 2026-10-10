@@ -180,14 +180,16 @@ Context, memory and token intelligence. Report: `V0_7_1_RELEASE_REPORT.md`. Rese
 - Retrieval without embeddings: path, typed relations, full text (FTS5), hierarchy when broad; confidence and
   widening; scope by project, workspace and program.
 - Context Engine V3: the 0.7.0 pack plus a "Project knowledge" section and four agent tools
-  (`context_open`, `context_search`, `context_related`, `context_note`). Off for agents by default.
+  (`context_open`, `context_search`, `context_related`, `context_note`). On for agents by default since the
+  real campaign of 2026-10-10; the planner gets the map and its request's selection, and an open returns a
+  branch with what is under it.
 - Token Intelligence Engine (`src/main/modules/token`): per-request cache events, context breakdowns, prefix
   registry, cache diagnosis, prompt auditor, failure-first check output, session efficiency, quality gate,
   provider capabilities, decision log.
 - Runtime: per-request usage, context usage and compaction events from the SDK, through the worker protocol.
 - Interface: Context view; Usage sections Cache, Context, Context techniques; agent Context tab; Tokens settings.
-- Defaults follow the measurements: failure-first check output on; stable prefix, upfront tool loading,
-  pressure rotation and the graph in agent context off.
+- Defaults follow the measurements: failure-first check output and the graph in agent context on; stable
+  prefix, upfront tool loading and pressure rotation off.
 - Three independent reviews (security; graph and memory correctness; token accounting, SDK use and test
   quality): 3 HIGH and 11 of 12 MEDIUM findings fixed with regression tests; the twelfth is a documented limit.
 - Nothing of 0.8 is implemented.

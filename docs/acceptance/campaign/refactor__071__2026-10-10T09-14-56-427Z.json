@@ -1,0 +1,225 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08f3cb609f4e7d77c72eb0bbc9421beec460a487",
+  "startedAt": "2026-10-10T09:14:56.427Z",
+  "finishedAt": "2026-10-10T09:18:41.350Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/692b6097/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (1.0515ms)\n✔ updateUser gives the same results as before, the id checked last (0.1784ms)\n✔ inviteUser gives the same results as before, the role checked last (0.1812ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.1587ms)\n✔ the handlers use the shared module and no longer carry their own copy (0.9553ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 77.4794\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 22,
+          "fail": 0,
+          "output": "✔ a valid user is created with a normalised email (1.1463ms)\n✔ an invalid email is reported (0.1669ms)\n✔ an invitation needs a known role (0.1093ms)\n✔ createUser reports each validation error (0.1178ms)\n✔ createUser reports the email error before the name error (0.1185ms)\n✔ updateUser reports each validation error (0.1052ms)\n✔ updateUser reports the email error before the name error (0.0658ms)\n✔ inviteUser reports each validation error (0.0803ms)\n✔ inviteUser reports the email error before the name error (0.0644ms)\n✔ inviteUser reports invalid email or name before an invalid role (0.1277ms)\n✔ updateUser reports invalid email or name before a missing id (0.089ms)\n✔ updateUser requires a non-empty id once email and name are valid (0.0757ms)\n✔ success values are normalised per handler (0.1061ms)\n✔ a valid email returns null (0.7276ms)\n✔ a valid email with surrounding whitespace returns null (0.1181ms)\n✔ a non-string email is not valid (0.1138ms)\n✔ malformed emails are not valid (0.0936ms)\n✔ an email of 254 trimmed characters is accepted and 255 is too long (0.1014ms)\n✔ a valid name returns null (0.0936ms)\n✔ non-string, empty and whitespace-only names are required (0.0946ms)\n✔ a name of 80 trimmed characters is accepted and 81 is too long (0.0616ms)\n✔ a name longer than 80 only because of whitespace is accepted (0.0759ms)\nℹ tests 22\nℹ suites 0\nℹ pass 22\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 131.2021\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "add-validation-module",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "refactor-handlers-to-use-validation",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 2,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"317898fd-d43e-4eb7-b9c3-3da8db4d695d\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}",
+        "{\"approvalId\":\"4dddd18f-5ac4-4df7-ac2b-c6848fc91dd6\",\"action\":\"Run PowerShell command\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "worker: PowerShell: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  only validate, so they return `null` or the error string and no normalised value.\n\nThe new tests cover:\n- **Email:** a valid address, surrounding whitespace, non-strings (`undefined`, `null`, a number) and malformed strings (`'nope'`, `'a@b'`, `'a b@c.co'`, `''`). They also cover the 254 and 255 boundary, including 254 with whitespace around it.\n- **Name:** a normal name, non-strings, `''` and whitespace-only values (all `'name: required'`), and the 80 and 81 boundary. One more test checks a name that is over 80 characters only because of surrounding whitespace.\n\nGit warned that LF line endings will become CRLF in the working copy of both new files. I didn't change any line-ending settings.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: id;\n  - the success values of each handler.\n\n  They passed against the unchanged handlers on the first run, so no test needed fixing.\n- **Refactor:** the email check runs first, then the name check, then the role check (`inviteUser`) or id check (`updateUser`). Both still return `{ ok: false, error }`. The role/id checks and the success returns are unchanged.\n- **Regex check:** searching `src/handlers` for `[^@` finds nothing.\n- **Commit:** the tests and the refactor went into one commit, `012c916`. I tried to commit the tests separately before refactoring, but that command was denied, so I made the edits one by one and committed once at the end. The tests were not edited after the refactor.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/refactor-handlers-to-use-validation [medium] Run shell command (bash): cd src/handlers; for f in createUser updateUser inviteUser; do echo \"== $f\"; cat -A $f.js | head -30; done; cat handlers.test.js; cat ../validation.js | path outside the worktree: ../validation.js",
+        "Worker/refactor-handlers-to-use-validation [medium] Run PowerShell command: git add src/handlers/handlers.test.js; git commit -q -m \"Add handler characterisation tests\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\"\n$d='src/handlers'\nforeach($f in 'createUser','updateUser','inviteUser'){\n  $p=\"$d/$f.js\"\n  $l=[System.IO.File]::ReadAllText($p) -split \"`n\"\n  $imp=\" | writes through a .NET file API: path uses a variable or expansion and cannot be shown to stay inside the worktree: $p; process substitution or redirection without a visible target; path outside the wo"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 73,
+    "inputTokensUncached": 25395,
+    "outputTokens": 23011,
+    "cacheCreationTokens": 69147,
+    "cacheReadTokens": 492861,
+    "costUsdReported": 0.9977,
+    "toolCalls": 65,
+    "toolCallsRecorded": 65,
+    "filesChangedRecorded": 6,
+    "toolCallsByName": {
+      "Bash": 26,
+      "StructuredOutput": 6,
+      "Read": 23,
+      "Write": 2,
+      "Edit": 4,
+      "PowerShell": 2,
+      "Grep": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 22,
+        "toolCalls": 20,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 32,
+        "toolCalls": 29,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 223241,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 51
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 52
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

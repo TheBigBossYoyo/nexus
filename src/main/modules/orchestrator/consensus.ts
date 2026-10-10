@@ -13,6 +13,7 @@ import {
 import { selectFactsForTask } from '@main/modules/intelligence'
 import { PLANNER_LENSES } from '@main/modules/planning'
 import type { AgentRunResult, SessionControl } from './agent-runner'
+import { graphContextForRequest } from './context-graph'
 import type { Core } from './core'
 
 /** Same contract as the single planner's validation: schema, plan rules and mode rules. */
@@ -158,6 +159,8 @@ export class ConsensusPlanner {
   private async runCandidates(input: ConsensusInput): Promise<PlanningCandidate[] | 'halt'> {
     const { repos, bus } = this.core.deps
     const { run, control } = input
+    // Retrieved once: every lens plans from the same project knowledge.
+    const knowledge = graphContextForRequest(this.core, run, new Set(input.memory.map((m) => m.id)))
     const sessions = await Promise.all(
       PLANNER_LENSES.map(async (lens) => {
         const started = Date.now()
@@ -174,6 +177,7 @@ export class ConsensusPlanner {
             run,
             profile: input.profile,
             memory: input.memory,
+            knowledge,
             ...(input.feedback ? { feedback: input.feedback } : {}),
             ...(input.previousPlan ? { previousPlan: input.previousPlan } : {}),
             lens: { label: lens.label, guidance: lens.guidance },

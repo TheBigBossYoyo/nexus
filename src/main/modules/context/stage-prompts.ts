@@ -74,6 +74,8 @@ export interface PlannerPromptInput {
   run: Run
   profile: ProjectProfile
   memory: MemoryEntry[]
+  /** v0.7.1: the Context Graph section for the request (the map and what was selected), when the graph is on. */
+  knowledge?: string | null
   feedback?: string
   previousErrors?: string[]
   previousPlan?: MissionPlan
@@ -119,6 +121,7 @@ export function buildPlannerPrompt(input: PlannerPromptInput): Pack {
     { name: 'Planning lens', body: input.lens ? `You are ${input.lens.label}. ${input.lens.guidance}` : null },
     { name: 'Project profile', body: renderProfile(input.profile) },
     { name: 'Project memory', body: memory },
+    { name: 'Project knowledge', body: input.knowledge ?? null },
     { name: 'Plan revision', body: revision },
     { name: 'Plan validation errors', body: errors },
     { name: 'Feedback', body: feedback },

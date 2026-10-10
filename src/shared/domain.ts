@@ -302,6 +302,12 @@ export interface RunConfig {
   reviewMode?: 'standard' | 'dual' | 'auto'
   /** v0.3. Absent on runs created before 0.3 and on runs started without a strategy. */
   strategy?: RunStrategyInfo
+  /**
+   * v0.7.1. A read-only run whose answer is read by a program, not a person: the JSON Schema the answer must
+   * match. The runtime enforces it (structured output), and the task's result is that JSON. Without it a
+   * session asked for JSON in its prompt answered real requests with a report in prose, and could not be read.
+   */
+  answerSchema?: Record<string, unknown>
 }
 
 export interface Run {

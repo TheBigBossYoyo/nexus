@@ -1,0 +1,260 @@
+{
+  "kind": "campaign-run",
+  "task": "program",
+  "category": "Program-style task",
+  "arm": "070",
+  "armIs": "NEXUS 0.7.0 sources, default settings",
+  "nexusVersion": "0.7.0",
+  "nexusCommit": "41fb3d68cad6fbf43b9af0191025a464eb29416c",
+  "startedAt": "2026-10-10T09:53:14.805Z",
+  "finishedAt": "2026-10-10T09:57:07.955Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 90,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "BLOCKED",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "kvlib",
+        "ref": "nexus/program-90a01ba8",
+        "hiddenPassed": false,
+        "hidden": {
+          "ok": false,
+          "pass": 0,
+          "fail": 1,
+          "output": "node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module 'C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-070-PXByny\\eval-kvlib\\src\\kv.js' imported from C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-070-PXByny\\eval-kvlib\\hidden.test.js\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\n    at #resolve (node:internal/modules/esm/loader:701:17)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\n  code: 'ERR_MODULE_NOT_FOUND',\n  url: 'file:///C:/Users/user/AppData/Local/Temp/nexus-campaign-program-070-PXByny/eval-kvlib/src/kv.js'\n}\n\nNode.js v24.14.0\n✖ hidden.test.js (55.5333ms)\nℹ tests 1\nℹ suites 0\nℹ pass 0\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 60.5256\n\n✖ failing tests:\n\ntest at hidden.test.js:1:1\n✖ hidden.test.js (55.5333ms)\n  'test failed'\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 1,
+          "fail": 0,
+          "output": "✔ the package loads (3.6131ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 80.7831\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "kv-store-and-tests",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-milestone",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (exit_node_test=$lastexitcode). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (exit_npm_test=$lastexitcode). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (--- diff head, --- base..head, --- ls-files). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "researcher: Bash: Command not permitted for the researcher role (sed). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "researcher: aches set time plus ttlMs, so expiry applies at equality.\",\n    \"On Windows, rename over an existing file can fail if the target is open; fs.rename is usually fine but needs a test.\",\n    \"Non-JSON-serializable values are lost or throw in save; the goal does not say how to handle them.\"\n  ],\n  \"constraints\": [\n    \"Time is injected, never read directly: Date.now is used only as the default of the now option\",\n    \"Files are replaced atomically via a temporary file in the same directory plus rename\",\n    \"Use Node's built-in test runner (node --test) with ES modules; no new dependencies\",\n    \"src/index.js is currently empty; whether to re-export from it is not required by the goal\"\n  ]\n}\n```",
+        "planner: ",
+        "worker: ts `createStore({ now = Date.now } = {})` with `set`, `get`, `has`, `delete`, `size`, `entries` and `restore`. It uses a Map of key to `{ value, expiresAt }`, checks liveness on read, and removes expired entries when it meets them.\n- **`Date.now`:** it appears once under `src/`, as the default of `now` in `src/kv.js`, which I confirmed with grep.\n- **Tests:** they use a local `t` variable as the fake clock and have no sleeps or timers. They cover each case you listed, plus `delete` on an already-expired key returning false.\n- **Scope:** no existing file and no dependency was changed.\n\nGit warned that LF will become CRLF in both new files the next time it touches them; I did nothing about it.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: xactly once, as the default of `now` | **Pass** | `src/kv.js:1`. |\n| Injected clock, no sleeping or timers | **Pass** | Nine tests pass `now: () => t` (or a constant) and move `t` by assignment; the two that call `createStore()` with no clock (`:5`, `:116`) use no ttl. A case-insensitive search of `src/` for `setTimeout`, `setInterval`, `setImmediate`, `mock`, `sleep`, `timers`, `skip`, `todo`, `.only`, `new Date` and `performance` finds only the word \"skips\" in a test title at `:89`. |\n| `node --test` passes including `src/index.test.js` | **Pass** | 11 of 11 pass, including `the package loads`. |\n| No dependencies added | **Pass** | `package.json` is not in the diff from the base commit. |",
+        "verifier: ",
+        "researcher: expiry. Milestone two will exercise them, but a unit test in `kv.test.js` would help.\n- **Cleanup cost (low):** `size()` and `entries()` walk the whole map and delete expired entries as they go. That is acceptable for a small store.\n\n## Memory proposals\n- **Interface:** `store.entries()` returns `[{key, value, expiresAt}]` for live entries, where `expiresAt` is an absolute ms timestamp or `null` for no expiry. `store.restore(entries)` takes the same shape, drops entries that are already expired, and keeps the absolute expiry. `src/persist.js` must use these and not reach into the Map.\n- **Semantics:** An entry expires when `now() >= expiresAt`. `delete` returns true only if the key was live.",
+        "researcher: millisecond time or `null`.\n- `store.restore(entries)` takes the same shape and skips expired entries. It overwrites existing keys.\n- `persist.js` should use these two methods and should not touch the store's internals.\n- `save` and `load` must serialise `null` and reuse the same `now` clock.\n\n**Proposed backlog items (minor, not blocking):**\n- `ttlMs` is not validated. `0`, a negative value or `NaN` is accepted. `ttlMs: 0` expires immediately, but `NaN` gives an entry that never expires, because the `>=` comparison is false.\n- `size()` and `entries()` scan the whole map on every call, which is O(n).\n- `restore()` does not validate entry shapes. This matters once `load` feeds it parsed JSON."
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": "Milestone \"In-memory TTL key-value store\" could not be verified: The milestone judgment session did not return a JSON object.",
+      "outcome": null,
+      "replans": 0,
+      "milestones": [
+        {
+          "key": "kv-store",
+          "state": "VERIFYING",
+          "attempts": 1
+        },
+        {
+          "key": "persistence",
+          "state": "PLANNED",
+          "attempts": 0
+        }
+      ],
+      "missions": [
+        {
+          "outcome": "completed",
+          "strategy": "BUILD"
+        }
+      ],
+      "decisions": [
+        "created: Program created with the autonomous policy.",
+        "plan_proposed: Plan version 1 proposed: 2 milestone(s).",
+        "plan_accepted: Plan version 1 accepted (policy).",
+        "milestone_started: Milestone \"In-memory TTL key-value store\" started.",
+        "mission_generated: Mission 1 for \"In-memory TTL key-value store\" (BUILD).",
+        "mission_ended: Mission completed.",
+        "blocked: Milestone \"In-memory TTL key-value store\" could not be verified: The milestone judgment session did not return a JSON object."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 4,
+    "sessions": 9,
+    "turns": 51,
+    "inputTokensUncached": 29768,
+    "outputTokens": 23449,
+    "cacheCreationTokens": 54574,
+    "cacheReadTokens": 394451,
+    "costUsdReported": 0.8763,
+    "toolCalls": 42,
+    "toolCallsRecorded": 42,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 15,
+      "mcp__nexus__record_decision": 1,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Read": 7,
+      "PowerShell": 9,
+      "Grep": 4
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "researcher": {
+        "sessions": 3,
+        "turns": 7,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "planner": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 4,
+        "toolCalls": 3,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 29,
+        "toolCalls": 26,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "The 0.7.0 runtime adapter does not report compaction events; 0 here means not observable.",
+    "wallMs": 231553,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 64
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 6
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 65
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 6
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

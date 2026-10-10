@@ -1,0 +1,347 @@
+{
+  "kind": "campaign-run",
+  "task": "workspace",
+  "category": "Workspace / cross-repository task",
+  "arm": "070",
+  "armIs": "NEXUS 0.7.0 sources, default settings",
+  "nexusVersion": "0.7.0",
+  "nexusCommit": "41fb3d68cad6fbf43b9af0191025a464eb29416c",
+  "startedAt": "2026-10-10T08:26:45.937Z",
+  "finishedAt": "2026-10-10T08:33:33.143Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 75,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "BLOCKED",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "schemas",
+        "ref": "3562323ef741109443c68cee1b392e46d95ae6e2",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ the contract has an optional currency with a default (4.9207ms)\n✔ the validator accepts an absent or valid currency and rejects others (0.3465ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 103.59\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 8,
+          "fail": 0,
+          "output": "✔ a complete order is valid (1.1342ms)\n✔ a missing id is reported (0.2378ms)\n✔ an order without currency is valid (0.8944ms)\n✔ an order with a valid currency is valid (0.1824ms)\n✔ an invalid currency \"usd\" is reported (0.1423ms)\n✔ an invalid currency \"US\" is reported (0.0561ms)\n✔ an invalid currency \"USDX\" is reported (0.0949ms)\n✔ an invalid currency 123 is reported (0.0924ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 112.067\n"
+        },
+        "note": null
+      },
+      {
+        "repository": "orders-service",
+        "ref": null,
+        "hiddenPassed": false,
+        "hidden": null,
+        "suitePassed": false,
+        "suite": null,
+        "note": "no result to evaluate"
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "sync-order-contract-copy",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "create-order-currency",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-orders-service-currency",
+        "state": "blocked",
+        "attempts": 0
+      },
+      {
+        "key": "sync-order-contract-copy-fix1",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "add-currency-schema-validator",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-currency-change",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 2,
+      "pauses": [
+        "Intervention required: tasks sync-order-contract-copy, verify-orders-service-currency, sync-order-contract-copy-fix1 are failed or blocked"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"fe5a8ada-cf5c-4878-a062-46bbe9d54b82\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"49d73916-bb12-4290-9af7-77073ff15816\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "planner: Bash: Command not permitted for the planner role (git). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (xxd, git, sha256sum). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (od, sha256sum). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "debugger: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [
+        "sync-order-contract-copy: {\"what\":\"Repair failed\",\"where\":\"sync-order-contract-copy-fix1\",\"why\":\"Repair of sync-order-contract-copy cannot close the two byte-identity criteria: the provider's contract block (BEGIN/END lines), which the task names as the single source, is again absent from the repair context. Root cause is an orchestration/context gap, not a file defect, so no code change was made. To unblock: deliver the contract block in the task context (implementer and verifier), or confirm that the prose description ",
+        "sync-order-contract-copy-fix1: {\"what\":\"Repair failed\",\"where\":\"sync-order-contract-copy-fix1\",\"why\":\"Repair of sync-order-contract-copy cannot close the two byte-identity criteria: the provider's contract block (BEGIN/END lines), which the task names as the single source, is again absent from the repair context. Root cause is an orchestration/context gap, not a file defect, so no code change was made. To unblock: deliver the contract block in the task context (implementer and verifier), or confirm that the prose description "
+      ],
+      "verificationFailures": [
+        "{\"id\":\"6870f49b-dfe4-4d5e-b00f-46de6316a2b4\",\"runId\":\"6dd8bfbb-30cf-4b0d-91eb-134a03319dd1\",\"taskId\":\"858b3653-02f2-493a-8cec-a52baa8cec68\",\"agentId\":\"07f9ddd5-f109-4809-9923-7c4fe6846bbe\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"Not verified as done: the two byte-identity criteria could not be checked because the provider's contract block (the BEGIN/END block the task names as the single source) was never in my context, so I had nothing to compare against. A blocker is recorded.\\n\\nEverything I could check passes. The committed file (21cd608) matches the task's prose description of the provider contract on every point: 21 lines, 298 bytes, LF endings, no BOM, one trailing newline, and `currency` added after `total` with type, pattern and default in that order. The commit touches only `contracts/order.schema.json`, and `npm test` exits 0 with the 2 existing tests passing.\\"
+      ],
+      "lastMessages": [
+        "researcher: ity requirement, so copy the file rather than retype it.\",\n    \"A JSON Schema `default` is not applied by validators automatically, so the 'EUR' default must be applied explicitly in createOrder.\",\n    \"The error message must be identical in both repositories; the orders-service may implement its own validation rather than reuse validateOrder, so the wording needs checking.\",\n    \"I only read the schemas repository's intelligence summary and did not inspect the orders-service code, so its current validation approach is unverified.\",\n    \"The `currency` property must not be added to `required` in this release (additive-change rule), to keep older providers and consumers compatible.\"\n  ]\n}\n```",
+        "planner: ",
+        "worker: .\n- **Validator:** `src/validate.js` pushes `'currency: must be three uppercase letters'` when `currency` is defined and isn't a three-uppercase-letter string. `null` and other non-strings count as invalid. An order without a currency stays valid. The `'EUR'` default isn't applied and the order isn't mutated.\n- **Tests:** `src/validate.test.js` keeps the two existing tests unchanged. New tests cover a missing currency, `'USD'` (both valid), and `'usd'`, `'US'`, `'USDX'` and `123` (each invalid).\n\nGit warned that LF line endings in `src/validate.test.js` will become CRLF the next time it touches the file. I left that alone, and the final `git status` printed nothing, so the worktree is clean.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: ing id is reported\n✔ an order without currency is valid\n✔ an order with a valid currency is valid\n✔ an invalid currency \"usd\" is reported\n✔ an invalid currency \"US\" is reported\n✔ an invalid currency \"USDX\" is reported\n✔ an invalid currency 123 is reported\nℹ tests 8\nℹ pass 8\nℹ fail 0\nℹ skipped 0\nEXIT=0\n```\n\n### Observations (not failures)\n\n- `currency: null` is rejected by the validator, since only `undefined` counts as absent. That agrees with the schema's `type: \"string\"` and is outside the listed criteria.\n- The test `'an order without currency is valid'` (`src/validate.test.js:13`) asserts the same thing as the original `'a complete order is valid'` (line 5). It is redundant but harmless.",
+        "verifier: ",
+        "planner: ",
+        "worker: t matches.\n- **Checks:** `npm test` passes, with 2 tests passing and 0 failing. The file is 21 lines, and `git ls-files --eol` reports LF in both the index and the working tree. The commit touches only this file, with 5 insertions and no other changes.\n- **Line endings:** my first edit left CRLF in the working copy, so I rewrote the whole file with LF endings and a single trailing newline. Git also warns that `core.autocrlf=true` may turn the working copy back into CRLF the next time it touches the file. The committed content is LF.\n- **Not done:** the mission criteria for `createOrder` (default and invalid-currency handling, plus new tests) are outside this task, so I left `src/` untouched.",
+        "reviewer: ",
+        "verifier: ",
+        "debugger: ne trailing newline; `git ls-files --eol` reports `i/lf w/lf`.\n- **Commit scope:** the commit touches only `contracts/order.schema.json`, and the worktree is clean.\n- **Tests:** I did not re-run `npm test` this session; the NEXUS check record shows it exiting 0 with both tests passing at this commit.\n\n**No regression test added:** there is no code defect to pin down, and the task forbids touching anything but the contract file.\n\n**To unblock:** deliver the contract block to the implementer and verifier contexts, or confirm that the prose description is the authoritative source. In the second case the existing commit already satisfies every criterion. A blocker is recorded with this evidence.",
+        "worker: are as before, the returned object still has `id` and `total`, and the request isn't mutated. The new check is a single guard line in the file's style.\n- **JSDoc:** left as is, since it is still accurate.\n\nI added three tests to `src/createOrder.test.js`: the default, `'USD'` kept, and an invalid-value test. The invalid-value test loops over `'usd'`, `'EURO'`, `'US'`, `''`, `123` and `null` and checks the exact message. The two existing tests are untouched. The diff touches only `src/createOrder.js` and `src/createOrder.test.js`.\n\nGit warned that LF line endings in `src/createOrder.test.js` will be converted to CRLF the next time it touches the file. I didn't change any line-ending settings.",
+        "reviewer: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/sync-order-contract-copy [high] Run shell command (bash): f=contracts/order.schema.json; sed -i 's/\\r$//' $f; od -c $f | head -2; git ls-files --eol $f; git diff --stat; git -c core.autocrlf=false diff | cat | git -c can configure arbitrary command execution",
+        "Debugger/sync-order-contract-copy-fix1 [high] Run shell command (bash): cat -A contracts/order.schema.json; git ls-files --eol contracts/order.schema.json; wc -lc contracts/order.schema.json; head -c3 contracts/order.schema.json | od -c | head -1; git status --short; git show --stat HEAD | tail -3; grep -rIl \"BEGIN\" . --exclude-dir=node_modules --exclude-dir=.git 2>/dev | touching Git's own files: .git"
+      ],
+      "blocked": [
+        "dependency: Blocked because dependency sync-order-contract-copy failed or was cancelled"
+      ],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": "The run of task orders-service-currency is paused and needs attention.",
+      "plan": [
+        {
+          "key": "schemas-currency",
+          "repository": "schemas",
+          "dependsOn": []
+        },
+        {
+          "key": "orders-service-currency",
+          "repository": "orders-service",
+          "dependsOn": [
+            "schemas-currency"
+          ]
+        }
+      ],
+      "tasks": [
+        {
+          "key": "schemas-currency",
+          "repository": "schemas",
+          "state": "COMPLETED"
+        },
+        {
+          "key": "orders-service-currency",
+          "repository": "orders-service",
+          "state": "RUNNING"
+        }
+      ],
+      "verification": null,
+      "decisions": [
+        "mission_created: Mission created: Add an optional `currency` to orders across the platform. The order contract (contracts/order.schema.json, owned by the schemas repository) get",
+        "plan_proposed: Plan: 2 task(s) across 2 repositories, in the order schemas-currency -> orders-service-currency.",
+        "plan_accepted: The cross-repository plan was accepted by the user.",
+        "task_started: Task schemas-currency started in schemas.",
+        "task_completed: Task schemas-currency completed in schemas.",
+        "task_started: Task orders-service-currency started in orders-service.",
+        "blocked: The run of task orders-service-currency is paused and needs attention."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 3,
+    "sessions": 15,
+    "turns": 103,
+    "inputTokensUncached": 38871,
+    "outputTokens": 38125,
+    "cacheCreationTokens": 96260,
+    "cacheReadTokens": 795849,
+    "costUsdReported": 1.5534,
+    "toolCalls": 88,
+    "toolCallsRecorded": 88,
+    "filesChangedRecorded": 4,
+    "toolCallsByName": {
+      "Bash": 43,
+      "StructuredOutput": 9,
+      "Read": 25,
+      "Edit": 4,
+      "Glob": 1,
+      "Write": 1,
+      "mcp__nexus__report_blocker": 2,
+      "Grep": 1,
+      "PowerShell": 1,
+      "mcp__nexus__send_message": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 14,
+    "byRole": {
+      "planner": {
+        "sessions": 2,
+        "turns": 16,
+        "toolCalls": 14,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 3,
+        "turns": 23,
+        "toolCalls": 20,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 3,
+        "turns": 13,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 5,
+        "turns": 44,
+        "toolCalls": 39,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "researcher": {
+        "sessions": 1,
+        "turns": 1,
+        "toolCalls": 0,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "The 0.7.0 runtime adapter does not report compaction events; 0 here means not observable.",
+    "wallMs": 405063,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 36
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 4
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 39
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 4
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

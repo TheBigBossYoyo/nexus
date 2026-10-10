@@ -25,7 +25,8 @@ describe('knowledge channels', () => {
     expect(health.spaces).toHaveLength(1)
     expect(health.spaces[0]).toMatchObject({ name: 'RaceDeck', space: { kind: 'project', id: h.project.id } })
     expect(health.spaces[0]!.health!.nodes).toBeGreaterThan(20)
-    expect(health.enabled).toBe(false)
+    // On by default since the real campaign of 0.7.1.
+    expect(health.enabled).toBe(true)
 
     const top = await api['knowledge.tree']({ projectId: h.project.id })
     expect(top.parent?.path).toBe('')
@@ -117,7 +118,7 @@ describe('token channels', () => {
     expect(o.compositionSessions).toBe(3)
     // One estimated component (the split of NEXUS's own text) makes the whole composition an estimate.
     expect(o.compositionBasis).toBe('estimated')
-    expect(o.techniques.map((t) => `${t.technique}:${t.enabled}`)).toEqual(['stablePrefix:false', 'contextGraph:false', 'toolLoading:false', 'outputFiltering:true', 'pressureRotation:false'])
+    expect(o.techniques.map((t) => `${t.technique}:${t.enabled}`)).toEqual(['stablePrefix:false', 'contextGraph:true', 'toolLoading:false', 'outputFiltering:true', 'pressureRotation:false'])
     expect(o.sessionActions).toEqual([{ action: 'KEEP', n: 3 }])
 
     const view = await api['tokens.agent']({ agentId: agents[1]!.id })
