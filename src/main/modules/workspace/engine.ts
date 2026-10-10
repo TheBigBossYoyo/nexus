@@ -1060,12 +1060,16 @@ export class WorkspaceEngine {
       const home = [...allowed].sort((a, b) => dependentsOf(b.key, edges).length - dependentsOf(a.key, edges).length || a.key.localeCompare(b.key))[0]
       if (!home) return this.block(mission, 'The workspace policy allows no repository.')
       this.repos.settings.setValue(startingKey(mission.id), { at: new Date().toISOString() })
+      // The planner reads the commit that was admitted for its repository, not the checkout as it is now: what
+      // it plans is carried out from the admitted snapshots, so that is what it must see.
+      const admittedBase = this.repos.settings.getValue<Record<string, string>>(`workspace-mission-bases:${mission.id}`)?.[home.id]
       const run = await this.deps.host.createRun({
         projectId: home.projectId,
         mode: 'ask',
       preset: workspace.policy.missionPreset,
         prompt: this.admittedPrompt(mission, this.buildPlanPrompt(mission)),
         overrides: { requirePlanApproval: false, engineeringOwner: { kind: 'WORKSPACE_MISSION', id: mission.id } },
+        ...(admittedBase ? { baseRef: admittedBase, readSnapshot: true } : {}),
       })
       this.repos.workspaceMissions.update(mission.id, { plannerRunId: run.id, updatedAt: this.iso() })
       this.repos.settings.deleteValue(startingKey(mission.id))

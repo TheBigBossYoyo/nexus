@@ -61,6 +61,8 @@ export interface ProgramRunHost {
     acceptanceCriteria?: string[]
     /** Start the run from this commit instead of the checkout's HEAD. */
     baseRef?: string
+    /** A read-only run reads a worktree of its own at its base commit, not the checkout. */
+    readSnapshot?: boolean
   }): Promise<Run>
   pauseRun(runId: string, reason?: 'user' | 'quota' | 'recovery', detail?: string): Promise<unknown>
   resumeRun(runId: string): Promise<unknown>

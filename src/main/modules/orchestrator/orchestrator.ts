@@ -90,6 +90,12 @@ export interface CreateRunInput {
    * accepted work of the missions before them, which lives on the program branch, not in the user's checkout.
    */
   baseRef?: string
+  /**
+   * v0.7.2. A read-only run reads the user's checkout by default. With this, it reads a worktree of its own at
+   * its base commit instead: what it sees is the admitted snapshot, whatever the checkout has become since
+   * (newer commits, uncommitted files). The worktree and its branch are removed when the run ends.
+   */
+  readSnapshot?: boolean
 }
 
 /** The usage service's view for the scheduler (usage/service.ts implements it). */
@@ -148,6 +154,11 @@ export class Orchestrator implements PipelineHost {
     this.core = new Core(deps)
     this.pipeline = new TaskPipeline(this.core, this)
     this.core.messages.setLiveDelivery((taskId, message) => this.deliverLive(taskId, message))
+    // The snapshot of a read-only run is of no use once the run has ended, and nothing was written in it.
+    deps.bus.subscribe((event) => {
+      if (event.type !== 'run.completed' && event.type !== 'run.failed' && event.type !== 'run.cancelled') return
+      void this.removeReadSnapshot(event.runId).catch((e: unknown) => this.core.log(`snapshot cleanup: ${errorMessage(e)}`))
+    })
     this.core.approvals.onResolved((approval) => this.onApprovalResolved(approval))
     this.core.approvals.onExpired((approval) => {
       if (approval.kind === 'graph') this.core.graph.onApprovalResolved(approval)
@@ -286,6 +297,8 @@ export class Orchestrator implements PipelineHost {
         ],
       })
       this.background(run.id, async () => {
+        // Created before the session starts: a read-only session works in the run's worktree when it has one.
+        if (input.readSnapshot && run.baseCommit) await this.ensureIntegration(run)
         if (await this.refreshFacts(run.id)) await this.startExecution(run.id)
       })
     } else {
@@ -1546,6 +1559,21 @@ export class Orchestrator implements PipelineHost {
       })
     }
     await git.pruneWorktrees(this.core.project(run).rootPath).catch(() => undefined)
+  }
+
+  /** A finished read-only run that read a snapshot of its own: the worktree and its branch go. */
+  private async removeReadSnapshot(runId: string): Promise<void> {
+    const { repos, git } = this.deps
+    const run = repos.runs.get(runId)
+    if (!run || run.mode !== 'ask' || !TERMINAL_RUN_STATES.includes(run.state)) return
+    const snapshots = repos.worktrees.listByRun(runId).filter((w) => w.taskId === null && w.state !== 'removed')
+    if (snapshots.length === 0) return
+    await this.idle(runId)
+    await this.cleanupRun(runId)
+    const repoRoot = this.core.project(run).rootPath
+    for (const snapshot of snapshots) {
+      if (repos.worktrees.get(snapshot.id)?.state === 'removed' && (await git.branchExists(repoRoot, snapshot.branch))) await git.deleteBranch(repoRoot, snapshot.branch)
+    }
   }
 
   /** Remove the worktrees of a finished run. Branches are kept; dirty worktrees are not deleted. */
