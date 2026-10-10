@@ -142,6 +142,10 @@ export class CapacityAwareProviderRouter {
       throw new Error('Capacity lease checkpoint binding is invalid')
     return leases
   }
+  /** Whether a session of this role could take a slot of the pool now. Read-only: nothing is claimed. */
+  slotFree(poolId: string, role: IntelligenceRole, policy: ProviderReservePolicy): boolean {
+    return this.hasSlot(poolId, role, policy)
+  }
   private hasSlot(poolId: string, role: IntelligenceRole, policy: ProviderReservePolicy): boolean {
     const limit = policy.poolLimits?.[poolId] ?? policy
     const held = this.leases(poolId).filter((l) => l.state === 'HELD' || l.state === 'QUARANTINED')

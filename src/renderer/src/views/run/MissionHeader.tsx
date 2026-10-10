@@ -285,7 +285,8 @@ export function MissionHeader() {
   const finished = TERMINAL_RUN_STATES.includes(run.state)
   const now = useNow(run.startedAt !== null && !finished)
   const done = tasks.filter((t) => t.state === 'completed').length
-  const pauseDetail = run.state === 'paused' && run.pauseReason !== 'quota' ? pauseDetailFromEvents(events) : null
+  // A capacity wait is explained in the state panel, in words; the header does not repeat its routing reasons.
+  const pauseDetail = run.state === 'paused' && run.pauseReason !== 'quota' && run.pauseReason !== 'capacity' ? pauseDetailFromEvents(events) : null
   const revisions = useGraphRevisions(run.id)
   const version = planVersion(revisions.data ?? [])
   const cleanable = finished && worktrees.some((w) => w.state !== 'removed')
@@ -368,7 +369,7 @@ export function MissionHeader() {
       <MissionAdmissionInspector key={run.id} run={run} />
       {run.state === 'paused' && pauseDetail ? (
         <div className="border-b bg-warning-subtle px-5 py-1.5 text-small text-warning" data-testid="pause-reason">
-          Paused{run.pauseReason ? ` (${run.pauseReason})` : ''}: {pauseDetail}
+          {run.pauseReason === 'user' ? 'Paused by you' : run.pauseReason === 'recovery' ? 'Paused after a restart' : 'Paused'}: {pauseDetail}
         </div>
       ) : null}
 

@@ -292,3 +292,42 @@ export function mergeEvents(existing: readonly RunEvent[], incoming: readonly Ru
   if (fresh.length === 0) return existing as RunEvent[]
   return [...existing, ...fresh].sort((a, b) => a.seq - b.seq)
 }
+
+const PROVIDER_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', openai: 'ChatGPT', gemini: 'Gemini' }
+
+/** One provider's part of a capacity wait, in words. Only what was observed: a time is given when the provider gave one. */
+function providerWaitLine(p: NonNullable<EventPayloads['capacity.waiting']['waitingOn']>['providers'][number], formatTime: (ms: number) => string): string | null {
+  const name = PROVIDER_LABEL[p.provider] ?? p.provider
+  const until = p.resetAt !== null ? ` Its limit resets at ${formatTime(p.resetAt)}.` : ''
+  switch (p.state) {
+    case 'QUOTA_PAUSED':
+    case 'WAITING_FOR_RESET':
+      return `${name} has reached its usage limit.${until || ' It gave no reset time; it is tried again later.'}`
+    case 'THROTTLED':
+      return `${name} is slowing requests down.${until}`
+    case 'AUTH_REQUIRED':
+      return `${name} needs you to sign in again (Providers page).`
+    case 'RUNTIME_UNAVAILABLE':
+      return `${name} does not answer on this machine (Providers page).`
+    default:
+      return p.usable ? null : `${name} cannot take this kind of session with its current settings.`
+  }
+}
+
+/**
+ * What a run that waits for capacity is waiting on: the latest wait on record, as lines for the user. Empty when
+ * the run has no such event (an older run) or the event carries no detail.
+ */
+export function capacityWaitLines(events: readonly RunEvent[], formatTime: (ms: number) => string = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })): string[] {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]
+    if (!e || e.type !== 'capacity.waiting') continue
+    const detail = (e.payload as EventPayloads['capacity.waiting']).waitingOn
+    if (!detail) return []
+    const lines = detail.providers.map((p) => providerWaitLine(p, formatTime)).filter((l): l is string => l !== null)
+    if (detail.slotsFull) lines.push('Every agent slot of this machine is in use (the limit is set in Control). The mission continues when one is free.')
+    if (lines.length === 0) lines.push('The slot was taken by another session at the same moment. The mission is tried again shortly.')
+    return lines
+  }
+  return []
+}

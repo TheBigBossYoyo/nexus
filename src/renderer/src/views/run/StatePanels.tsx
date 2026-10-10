@@ -5,14 +5,14 @@ import { DASH, formatCost, formatDuration } from '../../lib/format'
 import { useResumeRun, useRetryTask, useRunSummary } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
 import { CandidatesSection } from './CandidatesSection'
-import { pauseDetailFromEvents } from './eventText'
+import { capacityWaitLines, pauseDetailFromEvents } from './eventText'
 import { useRunCtx } from './runContext'
 
 const PAUSE_LABEL = {
   user: 'Paused by you',
   quota: 'Paused: Claude usage limit reached',
   recovery: 'Paused after an app restart (recovery)',
-  capacity: 'Waiting for provider capacity; NEXUS resumes this mission when a quality-approved provider is free',
+  capacity: 'Waiting for a provider: nothing failed, and NEXUS resumes this mission by itself',
 } as const
 
 function TaskProblem({ task, canRetry }: { task: Task; canRetry: boolean }) {
@@ -69,9 +69,18 @@ export function RunStatePanel() {
 
   if (run.state === 'paused') {
     const reason = run.pauseReason ? PAUSE_LABEL[run.pauseReason] : 'Paused'
-    const detailText = pauseDetailFromEvents(events)
+    const waitingOn = run.pauseReason === 'capacity' ? capacityWaitLines(events) : []
+    // A capacity wait says what it waits on in words; the raw routing reasons stay in the event log.
+    const detailText = waitingOn.length > 0 ? null : pauseDetailFromEvents(events)
     return (
       <Notice tone="warning" title={reason} className="m-3 shrink-0" data-testid="run-state-panel">
+        {waitingOn.length > 0 ? (
+          <ul className="list-disc pl-4" data-testid="capacity-wait-detail">
+            {waitingOn.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
         {detailText ? (
           <div className="whitespace-pre-wrap break-words" data-testid="pause-detail">
             {detailText}
@@ -79,7 +88,7 @@ export function RunStatePanel() {
         ) : null}
         <div className="mt-1.5 flex items-center gap-2">
           <Button size="sm" variant="primary" icon={<PlayIcon size={12} />} loading={resume.isPending} onClick={() => resume.mutate({ runId: run.id })}>
-            Resume
+            {run.pauseReason === 'capacity' ? 'Try now' : 'Resume'}
           </Button>
           {run.resumeState ? <span className="text-text-muted">Resumes into {run.resumeState}.</span> : null}
         </div>

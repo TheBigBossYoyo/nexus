@@ -68,6 +68,8 @@ describe('scenario: missions through the capacity kernel', () => {
     const paused = await h.waitForState(run.id, ['paused', 'completed', 'failed'])
     expect(paused).toMatchObject({ state: 'paused', pauseReason: 'capacity' })
     expect(h.runtime.sessions.length).toBe(0)
+    // The wait on record says what it is on: the provider is fine, every slot is taken.
+    expect(h.eventsOfType(run.id, 'capacity.waiting').at(-1)!.payload.waitingOn).toMatchObject({ slotsFull: true, providers: [{ provider: 'claude', usable: true }] })
 
     // Recovery looks, finds the slot still taken, and leaves the run where it is.
     await h.capacity!.recover()

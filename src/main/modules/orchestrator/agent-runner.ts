@@ -636,7 +636,7 @@ export class AgentRunner {
         switch (event.type) {
           case 'capacity.wait':
             capacity = true
-            bus.emit({ ...ids, type: 'capacity.waiting', payload: { routingId: event.routingId, provider: event.provider, reasons: event.reasons } })
+            bus.emit({ ...ids, type: 'capacity.waiting', payload: { routingId: event.routingId, provider: event.provider, reasons: event.reasons, ...(event.waitingOn ? { waitingOn: event.waitingOn } : {}) } })
             break
           case 'session.started': {
             sdkId = event.sessionId

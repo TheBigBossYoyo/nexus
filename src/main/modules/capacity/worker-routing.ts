@@ -1,3 +1,4 @@
+import type { CapacityWaitDetail } from '@shared/events'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AgentRole } from '@shared/domain'
@@ -158,9 +159,11 @@ export class WorkerCapacityRouting {
     let record: CapacityRoutingRecord | null = null, leases: ProviderCapacityLease[] = []
     let usage: UsageInfo[] = [], terminal = false, failed = false
     let terminalEvent: Extract<AgentEvent, { type: 'session.ended' }> | null = null
+    // What the wait is on, as seen when it was decided: read by the user, never by the recovery.
+    let waitingOn: CapacityWaitDetail | undefined
     const wait = (decision: CapacityRoutingRecord): void => {
       this.saveWait(spec, decision)
-      queue.push({ type: 'capacity.wait', routingId: decision.id, provider: decision.provider, reasons: decision.reasons })
+      queue.push({ type: 'capacity.wait', routingId: decision.id, provider: decision.provider, reasons: decision.reasons, ...(waitingOn ? { waitingOn } : {}) })
     }
     const work = (async () => {
       try {
@@ -173,6 +176,14 @@ export class WorkerCapacityRouting {
         // session, which the task can retry afresh, and not a wait that nothing would ever end.
         if (spec.resumeSessionId && !snapshot.owner) throw new Error('The provider of the session to resume is not on record')
         const reserve = sessionReservePolicy(snapshot.pools, this.o.maxAgents())
+        const hostPoolId = hostedSessionPool(this.o.dataDir).id
+        waitingOn = {
+          providers: snapshot.candidates.map((c) => {
+            const pool = snapshot.pools.find((p) => p.id === c.poolIds[0])
+            return { provider: c.provider, state: pool?.state ?? 'USAGE_UNKNOWN', resetAt: pool?.resetAt.value ?? null, usable: c.available && c.qualityApproved }
+          }),
+          slotsFull: !this.kernel.slotFree(hostPoolId, snapshot.role, reserve),
+        }
         record = this.kernel.decide({
           projectId: run.projectId, operationId: spec.agentId, stage: `WORKER:${spec.role}:${randomUUID()}`, ...snapshot,
           policy: reserve, coherentBoundary: !spec.resumeSessionId,
