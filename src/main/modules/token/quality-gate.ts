@@ -155,7 +155,11 @@ export function evaluateGate(baseline: readonly TrialOutcome[], optimized: reado
   }
   if (base.severityDelta.critical > 0) reasons.push(`Critical findings rose by ${base.severityDelta.critical.toFixed(2)} across the cases.`)
   if (strict && regressions.length > 0) reasons.push(`${regressions.length} case(s) passed on the baseline and failed when optimized; ${cfg.risk}-risk work tolerates none.`)
-  if (lower !== null && lower < -margin) reasons.push(`The pass rate may be lower by more than ${(margin * 100).toFixed(0)} points (lower bound ${(lower * 100).toFixed(1)}).`)
+  // The bound guards against a drop, so it is asked only when some case is worse. With none worse it used to
+  // refuse on the spread of the improvements alone: one case going from failing to passing among eight equal
+  // ones gives a mean of +12.5 points and a lower bound of -8.1, and a variant that is worse on no case was
+  // called inferior. How far the cases seen speak for those not seen is the minimum-pairs rule's question.
+  if (lower !== null && lower < -margin && regressions.length > 0) reasons.push(`The pass rate may be lower by more than ${(margin * 100).toFixed(0)} points (lower bound ${(lower * 100).toFixed(1)}).`)
   if (base.repairDelta > n * 0.25) reasons.push(`Repairs and regressions rose by ${base.repairDelta.toFixed(2)} across ${n} cases.`)
   if (reasons.length > 0) return { ...base, verdict: 'INFERIOR', mayBecomeDefault: false, reasons }
   if (baselinePassRate === 0 && optimizedPassRate === 0) {

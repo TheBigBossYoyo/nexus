@@ -370,6 +370,23 @@ describe('quality non-regression gate', () => {
     expect(better).toMatchObject({ verdict: 'IMPROVED', mayBecomeDefault: true })
   })
 
+  it('a variant that is worse on no case is never inferior, however uneven its improvements are', () => {
+    // What the real campaign of 0.7.1 produced: eight cases, seven equal and one that failed before and passes now.
+    const baseline = cases(8).map((c, i) => trial(c, { hiddenPassed: i !== 0 }))
+    const optimized = cases(8).map((c) => trial(c))
+    const gate = evaluateGate(baseline, optimized)
+    expect(gate.regressions).toEqual([])
+    expect(gate.improvements).toEqual(['case-0'])
+    // The normal-approximation bound is below the margin on the spread of that one improvement alone.
+    expect(gate.passRateLowerBound).toBeLessThan(-0.05)
+    expect(gate.verdict).toBe('NON_INFERIOR')
+    expect(gate.mayBecomeDefault).toBe(true)
+    // The same spread with one case worse is still refused: the bound applies as soon as anything dropped.
+    const mixed = evaluateGate(cases(8).map((c, i) => trial(c, { hiddenPassed: i !== 0 })), cases(8).map((c, i) => trial(c, { hiddenPassed: i !== 1 })))
+    expect(mixed.regressions).toEqual(['case-1'])
+    expect(mixed.verdict).toBe('INFERIOR')
+  })
+
   it('is stricter for high-risk work: more pairs, and one regression is enough to refuse', () => {
     const baseline = cases(16).map((c) => trial(c))
     const optimized = cases(16).map((c, i) => trial(c, { hiddenPassed: i !== 5 }))

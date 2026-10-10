@@ -1,0 +1,255 @@
+{
+  "kind": "campaign-run",
+  "task": "program",
+  "category": "Program-style task",
+  "arm": "071",
+  "armIs": "NEXUS 0.7.1 sources, default settings (Context Graph off for agents)",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "a8a2e247dd987eb6fff64cedcb93bc9690c6e790",
+  "startedAt": "2026-10-10T10:05:01.100Z",
+  "finishedAt": "2026-10-10T10:08:24.322Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 90,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "BLOCKED",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "kvlib",
+        "ref": "nexus/program-4074d982",
+        "hiddenPassed": false,
+        "hidden": {
+          "ok": false,
+          "pass": 0,
+          "fail": 1,
+          "output": "node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module 'C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-071-0HtIbQ\\eval-kvlib\\src\\kv.js' imported from C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-071-0HtIbQ\\eval-kvlib\\hidden.test.js\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\n    at #resolve (node:internal/modules/esm/loader:701:17)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\n  code: 'ERR_MODULE_NOT_FOUND',\n  url: 'file:///C:/Users/user/AppData/Local/Temp/nexus-campaign-program-071-0HtIbQ/eval-kvlib/src/kv.js'\n}\n\nNode.js v24.14.0\n✖ hidden.test.js (57.4662ms)\nℹ tests 1\nℹ suites 0\nℹ pass 0\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 63.3807\n\n✖ failing tests:\n\ntest at hidden.test.js:1:1\n✖ hidden.test.js (57.4662ms)\n  'test failed'\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 1,
+          "fail": 0,
+          "output": "✔ the package loads (4.0456ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 83.5698\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "implement-kv-store",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-kv-milestone",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (---, exit=$lastexitcode). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "researcher: Bash: Command not permitted for the researcher role (sed, git, npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "researcher: \n      \"complexity\": \"medium\",\n      \"risk\": \"medium\"\n    }\n  ],\n  \"risks\": [\n    \"Persistence needs access to entries and absolute expiries, which the public store API does not expose; the interface addition must not break milestone one.\",\n    \"Atomic rename behaviour on Windows when the target exists can differ; tests must run on win32.\",\n    \"Expiry boundary (expired when clock equals set time plus ttlMs) is easy to get off by one.\"\n  ],\n  \"constraints\": [\n    \"Time is injected via a now option; Date.now only as its default\",\n    \"Files another process may read are replaced atomically via temp file in the same directory plus rename\",\n    \"Tests run with node --test via npm test\"\n  ]\n}\n```",
+        "planner: ",
+        "worker: t diff` the other files; I only wrote the two new files and the commit staged only those.\n\n- **Store:** it is a `Map` of key to `{ value, expiresAt }`, checked lazily on each call, with no timers or sweeping. `Date.now` appears only as the default of the `now` option.\n- **Tests:** they cover the four areas in the task, with time controlled only by an injected fake clock (`let t`, advanced by assignment).\n- **Expired keys:** `get`, `has` and `delete` drop an expired key when they touch it, and `size()` does the same for every key it counts.\n- **Line endings:** git warned that LF will be replaced by CRLF in both new files the next time it touches them. I didn't change any line-ending settings.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: he public API with concrete expected values; changing `>=` to `>` would fail the assertions at `:35-37`, `:54` and `:76`.\n\n`:80-84` calls `createStore()` with no clock, so it uses the default. It sets without a ttl, so `now()` is never invoked and the test does not depend on real time.\n\n## 6. Repository state — pass\n- **Working tree:** `git status --porcelain --ignored` prints nothing.\n- **Changes since base:** `git diff --name-status f671aa1 HEAD` shows only `A src/kv.js` and `A src/kv.test.js`, so `src/index.js`, `src/index.test.js`, `package.json` and `README.md` are unchanged.\n- **Stray files:** the directory listing shows only `README.md`, `package.json` and the four files under `src/`.",
+        "verifier: ",
+        "researcher: se it checks every key on each call. It also deletes expired entries as a side effect, which is fine for now.\n\n**Memory entries:** no new proposals. The existing project-memory entry \"Time is injected, never read directly\" already covers the clock convention. Milestone two should follow it by passing `now` into `load` and reusing `createStore`.\n\nOne thing for milestone two to handle: `src/kv.js` keeps entries in a private `Map` and exposes no way to list live entries with their absolute `expiresAt`. `save` in `src/persist.js` will need such an accessor, or an export added to the store. The same accessor would let `load` restore an absolute expiry, because `set` takes only a relative `ttlMs`.",
+        "researcher: olean, which the spec doesn't mention. It is tested but unspecified, so later milestones shouldn't depend on it without confirming.\n- Negative or zero `ttlMs` is untested. Zero expires immediately by the `>=` rule, which seems fine.\n- `size()` is O(n) because it checks every entry. That is acceptable for this scope.\n\n**Memory proposal:** `createStore` keeps a `Map` of key to `{ value, expiresAt }`, with `expiresAt` undefined when there is no ttl. Expiry is checked lazily on each call, with no timers. Milestone two's `save` needs the live entries with their absolute `expiresAt`, but the store doesn't expose that. Persistence will need either a new accessor on the store or a change to `kv.js`."
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": "Milestone \"In-memory key-value store with TTL\" could not be verified: The milestone judgment session did not return a JSON object.",
+      "outcome": null,
+      "replans": 0,
+      "milestones": [
+        {
+          "key": "kv-store",
+          "state": "VERIFYING",
+          "attempts": 1
+        },
+        {
+          "key": "persistence",
+          "state": "PLANNED",
+          "attempts": 0
+        }
+      ],
+      "missions": [
+        {
+          "outcome": "completed",
+          "strategy": "BUILD"
+        }
+      ],
+      "decisions": [
+        "created: Program created with the autonomous policy.",
+        "plan_proposed: Plan version 1 proposed: 2 milestone(s).",
+        "plan_accepted: Plan version 1 accepted (policy).",
+        "milestone_started: Milestone \"In-memory key-value store with TTL\" started.",
+        "mission_generated: Mission 1 for \"In-memory key-value store with TTL\" (BUILD).",
+        "mission_ended: Mission completed.",
+        "blocked: Milestone \"In-memory key-value store with TTL\" could not be verified: The milestone judgment session did not return a JSON object."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 4,
+    "sessions": 9,
+    "turns": 41,
+    "inputTokensUncached": 28221,
+    "outputTokens": 19225,
+    "cacheCreationTokens": 49857,
+    "cacheReadTokens": 333745,
+    "costUsdReported": 0.737,
+    "toolCalls": 32,
+    "toolCallsRecorded": 32,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 15,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Read": 6,
+      "PowerShell": 4,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 3,
+    "byRole": {
+      "researcher": {
+        "sessions": 3,
+        "turns": 8,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "planner": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 4,
+        "toolCalls": 3,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 19,
+        "toolCalls": 16,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 201579,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 67
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 68
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}
