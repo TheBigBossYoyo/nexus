@@ -70,7 +70,9 @@ export class WorkerCapacityRouting {
       const model = provider === 'claude' ? spec.model ?? this.o.repos.settings.get().models.tiers.strongest
         : policy.models.codex ?? this.o.providers.defaultModel('codex')
       if (!model) continue
-      const primary = provider === 'claude' && request.requested === 'claude'
+      // The provider the policy asks for in this role: Claude by default, another one where the user chose it
+      // (cross-model review). It is the user's decision, not a substitution, and needs no evidence.
+      const primary = provider === request.requested
       const account = await runtime.getAccountInfo({ subscriptionMode: this.o.repos.settings.get().claude.subscriptionMode }).catch(() => null)
       if (!account || account.state !== 'authenticated') continue
       // A provider that stands in for the requested one is admitted on quality evidence, and that evidence is
@@ -160,9 +162,12 @@ export class WorkerCapacityRouting {
               const providerPool = snapshot.pools.find((p) => p.id === record!.poolIds[0])!
               this.pools.observe(providerPool, event.result.outcome === 'auth' ? 'AUTH_REQUIRED' : 'QUOTA_PAUSED')
               const paused: CapacityRoutingRecord = { ...record, action: 'WAIT', state: 'WAITING_FOR_CAPACITY', failure: 'CAPACITY', reasons: [...record.reasons, event.result.outcome === 'auth' ? 'PROVIDER_AUTH_REQUIRED' : 'PROVIDER_QUOTA_REJECTED'] }
+              // The provider refused a request that was sent. The routing record says so, and the session's own
+              // result carries the outcome: the run pauses for quota or authentication as it always has (the
+              // banner, the reset time, the automatic resume, an overnight run's shutdown all hang on that
+              // pause). A capacity wait is only for work that was never dispatched.
               this.o.repos.intelligenceArtifacts.saveRouting(paused)
               record = paused
-              wait(paused)
             }
           } else if (event.type === 'rate_limit' && event.status === 'rejected') {
             const providerPool = snapshot.pools.find((p) => p.id === record!.poolIds[0])!
