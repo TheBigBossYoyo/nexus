@@ -404,6 +404,8 @@ async function runTask(task: CampaignTask, arm: Arm) {
         taskErrors: tasksRows.filter((t) => t.error).map((t) => `${t.key}: ${JSON.stringify(t.error).slice(0, 500)}`),
         verificationFailures: verifications.filter((v) => !v.passed).map((v) => JSON.stringify(v).slice(0, 900)),
         lastMessages: sessions.map((s) => `${s.role}: ${s.lastText}`),
+        approvalDetails: runs.flatMap((r) => repos.approvals.listByRun(r.id)).map((x) => `${x.requestedBy} [${x.risk}] ${x.action}: ${String(x.command ?? '').slice(0, 300)} | ${String(x.reason).slice(0, 200)}`),
+        blocked: events.filter((e) => e.type === 'task.blocked').map((e) => String((e.payload as { reason?: string }).reason ?? '').slice(0, 500)),
         keptAt: process.env['NEXUS_CAMPAIGN_KEEP'] === '1' ? root : null,
       },
       detail,

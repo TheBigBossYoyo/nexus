@@ -1,0 +1,220 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "070",
+  "armIs": "NEXUS 0.7.0 sources, default settings",
+  "nexusVersion": "0.7.0",
+  "nexusCommit": "41fb3d68cad6fbf43b9af0191025a464eb29416c",
+  "startedAt": "2026-10-10T07:39:35.847Z",
+  "finishedAt": "2026-10-10T07:43:31.642Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/f76fd606/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (1.3867ms)\n✔ updateUser gives the same results as before, the id checked last (0.2996ms)\n✔ inviteUser gives the same results as before, the role checked last (0.2498ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.1396ms)\n✔ the handlers use the shared module and no longer carry their own copy (0.9734ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 79.0202\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 24,
+          "fail": 0,
+          "output": "ds a known role (0.1079ms)\n✔ createUser characterization: email and name errors (0.1447ms)\n✔ createUser characterization: valid input is normalised (0.1166ms)\n✔ createUser characterization: email is checked before name (0.0726ms)\n✔ updateUser characterization: email and name errors (0.1365ms)\n✔ updateUser characterization: valid input is normalised (0.1405ms)\n✔ updateUser characterization: email is checked before name (0.0992ms)\n✔ inviteUser characterization: email and name errors (0.1754ms)\n✔ inviteUser characterization: valid input is normalised (0.0607ms)\n✔ inviteUser characterization: email is checked before name (0.0428ms)\n✔ updateUser characterization: email and name are checked before id (0.1002ms)\n✔ inviteUser characterization: email and name are checked before role (0.0666ms)\n✔ a valid email returns null (0.6447ms)\n✔ a valid email with surrounding whitespace returns null (0.6023ms)\n✔ non-string emails return the format message (0.1031ms)\n✔ malformed emails return the format message (0.0823ms)\n✔ an email of exactly 254 characters is valid and 255 is too long (0.1063ms)\n✔ whitespace does not count toward the email length (0.0765ms)\n✔ a valid name returns null (0.1001ms)\n✔ non-string, empty and whitespace-only names are required (0.0841ms)\n✔ a name of exactly 80 characters is valid and 81 is too long (0.0772ms)\n✔ whitespace does not count toward the name length (0.1156ms)\nℹ tests 24\nℹ suites 0\nℹ pass 24\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 126.2612\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "add-validation-module",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "use-validation-in-handlers",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"a3d0d2cd-5170-48c3-b914-0ae747849566\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: , and the 254/255 and 80/81 length boundaries.\n- **Characterization tests:** these cover all three handlers and passed against the unmodified handlers. For each handler they check:\n  - every email and name error;\n  - a valid input, with the trimmed and lower-cased email;\n  - email-before-name ordering.\n\n  They also check that `updateUser` reports email and name errors before `id: required`, and `inviteUser` reports them before the role error.\n- **Unchanged files:** the three original tests and the handler source files are untouched.\n\nGit warned that LF will be replaced by CRLF in the three changed test and source files the next time it touches them. I did not change any line-ending settings.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: d the four inline error strings no longer appear in any handler.\n- **`src/validation.js`:** I read it against the original inline logic and it matches, so I made no changes to it. I made no changes to test files either.\n- **Unchecked criteria:** I checked the success-return and removed-strings criteria by reading the diff, not by running `git diff` or a search.\n- **File rewrites:** I rewrote each handler file in full rather than editing in place. Git's diff stat shows 10 lines changed per file. Git again warned that LF will be replaced by CRLF in these files.\n- **Blocked command:** a first attempt to edit all three files with a Node script was denied by you, so I used the file tools instead.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 79,
+    "inputTokensUncached": 26640,
+    "outputTokens": 24788,
+    "cacheCreationTokens": 75542,
+    "cacheReadTokens": 494003,
+    "costUsdReported": 1.0905,
+    "toolCalls": 71,
+    "toolCallsRecorded": 71,
+    "filesChangedRecorded": 5,
+    "toolCallsByName": {
+      "Bash": 27,
+      "Glob": 1,
+      "Read": 31,
+      "StructuredOutput": 6,
+      "Write": 5,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 9,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 20,
+        "toolCalls": 18,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 35,
+        "toolCalls": 32,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "The 0.7.0 runtime adapter does not report compaction events; 0 here means not observable.",
+    "wallMs": 234079,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 22
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 24
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

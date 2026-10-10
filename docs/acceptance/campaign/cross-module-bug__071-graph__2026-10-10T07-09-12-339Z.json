@@ -1,0 +1,204 @@
+{
+  "kind": "campaign-run",
+  "task": "cross-module-bug",
+  "category": "cross-module bug",
+  "arm": "071-graph",
+  "armIs": "NEXUS 0.7.1 sources, Context Graph in agent context",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "08d11443aafec8cdcf3303189e8021ad50e28c1a",
+  "startedAt": "2026-10-10T07:09:12.339Z",
+  "finishedAt": "2026-10-10T07:13:06.897Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "shopfront",
+        "ref": "nexus/f0270194/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 14,
+          "fail": 0,
+          "output": "✔ order 0: the cart follows the money rules (0.7139ms)\n✔ order 0: the invoice follows the money rules and equals the cart (0.1464ms)\n✔ order 1: the cart follows the money rules (0.0686ms)\n✔ order 1: the invoice follows the money rules and equals the cart (0.0729ms)\n✔ order 2: the cart follows the money rules (0.0952ms)\n✔ order 2: the invoice follows the money rules and equals the cart (0.1003ms)\n✔ order 3: the cart follows the money rules (0.0721ms)\n✔ order 3: the invoice follows the money rules and equals the cart (0.0546ms)\n✔ order 4: the cart follows the money rules (0.0995ms)\n✔ order 4: the invoice follows the money rules and equals the cart (0.1192ms)\n✔ order 5: the cart follows the money rules (0.0579ms)\n✔ order 5: the invoice follows the money rules and equals the cart (0.0578ms)\n✔ order 6: the cart follows the money rules (0.0691ms)\n✔ order 6: the invoice follows the money rules and equals the cart (0.0538ms)\nℹ tests 14\nℹ suites 0\nℹ pass 14\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 84.7182\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 8,
+          "fail": 0,
+          "output": "✔ a cart without discount or tax is the sum of its lines (0.5745ms)\n✔ the discount and the tax are rounded once on the order (0.1025ms)\n✔ a half cent of discount rounds up (0.0713ms)\n✔ one line of quantity 3 totals the same as three lines (0.7828ms)\n✔ an invoice without discount or tax is the sum of its lines (0.6218ms)\n✔ an invoice rounds the discount and the tax once on the order (0.6118ms)\n✔ an invoice rounds half cents up (0.1348ms)\n✔ the invoice total equals the cart total (0.1552ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 106.9275\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "shared-order-totals",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "review-money-rules",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"3368f756-24d6-4ca9-a54a-fab3b7514be9\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: `, and `printed` is `formatCents(total)`.\n- **Results:** three 35-cent items at 15%/20% give subtotal 105, discount 16, tax 18, total 107 and printed '1.07' on the invoice, and 107 from the cart. A single 30-cent item gives 30.\n- **New tests:** the cart has three, covering the reported order, the 30-cent item, and one line of 35 × 3. The invoice has three: the reported order, the 10-cent half-up case, and a check that `buildInvoice(order).total` equals `cartTotal(order)` over four multi-line orders with mixed quantities and both percentages non-zero.\n\nMy first attempt to write the files from a shell command was denied. I redid the edits with the file tools, and nothing was left half-written.",
+        "reviewer: ",
+        "verifier: ",
+        "reviewer: { gross, discount, tax, net }` to `{ gross }` (`src/invoice/invoice.js:5`). Rules 4–5 require this, since per-line discount and tax were the bug. No file in the diff or among those I read uses the removed fields, but I did not search the rest of the repository for other consumers.\n- **Fractional percentages are unverified:** if a percentage such as 1.15 were ever passed, `subtotal * percent` at `src/money.js:16-17` could in principle be inexact near a half-cent boundary. `docs/MONEY.md` does not say whether percentages are integers, and every test uses integers. I could not produce a failing input, because the reviewer hook blocked running ad-hoc `node`, so this is not reported as a finding.",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 6,
+    "turns": 55,
+    "inputTokensUncached": 20823,
+    "outputTokens": 24770,
+    "cacheCreationTokens": 71415,
+    "cacheReadTokens": 430459,
+    "costUsdReported": 1.0653,
+    "toolCalls": 49,
+    "toolCallsRecorded": 49,
+    "filesChangedRecorded": 5,
+    "toolCallsByName": {
+      "Bash": 21,
+      "StructuredOutput": 4,
+      "Read": 16,
+      "Edit": 4,
+      "Write": 2,
+      "PowerShell": 1,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 16,
+        "toolCalls": 15,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 16,
+        "toolCalls": 14,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 18,
+        "toolCalls": 16,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 232823,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 11
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 2
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 13
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 2
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

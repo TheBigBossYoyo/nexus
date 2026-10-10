@@ -1,0 +1,198 @@
+{
+  "kind": "campaign-run",
+  "task": "security",
+  "category": "security-sensitive task",
+  "arm": "070",
+  "armIs": "NEXUS 0.7.0 sources, default settings",
+  "nexusVersion": "0.7.0",
+  "nexusCommit": "41fb3d68cad6fbf43b9af0191025a464eb29416c",
+  "startedAt": "2026-10-10T08:04:25.934Z",
+  "finishedAt": "2026-10-10T08:09:36.208Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "fileserver",
+        "ref": "nexus/3ecb0665/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ ordinary requests are served (1.1745ms)\n✔ dot segments that stay inside the root are served (0.1436ms)\n✔ traversal out of the root is forbidden (0.3808ms)\n✔ encoded traversal is forbidden (0.1766ms)\n✔ a backslash is a separator (0.2096ms)\n✔ a sibling directory that shares the prefix of the root is outside it (0.1281ms)\n✔ the path is decoded exactly once (0.1217ms)\n✔ malformed encoding and NUL are bad requests (0.1508ms)\n✔ the result is absolute and never leaves the root (0.1922ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 84.629\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 12,
+          "fail": 0,
+          "output": "✔ a plain path is a file under the root (1.1275ms)\n✔ plain traversal is forbidden (0.595ms)\n✔ encoded traversal is forbidden (0.1378ms)\n✔ backslash traversal is forbidden on every platform (0.1146ms)\n✔ a sibling directory sharing the root prefix is forbidden (0.115ms)\n✔ double encoding is decoded only once (0.1655ms)\n✔ malformed encoding is a bad request (0.1441ms)\n✔ NUL is a bad request (0.0748ms)\n✔ .. that stays inside the root is served (0.1558ms)\n✔ absolute-looking and UNC-looking requests stay inside the root (0.1735ms)\n✔ drive-letter requests are forbidden or inside the root (0.1249ms)\n✔ a file name starting with two dots is served (0.093ms)\nℹ tests 12\nℹ suites 0\nℹ pass 12\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 87.416\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-resolve-path",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "security-review-resolve",
+        "state": "blocked",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": [
+        "Intervention required: tasks security-review-resolve are failed or blocked"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cat, node, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "security_reviewer: Bash: Command not permitted for the security_reviewer role (npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: olve(root)`, then checks the final path with `path.relative`. Anything outside throws `EFORBIDDEN`. This accepts `..foo`, accepts `/a/../index.html`, rejects the sibling `www-private` case, and works with a file-system root.\n- **Imports:** `resolve.js` imports only from `node:path` and does no file-system access.\n\nThe new tests cover each case in the task list. The drive-letter test asserts the invariant: each call either throws `EFORBIDDEN` or returns a path inside the root. The double-encoding test also checks the result equals `join(root, '%2e%2e%2fsecret')`.\n\nGit warned that LF will be replaced by CRLF in both files the next time it touches them. I didn't change any line-ending settings.",
+        "reviewer: ",
+        "verifier: ",
+        "security_reviewer: lvePath('C:\\\\web', '/..%20')`, which returns `C:\\web\\.. `, and `resolvePath('C:\\\\web', '/CON')`. Node's `fs` should be unaffected because it opens paths in the `\\\\?\\` namespaced form, which skips Win32 trailing-space trimming and device-name mapping. It matters only if the returned string is handed to a non-Node consumer such as a shell or child process. I did not verify this by running anything.\n\n4. **Info — the single-decode guarantee depends on the caller** (`src/static/resolve.js:11`). The caller must pass the raw, still-encoded pathname with no query string. The repository has no caller (`git ls-files` shows only `README.md`, `package.json` and the two files), so I could not check this."
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 39,
+    "inputTokensUncached": 16752,
+    "outputTokens": 28480,
+    "cacheCreationTokens": 45872,
+    "cacheReadTokens": 452171,
+    "costUsdReported": 0.9578,
+    "toolCalls": 34,
+    "toolCallsRecorded": 34,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 18,
+      "StructuredOutput": 3,
+      "Read": 7,
+      "Edit": 4,
+      "Grep": 1,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 4,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 14,
+        "toolCalls": 13,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "security_reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "The 0.7.0 runtime adapter does not report compaction events; 0 here means not observable.",
+    "wallMs": 308608,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 30
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 31
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

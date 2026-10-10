@@ -1,0 +1,240 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "070",
+  "armIs": "NEXUS 0.7.0 sources, default settings",
+  "nexusVersion": "0.7.0",
+  "nexusCommit": "41fb3d68cad6fbf43b9af0191025a464eb29416c",
+  "startedAt": "2026-10-10T07:43:36.751Z",
+  "finishedAt": "2026-10-10T07:49:01.471Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/7210f94e/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (0.969ms)\n✔ an unknown format names itself and the known formats (0.2844ms)\n✔ a format is added from outside, without touching the module (0.7096ms)\n✔ registering a name twice throws and keeps the first exporter (0.1122ms)\n✔ the decision is recorded with its three sections (8.7677ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 80.9519\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ json output (0.5658ms)\n✔ csv output (0.1197ms)\n✔ json output matches a literal (0.1008ms)\n✔ empty rows (0.0836ms)\n✔ csv renders null, undefined and missing values as empty fields (0.101ms)\n✔ listFormats includes the defaults, sorted, as a new array (0.4928ms)\n✔ a registered format is exported and listed in sorted position (0.1238ms)\n✔ registering a duplicate name throws (0.2984ms)\n✔ unknown format names the format and the known formats (0.1174ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 99.7693\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 2
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 2,
+    "findingsBySeverity": {
+      "low": 1,
+      "nit": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry-fix1",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"91484628-376c-4aff-955f-e641988a52a5\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cat, import, execsync, from, pathtofileurl, const, index.js,, encoding:, javascript;base64,, oldsrc, .tostring, base64, path.resolve, index.js, .href, console.log, exports,, cur, .sort, defaults,, cur.listformats, ,, !==, [{, id:, ],, a:, n:, b:, ], let, ",
+        "verifier: PowerShell: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, git, cat, import, registerexporter, from, tsv,, rows, =, r, .join, t, n, eof, exportdata, console.log, exports,, mod, .sort, defaults,, const, let, for, f,, ,, if, a, ok, diff,, byte-identical,, await, plugin.mjs, after plugin,"
+      ],
+      "taskErrors": [],
+      "verificationFailures": [
+        "{\"id\":\"f80389f8-ab40-4f20-b5d7-2cdd7920a06f\",\"runId\":\"7210f94e-9d30-4f4c-8a12-4b5050ecac84\",\"taskId\":\"4e59ffb6-5398-4b55-b563-9c6472eb12d9\",\"agentId\":\"b085139b-79c0-4778-af71-b21c6eb04596\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"The task is not done: docs/adr/0001-exporter-registry.md was never written. docs/adr contains only README.md, the working tree is clean and HEAD is still the merge commit 41468c7, which matches the implementer's own report that their write was denied. All five ADR criteria fail for that single reason. The registry code criteria pass by reading src/export/index.js and by `npm test` (9 pass, 0 fail, exit 0). One limit on my evidence: a direct node run diffing output against commit fc616d1 was blocked for the verifier role, so byte-identity rests on the json and csv function bodies being unchanged from fc616d1 plus the literal-output tests.\",\"criteri"
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: d and missing csv values;\n  - `listFormats()` returning the defaults sorted and as a fresh array;\n  - registering and exporting a custom format, then checking it appears in sorted position;\n  - duplicate-name errors for a custom name, `json` and `csv`;\n  - the unknown-format message containing `xml`, `csv` and `json`.\n- **Shared registry state:** each test uses its own format name, and the `listFormats` checks don't depend on what other tests registered.\n\n**Not done:** the mission criteria want `docs/adr/0001-exporter-registry.md`, but this task said not to touch docs, so I didn't write it. Project memory says reviewers reject a structural change without an ADR. Another task needs to add it.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: I couldn't finish this task. The Bash call that would have written `docs/adr/0001-exporter-registry.md`, run `npm test` and committed was denied, so nothing was written, tested or committed.\n\nI did read `src/export/index.js`, `src/export/index.test.js` and `docs/adr/README.md`. The ADR was drafted from them but never reached disk.\n\nDo you want me to retry the same command, or would you prefer I write the file with a different tool and then run the tests and commit separately?",
+        "verifier: ",
+        "debugger: sv` are registered by default with unchanged output. Their function bodies are identical to the old switch cases at `fc616d1`; I did not run an output diff against that commit.\n- **Consequences:** covers the five trade-offs from the task, including that a format is only available once the file registering it has been imported.\n\n**One addition beyond the brief:** I added a consequence noting that `registerExporter` does not validate `name` or `fn`, so a non-function is accepted and only fails when `exportData` is called for that format. That is from reading the code, not from a test.\n\n**Regression test:** none added. The deliverable is a document, and the task forbids changing any other file.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 10,
+    "turns": 72,
+    "inputTokensUncached": 30325,
+    "outputTokens": 31851,
+    "cacheCreationTokens": 73485,
+    "cacheReadTokens": 579648,
+    "costUsdReported": 1.2836,
+    "toolCalls": 62,
+    "toolCallsRecorded": 62,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 24,
+      "Read": 20,
+      "mcp__nexus__record_decision": 1,
+      "StructuredOutput": 7,
+      "Glob": 3,
+      "Write": 3,
+      "PowerShell": 1,
+      "mcp__nexus__send_message": 1,
+      "Edit": 1,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 11,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 9,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 4,
+        "turns": 34,
+        "toolCalls": 30,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "The 0.7.0 runtime adapter does not report compaction events; 0 here means not observable.",
+    "wallMs": 323107,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 24
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 26
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 3
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}
