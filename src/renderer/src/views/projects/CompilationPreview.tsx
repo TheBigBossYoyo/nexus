@@ -1,6 +1,6 @@
 import { COMPILATION_MODE_LABEL, kindLabel, provenanceLabel } from '../../lib/intelligenceLabels'
 import { useUiStore } from '../../store/ui'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   COMPILATION_MODES,
@@ -49,6 +49,13 @@ export function CompilationPreview({
     onSuccess: onSpec,
   })
   const setView = useUiStore((state) => state.setView)
+  // The panel is the user's to open and close. It opens by itself for a result that needs them (a wait, a
+  // decision); it never closes by itself, which used to hide a result that had just become ready.
+  const [open, setOpen] = useState(false)
+  const needsAttention = spec !== null && spec.status !== 'READY'
+  useEffect(() => {
+    if (needsAttention) setOpen(true)
+  }, [needsAttention, spec?.id])
   const stale =
     spec &&
     (spec.rawIntent !== raw ||
@@ -62,7 +69,8 @@ export function CompilationPreview({
     <details
       className="rounded-md border bg-surface p-3"
       data-testid="compilation-preview"
-      open={spec?.status !== 'READY' && spec !== null ? true : undefined}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="cursor-pointer font-medium">Task compilation preview</summary>
       <p className="text-small text-text-muted">
