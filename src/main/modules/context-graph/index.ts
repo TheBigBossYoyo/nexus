@@ -3,6 +3,6 @@ export type { ContextGraphDeps, FileStateReader, NoteInput, NoteRejection, SyncR
 export { retrieve, queryTerms, warningOf } from './retriever'
 export { projectProject, projectWorkspace, trustOfFact, PROJECT_OWNED, WORKSPACE_OWNED } from './projection'
 export type { EdgeDraft, NodeDraft, Projection, ProjectRecords, ProgramRecords, WorkspaceRecords } from './projection'
-export { GRAPH_DATA_NOTE, GRAPH_TOOLS_HINT, handleOf, renderDetail, renderGraphSection, renderMap, renderRetrieved, renderSearch } from './render'
-export type { GraphSection } from './render'
+export { GRAPH_DATA_NOTE, GRAPH_TOOLS_HINT, handleOf, renderDetail, renderGraphSection, renderMap, renderRetrieved, renderSearch, shownInFull } from './render'
+export type { DetailExpansion, GraphSection } from './render'
 export { clip, depthOf, joinPath, normFile, parentPath, segment, sha, shortHash, subjectKey, validatePath } from './paths'

@@ -3,7 +3,7 @@ import type { AgentPurpose, AgentRole, Run, Task } from '@shared/domain'
 import { CONTEXT_EDGE_TYPES, parseContextRef, type ContextEdgeType, type ContextNode, type ContextSpace, type RetrievalBreadth } from '@shared/context-graph'
 import { NexusError, errorMessage } from '@shared/result'
 import { estimateTokens, techniqueEnabled } from '@shared/token'
-import { handleOf, renderDetail, renderGraphSection, renderSearch, retrieve, validatePath, warningOf } from '@main/modules/context-graph'
+import { handleOf, renderDetail, renderGraphSection, renderSearch, retrieve, validatePath, warningOf, type DetailExpansion } from '@main/modules/context-graph'
 import { oneLine } from '@main/modules/context/render'
 import { allocateBudget } from '@main/modules/token'
 import type { Core } from './core'
@@ -96,6 +96,41 @@ export function graphContextFor(core: Core, run: Run, task: Task, purpose: Agent
 }
 
 /**
+ * The graph context of a session that has no task yet: the planner. It gets the same Context Graph tools as
+ * a task's agents, and without a map or a selection it used them to walk the tree from the root (six calls
+ * in the 0.7.1 real pair, for one note). So what the request is about is retrieved before the session starts
+ * and shown with the map. A planner knows no files yet: the retrieval is by the request's text, and a request
+ * that matches little is widened to every current hazard and decision, which is what a plan must respect.
+ * Memory entries the planner prompt already lists are not repeated.
+ */
+export function graphContextForRequest(core: Core, run: Run, shownMemoryIds: ReadonlySet<string>): string | null {
+  if (!graphEnabled(core)) return null
+  try {
+    const settings = core.deps.repos.settings.get().tokens
+    const primary: ContextSpace = { kind: 'project', id: run.projectId }
+    if (!core.contextGraph.root(primary)) return null
+    const stores = core.deps.repos.contextGraph
+    const programId = programOf(core, run)
+    const budget = allocateBudget({ windowTokens: null, fixedTokens: null, historyTokens: 0, risk: 'medium', graphBudget: settings.graphContextBudget })
+    const result = retrieve(stores, { spaces: core.contextGraph.spacesForProject(run.projectId), programId, text: run.prompt, files: [], role: 'planner', risk: 'medium', tokenBudget: budget.graphTokens })
+    const shown = result.nodes.filter((r) => !(r.node.originKind === 'memory' && r.node.originId !== null && shownMemoryIds.has(r.node.originId) && r.warning === null))
+    const section = renderGraphSection(stores, primary, { ...result, nodes: shown }, { tools: true, programId })
+    core.tokens.decide(
+      { runId: run.id, taskId: null, agentId: null },
+      result.widened ? 'WIDEN_RETRIEVAL' : 'RETRIEVE_GRAPH_BRANCH',
+      result.widened ? `Retrieval confidence ${result.confidence.toFixed(2)} for the request: the selection was widened to ${result.breadth} rather than kept small.` : `${shown.length} nodes selected from the graph for the request (${budget.note})`,
+      { purpose: 'plan', nodes: shown.length, confidence: result.confidence, breadth: result.breadth, considered: result.considered },
+      -section.tokenEstimate,
+      'estimated',
+    )
+    return section.text
+  } catch (e) {
+    core.log(`context graph unavailable for the planner: ${errorMessage(e)}`)
+    return null
+  }
+}
+
+/**
  * Why an approved memory entry is not current any more, as the graph records it. The memory store has no
  * supersession of its own; without this a superseded entry would still be shown as project memory.
  */
@@ -183,8 +218,17 @@ export function contextToolHandler(core: Core, session: ContextToolSession): (in
       case 'open': {
         const node = resolve(allowed, input.path)
         if (!visible(node)) throw new NexusError('not_found', 'Context node not found')
-        const detail = core.contextGraph.detail(node.id, allowed, { includeHistory: input.includeHistory ?? false })
-        const text = renderDetail({ ...detail, children: detail.children.filter(visible), outgoing: detail.outgoing.filter((r) => visible(r.node)), incoming: detail.incoming.filter((r) => visible(r.node)) }, primary)
+        const includeHistory = input.includeHistory ?? false
+        const detail = core.contextGraph.detail(node.id, allowed, { includeHistory })
+        // One call answers for the branch and what is under it: the level-by-level walk cost a turn per level.
+        const expansion: DetailExpansion = {
+          childrenOf: (n) => {
+            const under = core.contextGraph.getChildren(n.id, allowed, { includeHistory, limit: 16 })
+            return { children: under.children.filter(visible), total: under.total }
+          },
+          textOf: (n) => (visible(n) ? core.contextGraph.originText(n) : null),
+        }
+        const text = renderDetail({ ...detail, children: detail.children.filter(visible), outgoing: detail.outgoing.filter((r) => visible(r.node)), incoming: detail.incoming.filter((r) => visible(r.node)) }, primary, { expansion })
         core.tokens.decide(ctx, 'EXPAND_GRAPH_NODE', `The agent opened ${handleOf(node, primary)}.`, { path: node.path, type: node.type, op: 'open' }, -estimateTokens(text), 'estimated')
         return text
       }

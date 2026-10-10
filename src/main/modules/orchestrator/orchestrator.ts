@@ -48,6 +48,7 @@ import { configureStrategy, planOverrides, type StrategyPlan } from '@main/modul
 import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
+import { graphContextForRequest } from './context-graph'
 import { Core } from './core'
 import { buildTaskEvidence } from './evidence'
 import type { OrchestratorDeps } from './deps'
@@ -440,10 +441,12 @@ export class Orchestrator implements PipelineHost {
     }
 
     for (let attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+      const memory = this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] })
       const prompt = buildPlannerPrompt({
         run,
         profile: project.profile,
-        memory: this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] }),
+        memory,
+        knowledge: graphContextForRequest(this.core, run, new Set(memory.map((m) => m.id))),
         feedback,
         previousErrors,
         previousPlan,

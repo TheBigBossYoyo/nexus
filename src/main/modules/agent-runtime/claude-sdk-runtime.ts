@@ -423,13 +423,13 @@ export function createNexusMcpServer(handlers: NexusToolHandlers, options: { alw
         ? [
             tool(
               'context_open',
-              'Open a node of the project knowledge index by path ("/" is the root): its text, its children, its relations (tests, decisions, hazards, contracts) and the source files it is based on. Use it to find where things are before searching the repository.',
+              'Open a node of the project knowledge index by path ("/" is the root): its text, its relations (tests, decisions, hazards, contracts), the source files it is based on, and its children together with what is under them, so one call on a branch usually shows all of it. An entry your prompt already shows in full need not be opened.',
               { path: contextPath.describe('a path from the map or from another result, e.g. "modules" or "hazards/packet-ordering"; "/" for the root'), includeHistory: z.boolean().optional().describe('also list superseded and archived entries') },
               (a) => guarded(() => context({ op: 'open', path: a.path, includeHistory: a.includeHistory ?? false })),
             ),
             tool(
               'context_search',
-              'Search the project knowledge index by words: modules, architecture, commands, decisions, known hazards, contracts, project memory and notes. Returns paths to open.',
+              'Search the project knowledge index by words: modules, architecture, commands, decisions, known hazards, contracts, project memory and notes. The direct way to one piece of knowledge your prompt does not show; returns each match with its summary and its path.',
               { query: z.string().max(400), includeHistory: z.boolean().optional().describe('also search superseded and archived entries') },
               (a) => guarded(() => context({ op: 'search', query: a.query, includeHistory: a.includeHistory ?? false })),
             ),

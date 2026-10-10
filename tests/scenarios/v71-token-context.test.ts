@@ -190,6 +190,20 @@ describe('scenario: the Context Graph in a mission', () => {
     expect(section).toContain('Selected for this task')
     expect(section).toMatch(/- notes\/general\/telemetry-parser-ordering-was-tried-with-a-sort-[0-9a-f]{6} \[note, user-provided\]/)
     expect(section).toContain('> Sorting the packets of a tick by sequence number alone was tried and reverted')
+    // The note is whole in the pack and says so: there is nothing an open of it would add.
+    expect(section).toMatch(/telemetry-parser-ordering-was-tried-with-a-sort-[0-9a-f]{6} \[note, user-provided\] "Telemetry parser ordering was tried with a sort" \(shown in full\)/)
+    expect(section).toContain('An entry marked "shown in full" is the whole record: opening it returns nothing new.')
+    // The planner has no task and no pack; it starts from the same map and what its request retrieves, not from the root.
+    const planner = h.runtime.sessions.find((s) => s.role === 'planner')!
+    const planning = planner.prompt.slice(planner.prompt.indexOf('## Project knowledge'))
+    expect(planner.prompt).toContain('## Project knowledge')
+    expect(planning).toContain('/ [repository] "scenario"')
+    expect(planning).toContain('- modules/ (')
+    expect(h.repos.optimizationDecisions.listByRun(runId).some((d) => d.agentId === null && d.taskId === null && (d.action === 'RETRIEVE_GRAPH_BRANCH' || d.action === 'WIDEN_RETRIEVAL'))).toBe(true)
+    // One open of the root answers for the branches too: what is under each, and which hold nothing.
+    expect(answers['root']).toMatch(/- modules \[section\] "Modules" \(\d+\)\n {2}- modules\//)
+    expect(answers['root']).toContain('Nothing recorded under: architecture, commands')
+    expect(answers['root']).toMatch(/- hazards \[section\] "Known hazards" \(\d+\)\n {2}- hazards\/packet-ordering \[hazard, user-provided\] "[^"]+": "Telemetry packets can arrive out of order/)
     // The hazard and the decision are already in the pack as repository facts: the graph does not repeat them.
     expect(spec.prompt.match(/packets can arrive out of order/g)).toHaveLength(1)
     const pack = h.repos.contextPacks.listByRun(runId).find((p) => p.taskId === h.task(runId, 'alpha').id && p.purpose === 'implement')!
