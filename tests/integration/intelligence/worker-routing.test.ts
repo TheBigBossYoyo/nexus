@@ -14,9 +14,9 @@ import { EventBus } from '@main/modules/events'
 import { makeAgent, makeRun } from '../persistence/fixtures'
 import { graphHarness } from '../../helpers/context-graph'
 
-async function harness(script?: FakeScript, max = 1) {
+async function harness(script?: FakeScript, max = 1, account: Partial<ReturnType<typeof defaultFakeAuthStatus>> = {}) {
   const h = graphHarness(), run = h.repos.runs.insert(makeRun(h.project.id, { state: 'executing' }))
-  const auth = { ...defaultFakeAuthStatus(), email: 'worker-fixture@example.invalid' }
+  const auth = { ...defaultFakeAuthStatus(), email: 'worker-fixture@example.invalid', ...account }
   const claude = new FakeAgentRuntime({ authStatus: auth, script: script ?? (async (_spec, ctx) => { await ctx.completeTurn({ text: 'done' }) }) })
   const codex = new FakeAgentRuntime({ authStatus: auth, script: async (_spec, ctx) => { await ctx.completeTurn({ text: 'codex done' }) } })
   const start = vi.spyOn(claude, 'startSession'), codexStart = vi.spyOn(codex, 'startSession')
@@ -136,6 +136,22 @@ describe('production worker capacity admission', () => {
       await Promise.allSettled(open)
       await restarted?.dispose()
       await h.close()
+    }
+  })
+
+  it('admits the requested primary whatever its account says about itself: no email, or an API key instead of a subscription', async () => {
+    for (const account of [{ email: null }, { email: null, mode: 'api_key' as const }]) {
+      const h = await harness(undefined, 1, account)
+      try {
+        const events = await collect(h.providers.router.startSession(h.spec()))
+        expect(events.some((e) => e.type === 'capacity.wait'), JSON.stringify(account)).toBe(false)
+        expect(events.find((e) => e.type === 'session.started')).toMatchObject({ provider: 'claude' })
+        // A stand-in is admitted on evidence bound to an account profile: with no identity there is none, so it waits.
+        h.providers.setPolicy({ ...h.providers.policy(), enabled: { ...h.providers.policy().enabled, codex: true } })
+        h.usage.apply({ type: 'restore_wait', resetAt: null, limitType: 'five_hour' })
+        expect((await collect(h.providers.router.startSession(h.spec('researcher')))).some((e) => e.type === 'capacity.wait')).toBe(true)
+        expect(h.codexStart).not.toHaveBeenCalled()
+      } finally { await h.close() }
     }
   })
 

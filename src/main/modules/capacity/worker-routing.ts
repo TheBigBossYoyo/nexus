@@ -70,8 +70,13 @@ export class WorkerCapacityRouting {
       const model = provider === 'claude' ? spec.model ?? this.o.repos.settings.get().models.tiers.strongest
         : policy.models.codex ?? this.o.providers.defaultModel('codex')
       if (!model) continue
-      const account = await runtime.getAccountInfo({ subscriptionMode: true }).catch(() => null)
-      if (!account || account.state !== 'authenticated' || account.mode !== 'subscription' || !account.email) continue
+      const primary = provider === 'claude' && request.requested === 'claude'
+      const account = await runtime.getAccountInfo({ subscriptionMode: this.o.repos.settings.get().claude.subscriptionMode }).catch(() => null)
+      if (!account || account.state !== 'authenticated') continue
+      // A provider that stands in for the requested one is admitted on quality evidence, and that evidence is
+      // bound to an account profile: with no identity, or outside a subscription, there is nothing to bind it
+      // to. The requested primary needs none: an account that reports no email, or an API key, still works.
+      if (!primary && (account.mode !== 'subscription' || !account.email)) continue
       const profile = createHash('sha256').update(JSON.stringify([account.email, account.organization, account.mode])).digest('hex')
       let pool = this.pools.pool(provider, profile)
       if (provider === 'claude') {
@@ -84,12 +89,11 @@ export class WorkerCapacityRouting {
         }
       }
       pools.push(pool)
-      const primary = provider === 'claude' && request.requested === 'claude'
       const evidence = primary ? [`PRIMARY_ROLE_POLICY:${DISPATCH_POLICY}:${profile}:${model}:${role}`]
         : this.quality.evidence({ provider, model, role, profile, policyVersion: DISPATCH_POLICY, runtimeVersion: status.version ?? 'unknown' })
       candidates.push({
         provider, model, roles: [role], poolIds: [pool.id, hostPool.id],
-        available: !this.disposed && spec.model !== '' && this.o.repos.settings.get().claude.subscriptionMode
+        available: !this.disposed && spec.model !== ''
           && unusableReason(provider, policy, status, spec.role) === null
           // Something must confine the agent: the NEXUS policy on every tool call, or the provider's own sandbox
           // (Codex, read-only roles). A provider with neither is never admitted.
