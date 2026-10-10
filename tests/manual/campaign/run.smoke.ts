@@ -103,6 +103,8 @@ interface SessionTap {
   tools: Record<string, number>
   contextTools: string[]
   deniedTools: number
+  denials: string[]
+  lastText: string
   compactions: number
   turnResults: number
   outcomes: string[]
@@ -114,16 +116,19 @@ interface SessionTap {
 function instrument(real: ClaudeSdkRuntime): { runtime: AgentRuntime; sessions: SessionTap[] } {
   const sessions: SessionTap[] = []
   const tap = (spec: SessionSpec, inner: AgentSessionHandle, resumed: boolean): AgentSessionHandle => {
-    const s: SessionTap = { agentId: spec.agentId, role: spec.role, model: null, resumed, tools: {}, contextTools: [], deniedTools: 0, compactions: 0, turnResults: 0, outcomes: [], startedAt: Date.now(), endedAt: null }
+    const s: SessionTap = { agentId: spec.agentId, role: spec.role, model: null, resumed, tools: {}, contextTools: [], deniedTools: 0, denials: [], lastText: '', compactions: 0, turnResults: 0, outcomes: [], startedAt: Date.now(), endedAt: null }
     sessions.push(s)
     async function* events(): AsyncGenerator<AgentEvent> {
       for await (const event of inner.events) {
-        const e = event as { type: string; model?: string; toolName?: string; input?: unknown; result?: { outcome: string } }
+        const e = event as { type: string; model?: string; toolName?: string; input?: unknown; reason?: string; text?: string; result?: { outcome: string } }
         if (e.type === 'session.started') s.model = e.model ?? null
         else if (e.type === 'tool.started' && e.toolName) {
           s.tools[e.toolName] = (s.tools[e.toolName] ?? 0) + 1
           if (e.toolName.startsWith('mcp__nexus__context_')) s.contextTools.push(`${e.toolName.replace('mcp__nexus__', '')} ${JSON.stringify(e.input ?? {}).slice(0, 160)}`)
-        } else if (e.type === 'tool.denied') s.deniedTools++
+        } else if (e.type === 'tool.denied') {
+          s.deniedTools++
+          if (s.denials.length < 12) s.denials.push(`${e.toolName ?? '?'}: ${String(e.reason ?? '').slice(0, 300)}`)
+        } else if (e.type === 'text' && e.text) s.lastText = e.text.slice(-700)
         else if (e.type === 'compaction') s.compactions++
         else if (e.type === 'turn.completed') {
           s.turnResults++
@@ -182,11 +187,13 @@ async function runTask(task: CampaignTask, arm: Arm) {
 
   // A tool call that needs a person is refused: nothing is approved unseen, and the refusal is counted.
   let approvalsRefused = 0
+  const approvals: string[] = []
   const pauses: string[] = []
   bus.subscribe((e) => {
     if (e.type === 'run.paused') pauses.push(String((e.payload as { detail?: string; reason?: string }).detail ?? (e.payload as { reason?: string }).reason ?? ''))
     if (e.type !== 'approval.requested') return
     approvalsRefused++
+    if (approvals.length < 20) approvals.push(JSON.stringify(e.payload).slice(0, 400))
     const approvalId = (e.payload as { approvalId: string }).approvalId
     setTimeout(() => {
       try {
@@ -391,6 +398,14 @@ async function runTask(task: CampaignTask, arm: Arm) {
       tasks: tasksRows.map((t) => ({ key: t.key, state: t.state, attempts: t.attempt })),
       regressions: evaluations.filter((e) => e.suite && !e.suitePassed).map((e) => e.repository),
       humanIntervention: { approvalsRequestedAndRefused: approvalsRefused, pauses },
+      diagnostics: {
+        approvals,
+        denials: sessions.flatMap((s) => s.denials.map((d) => `${s.role}: ${d}`)),
+        taskErrors: tasksRows.filter((t) => t.error).map((t) => `${t.key}: ${JSON.stringify(t.error).slice(0, 500)}`),
+        verificationFailures: verifications.filter((v) => !v.passed).map((v) => JSON.stringify(v).slice(0, 900)),
+        lastMessages: sessions.map((s) => `${s.role}: ${s.lastText}`),
+        keptAt: process.env['NEXUS_CAMPAIGN_KEEP'] === '1' ? root : null,
+      },
       detail,
     },
     efficiency: {
@@ -403,6 +418,9 @@ async function runTask(task: CampaignTask, arm: Arm) {
       cacheReadTokens: sum((u) => u.cacheReadTokens),
       costUsdReported: Math.round(sum((u) => u.costUsd) * 10_000) / 10_000,
       toolCalls: Object.values(toolTotals).reduce((n, v) => n + v, 0),
+      // What NEXUS recorded per agent (file edits included); the wrapper's count above is of tool.started events.
+      toolCallsRecorded: agents.reduce((n, x) => n + x.metrics.toolCalls, 0),
+      filesChangedRecorded: agents.reduce((n, x) => n + x.metrics.filesChanged, 0),
       toolCallsByName: toolTotals,
       contextToolCalls: sessions.flatMap((s) => s.contextTools.map((c) => `${s.role}: ${c}`)),
       deniedToolCalls: sessions.reduce((n, s) => n + s.deniedTools, 0),
@@ -421,7 +439,7 @@ async function runTask(task: CampaignTask, arm: Arm) {
   await orchestrator.shutdown().catch(() => undefined)
   await real.shutdown().catch(() => undefined)
   db.close()
-  rmSync(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
+  if (process.env['NEXUS_CAMPAIGN_KEEP'] !== '1') rmSync(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
   return result
 }
 
