@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PROGRAM_POLICY_PRESETS } from '@shared/program'
 import { completeWith, scriptsByRole, type FakeScript } from '@main/modules/agent-runtime/fake-runtime'
@@ -64,14 +64,20 @@ describe('v0.4 program on the real orchestrator', () => {
     }
     // The mission planner plans one task named after the milestone it was given.
     const planner: FakeScript = async (spec, ctx) => {
-      const key = spec.prompt.includes('Milestone api') ? 'api' : 'core'
-      const attempt = spec.prompt.includes('verified and rejected') ? 'fix' : 'first'
+      // Only the request says which milestone this mission is for. The rest of the prompt (the project
+      // knowledge, on by default) names the program's other milestones too.
+      const request = spec.prompt.split('\n## Mode')[0] ?? spec.prompt
+      const key = request.includes('Milestone api') ? 'api' : 'core'
+      const attempt = request.includes('verified and rejected') ? 'fix' : 'first'
       await ctx.completeTurn({ text: 'plan', structuredOutput: plan([plannedTask(`${key}-${attempt}`, { suggestedFiles: [`${key}.txt`], acceptanceCriteria: [`${key}.txt exists`] })]) })
     }
     const worker: FakeScript = async (spec, ctx) => {
-      const key = spec.prompt.includes('api-') ? 'api' : 'core'
+      // The task is read from the worktree's name, not searched for in the prompt: with the Context Graph on
+      // by default the prompt also names other tasks' knowledge (a note of the api milestone in the core task).
+      const task = basename(spec.cwd)
+      const key = task.startsWith('api-') ? 'api' : 'core'
       seenByWorker.push({ cwd: spec.cwd, coreExisted: existsSync(join(spec.cwd, 'core.txt')), prompt: spec.prompt })
-      const name = spec.prompt.includes('-fix') ? `${key}-version.txt` : `${key}.txt`
+      const name = task.endsWith('-fix') ? `${key}-version.txt` : `${key}.txt`
       await writeFiles(spec, ctx, { [name]: `${key}\n` })
       await ctx.completeTurn({ text: `Wrote ${name}` })
     }

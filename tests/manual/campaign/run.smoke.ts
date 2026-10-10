@@ -35,7 +35,7 @@ import { CAMPAIGN_TASKS, type CampaignTask, type Files, type Repo } from './task
 type Arm = '070' | '071' | '071-graph'
 const ARMS: Record<Arm, { version: string; what: string }> = {
   '070': { version: '0.7.0', what: 'NEXUS 0.7.0 sources, default settings' },
-  '071': { version: '0.7.1', what: 'NEXUS 0.7.1 sources, default settings (Context Graph off for agents)' },
+  '071': { version: '0.7.1', what: 'NEXUS 0.7.1 sources, Context Graph off for agents (the default until the campaign ended)' },
   '071-graph': { version: '0.7.1', what: 'NEXUS 0.7.1 sources, Context Graph in agent context' },
 }
 
@@ -182,7 +182,8 @@ async function runTask(task: CampaignTask, arm: Arm) {
     ...base,
     execution: { ...base.execution, requirePlanApproval: false, maxParallelAgents: 1 },
     permissions: { ...base.permissions, safeCommandPrefixes: ['node --test', 'npm test'] },
-    ...(arm === '071-graph' ? { tokens: { ...base.tokens, contextGraph: 'on' } } : {}),
+    // Both 0.7.1 arms name the setting, so that an arm means the same whatever the release default is.
+    ...(arm === '071-graph' ? { tokens: { ...base.tokens, contextGraph: 'on' } } : arm === '071' ? { tokens: { ...base.tokens, contextGraph: 'off' } } : {}),
   } as typeof DEFAULT_SETTINGS)
 
   // A tool call that needs a person is refused: nothing is approved unseen, and the refusal is counted.
