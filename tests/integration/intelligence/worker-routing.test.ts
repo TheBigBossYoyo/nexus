@@ -86,7 +86,11 @@ describe('production worker capacity admission', () => {
       expect(routed.find((e) => e.type === 'session.started')).toMatchObject({ provider: 'codex', model: 'fake-codex' })
       expect(h.start).not.toHaveBeenCalled()
       const unknown = h.spec('researcher', { resumeSessionId: 'unowned-sdk-session' })
-      expect((await collect(h.providers.router.startSession(unknown))).some((e) => e.type === 'capacity.wait')).toBe(true)
+      // A session whose provider is not on record cannot be resumed anywhere, now or later: it fails (the task can
+      // start afresh) and is not left as a wait that nothing would ever end. No provider is started for it.
+      const refused = await collect(h.providers.router.startSession(unknown))
+      expect(refused.some((e) => e.type === 'capacity.wait')).toBe(false)
+      expect(refused.at(-1)).toMatchObject({ type: 'session.ended', reason: 'crashed' })
       expect(h.codexStart).toHaveBeenCalledTimes(1)
     } finally { await h.close() }
   })
@@ -206,6 +210,56 @@ describe('production worker capacity admission', () => {
       vi.useRealTimers()
       await h.close()
     }
+  })
+
+  it('recovery resumes one waiting run per pass, a run whose resume fails does not hold the others back, and a leftover wait is not read as waiting', async () => {
+    let finish!: () => void
+    const h = await harness(async (_spec, ctx) => { await new Promise<void>((resolve) => { finish = resolve }); await ctx.completeTurn({ text: 'done' }) })
+    try {
+      // The one worker slot is taken; two other runs each have a session that waits.
+      const busy = collect(h.providers.router.startSession(h.spec()))
+      await vi.waitFor(() => expect(h.start).toHaveBeenCalledTimes(1))
+      const waitingRun = async (): Promise<{ runId: string; agentId: string }> => {
+        const run = h.h.repos.runs.insert(makeRun(h.h.project.id, { state: 'executing' }))
+        const agent = h.h.repos.agents.insert(makeAgent(run.id, null, { role: 'worker', state: 'stopped' }))
+        const events = await collect(h.providers.router.startSession({ ...h.spec(), agentId: agent.id }))
+        expect(events.some((e) => e.type === 'capacity.wait')).toBe(true)
+        h.h.repos.runs.update(run.id, { state: 'paused', pauseReason: 'capacity', resumeState: 'executing' })
+        return { runId: run.id, agentId: agent.id }
+      }
+      const a = await waitingRun()
+      const b = await waitingRun()
+      // A wait left over in run b from an earlier pause: its task has a newer agent, which is the one that waits.
+      const store = h.h.repos.intelligenceArtifacts
+      const stale = h.h.repos.agents.insert({ ...makeAgent(b.runId, null, { role: 'worker', state: 'stopped' }), createdAt: '2020-01-01T00:00:00.000Z' })
+      store.checkpoint(`worker-capacity-wait:${stale.id}`, null, { runId: b.runId, projectId: h.h.project.id, agentId: stale.id, routingId: 'old', role: 'worker', label: null, model: 'fake-claude', resumeSessionId: 'gone-session', state: 'WAITING_FOR_CAPACITY', createdAt: '2020-01-01T00:00:00.000Z' })
+
+      const resumed: string[] = []
+      const resume = vi.fn(async (runId: string) => {
+        resumed.push(runId)
+        if (runId === a.runId) throw new Error('its admission is stale')
+        h.h.repos.runs.update(runId, { state: 'executing', pauseReason: null, resumeState: null })
+      })
+      // The slot is still taken: nobody is resumed.
+      await h.routing.recover(resume)
+      expect(resumed).toEqual([])
+      finish(); await busy
+
+      // First pass: one run only, and it fails. It is remembered, not retried at once.
+      await h.routing.recover(resume)
+      expect(resumed).toEqual([a.runId])
+      // The resume did not happen, so its wait is a wait again and the run is not forgotten.
+      expect((store.readCheckpoint(`worker-capacity-wait:${a.agentId}`)!.body as { state: string }).state).toBe('WAITING_FOR_CAPACITY')
+      // Second pass: the failing run is in its delay; the other one is resumed. The leftover wait did not stop it,
+      // although its session could never be resumed, and it is closed.
+      await h.routing.recover(resume)
+      expect(resumed).toEqual([a.runId, b.runId])
+      expect((store.readCheckpoint(`worker-capacity-wait:${stale.id}`)!.body as { state: string }).state).toBe('ENDED')
+      expect((store.readCheckpoint(`worker-capacity-wait:${b.agentId}`)!.body as { state: string }).state).toBe('RESUMED')
+      // Third pass, at once: nothing. The failed run waits out its delay instead of being resumed every pass.
+      await h.routing.recover(resume)
+      expect(resumed).toEqual([a.runId, b.runId])
+    } finally { finish?.(); await h.close() }
   })
 
   it('does not spend when durable admission cannot be written', async () => {

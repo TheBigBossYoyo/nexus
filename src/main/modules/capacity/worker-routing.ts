@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { AgentRole } from '@shared/domain'
 import type { CapacityPool, CapacityRoutingRecord, IntelligenceRole, ProviderCapacityLease, ProviderUsageReceipt, RoutingCandidate } from '@shared/capacity'
 import { READ_ONLY_ROLES, routeSession, unusableReason, type ProviderId } from '@shared/provider'
-import type { AgentEvent, AgentSessionHandle, SessionSpec, UsageInfo } from '../agent-runtime/types'
+import type { AgentEvent, AgentRuntime, AgentSessionHandle, SessionSpec, UsageInfo } from '../agent-runtime/types'
 import { AsyncQueue } from '../agent-runtime/async-queue'
 import type { Repositories } from '../persistence'
 import type { ProviderService, AdmittedSessionProvider } from '../providers/service'
@@ -25,6 +25,10 @@ const PAUSED_STATES: ReadonlySet<string> = new Set(['QUOTA_PAUSED', 'WAITING_FOR
 /** How long a pause with no known reset time holds before the provider is tried again. */
 export const PAUSE_RETRY_MS = 15 * 60_000
 export const AUTH_RETRY_MS = 2 * 60_000
+/** A run resumed from a capacity wait that waits again is tried with a growing delay, not every pass. */
+export const RESUME_BACKOFF_MS = 2_000
+export const RESUME_BACKOFF_MAX_MS = 60_000
+const ACCOUNT_TTL_MS = 30_000
 const roleOf = (role: AgentRole): IntelligenceRole => reviewRoles.has(role) ? 'reviewer' : 'worker'
 
 /** The production worker front door. No wait starts a runtime or spends a model request. */
@@ -37,6 +41,10 @@ export class WorkerCapacityRouting {
   private readonly quarantined = new Map<AgentSessionHandle, ProviderCapacityLease[]>()
   /** Leases of sessions that never started and whose release could not be written; tried again on recovery. */
   private unreleased: ProviderCapacityLease[][] = []
+  /** Per run that waits for capacity: how often it was resumed in a row, and when it may be tried again. */
+  private readonly retries = new Map<string, { count: number; nextAt: number }>()
+  /** What a runtime said about its account, kept briefly: asking starts a process, and recovery asks for every wait. */
+  private readonly accounts = new Map<string, { at: number; info: Awaited<ReturnType<AgentRuntime['getAccountInfo']>> | null }>()
   private disposed = false
   private recovering: Promise<void> | null = null
 
@@ -80,7 +88,7 @@ export class WorkerCapacityRouting {
       // The provider the policy asks for in this role: Claude by default, another one where the user chose it
       // (cross-model review). It is the user's decision, not a substitution, and needs no evidence.
       const primary = provider === request.requested
-      const account = await runtime.getAccountInfo({ subscriptionMode: this.o.repos.settings.get().claude.subscriptionMode }).catch(() => null)
+      const account = await this.account(provider, runtime)
       if (!account || account.state !== 'authenticated') continue
       // A provider that stands in for the requested one is admitted on quality evidence, and that evidence is
       // bound to an account profile: with no identity, or outside a subscription, there is nothing to bind it
@@ -122,6 +130,14 @@ export class WorkerCapacityRouting {
     return { candidates, pools, role, requested: request.requested, owner }
   }
 
+  private async account(provider: string, runtime: AgentRuntime): Promise<Awaited<ReturnType<AgentRuntime['getAccountInfo']>> | null> {
+    const cached = this.accounts.get(provider)
+    if (cached && Date.now() - cached.at < ACCOUNT_TTL_MS) return cached.info
+    const info = await runtime.getAccountInfo({ subscriptionMode: this.o.repos.settings.get().claude.subscriptionMode }).catch(() => null)
+    this.accounts.set(provider, { at: Date.now(), info })
+    return info
+  }
+
   private saveWait(spec: SessionSpec, record: CapacityRoutingRecord): void {
     const runId = this.o.repos.agents.get(spec.agentId)?.runId
     if (!runId) return
@@ -153,6 +169,9 @@ export class WorkerCapacityRouting {
         if (!run) throw new Error('Worker capacity admission requires an owning run')
         const snapshot = await this.snapshot(spec)
         if (stopped || this.disposed) return
+        // A session whose provider is not on record cannot be resumed anywhere, now or later: that is a failed
+        // session, which the task can retry afresh, and not a wait that nothing would ever end.
+        if (spec.resumeSessionId && !snapshot.owner) throw new Error('The provider of the session to resume is not on record')
         const reserve = sessionReservePolicy(snapshot.pools, this.o.maxAgents())
         record = this.kernel.decide({
           projectId: run.projectId, operationId: spec.agentId, stage: `WORKER:${spec.role}:${randomUUID()}`, ...snapshot,
@@ -257,27 +276,66 @@ export class WorkerCapacityRouting {
       try { this.kernel.settle(leases); this.changed(); return false } catch { return true }
     })
     const store = this.o.repos.intelligenceArtifacts
+    const now = Date.now()
+    const waitingRuns = new Set<string>()
+    let resumed = false
     for (const run of this.o.repos.runs.listActive()) {
       if (this.disposed || run.state !== 'paused' || run.pauseReason !== 'capacity') continue
-      const waiting = this.o.repos.agents.listByRun(run.id).flatMap((agent) => {
-        const saved = store.readCheckpoint(`worker-capacity-wait:${agent.id}`)
-        if (!saved) return []
-        const wait = Wait.parse(saved.body)
-        return wait.state === 'WAITING_FOR_CAPACITY' ? [{ wait, revision: saved.revision }] : []
-      })
-      if (!waiting.length) continue
-      let ready = true
-      for (const { wait } of waiting) {
-        const snapshot = await this.snapshot({ role: wait.role as AgentRole, label: wait.label ?? undefined, model: wait.model, resumeSessionId: wait.resumeSessionId ?? undefined })
-        const decision = this.kernel.assess({ ...snapshot, policy: sessionReservePolicy(snapshot.pools, this.o.maxAgents()), coherentBoundary: !wait.resumeSessionId, allowPaid: false,
-          ...(wait.resumeSessionId && snapshot.owner ? { activeSession: { provider: snapshot.owner as 'claude' | 'codex', model: wait.model } } : {}) })
-        if (decision.action !== 'ROUTE') { ready = false; break }
+      waitingRuns.add(run.id)
+      // One run that cannot be resumed (its admission is stale, its repository is gone) must not keep the
+      // others waiting: each run is tried on its own, and a failure is remembered with a growing delay.
+      const marked: WorkerWait[] = []
+      try {
+        const agents = this.o.repos.agents.listByRun(run.id)
+        // Only the wait of the newest agent of a task counts. An older one is left over from a resume whose
+        // mark was never written (a crash, a concurrent change): its task has been given a new agent since.
+        const newest = new Map<string, string>()
+        for (const agent of agents) newest.set(agent.taskId ?? `:${agent.role}`, agent.id)
+        const waiting: { wait: WorkerWait; revision: number }[] = []
+        for (const agent of agents) {
+          const key = `worker-capacity-wait:${agent.id}`
+          const saved = store.readCheckpoint(key)
+          if (!saved) continue
+          const wait = Wait.parse(saved.body)
+          if (wait.state !== 'WAITING_FOR_CAPACITY') continue
+          if (newest.get(agent.taskId ?? `:${agent.role}`) === agent.id) waiting.push({ wait, revision: saved.revision })
+          else store.checkpoint(key, saved.revision, { ...wait, state: 'ENDED' })
+        }
+        // A run paused for capacity with no wait on record (the record was never written, or a resume was
+        // marked and the process died before it happened) is still a run that waits: it is tried like the others.
+        const retry = this.retries.get(run.id)
+        if (retry && now < retry.nextAt) continue
+        // One run per pass: every run would otherwise be judged against the same free slot and resumed, and all
+        // but one would wait again at once.
+        if (resumed) continue
+        let ready = true
+        for (const { wait } of waiting) {
+          const snapshot = await this.snapshot({ role: wait.role as AgentRole, label: wait.label ?? undefined, model: wait.model, resumeSessionId: wait.resumeSessionId ?? undefined })
+          const decision = this.kernel.assess({ ...snapshot, policy: sessionReservePolicy(snapshot.pools, this.o.maxAgents()), coherentBoundary: !wait.resumeSessionId, allowPaid: false,
+            ...(wait.resumeSessionId && snapshot.owner ? { activeSession: { provider: snapshot.owner as 'claude' | 'codex', model: wait.model } } : {}) })
+          if (decision.action !== 'ROUTE') { ready = false; break }
+        }
+        if (!ready || agents.some((a) => a.state === 'starting' || a.state === 'working')) continue
+        // Marked before the resume: a wait that is resumed and then waits again writes a new record, and a
+        // failure after this point leaves nothing that reads as still waiting.
+        for (const { wait, revision } of waiting) if (store.checkpoint(`worker-capacity-wait:${wait.agentId}`, revision, { ...wait, state: 'RESUMED' })) marked.push(wait)
+        const count = (retry?.count ?? 0) + 1
+        this.retries.set(run.id, { count, nextAt: now + Math.min(RESUME_BACKOFF_MAX_MS, RESUME_BACKOFF_MS * 2 ** (count - 1)) })
+        resumed = true
+        await resume(run.id)
+      } catch {
+        // The resume did not happen: the waits are waits again.
+        for (const wait of marked) {
+          const key = `worker-capacity-wait:${wait.agentId}`
+          const saved = store.readCheckpoint(key)
+          if (saved) store.checkpoint(key, saved.revision, { ...wait, state: 'WAITING_FOR_CAPACITY' })
+        }
+        const count = (this.retries.get(run.id)?.count ?? 0) + 1
+        this.retries.set(run.id, { count, nextAt: now + Math.min(RESUME_BACKOFF_MAX_MS, RESUME_BACKOFF_MS * 2 ** (count - 1)) })
       }
-      if (!ready || this.o.repos.agents.listByRun(run.id).some((a) => a.state === 'starting' || a.state === 'working')) continue
-      await resume(run.id)
-      for (const { wait, revision } of waiting)
-        if (!store.checkpoint(`worker-capacity-wait:${wait.agentId}`, revision, { ...wait, state: 'RESUMED' })) throw new Error('Capacity wait changed during resume')
     }
+    // A run that no longer waits for capacity starts from no delay the next time it does.
+    for (const runId of this.retries.keys()) if (!waitingRuns.has(runId)) this.retries.delete(runId)
   }
 
   async dispose(): Promise<void> {
