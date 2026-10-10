@@ -9,7 +9,7 @@ import type {
   CompilationExecutionScope,
 } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
-import { Button, ErrorNote } from '../../components/ui'
+import { Button, ErrorNote, EmptyState } from '../../components/ui'
 import { CompilationPreview } from './CompilationPreview'
 import type { Run } from '@shared/domain'
 import { defaultIntentMetadata } from '@shared/intelligence'
@@ -82,7 +82,7 @@ export function MissionAdmissionInspector({ run }: { run: Run }) {
   const resume = useResumeRun()
   const raw = run.config.compiledTaskSpec?.rawIntent ?? run.prompt
   return <details className="max-h-[60vh] overflow-auto border-b bg-surface px-5 py-2 text-small" data-testid="mission-admission-inspector">
-    <summary className="cursor-pointer font-medium">Compiled task inspector</summary>
+    <summary className="cursor-pointer font-medium">Specification of this mission</summary>
     {run.config.compiledTaskSpec ? <SavedSpecification spec={run.config.compiledTaskSpec} /> : <p>This mission needs a specification before it can resume.</p>}
     {run.state === 'paused' && !run.config.engineeringOwner ? <>
       <CompilationPreview projectId={run.projectId} raw={raw} mode={mode} spec={preview}
@@ -132,7 +132,7 @@ export function AdmissionInspector({
       onToggle={(e) => setOpen(e.currentTarget.open)}
       data-testid="admission-inspector"
     >
-      <summary className="cursor-pointer font-medium">Compiled task inspector</summary>
+      <summary className="cursor-pointer font-medium">Specification of this mission</summary>
       {saved.isError ? (
         <ErrorNote error={saved.error} />
       ) : saved.isPending ? (
@@ -177,7 +177,7 @@ export function CompilationHistory({ projectId }: { projectId: string }) {
   })
   return (
     <details className="mt-3 rounded-md border p-3" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="cursor-pointer font-medium">Compilation history</summary>
+      <summary className="cursor-pointer font-medium">Specification history</summary>
       {history.isError ? (
         <ErrorNote error={history.error} />
       ) : history.isPending ? (
@@ -195,7 +195,7 @@ export function CompilationHistory({ projectId }: { projectId: string }) {
           ))}
         </div>
       ) : (
-        <p>No saved specifications.</p>
+        <EmptyState title="No saved specifications">A specification is saved each time a request is previewed or admitted.</EmptyState>
       )}
       <div className="mt-3 flex gap-2">
         <Button

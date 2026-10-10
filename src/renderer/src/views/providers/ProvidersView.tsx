@@ -409,8 +409,8 @@ export function ProvidersView() {
               <p className="m-0 text-small text-text-secondary" data-testid="providers-intro">
                 These execution providers are detected through their command line tools without
                 sending a model prompt. {PROVIDER_NAMES.claude} currently plans and implements missions;
-                optional providers handle only the roles enabled below. The ChatGPT strategy
-                connection above has separate sign-in and consent controls.
+                optional providers handle only the roles enabled below. The ChatGPT
+                connection above has its own sign-in and its own switch for sending.
               </p>
               <div className="grid gap-4 xl:grid-cols-3" data-testid="providers-list">
                 {o.statuses.map((s) => (

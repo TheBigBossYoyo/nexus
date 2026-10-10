@@ -11,7 +11,7 @@ import {
   defaultIntentMetadata,
 } from '@shared/intelligence'
 import { api } from '../../lib/bridge'
-import { Button, ErrorNote, Field, Notice, Select, Toggle } from '../../components/ui'
+import { Button, ErrorNote, Field, Notice, Select, Tabs, Toggle } from '../../components/ui'
 
 /** The composer controls the admission mode and saved specification. */
 export function CompilationPreview({
@@ -85,7 +85,7 @@ export function CompilationPreview({
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="cursor-pointer font-medium">Task compilation preview</summary>
+      <summary className="cursor-pointer font-medium">Specification preview</summary>
       <p className="text-small text-text-muted">
         Before work starts, NEXUS can develop your request into a specification. Every depth but Exact wording
         and Light sends the request and matching project knowledge to OpenAI (Providers lists what is sent).
@@ -174,22 +174,16 @@ export function CompilationPreview({
               </div>
             ) : null}
           </Notice>
-          <div className="flex gap-2" role="group" aria-label="Specification view">
-            {(['original', 'compiled', 'evidence'] as const).map((value) => (
-              <Button
-                key={value}
-                size="sm"
-                aria-pressed={tab === value}
-                onClick={() => setTab(value)}
-              >
-                {value === 'original'
-                  ? 'Original'
-                  : value === 'compiled'
-                    ? 'Compiled & provenance'
-                    : 'Context & assumptions'}
-              </Button>
-            ))}
-          </div>
+          <Tabs
+            label="Specification"
+            active={tab}
+            onChange={setTab}
+            tabs={[
+              { id: 'original', label: 'Your request', testId: 'spec-tab-original' },
+              { id: 'compiled', label: 'What was added', badge: spec.recommendations.length || undefined, testId: 'spec-tab-compiled' },
+              { id: 'evidence', label: 'Context used', testId: 'spec-tab-evidence' },
+            ]}
+          />
           {tab === 'original' ? (
             <pre className="whitespace-pre-wrap break-words text-small">{spec.rawIntent}</pre>
           ) : tab === 'compiled' ? (

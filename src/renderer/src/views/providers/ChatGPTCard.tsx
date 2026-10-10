@@ -29,8 +29,8 @@ export function ChatGPTCard() {
   const run = (fn: () => Promise<unknown>) => action.mutate(fn)
   return (
     <Card
-      title="ChatGPT strategy"
-      description="Connect through the official ChatGPT sign-in flow. Strategic previews are advisory and cannot execute tools."
+      title="ChatGPT"
+      description="The Strategic Director and the development of specifications run on your ChatGPT plan. Connect through the official ChatGPT sign-in. What it writes is advice: it cannot run tools or start work."
       data-testid="chatgpt-card"
     >
       <div className="space-y-4">
@@ -47,7 +47,7 @@ export function ChatGPTCard() {
             tone={
               ['AVAILABLE', 'USAGE_UNKNOWN'].includes(status.capacity.state) ? 'neutral' : 'warning'
             }
-            title={`Plan capacity · ${status.capacity.state.replaceAll('_', ' ').toLowerCase()}`}
+            title={`Provider capacity · ${status.capacity.state.replaceAll('_', ' ').toLowerCase()}`}
           >
             Allowance and reset time are unknown. This evidence applies to this ChatGPT app
             registration; no shared Codex pool has been established.

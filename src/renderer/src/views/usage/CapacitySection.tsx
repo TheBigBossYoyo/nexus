@@ -24,7 +24,7 @@ export function CapacitySection() {
     pool = connection?.capacity
   return (
     <Card
-      title="Intelligence capacity"
+      title="Provider capacity"
       description="Provider allowance, observed request outcomes and routing policy are separate facts."
       data-testid="intelligence-capacity"
     >
@@ -32,7 +32,7 @@ export function CapacitySection() {
         {query.error ? <ErrorNote error={query.error} /> : null}
         <div className="grid gap-5 lg:grid-cols-2">
           <section className="space-y-2">
-            <h3 className="font-medium">ChatGPT strategic registration</h3>
+            <h3 className="font-medium">ChatGPT connection</h3>
             <KeyValue
               rows={[
                 {
@@ -77,7 +77,7 @@ export function CapacitySection() {
             />
           </section>
           <section className="space-y-2">
-            <h3 className="font-medium">Pool and role boundaries</h3>
+            <h3 className="font-medium">Which provider does what</h3>
             <p className="text-small">
               This app registration supplies strategic advice and specification development. Its
               capacity binding has not been verified as shared with the Codex CLI account.

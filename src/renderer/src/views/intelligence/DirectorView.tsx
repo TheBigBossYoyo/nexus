@@ -12,6 +12,7 @@ import {
   Field,
   Notice,
   PageHeader,
+  EmptyState,
   Loading,
   Select,
   Textarea,
@@ -343,7 +344,7 @@ export function DirectorView() {
             {records.isLoading ? (
               <Loading />
             ) : !records.data?.length ? (
-              <p className="text-text-muted">No escalations or decisions saved.</p>
+              <EmptyState title="No escalations or decisions saved">An escalation you save, and the decision of a Council, appear here.</EmptyState>
             ) : (
               records.data.map((record) => (
                 <details
@@ -406,16 +407,14 @@ export function DirectorView() {
               ))
             )}
           </Card>
-          <h2 className="text-lg font-semibold">Saved advisory history</h2>
+          <h2 className="text-heading font-semibold">Saved advice</h2>
           {history.error ? <ErrorNote error={history.error} /> : null}
           {history.isLoading ? (
-            <p role="status">Loading history…</p>
+            <Loading />
           ) : !history.data?.length ? (
-            <p className="text-text-muted">
-              {projectId
-                ? 'No advice saved for this project yet.'
-                : 'Select a project to see its advice.'}
-            </p>
+            <EmptyState title={projectId ? 'No advice saved for this project yet' : 'Select a project to see its advice'}>
+              Every request for advice is saved with its answer, its provider and what it used.
+            </EmptyState>
           ) : (
             history.data.map((r) => <Material key={r.id} invocation={r} />)
           )}
