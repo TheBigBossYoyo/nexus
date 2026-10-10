@@ -423,12 +423,19 @@ export class Orchestrator implements PipelineHost {
     }
     const control = this.runControl(runId)
     let previousErrors: string[] | undefined
+    // The planner reads the snapshot the run executes: the integration worktree, created at the run's base
+    // commit. It used to read the user's checkout, which can move (or carry uncommitted files) while the run
+    // plans, waits or is paused: the plan then described one state of the repository and the workers, in
+    // worktrees made from the base commit, executed another. A run with no base commit (a folder that is not a
+    // repository, a read-only question) has only the checkout to read.
+    const planningRoot = run.baseCommit && run.mode !== 'ask' && run.mode !== 'audit' ? (await this.ensureIntegration(run)).path : project.rootPath
+    if (this.closing || repos.runs.require(runId).state !== 'planning') return
 
     if ((run.config.planningMode ?? 'single') === 'consensus') {
       const outcome = await new ConsensusPlanner(this.core).run({
         run,
         profile: project.profile,
-        projectRoot: project.rootPath,
+        projectRoot: planningRoot,
         control,
         memory: this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] }),
         ...(feedback ? { feedback } : {}),
@@ -462,8 +469,8 @@ export class Orchestrator implements PipelineHost {
         role: 'planner',
         purpose: 'plan',
         label: 'Planner',
-        cwd: project.rootPath,
-        worktreeRoot: project.rootPath,
+        cwd: planningRoot,
+        worktreeRoot: planningRoot,
         projectRoot: project.rootPath,
         prompt,
         outputSchema: missionPlanJsonSchema,

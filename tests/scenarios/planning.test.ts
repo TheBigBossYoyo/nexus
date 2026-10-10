@@ -1,7 +1,9 @@
-import { readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { completeWith } from '@main/modules/agent-runtime/fake-runtime'
-import { createHarness, git, plan, plannedTask, scenarioScript, sessionsOf, type Harness } from './harness'
+import { completeWith, scriptsByRole, type FakeScript } from '@main/modules/agent-runtime/fake-runtime'
+import { approvedReview, createHarness, fileWorker, git, passedVerification, plan, plannedTask, scenarioScript, sessionsOf, type Harness } from './harness'
 
 const validPlan = plan([plannedTask('alpha')])
 
@@ -76,7 +78,18 @@ describe('scenario: planning, validation and plan approval', () => {
     // Tasks exist as drafts but nothing has started.
     expect(h.repos.tasks.listByRun(run.id).map((t) => t.state)).toEqual(['draft'])
     expect(sessionsOf(h, 'worker')).toHaveLength(0)
-    expect(h.repos.worktrees.listByRun(run.id)).toHaveLength(0)
+    // No task has a worktree. The run's own snapshot exists since 0.7.2: the planner read it, not the user's
+    // checkout, so that the plan describes the commit the workers will execute.
+    const worktrees = h.repos.worktrees.listByRun(run.id)
+    expect(worktrees.filter((w) => w.taskId !== null)).toHaveLength(0)
+    expect(worktrees.map((w) => w.taskId)).toEqual([null])
+    const planner = sessionsOf(h, 'planner')[0]!
+    expect(planner.cwd).toBe(worktrees[0]!.path)
+    expect(planner.cwd).not.toBe(h.repoDir)
+    expect(await git(worktrees[0]!.path, 'rev-parse', 'HEAD')).toBe(h.repos.runs.require(run.id).baseCommit)
+    // The user's checkout was not touched by it.
+    expect(await git(h.repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main')
+    expect(await git(h.repoDir, 'status', '--porcelain')).toBe('')
 
     await h.orchestrator.approvePlan(run.id)
     expect((await h.waitForState(run.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
@@ -252,5 +265,30 @@ describe('scenario: AUDIT and ASK modes are read-only', () => {
     const tasks = h.repos.tasks.listByRun(run.id)
     expect(tasks).toHaveLength(1)
     expect(tasks[0]).toMatchObject({ kind: 'ask', role: 'researcher', state: 'completed', resultSummary: 'It is a tiny scenario repo.' })
+  })
+
+  it('the planner reads the commit the run executes, also when the user checkout moves while it plans', async () => {
+    let seen: { cwd: string; shared: string; extra: boolean } | null = null
+    const planner: FakeScript = async (spec, ctx) => {
+      // The user goes on working in their checkout while the run plans: a new commit and an uncommitted file.
+      await writeFile(join(h.repoDir, 'shared.txt'), 'line 1 changed by the user\n')
+      await git(h.repoDir, 'commit', '-qam', 'user work during planning')
+      await writeFile(join(h.repoDir, 'uncommitted.txt'), 'not part of any commit\n')
+      seen = { cwd: spec.cwd, shared: await readFile(join(spec.cwd, 'shared.txt'), 'utf8'), extra: existsSync(join(spec.cwd, 'uncommitted.txt')) }
+      await ctx.completeTurn({ text: 'plan', structuredOutput: validPlan })
+    }
+    h = await createHarness({ script: scriptsByRole({ planner, worker: fileWorker, reviewer: completeWith({ text: 'review', structuredOutput: approvedReview }), verifier: completeWith({ text: 'verify', structuredOutput: passedVerification }) }) })
+    const base = await git(h.repoDir, 'rev-parse', 'HEAD')
+    const run = await h.startRun()
+    expect((await h.waitForState(run.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+    expect(h.repos.runs.require(run.id).baseCommit).toBe(base)
+    // What the planner saw is the base commit: the same state every worker's worktree starts from.
+    expect(seen).not.toBeNull()
+    expect(seen!.shared.trim()).toBe('line 1')
+    expect(seen!.extra).toBe(false)
+    expect(seen!.cwd).not.toBe(h.repoDir)
+    // And the user's work is where they left it.
+    expect((await readFile(join(h.repoDir, 'shared.txt'), 'utf8')).trim()).toBe('line 1 changed by the user')
+    expect(existsSync(join(h.repoDir, 'uncommitted.txt'))).toBe(true)
   })
 })
