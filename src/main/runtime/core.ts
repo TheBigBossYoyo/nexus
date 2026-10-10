@@ -1017,7 +1017,6 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     phase = 'STOPPING'
     intelligenceOperations.closeAdmission()
     clearInterval(capacityRecoveryTimer)
-    workerRouting.closeAdmission()
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
     push({ kind: 'runtime' })
@@ -1044,6 +1043,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.
       await recovery.idle()
       await orchestrator.shutdown()
+      // Session admission closes only now. The orchestrator has given every unit of work its stop reason, so a
+      // session refused from here on ends as stopped for shutdown. Closed earlier (it used to be the first step,
+      // up to 30 s before), a session a running pipeline started in between ended stopped with no reason, which
+      // reads as a crash: the task failed and an attempt was spent on a shutdown.
+      workerRouting.closeAdmission()
       await workerManager?.shutdown()
       await workerRouting.dispose()
       usage.dispose()
