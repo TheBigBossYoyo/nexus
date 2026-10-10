@@ -35,7 +35,7 @@ test('AUTO waits for its provider and explicit EXACT preserves intent in an admi
     await expect(page.getByTestId('mission-form')).toHaveAttribute('disabled', '')
     await expect(page.getByTestId('mission-prompt')).toBeDisabled()
     await expect(page.getByTestId('mode-select')).toBeDisabled()
-    await expect(page.getByText('Waiting for a configured provider', { exact: true })).toBeVisible()
+    await expect(page.getByText('Waiting for a provider', { exact: true })).toBeVisible()
     await expect(
       page.getByRole('status').filter({ hasText: 'Mission has not started.' }),
     ).toBeFocused()

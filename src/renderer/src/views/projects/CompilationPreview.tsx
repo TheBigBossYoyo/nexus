@@ -74,11 +74,8 @@ export function CompilationPreview({
     >
       <summary className="cursor-pointer font-medium">Task compilation preview</summary>
       <p className="text-small text-text-muted">
-        Before work starts, NEXUS can develop your request into a specification. Automatic, Standard, Technical
-        and Council send the request and matching project knowledge to OpenAI through your ChatGPT connection
-        (the Providers page lists what is sent). Exact wording and Light send nothing there. What is added to
-        your request is shown with where it came from, and a question that changes the outcome stops the start
-        until you have answered it.
+        Before work starts, NEXUS can develop your request into a specification. Every depth but Exact wording
+        and Light sends the request and matching project knowledge to OpenAI (Providers lists what is sent).
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Compilation depth">
@@ -108,7 +105,7 @@ export function CompilationPreview({
               stale
                 ? 'Request changed — preview again'
                 : spec.status === 'WAITING_FOR_PROVIDER'
-                  ? 'Waiting for a configured provider'
+                  ? 'Waiting for a provider'
                   : spec.status === 'USER_DECISION_REQUIRED'
                     ? 'A user decision is required'
                     : 'Specification preview ready'
@@ -121,7 +118,12 @@ export function CompilationPreview({
                 sending on in Providers, then preview again. Exact wording and Light need no provider.
               </p>
             ) : null}
-            {spec.reasons.length ? <p className="text-text-muted">Recorded reasons: {spec.reasons.join(' · ')}</p> : null}
+            {spec.reasons.length ? (
+              <details className="text-text-muted">
+                <summary className="cursor-pointer">Details for support</summary>
+                <p className="break-words font-mono text-caption">{spec.reasons.join(' · ')}</p>
+              </details>
+            ) : null}
             {spec.status === 'USER_DECISION_REQUIRED' ? (
               <p>
                 Clarify the original request and preview again before starting. Generated

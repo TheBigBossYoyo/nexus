@@ -295,6 +295,7 @@ export function DirectorView() {
                 )}
               </Field>
               <Button
+                variant="primary"
                 disabled={pending || !projectId || !objective.trim()}
                 loading={invoke.isPending}
                 onClick={() => {
@@ -315,6 +316,14 @@ export function DirectorView() {
               >
                 Save escalation
               </Button>
+              {!projectId || !objective.trim() ? (
+                <p className="text-text-secondary">Choose a project and write the objective to continue.</p>
+              ) : null}
+              <p className="text-text-muted">
+                Request advice sends the objective and matching project knowledge to the provider of the level you
+                chose (Claude for the Technical Director; ChatGPT, and Claude for a Council, otherwise). The
+                Providers page lists what is sent. Nothing starts work.
+              </p>
               <p className="text-text-muted">
                 Saving an escalation sends no model request. Review it below before requesting
                 advice.

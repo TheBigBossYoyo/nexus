@@ -156,8 +156,11 @@ export function ChatGPTCard() {
         <div className="text-small text-text-secondary" data-testid="chatgpt-data-notice">
           <p className="font-medium text-text-primary">What is sent to OpenAI</p>
           <p>
-            Only while the switch above is on, and only when you develop a request with ChatGPT (the compilation
-            depths Automatic, Standard, Technical and Council) or ask the Strategic Director or the Council:
+            {status?.state === 'SIGNED_IN_PLAN_USAGE'
+              ? 'Only while the switch above is on, and only when you ask for it:'
+              : 'Connecting sends nothing. After you connect and choose a model, a switch on this card turns sending on; nothing is sent before you turn it on. Then, only when you ask for it:'}{' '}
+            developing a request with ChatGPT (the compilation depths Automatic, Standard, Technical and Council),
+            or asking the Strategic Director or the Council.
           </p>
           <ul className="list-disc pl-4">
             <li>your request as you wrote it, with its goals, constraints and criteria;</li>

@@ -76,7 +76,7 @@ test.describe('UI review capture: 0.7.2 screens', () => {
           if (!(await preview.evaluate((el) => (el as HTMLDetailsElement).open))) await preview.locator('summary').click()
           await page.getByTestId('compilation-mode').selectOption('STANDARD')
           await preview.getByRole('button', { name: 'Preview specification', exact: true }).click()
-          await expect(preview.getByText('Waiting for a configured provider', { exact: true })).toBeVisible()
+          await expect(preview.getByText('Waiting for a provider', { exact: true })).toBeVisible()
           await preview.scrollIntoViewIfNeeded()
           await shot(page, name('composer-preview-waiting'))
           await page.getByTestId('compilation-mode').selectOption('EXACT')

@@ -3,6 +3,16 @@ import { api } from '../../lib/bridge'
 import { useUiStore } from '../../store/ui'
 import { Button, Card, ErrorNote, KeyValue, Notice } from '../../components/ui'
 
+/** The same words as on the Providers page. */
+const CONNECTION_LABEL: Record<string, string> = {
+  SIGNED_OUT: 'Not connected',
+  CONNECTING: 'Sign-in in progress',
+  SIGNED_IN_NO_PLAN_USAGE: 'Connected · plan usage not granted',
+  SIGNED_IN_PLAN_USAGE: 'Connected · plan usage granted',
+  AUTH_REQUIRES_RECONNECT: 'Reconnect required',
+  STORAGE_UNAVAILABLE: 'Protected storage unavailable',
+}
+
 export function CapacitySection() {
   const setView = useUiStore((s) => s.setView)
   const query = useQuery({
@@ -27,7 +37,7 @@ export function CapacitySection() {
               rows={[
                 {
                   label: 'Connection',
-                  value: connection?.state.replaceAll('_', ' ').toLowerCase() ?? 'Loading…',
+                  value: connection ? CONNECTION_LABEL[connection.state] : 'Loading…',
                 },
                 {
                   label: 'Capacity state',
