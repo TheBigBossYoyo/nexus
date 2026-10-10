@@ -20,6 +20,11 @@ const Wait = z.object({
 }).strict()
 type WorkerWait = z.infer<typeof Wait>
 const reviewRoles = new Set<AgentRole>(['reviewer', 'security_reviewer', 'verifier'])
+/** States a rejection leaves a pool in. */
+const PAUSED_STATES: ReadonlySet<string> = new Set(['QUOTA_PAUSED', 'WAITING_FOR_RESET', 'THROTTLED', 'AUTH_REQUIRED', 'RUNTIME_UNAVAILABLE'])
+/** How long a pause with no known reset time holds before the provider is tried again. */
+export const PAUSE_RETRY_MS = 15 * 60_000
+export const AUTH_RETRY_MS = 2 * 60_000
 const roleOf = (role: AgentRole): IntelligenceRole => reviewRoles.has(role) ? 'reviewer' : 'worker'
 
 /** The production worker front door. No wait starts a runtime or spends a model request. */
@@ -91,6 +96,13 @@ export class WorkerCapacityRouting {
           const machine = this.o.usage.machineState()
           if (pool.state !== machine.status) pool = this.pools.observe(pool, machine.status, { resetAt: machine.resetAt, utilization: machine.utilizationPercent })
         }
+      } else if (PAUSED_STATES.has(pool.state)) {
+        // Claude's pool follows the usage service. A provider with no observation of its own gets its chance
+        // again when the pause's evidence has run out; the account check above already says it is signed in.
+        const since = pool.stateEvidence?.observedAt ?? 0
+        const reset = pool.resetAt.value
+        const wait = pool.state === 'AUTH_REQUIRED' ? AUTH_RETRY_MS : PAUSE_RETRY_MS
+        if (reset !== null ? Date.now() >= reset : Date.now() - since >= wait) pool = this.pools.expire(pool)
       }
       pools.push(pool)
       const evidence = primary ? [`PRIMARY_ROLE_POLICY:${DISPATCH_POLICY}:${profile}:${model}:${role}`]

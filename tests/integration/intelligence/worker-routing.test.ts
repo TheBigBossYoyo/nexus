@@ -4,7 +4,7 @@ import { FakeAgentRuntime, defaultFakeAuthStatus, type FakeScript } from '@main/
 import type { AgentEvent, SessionSpec } from '@main/modules/agent-runtime/types'
 import { FakeRuntimeProvider } from '@main/modules/providers/providers'
 import { ProviderService } from '@main/modules/providers/service'
-import { WorkerCapacityRouting } from '@main/modules/capacity/worker-routing'
+import { PAUSE_RETRY_MS, WorkerCapacityRouting } from '@main/modules/capacity/worker-routing'
 import { CapacityAwareProviderRouter } from '@main/modules/capacity/router'
 import { ProviderQualityRegistry } from '@main/modules/capacity/quality'
 import { RuntimeCapacityPools } from '@main/modules/capacity/runtime-pools'
@@ -174,6 +174,38 @@ describe('production worker capacity admission', () => {
       const ok = await collect(h.providers.router.startSession(h.spec()))
       expect(ok.find((e) => e.type === 'session.started')).toMatchObject({ provider: 'claude' })
     } finally { await h.close() }
+  })
+
+  it('a provider with no probe of its own is tried again when its pause has run out, and not before', async () => {
+    const h = await harness()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      h.providers.setPolicy({ ...h.providers.policy(), enabled: { ...h.providers.policy().enabled, codex: true } })
+      new ProviderQualityRegistry(h.h.repos.intelligenceArtifacts).recordValidated({ provider: 'codex', model: 'fake-codex', role: 'worker', profile: h.profile, policyVersion: DISPATCH_POLICY, runtimeVersion: '0.0.0-fake' }, ['controlled-worker-role-comparison'], new Date().toISOString())
+      h.usage.apply({ type: 'restore_wait', resetAt: null, limitType: 'five_hour' })
+      // One rejection marked Codex's pool paused, with no reset time. Nothing else ever writes that pool.
+      const pools = new RuntimeCapacityPools(h.h.repos.intelligenceArtifacts, 'worker-fixture')
+      pools.observe(pools.pool('codex', h.profile), 'QUOTA_PAUSED')
+      const waits = async (): Promise<boolean> => (await collect(h.providers.router.startSession(h.spec('researcher')))).some((e) => e.type === 'capacity.wait')
+      expect(await waits()).toBe(true)
+      vi.setSystemTime(Date.now() + PAUSE_RETRY_MS - 60_000)
+      expect(await waits()).toBe(true)
+      expect(h.codexStart).not.toHaveBeenCalled()
+      // It used to wait for ever. After the retry interval the pool is unknown again, labelled as NEXUS's own reckoning.
+      vi.setSystemTime(Date.now() + 2 * 60_000)
+      const events = await collect(h.providers.router.startSession(h.spec('researcher')))
+      expect(events.find((e) => e.type === 'session.started')).toMatchObject({ provider: 'codex' })
+      expect(pools.pool('codex', h.profile)).toMatchObject({ state: 'USAGE_UNKNOWN', stateEvidence: { source: 'LOCAL', confidence: 'ESTIMATED' } })
+      // A pause that names its reset time holds until then, however long.
+      pools.observe(pools.pool('codex', h.profile), 'QUOTA_PAUSED', { resetAt: Date.now() + 3 * 60 * 60_000 })
+      vi.setSystemTime(Date.now() + 2 * 60 * 60_000)
+      expect(await waits()).toBe(true)
+      vi.setSystemTime(Date.now() + 61 * 60_000)
+      expect(await waits()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+      await h.close()
+    }
   })
 
   it('does not spend when durable admission cannot be written', async () => {

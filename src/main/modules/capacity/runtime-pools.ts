@@ -81,6 +81,19 @@ export class RuntimeCapacityPools {
       stateEvidence: { ...unknown, value: 'USAGE_UNKNOWN' },
     }
   }
+  /**
+   * A pause whose evidence has run out: the reset time it named has passed, or nothing has been heard for the
+   * retry interval. The pool is unknown again, by NEXUS's own reckoning and labelled so; the next session is
+   * the probe. Without this a provider that has no probe of its own (Codex) stayed paused for ever after one
+   * rejection.
+   */
+  expire(pool: CapacityPool): CapacityPool {
+    const local = { value: null, source: 'LOCAL', confidence: 'ESTIMATED', observedAt: this.now() } as const
+    const next: CapacityPool = { ...pool, state: 'USAGE_UNKNOWN', stateEvidence: { ...local, value: 'USAGE_UNKNOWN' }, resetAt: { ...local }, utilization: { ...local } }
+    const saved = this.store.readCheckpoint(pool.id)
+    if (!this.store.checkpoint(pool.id, saved?.revision ?? null, Pool.parse(next))) throw new Error('Runtime capacity changed during expiry')
+    return next
+  }
   observe(
     pool: CapacityPool,
     state: CapacityState,
