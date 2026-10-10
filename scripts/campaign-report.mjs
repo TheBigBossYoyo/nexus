@@ -1,6 +1,6 @@
-// Reads the evidence files of the real quality campaign (docs/acceptance/campaign) and prints two tables:
-// quality and efficiency. They are never combined into one score. With several files for one task and arm,
-// the latest is used and the others are counted. Usage: node scripts/campaign-report.mjs [directory]
+// Reads the evidence files of the real quality campaign (docs/acceptance/campaign) and prints quality and
+// efficiency tables. They are never combined into one score. EVERY run on file counts: quality is shown as
+// counts over the runs of a cell, efficiency as the mean of its runs. Usage: node scripts/campaign-report.mjs [directory]
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -8,52 +8,46 @@ const dir = resolve(process.argv[2] ?? 'docs/acceptance/campaign')
 const ARMS = ['070', '071', '071-graph']
 const TASKS = ['localized-bug', 'cross-module-bug', 'feature', 'refactor', 'architecture', 'security', 'program', 'workspace']
 
-const latest = new Map()
-const counts = new Map()
+const cells = new Map()
 for (const name of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
   const run = JSON.parse(readFileSync(join(dir, name), 'utf8'))
   if (run.kind !== 'campaign-run') continue
   const key = `${run.task}|${run.arm}`
-  latest.set(key, { ...run, file: name })
-  counts.set(key, (counts.get(key) ?? 0) + 1)
+  cells.set(key, [...(cells.get(key) ?? []), run])
 }
 
-const k = (n) => (n >= 10_000 ? `${(n / 1000).toFixed(0)}k` : String(n))
-const yes = (b) => (b ? 'yes' : '**no**')
-const rows = (f) => TASKS.flatMap((task) => ARMS.flatMap((arm) => (latest.has(`${task}|${arm}`) ? [f(latest.get(`${task}|${arm}`), counts.get(`${task}|${arm}`))] : [])))
+const k = (n) => (n >= 10_000 ? `${(n / 1000).toFixed(0)}k` : String(Math.round(n)))
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+const of = (runs, f) => `${runs.filter(f).length}/${runs.length}`
+const each = (f) => TASKS.flatMap((task) => ARMS.flatMap((arm) => (cells.has(`${task}|${arm}`) ? [f(task, arm, cells.get(`${task}|${arm}`))] : [])))
 
-console.log('### Quality\n')
-console.log('| Task | Arm | Completed | Hidden evaluation | First-pass verification | Reviewer findings (by severity) | Repairs | Regressions | Human intervention | Runs on file |')
-console.log('| --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: |')
-for (const line of rows((r, n) => {
-  const q = r.quality
-  const hidden = q.evaluations.map((e) => `${e.hidden?.pass ?? '?'}/${(e.hidden?.pass ?? 0) + (e.hidden?.fail ?? 0)}`).join(' + ')
-  const sev = Object.entries(q.findingsBySeverity).map(([s, c]) => `${c} ${s}`).join(', ') || 'none'
-  const human = q.humanIntervention.approvalsRequestedAndRefused + q.humanIntervention.pauses.length === 0 ? 'none' : `${q.humanIntervention.approvalsRequestedAndRefused} approvals refused, ${q.humanIntervention.pauses.length} pauses`
-  return `| ${r.task} | ${r.arm} | ${yes(q.completed)}${q.timedOut ? ' (timed out)' : ''} | ${yes(q.hiddenPassed)} (${hidden}) | ${yes(q.firstPassAllPassed)} | ${q.reviewerFindings} (${sev}) | ${q.repairs} | ${q.regressions.length === 0 ? 'none' : q.regressions.join(', ')} | ${human} | ${n} |`
+console.log('### Quality (counts over the runs of each cell)\n')
+console.log('| Task | Arm | Runs | Completed | Hidden evaluation passed | First-pass verification | Reviewer findings (critical / high / other) | Repairs | Regressions | Approvals refused / pauses |')
+console.log('| --- | --- | ---: | --- | --- | --- | --- | ---: | ---: | --- |')
+for (const line of each((task, arm, runs) => {
+  const q = runs.map((r) => r.quality)
+  const sev = (s) => q.reduce((n, x) => n + (x.findingsBySeverity[s] ?? 0), 0)
+  const all = q.reduce((n, x) => n + x.reviewerFindings, 0)
+  return `| ${task} | ${arm} | ${runs.length} | ${of(runs, (r) => r.quality.completed)} | ${of(runs, (r) => r.quality.hiddenPassed)} | ${of(runs, (r) => r.quality.firstPassAllPassed)} | ${sev('critical')} / ${sev('high')} / ${all - sev('critical') - sev('high')} | ${q.reduce((n, x) => n + x.repairs, 0)} | ${q.reduce((n, x) => n + x.regressions.length, 0)} | ${q.reduce((n, x) => n + x.humanIntervention.approvalsRequestedAndRefused, 0)} / ${q.reduce((n, x) => n + x.humanIntervention.pauses.length, 0)} |`
 })) console.log(line)
 
-console.log('\n### Efficiency\n')
-console.log('| Task | Arm | Sessions | Turns | Tool calls (context) | Uncached input | Cache written | Cache read | Output | Rotations | Compactions | Wall time | Weekly window |')
-console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |')
-for (const line of rows((r) => {
-  const e = r.efficiency
-  const week = (w) => w?.find((x) => x.limitType === 'seven_day')?.utilizationPercent
-  const window = week(e.usageWindowsBefore) == null ? 'n/a' : `${week(e.usageWindowsBefore)}% -> ${week(e.usageWindowsAfter)}%`
-  return `| ${r.task} | ${r.arm} | ${e.sessions} | ${e.turns} | ${e.toolCalls} (${e.contextToolCalls.length}) | ${k(e.inputTokensUncached)} | ${k(e.cacheCreationTokens)} | ${k(e.cacheReadTokens)} | ${k(e.outputTokens)} | ${e.sessionRotations} | ${e.compactions} | ${Math.round(e.wallMs / 1000)} s | ${window} |`
-})) console.log(line)
+console.log('\n### Efficiency (mean of the runs of each cell)\n')
+console.log('| Task | Arm | Runs | Sessions | Turns | Tool calls recorded | Context-tool calls | Uncached input | Cache written | Cache read | Output | Rotations | Compactions | Wall time |')
+console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
+const m = (runs, f) => mean(runs.map((r) => f(r.efficiency)))
+for (const line of each((task, arm, runs) => `| ${task} | ${arm} | ${runs.length} | ${m(runs, (e) => e.sessions).toFixed(1)} | ${m(runs, (e) => e.turns).toFixed(1)} | ${m(runs, (e) => e.toolCallsRecorded ?? e.toolCalls).toFixed(1)} | ${m(runs, (e) => e.contextToolCalls.length).toFixed(1)} | ${k(m(runs, (e) => e.inputTokensUncached))} | ${k(m(runs, (e) => e.cacheCreationTokens))} | ${k(m(runs, (e) => e.cacheReadTokens))} | ${k(m(runs, (e) => e.outputTokens))} | ${m(runs, (e) => e.sessionRotations).toFixed(1)} | ${m(runs, (e) => e.compactions).toFixed(1)} | ${Math.round(m(runs, (e) => e.wallMs) / 1000)} s |`)) console.log(line)
 
-console.log('\n### Against 0.7.0, per task\n')
-console.log('| Task | Arm | Turns | Cache read | Cache written | Output | Wall time | Hidden evaluation |')
-console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |')
+console.log('\n### Totals over the tasks every arm has run (sum of cell means)\n')
+const shared = TASKS.filter((t) => ARMS.every((a) => cells.has(`${t}|${a}`)))
+console.log(`Tasks: ${shared.join(', ') || 'none yet'}\n`)
+console.log('| Arm | Runs | Hidden evaluation passed | Turns | Uncached input | Cache written | Cache read | Output | Wall time | Against 0.7.0: turns / all input / output / wall |')
+console.log('| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |')
+const total = (arm, f) => shared.reduce((n, t) => n + m(cells.get(`${t}|${arm}`), f), 0)
+const input = (e) => e.inputTokensUncached + e.cacheCreationTokens + e.cacheReadTokens
 const pct = (a, b) => (b ? `${a - b >= 0 ? '+' : ''}${(((a - b) / b) * 100).toFixed(1)}%` : 'n/a')
-for (const task of TASKS) {
-  const base = latest.get(`${task}|070`)
-  if (!base) continue
-  for (const arm of ARMS.slice(1)) {
-    const r = latest.get(`${task}|${arm}`)
-    if (!r) continue
-    const [a, b] = [r.efficiency, base.efficiency]
-    console.log(`| ${task} | ${arm} | ${a.turns - b.turns >= 0 ? '+' : ''}${a.turns - b.turns} (${pct(a.turns, b.turns)}) | ${pct(a.cacheReadTokens, b.cacheReadTokens)} | ${pct(a.cacheCreationTokens, b.cacheCreationTokens)} | ${pct(a.outputTokens, b.outputTokens)} | ${pct(a.wallMs, b.wallMs)} | ${base.quality.hiddenPassed ? 'pass' : 'FAIL'} -> ${r.quality.hiddenPassed ? 'pass' : 'FAIL'} |`)
-  }
+for (const arm of ARMS) {
+  if (shared.length === 0) break
+  const runs = shared.flatMap((t) => cells.get(`${t}|${arm}`))
+  const against = arm === '070' ? 'baseline' : `${pct(total(arm, (e) => e.turns), total('070', (e) => e.turns))} / ${pct(total(arm, input), total('070', input))} / ${pct(total(arm, (e) => e.outputTokens), total('070', (e) => e.outputTokens))} / ${pct(total(arm, (e) => e.wallMs), total('070', (e) => e.wallMs))}`
+  console.log(`| ${arm} | ${runs.length} | ${of(runs, (r) => r.quality.hiddenPassed)} | ${total(arm, (e) => e.turns).toFixed(0)} | ${k(total(arm, (e) => e.inputTokensUncached))} | ${k(total(arm, (e) => e.cacheCreationTokens))} | ${k(total(arm, (e) => e.cacheReadTokens))} | ${k(total(arm, (e) => e.outputTokens))} | ${Math.round(total(arm, (e) => e.wallMs) / 1000)} s | ${against} |`)
 }
