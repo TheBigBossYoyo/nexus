@@ -126,3 +126,34 @@ Not yet reviewed by me: OpenAI authentication and storage, the Director and Coun
 entry boundaries and snapshot consistency, instruction history, the UI. Not yet done: provider-scoped wait
 state in the UI, crash tests on a real runtime process for worker admission, everything that needs real
 providers.
+
+## 2026-10-10, later: reconciliation with 0.7.1, twelve reviews, two rounds of fixes
+
+0.7.1 was closed and tagged (`v0.7.1`, not pushed) and merged into this branch at `3fcd1e0`
+(docs/V0_7_2_PARENT_RECONCILIATION.md). The suite on the merged tree: 182 files, 4,084 of 4,084.
+
+Twelve of the fourteen independent reviews are done. Every finding, its severity and its state are in
+docs/V0_7_2_REVIEW_FINDINGS.md: that file is the ledger, this section is the summary.
+
+| Review | Verdict in one line |
+| --- | --- |
+| 1 OpenAI and sign-in correctness | Sound flow; one 401 latched the pool (fixed) |
+| 2 OAuth and credential security | Sound; the data directory reached agent environments (fixed) |
+| 3 Capacity accounting | Leases and pauses had four ways to be lost or to stick (fixed) |
+| 4 Routing and failover | A capacity wait blocked Programs and Workspaces and looked like a stall (fixed); waiting is run-wide (limitation) |
+| 5 Director architecture | Authority boundary sound; five MEDIUM on records and escalations (open) |
+| 6 Task Compiler intent | CRITICAL: a rotated worker lost the user's instructions (fixed); replan notes were one slot (fixed) |
+| 7 Compiler prompt injection | Agent notes reached the compiler unlabelled (fixed); READY rests on the model's own report (open, MEDIUM) |
+| 8 Context Graph integration | Same agent-note defect; the planner section accepted as designed |
+| 9 Token Intelligence regression | The request was unbounded in worker packs (fixed); advice in every pack and calls before planning (open) |
+| 10 Privacy | No statement of what goes to OpenAI and no redaction (fixed); no switch per project (open) |
+| 13 Test quality | Subsystems tested alone; kernel and orchestrator never met (fixed with scenarios); default AUTO path untested end to end (open) |
+| 14 Scheduler and recovery | A wait cost an attempt, a dead worker leaked a slot, shutdown consumed attempts (fixed) |
+
+Open and HIGH after the second round: the workspace half of 6.3, 9.2, 9.3 (no measurement), 10.1 (switch per
+project), 13.2. Reviews 11 (UI/UX) and 12 (accessibility) wait for the UI work.
+
+Not done, and needed for a verdict other than PARTIAL: real Claude Technical Director acceptance; real Council
+and real Task Compiler acceptance (both need ChatGPT inference, which only the provider's own paid-credit
+confirmation in the app may allow); Director outcome learning; the provider-scoped wait in the UI; UI 2.0 with
+its two reviews; a full end-to-end, stress and package run on final source.
