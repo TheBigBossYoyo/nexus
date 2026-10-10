@@ -91,7 +91,9 @@ export class WorkerCapacityRouting {
         provider, model, roles: [role], poolIds: [pool.id, hostPool.id],
         available: !this.disposed && spec.model !== '' && this.o.repos.settings.get().claude.subscriptionMode
           && unusableReason(provider, policy, status, spec.role) === null
-          && status.capabilities.toolAuthorization
+          // Something must confine the agent: the NEXUS policy on every tool call, or the provider's own sandbox
+          // (Codex, read-only roles). A provider with neither is never admitted.
+          && (status.capabilities.toolAuthorization || status.capabilities.confinement === 'provider_sandbox')
           && (READ_ONLY_ROLES.includes(spec.role) || status.capabilities.writes)
           && (provider !== 'claude' || this.o.usage.canDispatch()),
         qualityApproved: evidence.length > 0, qualityEvidence: evidence, reserve: 'NONE', paid: false,
