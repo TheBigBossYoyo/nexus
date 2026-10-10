@@ -56,6 +56,33 @@ Each provider has one state on the page:
 Nothing is sent to a provider you have not enabled. Enabling a provider sends it nothing by itself: a use must be
 switched on too.
 
+### ChatGPT (OpenAI), since 0.7.2
+
+The ChatGPT connection on the Providers page is a second destination for project data. Signing in sends
+nothing. Sending starts when a model is chosen and the switch "I have disabled paid credits in ChatGPT Usage
+settings" is on; while that switch is off nothing is sent to OpenAI, and you stay signed in.
+
+With the switch on, a request compiled in AUTO, STANDARD, TECHNICAL or COUNCIL depth, and a Director request,
+send to OpenAI (`store: false`, at most 128 KB):
+
+- the text of the request, with its goals, constraints and acceptance criteria, as written;
+- earlier instructions, task titles, descriptions and criteria of the same work, and the goal and milestones of
+  its program or workspace;
+- the commit the work starts from and the names of the project's check commands;
+- up to twelve entries of the project's knowledge that match the request (title and summary). Notes written by
+  agents are left out; text that looks like a credential is removed.
+
+Not sent: file contents, author names and addresses. A machine path is sent only if it is in the request or in
+a knowledge entry.
+
+In TECHNICAL and COUNCIL depth, and in a Director council, OpenAI's answer is given to Claude and Claude's
+answer to OpenAI. EXACT and LIGHT depth send nothing to OpenAI. AUTO is the default depth of the composer: with
+the switch on, the next mission started in AUTO sends the data above without a further question.
+
+What was sent is not kept as text: the inspector of a compiled task shows the identifiers and versions of the
+knowledge entries it was given. Requests, specifications and Director records are removed with their project;
+there is no finer deletion in 0.7.2.
+
 | Setting | Default | Effect |
 |---|---|---|
 | Allow NEXUS to use Codex | off | Without it no session ever goes to Codex |

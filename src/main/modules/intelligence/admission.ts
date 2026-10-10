@@ -11,6 +11,7 @@ import { defaultIntentMetadata, UserIntentMetadataSchema } from '@shared/intelli
 import { NexusError } from '@shared/result'
 import { ContextGraphService } from '@main/modules/context-graph'
 import { TRUST_WORD } from '@main/modules/context-graph/render'
+import { redactAction } from '@main/modules/policies/security-log'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
 import type { ChatGPTConnection } from './connection'
@@ -77,7 +78,9 @@ export class TaskAdmissionService {
       .map((n) => ({
         id: n.id,
         version: `${n.version}:${n.contentHash}`,
-        text: `[${n.type.toLowerCase()}, ${TRUST_WORD[n.trust]}] ${n.title}\n${n.summary}`,
+        // This text leaves the machine for an advisory provider, and the user did not write it for that: what
+        // looks like a credential in it is taken out first. The user's own request is sent as they wrote it.
+        text: redactAction(`[${n.type.toLowerCase()}, ${TRUST_WORD[n.trust]}] ${n.title}\n${n.summary}`),
       }))
   }
   workspaceProject(workspaceId: string): string {

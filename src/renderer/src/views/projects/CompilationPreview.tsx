@@ -63,7 +63,9 @@ export function CompilationPreview({
     >
       <summary className="cursor-pointer font-medium">Task compilation preview</summary>
       <p className="text-small text-text-muted">
-        AUTO develops the request before work starts. EXACT preserves the supplied request with
+        AUTO develops the request before work starts, by sending it and matching project knowledge to OpenAI
+        through your ChatGPT connection (the Providers page lists what is sent). EXACT and LIGHT send nothing
+        there. EXACT preserves the supplied request with
         deterministic policy wrappers. Added recommendations keep their provenance; consequential
         ambiguity blocks admission until the request is clarified.
       </p>

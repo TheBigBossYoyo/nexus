@@ -39,6 +39,11 @@ describe('compiled task admission', () => {
       expect(text).toContain('keeps its public API')
       expect(text).toContain('user-provided')
       expect(text).not.toContain('left-pad-extra')
+      // What looks like a credential in stored knowledge does not leave with it.
+      h.graph.writeNote({ space: h.space, title: 'Parser staging access', body: 'The telemetry parser staging server takes api_key=Zx81kQ7pLm22vTt9 on every request.', author: { source: 'user' } })
+      const again = new TaskAdmissionService(h.repos).retrieve(h.project.id, 'Change the telemetry parser staging').map((c) => c.text).join('\n')
+      expect(again).toContain('staging server')
+      expect(again).not.toContain('Zx81kQ7pLm22vTt9')
     } finally {
       h.close()
     }

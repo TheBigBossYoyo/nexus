@@ -144,7 +144,7 @@ export function ChatGPTCard() {
                 blocked || !status.model || (!status.includedOnlyConfirmed && !status.models.length)
               }
               label="I have disabled paid credits in ChatGPT Usage settings"
-              description="NEXUS requires this confirmation before sending strategic requests. ChatGPT controls this setting; NEXUS cannot verify it or enforce a spending cap."
+              description="This switch is also what lets NEXUS send anything to OpenAI: while it is off, nothing is sent, and you stay signed in. ChatGPT controls the paid-credit setting; NEXUS cannot verify it or enforce a spending cap."
               onChange={(includedOnlyConfirmed) =>
                 run(() =>
                   api.invoke('chatgpt.configure', { model: status.model!, includedOnlyConfirmed }),
@@ -153,6 +153,21 @@ export function ChatGPTCard() {
             />
           </>
         ) : null}
+        <div className="text-small text-text-muted" data-testid="chatgpt-data-notice">
+          <p className="font-medium text-text">What is sent to OpenAI</p>
+          <p>
+            When the switch above is on, a request compiled in AUTO, STANDARD, TECHNICAL or COUNCIL depth, and a
+            Director request, send to OpenAI: the text of your request with its goals, constraints and criteria;
+            earlier instructions, task titles and program or workspace goals of the same work; the names of the
+            project&apos;s check commands; and up to twelve entries of the project&apos;s knowledge that match the
+            request. Notes written by agents are left out and text that looks like a credential is removed from
+            that knowledge. Your own request is sent as you wrote it. File contents are not sent.
+          </p>
+          <p>
+            In TECHNICAL and COUNCIL depth, and in a Director council, OpenAI&apos;s answer is also given to Claude
+            and Claude&apos;s answer to OpenAI. EXACT and LIGHT send nothing to OpenAI.
+          </p>
+        </div>
         <p className="text-small text-text-muted">
           This connection is separate from the Codex CLI account. Quota and reset time remain
           unknown until supported provider evidence is available. Disconnecting removes local tokens
