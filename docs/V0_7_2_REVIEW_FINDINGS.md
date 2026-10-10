@@ -327,9 +327,22 @@ with its three stages, 14 disagreements kept and no execution authorized
 (`v72-live-2026-10-10T19-48-40-838Z.json`). The other `v72-live` files of the day are the failed runs that showed
 R.2 to R.5.
 
-## Reviews not finished
+## 11 and 12, round 2: on rendered pages
 
-The second round of 11 and 12, after the fixes of the first, on rendered pages.
+2026-10-10. The reviewer read 27 screenshots of the current build (the 0.7.2 screens and a sample of the others,
+light and dark, 1440x900 and 1024x700) from the capture tests. Nothing is clipped, overlapping or broken at
+either size; no element kept a light colour in the dark theme; the fixes of round 1 landed; the darker edge of
+controls reads as defined, not heavy; the focus ring is clear. Not in the set, so not judged: the capacity-wait
+panel of a paused mission, the signed-in ChatGPT card and its switch, the loading state of a preview.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| U2.1 | HIGH | The signed-out ChatGPT card says "only while the switch above is on" and shows no switch; it does not say what connecting does | Screenshot | FIXED: the card says that connecting sends nothing and that the switch appears after |
+| U2.2 | MEDIUM | The Director's two buttons are disabled with no stated reason, neither is the main one, and nothing says what a request sends | Screenshot | FIXED |
+| U2.3 | MEDIUM | Walls of text: the capacity section's three paragraphs, the introduction of the preview | Screenshot | PARTLY FIXED: the preview's introduction is two lines. The capacity section: OPEN |
+| U2.4 | MEDIUM | Recorded reason codes shown in the notice; two titles for a wait; the waiting notice and the quota banner are two patterns | Screenshot | PARTLY FIXED: the codes are a detail for support, one title. Two patterns: OPEN |
+| U2.5 | LOW | The preview button is not the main button of its panel; at 1024 the header drops the approvals count; three sidebar entries share an icon; "Adaptive (recommended)" is cut in its select at 1024 | Screenshot | OPEN |
+| U2.6 | LOW | "Not connected" on Providers, "signed out" on Usage | Screenshot | FIXED |
 
 ## Count on 2026-10-10, after fourteen reviews (the two of the UI in their first round)
 
