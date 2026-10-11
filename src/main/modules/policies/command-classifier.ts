@@ -650,8 +650,11 @@ function variablePathRisk(v: string, a: Analysis): string | null {
 /** `[IO.File]::WriteAllText(path, ...)`, `[IO.Directory]::Delete(path)`, `New-Object IO.StreamWriter path`: the path argument is a write position. */
 function checkDotNetFileWrites(text: string, a: Analysis): void {
   const targets: string[] = []
-  for (const m of text.matchAll(/\[(?:System\.)?IO\.(?:File|Directory)\]::(?!(?:Read|Exists|Get|Open(?:Read)?\b))\w+\(\s*(?:\$\w+|"([^"]*)"|'([^']*)')\s*(?:,\s*(?:"([^"]*)"|'([^']*)'))?/gi)) {
-    targets.push(...[m[1], m[2], m[3], m[4]].filter((x): x is string => x !== undefined))
+  for (const m of text.matchAll(/\[(?:System\.)?IO\.(?:File|Directory)\]::(?!(?:Read|Exists|Get|Open(?:Read)?\b))(\w+)\(\s*(?:\$\w+|"([^"]*)"|'([^']*)')\s*(?:,\s*(?:"([^"]*)"|'([^']*)'))?/gi)) {
+    // The second argument is a path only where the method takes two (Copy, Move, Replace); elsewhere it is the
+    // text that is written, and text is not a place.
+    const twoPaths = /^(?:copy|move|replace)/i.test(m[1] ?? '')
+    targets.push(...[m[2], m[3], ...(twoPaths ? [m[4], m[5]] : [])].filter((x): x is string => x !== undefined))
   }
   for (const m of text.matchAll(/\bstreamwriter\b[\s(]*["']?([^"',)\s]+)/gi)) if (m[1] !== undefined) targets.push(m[1])
   for (const m of text.matchAll(/\[(?:System\.)?IO\.(?:File|Directory)\]::(?!Read|Exists|Get)\w+\(\s*(\$\w+)/gi)) if (m[1] !== undefined) targets.push(m[1])

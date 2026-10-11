@@ -91,6 +91,14 @@ const GIT_HINT =
 /** git subcommands that change a ref, and so need to run where the directories above the repository can be seen. */
 const REF_CHANGING = ['commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
 
+/**
+ * After every commit git removes a leftover of merges (`AUTO_MERGE`), and for that it tries to lock the
+ * repository's `packed-refs`, which a contained git may not create. git goes on and the commit stands, but it
+ * prints "error: Unable to create '…/packed-refs.lock': Permission denied", which reads as a failure and is
+ * none (traced with GIT_TRACE_REFS, git 2.53). That one line is left out; git's exit code is its own.
+ */
+const BASH_GIT_QUIET_LOCK = `git() { command git "$@" 2> >(grep -v "packed-refs.lock': Permission denied" >&2); local rc=$?; wait $! 2>/dev/null; return $rc; }\n`
+
 /** A `git` function for the command's script: it stops the subcommands that cannot work here and says what to do, and passes the rest to git. */
 function bashGitGuard(kind: 'all' | 'refs'): string {
   const refuse = `echo ${JSON.stringify(GIT_HINT)} >&2; return 128`
@@ -471,7 +479,7 @@ export class ExecutionBroker {
       if (input.shell === 'bash') {
         if (bash === null) return this.fail(input.projectId, input.profile, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
         const script = join(roots.temp, `nx-${id}.sh`)
-        writeFileSync(script, `${gitHint === null ? '' : bashGitGuard(gitHint)}${input.command}\n`, { flag: 'wx' })
+        writeFileSync(script, `${gitHint !== null ? bashGitGuard(gitHint) : input.gitOnly === true ? BASH_GIT_QUIET_LOCK : ''}${input.command}\n`, { flag: 'wx' })
         commandLine = `${quoteArg(bash.bash)} --noprofile --norc ${quoteArg(script)}`
       } else {
         const script = join(roots.temp, `nx-${id}.ps1`)

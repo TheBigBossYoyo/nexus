@@ -24,7 +24,7 @@ import type { WorkersOverview } from '@shared/workers'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { ArenaService } from '../modules/arena'
 import { AutonomyService } from '../modules/autonomy/service'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { ApplicationUnderTestManager } from '../modules/browser/app-manager'
 import { PlaywrightDirectProvider } from '../modules/browser/provider'
@@ -70,6 +70,7 @@ import {
   WorkspaceMissionWorkload,
 } from '../modules/overnight'
 import { buildTrayModel, type TrayAction } from '../modules/overnight/tray-model'
+import { AUTONOMY_CAPABILITIES } from '@shared/autonomy'
 import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
 import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
@@ -174,6 +175,34 @@ function testNumber(host: RuntimeHost, name: string): number | undefined {
  * manager, the schedules, the overnight supervisor, and the local server through which windows talk to it.
  * It needs no window, and a window that closes or crashes takes nothing with it.
  */
+/**
+ * A boundary request as an artifact of the task it came from (and of the task that one repairs): what was
+ * asked, that it was not done, and that it waits for the user. A reviewer or a verifier reads the task's
+ * artifacts; without this the only evidence of a refused action is the word of the session that tried it.
+ */
+export function recordBoundaryEvidence(repos: ReturnType<typeof createRepositories>, request: { id: string; runId: string | null; taskId: string | null; capability: string; action: string; occurrences: number }): void {
+  if (request.runId === null) return
+  const task = request.taskId !== null ? repos.tasks.get(request.taskId) : null
+  const taskIds = task ? [task.id, ...(task.parentTaskId ? [task.parentTaskId] : [])] : [null]
+  const label = (AUTONOMY_CAPABILITIES as Record<string, { label: string }>)[request.capability]?.label ?? request.capability
+  for (const taskId of taskIds) {
+    try {
+      repos.artifacts.insert({
+        id: randomUUID(),
+        runId: request.runId,
+        taskId,
+        agentId: null,
+        kind: 'boundary-request',
+        title: `Boundary request: ${label} (not done; waits for the user)`,
+        content: `NEXUS refused this action and put it to the user as boundary request ${request.id}: ${label}.\nThe action: ${request.action.slice(0, 600)}\nIt was not carried out. Recorded at ${new Date().toISOString()}. A later attempt of the same action in this mission is the same request and is refused the same way.`,
+        createdAt: new Date().toISOString(),
+      })
+    } catch {
+      // Evidence for a checker; the request itself is on record whatever happens here.
+    }
+  }
+}
+
 export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> {
   const { dataDir, env } = host
   let worktreesDir = join(dataDir, 'worktrees')
@@ -569,6 +598,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       push({ kind: 'autonomy', pending })
       if (change.kind === 'enrollment') protectStores()
       if (change.kind === 'request' && change.created === true && change.request) {
+        // On the task's own record too, where whoever checks the task finds it: that the action was put to the
+        // user and did not happen is a fact of the task, not something to take from the session that asked.
+        recordBoundaryEvidence(repos, change.request)
         const text = pending === 1 ? '1 boundary decision required.' : `${pending} boundary decisions required.`
         announceBoundary?.(change.request.projectId, text)
       }
@@ -639,6 +671,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
   const appTools = createAppTools({
     apps,
+    recordEvidence: (session, title, content) => {
+      const taskIds = session.task ? [session.task.id, ...(session.task.parentTaskId ? [session.task.parentTaskId] : [])] : [null]
+      for (const taskId of taskIds) repos.artifacts.insert({ id: randomUUID(), runId: session.run.id, taskId, agentId: session.agentId, kind: 'app-evidence', title, content, createdAt: new Date().toISOString() })
+    },
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
   })
   const extensionTools = combineExtensions(researchTools, appTools)

@@ -21,6 +21,12 @@ export interface AppToolsDeps {
   apps: ApplicationUnderTestManager
   /** The gate of the session, or undefined when its project is not enrolled: then it has no application tools. */
   gateFor: (session: ExtensionSession) => AutonomyGate | undefined
+  /**
+   * Puts what a session did with the application on the task's own record (a screenshot, a launch), where a
+   * reviewer or a verifier finds it among the task's artifacts. For a repair task it is recorded for the task
+   * being repaired as well: that is the one that is checked.
+   */
+  recordEvidence?: (session: ExtensionSession, title: string, content: string) => void
 }
 
 const ANY = { kind: 'ANY' as const, value: '' }
@@ -69,6 +75,7 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           const no = refused(def.name, 'LAUNCH_PROJECT_APP', 'starts the application the project builds, inside the containment', 'app_launch')
           if (no !== null) return no
           const status = await deps.apps.launch(owner)
+          deps.recordEvidence?.(session, `Application launched (${status.type}, ${status.profile})`, `Launched with app_launch by the ${session.role} session at ${status.startedAt}, inside the ${status.profile} execution profile${status.endpoint ? `, answering at ${status.endpoint}` : ''}. ${status.note}`)
           const browser = deps.apps.session(owner.key)
           const snapshot = await browser.snapshot({ maxChars: 3000 })
           return [statusText(status), page(snapshot), enveloped('snapshot', snapshot.text), snapshot.truncated ? `The snapshot is cut at ${snapshot.text.length} of ${snapshot.totalChars} characters. Use app_find to locate a control, or app_snapshot with a ref to read one part.` : ''].filter((l) => l !== '').join('\n')
@@ -142,6 +149,7 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           if (no !== null) return no
           const shot = await deps.apps.session(owner.key).screenshot({ fullPage: args['full_page'] === true })
           deps.apps.noteArtifact(owner.key, shot.path)
+          deps.recordEvidence?.(session, `Screenshot of the application under test (${shot.width}x${shot.height})`, `Taken with app_screenshot by the ${session.role} session at ${new Date().toISOString()}: ${shot.width}x${shot.height}, ${shot.bytes} bytes. Kept by NEXUS with the application session; shown to the user with the task.`)
           return `Screenshot kept as evidence of the task: ${shot.width}x${shot.height}, ${shot.bytes} bytes. It is shown to the user with the task, and app_status reports it to whoever checks this task; to see what is on the page yourself, use app_snapshot.`
         }
         if (def.name === 'app_logs') {

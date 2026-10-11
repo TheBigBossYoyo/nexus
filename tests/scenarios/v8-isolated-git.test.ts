@@ -49,7 +49,7 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
       const bash: [string, string][] = [
         ['who', 'whoami'],
         ['status', 'git status --short'],
-        ['commit', 'git add -A && git commit -q -m "agent commit" && git status --short && git log --oneline -1'],
+        ['commit', 'git add -A 2>&1 && git commit -q -m "agent commit" 2>&1 && git status --short && git log --oneline -1'],
         ['mixed', 'git log --oneline | head -3; git status --short; echo mixed-done'],
         ['with-node', 'node probe.cjs && git rev-parse HEAD'],
         ['diff', 'echo more >> agent-file.txt && git diff --stat'],

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import type {
   CheckCommands,
@@ -295,7 +295,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled' || event.type === 'run.paused') void apps.stopForRun(event.runId).catch(() => undefined)
     })
   }
-  const appTools = apps ? createAppTools({ apps, gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }) }) : null
+  const appTools = apps ? createAppTools({ apps, recordEvidence: (session, title, content) => { for (const taskId of session.task ? [session.task.id, ...(session.task.parentTaskId ? [session.task.parentTaskId] : [])] : [null]) repos.artifacts.insert({ id: randomUUID(), runId: session.run.id, taskId, agentId: session.agentId, kind: 'app-evidence', title, content, createdAt: new Date().toISOString() }) }, gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }) }) : null
   const extensionMakers = [researchTools, appTools].filter((m): m is NonNullable<typeof m> => m !== null)
   const orchestrator = new Orchestrator({
     repos,

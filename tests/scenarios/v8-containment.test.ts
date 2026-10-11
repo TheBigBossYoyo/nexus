@@ -94,7 +94,7 @@ d('scenario: a mission inside the containment (0.8)', () => {
       const steps: [string, string][] = [
         ['write', 'echo change > agent-file.txt'],
         ['status', 'git status --short'],
-        ['commit', 'git add -A && git commit -m "agent commit" && git log --oneline -1'],
+        ['commit', 'git add -A && git commit -m "agent commit" 2>&1 && git log --oneline -1'],
       ]
       for (const [name, command] of steps) {
         await ctx.useTool('Bash', { command }, async (effective) => {
@@ -116,6 +116,8 @@ d('scenario: a mission inside the containment (0.8)', () => {
 
     expect(outputs['status']).toContain('agent-file.txt')
     expect(outputs['commit'], outputs['commit']).toContain('agent commit')
+    // git's attempt to lock the repository's packed-refs after a commit is refused and is not shown as an error.
+    expect(outputs['commit']).not.toMatch(/error:|Permission denied/)
     for (const name of ['delete-main', 'move-main', 'hooks']) expect(outputs[name], name).toBe('REFUSED')
     expect(await git(h.repoDir, 'rev-parse', 'main')).toBe(mainBefore)
     expect(await git(h.repoDir, 'config', '--get', 'core.hooksPath').catch(() => '')).toBe('')
