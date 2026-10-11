@@ -5,6 +5,7 @@ import { cn } from '../../lib/cn'
 import { applyAppearance } from '../../app/appearance'
 import { useUiStore } from '../../store/ui'
 import { Button, ErrorNote, Loading, PageHeader } from '../../components/ui'
+import { AutonomySettings } from '../autonomy/AutonomySettings'
 import { isSameSettings, normalizeSettings, validateSettings } from './settingsForm'
 import {
   AdvancedSection,
@@ -21,10 +22,11 @@ import {
   type SectionProps,
 } from './sections'
 
-type SectionId = 'claude' | 'models' | 'execution' | 'usage' | 'git' | 'permissions' | 'memory' | 'tokens' | 'mcp' | 'appearance' | 'advanced'
+type SectionId = 'claude' | 'autonomy' | 'models' | 'execution' | 'usage' | 'git' | 'permissions' | 'memory' | 'tokens' | 'mcp' | 'appearance' | 'advanced'
 
 const SECTIONS: { id: SectionId; label: string; description?: string; render: (p: SectionProps) => ReactNode; prefix: string }[] = [
   { id: 'claude', label: 'Claude', prefix: 'claude', render: (p) => <ClaudeSection {...p} /> },
+  { id: 'autonomy', label: 'Autonomy', prefix: 'autonomy', render: () => <AutonomySettings /> },
   { id: 'models', label: 'Models', prefix: 'models', render: (p) => <ModelsSection {...p} /> },
   { id: 'execution', label: 'Execution', prefix: 'execution', render: (p) => <ExecutionSection {...p} /> },
   { id: 'usage', label: 'Usage behavior', prefix: 'usage', render: (p) => <UsageSection {...p} /> },

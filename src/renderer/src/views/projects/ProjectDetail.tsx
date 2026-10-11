@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { CheckCommands, Project } from '@shared/domain'
+import { useAutonomyOverview } from '../../lib/queries-autonomy'
+import { enrollmentLine } from '../autonomy/autonomyModel'
 import { useRemoveProject, useReprofileProject, useUpdateProject } from '../../lib/queries'
 import { DASH, formatBytes, formatCount, formatDateTime } from '../../lib/format'
 import { useUiStore } from '../../store/ui'
@@ -44,6 +46,33 @@ function Commands({ commands }: { commands: CheckCommands }) {
         </span>
       ))}
     </span>
+  )
+}
+
+/** One line: how this project stands with autonomy, and the way to the settings for it. */
+function AutonomyLine({ projectId }: { projectId: string }) {
+  const overview = useAutonomyOverview(projectId)
+  const selectProject = useUiStore((s) => s.selectProject)
+  const openSettings = useUiStore((s) => s.openSettings)
+  const profile = overview.data?.enrollment?.profile ?? null
+  const text = overview.isPending ? 'Autonomy: loading' : overview.isError ? 'Autonomy: not available right now.' : enrollmentLine(profile)
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3" data-testid="project-autonomy">
+      <span className="font-medium">Autonomy</span>
+      <span role="status" className="min-w-0 flex-1 text-text-secondary" data-testid="project-autonomy-line">
+        {text}
+      </span>
+      <Button
+        size="sm"
+        onClick={() => {
+          selectProject(projectId)
+          openSettings('autonomy')
+        }}
+        data-testid="project-autonomy-open"
+      >
+        Autonomy settings
+      </Button>
+    </div>
   )
 }
 
@@ -119,6 +148,8 @@ export function ProjectDetail({ project }: { project: Project }) {
             Reprofile to detect the branch, languages, frameworks and check commands.
           </Notice>
         )}
+
+        <AutonomyLine projectId={project.id} />
 
         <div className="border-t pt-3">
           <Toggle
