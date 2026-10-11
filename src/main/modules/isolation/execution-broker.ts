@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { containedEnv } from '@main/modules/process/contained-env'
 import { tokenizeCommandLine } from '@main/modules/process/command-line'
 import { runProcess, type ProcessResult, type RunProcessOptions } from '@main/modules/process/run-process'
@@ -86,6 +86,23 @@ export interface ContainSession {
 }
 
 const DEFAULT_MAX_PROCESSES = 512
+const GIT_HINT =
+  'nexus: in the isolated profile this git command runs only as a command of its own (git alone, optionally piped through head, tail, grep, wc, sort, uniq, cut, cat, ls). Run it separately; nothing was changed.'
+/** git subcommands that change a ref, and so need to run where the directories above the repository can be seen. */
+const REF_CHANGING = ['commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
+
+/** A `git` function for the command's script: it stops the subcommands that cannot work here and says what to do, and passes the rest to git. */
+function bashGitGuard(kind: 'all' | 'refs'): string {
+  const refuse = `echo ${JSON.stringify(GIT_HINT)} >&2; return 128`
+  if (kind === 'all') return `git() { ${refuse}; }\n`
+  return `git() { local a; for a in "$@"; do case "$a" in -*) continue;; ${REF_CHANGING.join('|')}) ${refuse};; *) break;; esac; done; command git "$@"; }\n`
+}
+
+function powershellGitGuard(kind: 'all' | 'refs'): string {
+  const refuse = `[Console]::Error.WriteLine(${JSON.stringify(GIT_HINT)}); $global:LASTEXITCODE = 128; return`
+  if (kind === 'all') return `function git { ${refuse} }\n`
+  return `function git { foreach ($a in $args) { if ("$a".StartsWith('-')) { continue }; if (@(${REF_CHANGING.map((c) => `'${c}'`).join(',')}) -contains "$a") { ${refuse} }; break }; & (Get-Command git -CommandType Application | Select-Object -First 1).Source @args }\n`
+}
 
 function shortHash(text: string): string {
   return createHash('sha256').update(text.toLowerCase()).digest('hex').slice(0, 16)
@@ -103,6 +120,8 @@ export class ExecutionBroker {
   private readonly msys = new Map<ContainmentProfile, { bash: string; binDir: string } | null>()
   private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
   private readonly counts = { shell: 0, commands: 0, programs: 0, refused: 0 }
+  /** Paths of repositories the sandbox account was given access to at this start, by path and kind of access. */
+  private readonly granted = new Set<string>()
 
   constructor(private readonly deps: ExecutionBrokerDeps) {}
 
@@ -146,6 +165,98 @@ export class ExecutionBroker {
     const check = this.status(profile)
     if (check === null) return { usable: false, detail: 'The containment has not been verified at this start.' }
     return { usable: check.available, detail: check.detail }
+  }
+
+  private grantsRecord(): string {
+    return join(this.deps.sandboxDir, 'git-grants.json')
+  }
+
+  private readGrants(): Record<string, string[]> {
+    try {
+      return JSON.parse(readFileSync(this.grantsRecord(), 'utf8')) as Record<string, string[]>
+    } catch {
+      return {}
+    }
+  }
+
+  private async icacls(args: string[]): Promise<void> {
+    const system32 = join(this.deps.baseEnv()['SystemRoot'] ?? 'C:\\Windows', 'System32')
+    const result = await runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, env: this.launcherEnv(), timeoutMs: 10 * 60_000, maxOutputBytes: 64 * 1024 })
+    if (result.exitCode !== 0) throw new Error(`icacls ${args.slice(1).join(' ')}: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
+  }
+
+  /**
+   * Under ISOLATED: gives the sandbox account what git needs of an enrolled project's repository to read it
+   * and to stage: the repository's Git data to read, objects to add, and the Git directory of its own worktree
+   * and the refs of its own mission to change. It gets no way to change another branch, the configuration, the
+   * hooks or an object that is already there. Each grant is on record (by repository) and is taken back by
+   * `revokeGit`.
+   *
+   * It does not make a commit possible for that account. Before git changes a ref it looks at every directory
+   * above it, and the account can see none of the user's above the repository (measured: "cannot lock ref
+   * 'HEAD': unable to create directory"; a junction from the sandbox root does not help, git resolves it).
+   * Giving the account rights on the user's own folders is not something NEXUS does. So a command that is git
+   * alone still runs as the user at low integrity, and a ref-changing git inside a larger command is told so.
+   */
+  async grantGit(layout: { commonDir: string; writable: readonly string[] }): Promise<void> {
+    const sandbox = this.sandbox()
+    if (sandbox === null) throw new Error('The sandbox account is not set up on this machine.')
+    const sid = `*${sandbox.account.sid}`
+    const record = this.readGrants()
+    const key = resolve(layout.commonDir).toLowerCase()
+    const paths = new Set(record[key] ?? [])
+    const once = async (path: string, kind: string, grants: string[]): Promise<void> => {
+      const mark = `${kind}|${resolve(path).toLowerCase()}`
+      if (this.granted.has(mark) || !existsSync(path)) return
+      await this.icacls([path, ...grants.flatMap((g) => ['/grant', g]), '/Q'])
+      this.granted.add(mark)
+      paths.add(resolve(path))
+    }
+    await once(layout.commonDir, 'read', [`${sid}:(OI)(CI)(RX)`])
+    for (const dir of layout.writable) {
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      // Objects are only ever added: who creates a file may finish writing it; nothing that is there is replaced or removed.
+      if (basename(dir).toLowerCase() === 'objects') await once(dir, 'add', [`${sid}:(OI)(CI)(RX,WD,AD)`, '*S-1-3-0:(OI)(CI)(IO)(F)'])
+      else await once(dir, 'modify', [`${sid}:(OI)(CI)(M)`])
+      await this.ensureLow(dir)
+    }
+    if (paths.size !== (record[key] ?? []).length) {
+      record[key] = [...paths]
+      mkdirSync(this.deps.sandboxDir, { recursive: true })
+      writeFileSync(this.grantsRecord(), JSON.stringify(record, null, 2))
+    }
+  }
+
+  /** Takes back the access to every repository on record that is not one of `keep` (the Git directories of the projects still enrolled). */
+  async revokeGitExcept(keep: readonly string[]): Promise<void> {
+    const kept = new Set(keep.map((dir) => resolve(dir).toLowerCase()))
+    for (const key of Object.keys(this.readGrants())) if (!kept.has(key)) await this.revokeGit(key)
+  }
+
+  /** Takes back what `grantGit` gave for a repository (every repository on record when none is named). */
+  async revokeGit(commonDir?: string): Promise<void> {
+    const account = this.deps.account()
+    const record = this.readGrants()
+    const keys = commonDir === undefined ? Object.keys(record) : [resolve(commonDir).toLowerCase()]
+    for (const key of keys) {
+      const left: string[] = []
+      // Deepest first, so that a directory's own entry goes before its parent's inherited one is recomputed.
+      for (const path of [...(record[key] ?? [])].sort((a, b) => b.length - a.length)) {
+        if (!existsSync(path)) continue
+        try {
+          if (account !== null) await this.icacls([path, '/remove', `*${account.sid}`, '/Q'])
+          if (basename(path).toLowerCase() === 'objects') await this.icacls([path, '/remove', '*S-1-3-0', '/Q']).catch(() => undefined)
+          await this.deps.launcher.label('clear', path).catch(() => undefined)
+          for (const mark of [...this.granted]) if (mark.endsWith(`|${path.toLowerCase()}`)) this.granted.delete(mark)
+          this.labeled.delete(path.toLowerCase())
+        } catch {
+          left.push(path)
+        }
+      }
+      if (left.length > 0) record[key] = left
+      else delete record[key]
+    }
+    if (existsSync(this.grantsRecord())) writeFileSync(this.grantsRecord(), JSON.stringify(record, null, 2))
   }
 
   private async ensureLow(dir: string): Promise<void> {
@@ -321,16 +432,28 @@ export class ExecutionBroker {
       gitOnly?: boolean
       /** For a git-only command: the directories of the repository a contained git must write to commit on its own branch. From NEXUS's record. */
       gitWritable?: readonly string[]
+      /** The repository's Git directory (the common one). With it, under ISOLATED, the sandbox account is given what git needs there. */
+      gitCommonDir?: string
     },
   ): Promise<ContainResult> {
     const state = this.usable(input.profile)
     if (!state.usable) return this.fail(input.projectId, input.profile, `The ${input.profile} execution profile is not available, so the command was not run: ${state.detail}`)
     try {
       const roots = await this.roots({ ...input, profile: input.sessionProfile === 'ISOLATED' ? 'ISOLATED' : input.profile })
-      if (input.gitOnly === true) for (const dir of input.gitWritable ?? []) if (existsSync(dir)) await this.ensureLow(dir)
+      // Whether git can read this repository from inside the command. Under ISOLATED that is so once the sandbox
+      // account was given its access; a command that runs as the user (RESTRICTED) reads it anyway.
+      let gitReadable = input.profile === 'RESTRICTED'
+      if (input.profile === 'ISOLATED' && input.gitCommonDir !== undefined) {
+        // Without the access the command still runs; git inside it is then told that it cannot work here.
+        gitReadable = await this.grantGit({ commonDir: input.gitCommonDir, writable: input.gitWritable ?? [] }).then(
+          () => true,
+          () => false,
+        )
+      } else if (input.gitOnly === true) for (const dir of input.gitWritable ?? []) if (existsSync(dir)) await this.ensureLow(dir)
       const shells = await this.findShells()
       const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
-      const { env, withheld } = this.environment(input, roots, input.gitOnly === true ? this.gitHardening(roots) : {})
+      // git is hardened wherever it can reach the repository: in a command that is git alone, and in every command of a session whose account was given access.
+      const { env, withheld } = this.environment(input, roots, input.gitOnly === true || (input.profile === 'ISOLATED' && gitReadable) ? this.gitHardening(roots, input.profile === 'ISOLATED') : {})
       if (bash !== null) {
         // The copy's own tools first, then Git itself, so that `git`, `ls` and `grep` are what a Git Bash user expects.
         const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
@@ -339,16 +462,19 @@ export class ExecutionBroker {
         env['MSYS'] = 'winsymlinks:nativestrict'
       }
       const id = randomBytes(8).toString('hex')
+      // The sandbox account cannot read the user's repository, so git inside a command that is more than git finds
+      // none. The command is told why, in the place where git would have answered.
+      const gitHint: 'all' | 'refs' | null = input.profile === 'ISOLATED' && input.gitOnly !== true && /\bgit\b/.test(input.command) ? (gitReadable ? 'refs' : 'all') : null
       let commandLine: string
       if (input.shell === 'bash') {
         if (bash === null) return this.fail(input.projectId, input.profile, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
         const script = join(roots.temp, `nx-${id}.sh`)
-        writeFileSync(script, `${input.command}\n`, { flag: 'wx' })
+        writeFileSync(script, `${gitHint === null ? '' : bashGitGuard(gitHint)}${input.command}\n`, { flag: 'wx' })
         commandLine = `${quoteArg(bash.bash)} --noprofile --norc ${quoteArg(script)}`
       } else {
         const script = join(roots.temp, `nx-${id}.ps1`)
         // A UTF-8 byte order mark: Windows PowerShell reads a script without one in the ANSI code page.
-        writeFileSync(script, `${String.fromCharCode(0xfeff)}${input.command}\nexit $LASTEXITCODE\n`, { flag: 'wx' })
+        writeFileSync(script, `${String.fromCharCode(0xfeff)}${gitHint === null ? '' : powershellGitGuard(gitHint)}${input.command}\nexit $LASTEXITCODE\n`, { flag: 'wx' })
         commandLine = `${quoteArg(shells.powershell)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${quoteArg(script)}`
       }
       // The command starts where the agent's shell is, when that is inside the worktree; else at the worktree.
@@ -476,7 +602,7 @@ export class ExecutionBroker {
    * monitor, no pager, no editor, no external transport. Given in the environment, which outranks the
    * repository's and the worktree's own configuration.
    */
-  private gitHardening(roots: SessionRoots): Record<string, string> {
+  private gitHardening(roots: SessionRoots, otherAccount = false): Record<string, string> {
     const emptyHooks = join(roots.temp, 'no-hooks')
     mkdirSync(emptyHooks, { recursive: true })
     const config: [string, string][] = [
@@ -486,7 +612,11 @@ export class ExecutionBroker {
       ['protocol.ext.allow', 'never'],
       ['core.sshCommand', 'false'],
       ['credential.helper', ''],
-      ['diff.external', ''],
+      // The task's work is not what triggers housekeeping of the user's repository.
+      ['gc.auto', '0'],
+      ['maintenance.auto', 'false'],
+      // The repository belongs to the user and the command runs as the sandbox account: git is told that this is meant.
+      ...(otherAccount ? ([['safe.directory', '*']] as [string, string][]) : []),
     ]
     const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length), GIT_EDITOR: 'true', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
     config.forEach(([key, value], i) => {

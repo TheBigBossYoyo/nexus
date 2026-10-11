@@ -67,7 +67,7 @@ export async function setupSandboxAccount(input: SandboxSetupInput): Promise<San
   const readResult = (): SetupScriptResult | null => {
     if (!existsSync(resultFile)) return null
     try {
-      return JSON.parse(readFileSync(resultFile, 'utf8').replace(/^﻿/, '')) as SetupScriptResult
+      return JSON.parse(readFileSync(resultFile, 'utf8').replace(String.fromCharCode(0xfeff), '')) as SetupScriptResult
     } catch {
       return null
     }

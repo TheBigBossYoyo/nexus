@@ -577,6 +577,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   let announceBoundary: ((projectId: string, text: string) => void) | null = null
   // What contained code must not read is marked when there is a project whose code is contained, and not before.
   function protectStores(): void {
+    // The sandbox account keeps its access to the Git data of the projects that are enrolled, and of no other.
+    const enrolledGitDirs = repos.projects.list().filter((p) => repos.enrollments.get(p.id) !== null).map((p) => join(p.rootPath, '.git'))
+    void executionBroker.revokeGitExcept(enrolledGitDirs).catch((e: unknown) => logger(`isolation: taking back Git access failed: ${errorMessage(e)}`))
     if (repos.enrollments.count() === 0) {
       void isolation.unprotect().catch((e: unknown) => logger(`isolation: removing the protection failed: ${errorMessage(e)}`))
       return

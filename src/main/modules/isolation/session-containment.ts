@@ -1,3 +1,4 @@
+import { basename, dirname } from 'node:path'
 import type { ExecutionBroker, ExecutionProfileName, ShellKind } from './execution-broker'
 import type { ContainmentProfile } from './launcher'
 
@@ -46,11 +47,15 @@ export function createShellContainment(input: {
     unavailable: state.usable ? null : state.detail,
     async wrap(shell, command, options) {
       if (profile === 'STANDARD') return { ok: true, command }
-      // A command that is git and nothing else runs as the user at low integrity even in an ISOLATED session:
-      // the repository's own data is in the user's profile, where the sandbox account cannot go.
+      const gitWritable = (options.gitOnly || profile === 'ISOLATED') && input.gitWritable ? await input.gitWritable().catch(() => []) : []
+      // A command that is git and nothing else (or git and text filters) runs as the user at low integrity even
+      // in an ISOLATED session: only there can git change a ref of a repository that is in the user's profile.
+      // Every other command runs as the sandbox account, which is given what git needs to read the repository
+      // and to stage. The repository's Git directory is the one above the `objects` directory NEXUS recorded.
       const use: ContainmentProfile = options.gitOnly && profile === 'ISOLATED' && broker.usable('RESTRICTED').usable ? 'RESTRICTED' : profile
-      const gitWritable = options.gitOnly && input.gitWritable ? await input.gitWritable().catch(() => []) : []
-      const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell, command, gitOnly: options.gitOnly, gitWritable })
+      const objects = gitWritable.find((dir) => basename(dir).toLowerCase() === 'objects')
+      const gitCommonDir = use === 'ISOLATED' && objects !== undefined ? dirname(objects) : undefined
+      const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell, command, gitOnly: options.gitOnly, gitWritable, ...(gitCommonDir !== undefined ? { gitCommonDir } : {}) })
       if (!contained.ok) return { ok: false, reason: contained.reason }
       const [spec] = contained.args.slice(-1)
       const text = shell === 'bash' ? `${singleQuoted(contained.file)} --spec ${singleQuoted(spec as string)}` : `& ${psQuoted(contained.file)} --spec ${psQuoted(spec as string)}; exit $LASTEXITCODE`

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { closeApp, createRepo, invoke, launchApp, removeDir, tempDir } from './helpers'
+import { closeApp, createRepo, invoke, launchApp, removeDir, startBoundaryMission, tempDir } from './helpers'
 
 /**
  * An automated accessibility check of every page, in both themes, on the built application. It runs in the page
@@ -224,6 +224,57 @@ test.describe('accessibility, automated', () => {
       expect(probed.map((f) => f.rule).sort(), JSON.stringify(probed)).toEqual(['1.3.1 reference', '1.4.11 control edge', '1.4.3 contrast', '2.4.3 tab order', '4.1.2 name'])
       await page.evaluate(() => document.getElementById('a11y-probe')?.remove())
       // One line per distinct finding, so that a failure reads as a list of what to fix.
+      const lines = [...new Set(all.map((f) => `${f.rule} | ${f.theme} ${f.view} | ${f.where} | ${f.detail}`))]
+      expect(lines, `${lines.length} accessibility finding(s):\n${lines.join('\n')}`).toEqual([])
+    } finally {
+      await closeApp(app)
+    }
+  })
+
+  test('the 0.8 pages: Settings, Autonomy with the isolation panel, the boundary inbox with a request, the project page panels', async () => {
+    test.setTimeout(300_000)
+    const repo = createRepo()
+    const dataDir = tempDir('a11y8')
+    dirs.push(repo, dataDir)
+    const { app, page } = await launchApp(dataDir, repo)
+    try {
+      await page.getByTestId('nav-projects').click()
+      await page.getByTestId('open-project').click()
+      await expect(page.getByTestId('project-detail')).toBeVisible()
+      const project = (await invoke(page, 'projects.list', {}))[0]
+      if (!project) throw new Error('no project')
+      // An enrolled project with one pending request: the mission stays alive for two minutes, which is longer than this check takes.
+      await startBoundaryMission(page, project.id)
+
+      const all: (Finding & { view: string; theme: string })[] = []
+      for (const theme of ['light', 'dark'] as const) {
+        const settings = await invoke(page, 'settings.get', {})
+        await invoke(page, 'settings.update', { settings: { ...settings, appearance: { ...settings.appearance, theme } } })
+        await page.reload()
+        await expect(page.getByTestId('app-shell')).toBeVisible()
+        const record = async (view: string): Promise<void> => {
+          await page.waitForTimeout(300)
+          for (const finding of await audit(page)) all.push({ ...finding, view, theme })
+        }
+
+        await page.getByTestId('nav-settings').click()
+        await page.getByTestId('settings-section-autonomy').click()
+        await expect(page.getByTestId('autonomy-settings')).toBeVisible()
+        await expect(page.getByTestId('isolation-panel')).toBeVisible()
+        await expect(page.getByTestId('autonomy-summary')).toBeVisible()
+        await record('settings, autonomy and isolation')
+
+        await page.getByTestId('boundary-badge').click()
+        await expect(page.getByTestId('boundary-request')).toHaveCount(1)
+        await record('boundary inbox')
+        await page.keyboard.press('Escape')
+        await expect(page.getByTestId('boundary-drawer')).toBeHidden()
+
+        await page.getByTestId('nav-projects').click()
+        await expect(page.getByTestId('app-sessions-panel')).toBeVisible()
+        await expect(page.getByTestId('research-panel')).toContainText('Nothing read')
+        await record('project page with the application and research panels')
+      }
       const lines = [...new Set(all.map((f) => `${f.rule} | ${f.theme} ${f.view} | ${f.where} | ${f.detail}`))]
       expect(lines, `${lines.length} accessibility finding(s):\n${lines.join('\n')}`).toEqual([])
     } finally {

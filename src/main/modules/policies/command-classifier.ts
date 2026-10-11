@@ -535,7 +535,9 @@ function skipXargsFlags(words: string[], from: number): number {
 const GIT_ENTRY_WRITERS = new Set([...PROJECT_WRITE_CMDS, ...DELETE_CMDS, ...MOVE_CMDS, 'mklink', 'ln', 'out-file', 'sc', 'ac', 'cpi', 'xcopy', 'robocopy', 'set-itemproperty', 'clear-content', 'sed', 'dd', 'install'])
 /** Cmdlets whose first positional (or -Path/-FilePath/-LiteralPath/-Destination value) is the path; later words are content. */
 const PATH_FIRST_ONLY = new Set(['set-content', 'sc', 'add-content', 'ac', 'out-file', 'new-item', 'ni', 'tee-object', 'export-csv', 'export-clixml', 'clear-content'])
-const GIT_ENTRY_REASON = "writing, moving or deleting a worktree's own .git entry (touching Git's own files) is never allowed: it decides which repository NEXUS's later git commands act on"
+/** Commands that only read the one file they are named. */
+const GIT_POINTER_READERS = new Set(['cat', 'type', 'get-content', 'gc', 'head', 'tail', 'wc', 'file', 'stat'])
+const GIT_ENTRY_REASON ="writing, moving or deleting a worktree's own .git entry (touching Git's own files) is never allowed: it decides which repository NEXUS's later git commands act on"
 
 function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boolean, isGit = false): void {
   const redirectTargets = new Set(seg.redirects.filter((r) => !r.op.startsWith('<')).map((r) => r.target))
@@ -570,6 +572,10 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
         a.add('forbidden', 'high', GIT_ENTRY_REASON, 'SYSTEM_CHANGE')
       } else if (destructive && namesGit) {
         a.ask('high', 'deleting or moving a .git directory', 'DESTRUCTIVE')
+      } else if (topGit && !isGit && GIT_POINTER_READERS.has(head[0] ?? '') && redirectTargets.size === 0) {
+        // Reading the worktree's own `.git` entry (in a worktree, a one-line file that says where the Git
+        // directory is) changes nothing and shows nothing git itself does not print. Only the entry itself:
+        // what is below a `.git` directory (the configuration, with the addresses of its remotes) is not read this way.
       } else if (namesGit && !isGit) {
         // Git's own files (a worktree's `.git` pointer, the repository's config and hooks) decide which
         // repository NEXUS's later git commands act on and what they run. No command but git itself has a

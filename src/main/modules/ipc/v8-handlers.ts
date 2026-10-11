@@ -84,6 +84,8 @@ export function enrollmentDetail(profile: AutonomyProfile): string {
     'It will not, without a separate decision of yours:',
     ...withheld.slice(0, 14).map((line) => `  • ${line}`),
     '',
+    'Where project code runs as the NEXUS sandbox account, that account is given read access to the Git data of this project (its .git folder) and may add to it for the branches of its own missions. This is taken back when you stop autonomous work here.',
+    '',
     'It never reads provider credentials, reaches its own runtime from project code, uses your browser profile, or controls power.',
   ].join('\n')
 }

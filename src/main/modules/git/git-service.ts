@@ -518,9 +518,12 @@ export class GitService {
     else if (WRITES_BRANCH.has(subcommandOf(args))) await this.assertOnOwnBranch(own)
     // Under the worktrees root git never looks further up than that root for a repository.
     const ceiling = this.worktreesRoot && isWithin(this.worktreesRoot, cwd) ? { GIT_CEILING_DIRECTORIES: this.worktreesRoot } : {}
+    // The worktree's Git directory holds a `commondir` file that says where the repository is, and code working
+    // in the worktree can write there. NEXUS says it itself: the repository is the one the Git directory is in.
+    const common = own ? { GIT_COMMON_DIR: dirname(dirname(own.gitDir)) } : {}
     const result = await runProcess(this.gitPath, fullArgs, {
       cwd,
-      env: { ...this.env, ...ceiling, ...(opts.env ?? {}) },
+      env: { ...this.env, ...ceiling, ...common, ...(opts.env ?? {}) },
       timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxOutputBytes: opts.maxOutputBytes,
       keep: opts.keep,

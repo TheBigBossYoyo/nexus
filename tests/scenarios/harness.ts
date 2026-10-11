@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import type {
   CheckCommands,
@@ -24,6 +25,8 @@ import { Launcher } from '@main/modules/isolation/launcher'
 import { IsolationService } from '@main/modules/isolation/service'
 import type { Resolver } from '@main/modules/network/guard'
 import { policyForPurpose } from '@main/modules/network/policy'
+import { readSandboxAccount } from '@main/modules/isolation/sandbox-account'
+import { mirrorTools } from '@main/modules/isolation/tools'
 import { ApplicationUnderTestManager } from '@main/modules/browser/app-manager'
 import { PlaywrightDirectProvider } from '@main/modules/browser/provider'
 import { combineExtensions, createAppTools } from '@main/modules/browser/tools'
@@ -149,7 +152,7 @@ export interface HarnessOptions {
    * is launched. `baseDir` puts the scenario's directory inside the checkout instead of the system's temporary
    * directory.
    */
-  containment?: { profile: 'RESTRICTED'; launcher: string }
+  containment?: { profile: 'RESTRICTED' | 'ISOLATED'; launcher: string }
   /** 0.8: give sessions the application tools (needs `containment`): a real headless browser on a real proxy. */
   apps?: boolean
   baseDir?: string
@@ -167,7 +170,9 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   const dir = options.existing?.dir ?? (await mkdtemp(join(options.baseDir ?? tmpdir(), 'nexus-scn-')))
   const repoDir = join(dir, 'repo')
   const dbPath = join(dir, 'nexus.db')
-  const worktreesDir = join(dir, 'worktrees')
+  // Under ISOLATED the worktrees are where the sandbox account can go: in its root, as the runtime puts them.
+  const sandboxAccount = options.containment?.profile === 'ISOLATED' ? readSandboxAccount() : null
+  const worktreesDir = sandboxAccount ? join(sandboxAccount.root, 'worktrees', `scenario-${createHash('sha256').update(dir.toLowerCase()).digest('hex').slice(0, 12)}`) : join(dir, 'worktrees')
 
   if (fresh) {
     await git(dir, 'init', '-b', 'main', repoDir)
@@ -229,7 +234,15 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   let executionBroker: ExecutionBroker | null = null
   if (containmentOptions) {
     const launcher = new Launcher({ executable: containmentOptions.launcher, specDir: join(dir, 'sandbox', 'specs') })
-    const broker = new ExecutionBroker({ launcher, sandboxDir: join(dir, 'sandbox'), account: () => null, baseEnv: () => process.env, gitIdentity: () => ({ name: 'NEXUS Agent', email: 'nexus-agent@localhost' }) })
+    const mirrored = sandboxAccount ? mirrorTools({ sandboxRoot: sandboxAccount.root, userProfile: homedir(), path: process.env['PATH'] ?? '', names: ['node'] }) : null
+    const broker = new ExecutionBroker({
+      launcher,
+      sandboxDir: join(dir, 'sandbox'),
+      account: () => sandboxAccount,
+      baseEnv: () => process.env,
+      gitIdentity: () => ({ name: 'NEXUS Agent', email: 'nexus-agent@localhost' }),
+      toolPath: (profile, path) => (profile === 'ISOLATED' && mirrored ? mirrored.path : path),
+    })
     executionBroker = broker
     isolation = new IsolationService({ broker, launcher, containment: () => containmentOptions.profile, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, gitWritable: async (worktree) => (await gitService.ownedGitLayout(worktree))?.writable ?? [], dataDir: dir })
     await isolation.start()
@@ -412,6 +425,11 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)
+      // What the sandbox account was given in the scenario's repository is taken back, and its worktrees removed.
+      if (sandboxAccount && executionBroker) {
+        await executionBroker.revokeGit().catch(() => undefined)
+        await rm(worktreesDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
+      }
       await apps?.stopAll().catch(() => undefined)
       await closeCapacity().catch(() => undefined)
       if (db.open) db.close()

@@ -3,6 +3,9 @@ import { basename, dirname, join } from 'node:path'
 import type { MissionPlan } from '@shared/domain'
 import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fake-runtime'
 
+/** How long the worker of a `[demo:boundary-push]` mission waits after its attempts; a stop of the session ends it at once. */
+const BOUNDARY_HOLD_MS = 120_000
+
 /**
  * Scripted agents for UI end-to-end tests (`NEXUS_FAKE_RUNTIME=1`, unpackaged builds only).
  * No Claude usage. The first review of task `ui` requests changes so the repair loop is exercised.
@@ -12,7 +15,10 @@ import { completeWith, scriptsByRole, specPurpose, type FakeScript } from './fak
  * limit that reports no reset time), `[demo:fail]` (the planner never returns a valid plan),
  * `[demo:quota-reset]` (the first worker hits a limit with an exact reset a few seconds ahead, then the
  * account is available again: automatic resume) and `[demo:quota-unknown]` (a limit with no reset time; the
- * first availability probe still finds it limited, the second finds it available).
+ * first availability probe still finds it limited, the second finds it available). `[demo:boundary-push]`
+ * makes the worker of task `api` attempt `git push origin main` three times through the real tool path, which
+ * in an enrolled project is one boundary request, and then keeps the mission alive for a while so that the
+ * request can be answered before the mission ends (a mission that ends expires what it left pending).
  */
 export function createDemoScript(): FakeScript {
   const plan: MissionPlan = {
@@ -67,6 +73,7 @@ export function createDemoScript(): FakeScript {
   let docsProposed = false
   let behaviour: 'normal' | 'stall' | 'quota' | 'fail' | 'quota-reset' | 'quota-unknown' = 'normal'
   let quotaHit = false
+  let boundaryPush = false
 
   const writer =
     (suffix: string): FakeScript =>
@@ -143,6 +150,10 @@ export function createDemoScript(): FakeScript {
         await ctx.rateLimit({ status: 'rejected', resetsAt: null, limitType: 'five_hour' })
         await ctx.completeTurn({ text: 'Usage limit reached.', outcome: 'quota' })
         return
+      }
+      if (boundaryPush && key === 'api') {
+        for (let attempt = 0; attempt < 3; attempt++) await ctx.useTool('Bash', { command: 'git push origin main' }, async () => 'pushed')
+        await ctx.sleep(BOUNDARY_HOLD_MS)
       }
       await ctx.sleep(300)
       const target = join(spec.cwd, `${key}.txt`)
@@ -340,6 +351,7 @@ export function createDemoScript(): FakeScript {
     researcher,
     // Planner sessions: the three consensus planners and the synthesizer all return the same plan.
     planner: async (spec, ctx) => {
+      boundaryPush = spec.prompt.includes('[demo:boundary-push]')
       const marker = /\[demo:(stall|quota|fail|quota-reset|quota-unknown)\]/.exec(spec.prompt)?.[1]
       if (marker === 'stall' || marker === 'quota' || marker === 'fail' || marker === 'quota-reset' || marker === 'quota-unknown') {
         behaviour = marker

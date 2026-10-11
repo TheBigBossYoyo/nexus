@@ -190,6 +190,53 @@ export async function screenshot(page: Page, name: string): Promise<string> {
   return path
 }
 
+/**
+ * Replaces the stub that answers native confirmations with one that also counts them, so that a test can say
+ * whether a change asked. The count is read with `confirmationCount`.
+ */
+export async function countConfirmations(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ dialog }) => {
+    const counter = globalThis as unknown as { __nexusConfirmations?: number }
+    counter.__nexusConfirmations = 0
+    dialog.showMessageBox = (async () => {
+      counter.__nexusConfirmations = (counter.__nexusConfirmations ?? 0) + 1
+      return { response: 0, checkboxChecked: false }
+    }) as never
+  })
+}
+
+export function confirmationCount(app: ElectronApplication): Promise<number> {
+  return app.evaluate(() => (globalThis as unknown as { __nexusConfirmations?: number }).__nexusConfirmations ?? 0)
+}
+
+/** The marker that makes the scripted worker try `git push origin main` three times (see the demo script). */
+export const BOUNDARY_MARKER = '[demo:boundary-push]'
+
+/**
+ * Enrolls the project in the Autonomous project profile and starts a mission whose scripted worker attempts one
+ * out-of-boundary action; returns once that attempt is one pending boundary request. The mission stays alive
+ * for a while after it, so the request can be answered before the mission ends.
+ */
+export async function startBoundaryMission(page: Page, projectId: string): Promise<{ runId: string; requestId: string }> {
+  await invoke(page, 'autonomy.enroll', { projectId, profile: 'AUTONOMOUS_PROJECT' })
+  const run = await invoke(page, 'runs.create', {
+    projectId,
+    mode: 'build',
+    preset: 'balanced',
+    prompt: `Add an API module and a UI module. ${BOUNDARY_MARKER}`,
+    compilationMode: 'EXACT',
+    requirePlanApproval: false,
+  })
+  await expect.poll(async () => (await invoke(page, 'autonomy.pending', { projectId })).length, { timeout: 90_000, intervals: [250] }).toBe(1)
+  // All three attempts have been made once the request has been met three times.
+  await expect
+    .poll(async () => (await invoke(page, 'autonomy.pending', { projectId }))[0]?.occurrences ?? 0, { timeout: 30_000, intervals: [250] })
+    .toBeGreaterThanOrEqual(3)
+  const request = (await invoke(page, 'autonomy.pending', { projectId }))[0]
+  if (!request) throw new Error('No boundary request')
+  return { runId: run.id, requestId: request.id }
+}
+
 /** A plan approval is answered in the plan panel, so the drawer must not cover it. */
 export async function dismissApprovalDrawer(page: Page): Promise<void> {
   // Plan approvals no longer auto-open the drawer; the pending-approval bar must still be shown.

@@ -1,3 +1,4 @@
+import { isGitWithFilters } from './git-pipeline'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -317,7 +318,9 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
 
     const contained = ctx.autonomy?.contained === true
     const baseNeed = shellBaseNeed(cls)
-    const shellInfo = { kind: shell, command, gitOnly: cls.findings.length === 0 && cls.segments.length > 0 && cls.segments.every((s) => s.command === 'git') } as const
+    // git alone, or git with nothing but text filters around it: such a command runs where the repository is readable.
+    const gitOnly = cls.findings.length === 0 && cls.segments.length > 0 && (cls.segments.every((s) => s.command === 'git') || (shell === 'bash' && shellRoots[0] !== undefined && isGitWithFilters(command, shellRoots[0], shellRoots[0])))
+    const shellInfo = { kind: shell, command, gitOnly } as const
     if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
       const findings = [
         ...cls.findings,
