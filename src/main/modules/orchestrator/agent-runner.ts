@@ -1,3 +1,4 @@
+import { basename, dirname } from 'node:path'
 import { extensionToolNames } from '@main/modules/agent-runtime/extension-tools'
 import {
   AgentMessageTypeSchema,
@@ -428,6 +429,10 @@ export class AgentRunner {
         runId: run.id,
         taskId: task?.id ?? null,
       },
+      // 0.8: the worktrees of one mission are one project's work. In an enrolled project a session may read its
+      // sibling tasks' worktrees (a verifier of the mission reads the task it checks): they lie in the mission's
+      // own directory, which NEXUS made, and are not "outside the project". Writing stays with each task.
+      ...(this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }) !== undefined && basename(dirname(input.worktreeRoot)) === run.id.slice(0, 8) ? { extraReadRoots: [dirname(input.worktreeRoot)] } : {}),
       // 0.8: in an enrolled project the capability broker decides where this policy would ask the user.
       autonomy: this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }),
       // 0.8: and its shell commands run inside the project's containment, or not at all.
