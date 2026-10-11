@@ -824,7 +824,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     }),
     ...createIsolationHandlers({
       ...(ctx.isolation ?? {
-        status: () => ({ requested: repos.settings.get().execution.containment, effective: 'STANDARD' as const, usable: false, detail: 'This runtime has no containment.', isolated: null, restricted: null, sandboxAccount: false, setupAvailable: false, protectedPaths: [] }),
+        status: () => ({ requested: repos.settings.get().execution.containment, effective: 'STANDARD' as const, usable: false, detail: 'This runtime has no containment.', isolated: null, restricted: null, sandboxAccount: false, setupAvailable: false, protectedPaths: [], launches: { shell: 0, commands: 0, programs: 0, refused: 0 } }),
         setup: () => Promise.resolve({ ok: false, detail: 'This runtime has no containment.' }),
         apps: () => [],
       }),

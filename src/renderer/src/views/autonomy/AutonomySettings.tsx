@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AUTONOMY_CAPABILITIES, type AutonomyOverview, type AutonomyProfile } from '@shared/autonomy'
+import {
+  AUTONOMY_CAPABILITIES,
+  type AutonomyOverview,
+  type AutonomyProfile,
+} from '@shared/autonomy'
 import { useProjects } from '../../lib/queries'
-import { useAutonomyOverview, useEnrollProject, useRevokeGrant, useUnenrollProject } from '../../lib/queries-autonomy'
+import {
+  useAutonomyOverview,
+  useEnrollProject,
+  useRevokeGrant,
+  useUnenrollProject,
+} from '../../lib/queries-autonomy'
 import { cn } from '../../lib/cn'
 import { useUiStore } from '../../store/ui'
 import {
@@ -33,7 +42,17 @@ import {
 
 type Grant = AutonomyOverview['grants'][number]
 
-function ProfileChoice({ value, current, onChange, disabled }: { value: AutonomyProfile; current: AutonomyProfile | null; onChange: (p: AutonomyProfile) => void; disabled: boolean }) {
+function ProfileChoice({
+  value,
+  current,
+  onChange,
+  disabled,
+}: {
+  value: AutonomyProfile
+  current: AutonomyProfile | null
+  onChange: (p: AutonomyProfile) => void
+  disabled: boolean
+}) {
   return (
     <fieldset className="m-0 flex flex-col gap-2 border-0 p-0" data-testid="autonomy-profiles">
       <legend className="mb-1 p-0 text-small font-medium text-text-secondary">Profile</legend>
@@ -43,7 +62,12 @@ function ProfileChoice({ value, current, onChange, disabled }: { value: Autonomy
           <label
             key={p}
             htmlFor={id}
-            className={cn('flex cursor-pointer items-start gap-2.5 rounded-md border p-3', value === p ? 'border-border-strong bg-accent-subtle' : 'bg-surface hover:bg-surface-hover')}
+            className={cn(
+              'flex cursor-pointer items-start gap-2.5 rounded-md border p-3',
+              value === p
+                ? 'border-border-strong bg-accent-subtle'
+                : 'bg-surface hover:bg-surface-hover',
+            )}
           >
             <input
               id={id}
@@ -58,7 +82,9 @@ function ProfileChoice({ value, current, onChange, disabled }: { value: Autonomy
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="font-medium text-text-primary">
                 {PROFILE_LABEL[p]}
-                {current === p ? <span className="ml-2 text-small font-normal text-text-muted">(current)</span> : null}
+                {current === p ? (
+                  <span className="ml-2 text-small font-normal text-text-muted">(current)</span>
+                ) : null}
               </span>
               <span className="text-text-secondary">{PROFILE_SENTENCE[p]}</span>
             </span>
@@ -69,22 +95,40 @@ function ProfileChoice({ value, current, onChange, disabled }: { value: Autonomy
   )
 }
 
-function SummaryLists({ summary, heading }: { summary: NonNullable<AutonomyOverview['summary']>; heading: string }) {
+function SummaryLists({
+  summary,
+  heading,
+}: {
+  summary: NonNullable<AutonomyOverview['summary']>
+  heading: string
+}) {
   return (
     <div className="flex flex-col gap-2" data-testid="autonomy-summary">
       <h3 className="m-0 text-body font-semibold">{heading}</h3>
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <h4 className="m-0 mb-1 text-small font-semibold text-text-secondary">NEXUS may, without asking</h4>
-          <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5" aria-label="NEXUS may, without asking" data-testid="autonomy-allowed">
+          <h4 className="m-0 mb-1 text-small font-semibold text-text-secondary">
+            NEXUS may, without asking
+          </h4>
+          <ul
+            className="m-0 flex list-disc flex-col gap-0.5 pl-5"
+            aria-label="NEXUS may, without asking"
+            data-testid="autonomy-allowed"
+          >
             {summary.allowed.map((s) => (
               <li key={s}>{s}</li>
             ))}
           </ul>
         </div>
         <div>
-          <h4 className="m-0 mb-1 text-small font-semibold text-text-secondary">NEXUS will not, without another decision of yours</h4>
-          <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5" aria-label="NEXUS will not, without another decision of yours" data-testid="autonomy-withheld">
+          <h4 className="m-0 mb-1 text-small font-semibold text-text-secondary">
+            NEXUS will not, without another decision of yours
+          </h4>
+          <ul
+            className="m-0 flex list-disc flex-col gap-0.5 pl-5"
+            aria-label="NEXUS will not, without another decision of yours"
+            data-testid="autonomy-withheld"
+          >
             {summary.withheld.map((s) => (
               <li key={s}>{s}</li>
             ))}
@@ -98,17 +142,42 @@ function SummaryLists({ summary, heading }: { summary: NonNullable<AutonomyOverv
   )
 }
 
-function GrantsTable({ grants, onRevoke, revoking, error }: { grants: Grant[]; onRevoke: (g: Grant) => void; revoking: boolean; error: unknown }) {
-  const rows = useMemo(() => [...grants].sort((a, b) => Number(b.active) - Number(a.active) || b.createdAt.localeCompare(a.createdAt)), [grants])
+function GrantsTable({
+  grants,
+  onRevoke,
+  revoking,
+  error,
+}: {
+  grants: Grant[]
+  onRevoke: (g: Grant) => void
+  revoking: boolean
+  error: unknown
+}) {
+  const rows = useMemo(
+    () =>
+      [...grants].sort(
+        (a, b) => Number(b.active) - Number(a.active) || b.createdAt.localeCompare(a.createdAt),
+      ),
+    [grants],
+  )
   const columns: Column<Grant>[] = [
     { key: 'capability', header: 'Capability', render: (g) => g.capabilityLabel },
-    { key: 'resource', header: 'Resource', render: (g) => <span className="break-words">{g.resourceLabel}</span> },
+    {
+      key: 'resource',
+      header: 'Resource',
+      render: (g) => <span className="break-words">{g.resourceLabel}</span>,
+    },
     { key: 'scope', header: 'Scope', render: (g) => SCOPE_WORDS[g.scope] },
     { key: 'when', header: 'Given', render: (g) => <TimeAgo iso={g.createdAt} /> },
     {
       key: 'state',
       header: 'State',
-      render: (g) => (g.active ? <Badge tone="success">Active</Badge> : <Badge>{grantEndedWords(g, g.active)}</Badge>),
+      render: (g) =>
+        g.active ? (
+          <Badge tone="success">Active</Badge>
+        ) : (
+          <Badge>{grantEndedWords(g, g.active)}</Badge>
+        ),
     },
     {
       key: 'action',
@@ -116,7 +185,13 @@ function GrantsTable({ grants, onRevoke, revoking, error }: { grants: Grant[]; o
       align: 'right',
       render: (g) =>
         g.active ? (
-          <Button size="sm" busy={revoking} onClick={() => onRevoke(g)} aria-label={`Take back: ${g.capabilityLabel}, ${g.resourceLabel}`} data-testid="autonomy-take-back">
+          <Button
+            size="sm"
+            busy={revoking}
+            onClick={() => onRevoke(g)}
+            aria-label={`Take back: ${g.capabilityLabel}, ${g.resourceLabel}`}
+            data-testid="autonomy-take-back"
+          >
             Take back
           </Button>
         ) : null,
@@ -132,7 +207,11 @@ function GrantsTable({ grants, onRevoke, revoking, error }: { grants: Grant[]; o
         rowTestId={(g) => `autonomy-grant-${g.id}`}
         empty="You have given no grant in this project."
       />
-      <div role="status" data-testid="autonomy-revoke-error" className={cn('text-small', error ? 'text-danger' : 'sr-only')}>
+      <div
+        role="status"
+        data-testid="autonomy-revoke-error"
+        className={cn('text-small', error ? 'text-danger' : 'sr-only')}
+      >
         {error ? resolveErrorText(error) : ''}
       </div>
     </div>
@@ -140,15 +219,31 @@ function GrantsTable({ grants, onRevoke, revoking, error }: { grants: Grant[]; o
 }
 
 function Denials({ events }: { events: AutonomyOverview['recentDenials'] }) {
-  if (events.length === 0) return <EmptyState title="Nothing was blocked" className="py-6">No action has been refused by the policy in this project.</EmptyState>
+  if (events.length === 0)
+    return (
+      <EmptyState title="Nothing was blocked" className="py-6">
+        No action has been refused by the policy in this project.
+      </EmptyState>
+    )
   return (
-    <ul className="m-0 list-none rounded-lg border bg-surface p-0" aria-label="Recent policy denials" data-testid="autonomy-denials">
+    <ul
+      className="m-0 list-none rounded-lg border bg-surface p-0"
+      aria-label="Recent policy denials"
+      data-testid="autonomy-denials"
+    >
       {events.map((e) => (
         <li key={e.id} className="flex flex-col gap-1 border-b px-3 py-2 last:border-b-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <Badge tone={severityTone(e.severity)}>{severityWords(e.severity)}</Badge>
-            {e.capability ? <span className="text-small text-text-secondary">{AUTONOMY_CAPABILITIES[e.capability].label}</span> : null}
-            <TimeAgo iso={e.timestamp} className="ml-auto whitespace-nowrap text-small text-text-muted" />
+            {e.capability ? (
+              <span className="text-small text-text-secondary">
+                {AUTONOMY_CAPABILITIES[e.capability].label}
+              </span>
+            ) : null}
+            <TimeAgo
+              iso={e.timestamp}
+              className="ml-auto whitespace-nowrap text-small text-text-muted"
+            />
           </div>
           <pre className="m-0 whitespace-pre-wrap break-all font-mono text-code">
             <code>{e.action}</code>
@@ -179,7 +274,7 @@ export function AutonomySettings() {
   const considering = effective !== enrolled ? effective : null
   const preview = useAutonomyOverview(considering ? selected : null, considering)
   const overview = base.data
-  const summary = considering ? preview.data?.summary ?? null : overview?.summary ?? null
+  const summary = considering ? (preview.data?.summary ?? null) : (overview?.summary ?? null)
 
   const enroll = useEnrollProject()
   const unenroll = useUnenrollProject()
@@ -207,7 +302,9 @@ export function AutonomySettings() {
   return (
     <div className="flex max-w-3xl flex-col gap-6" data-testid="autonomy-settings">
       <p className="m-0 text-text-secondary">
-        Enroll a project once. What its profile allows runs without asking; anything outside it becomes one question that waits in the boundary inbox while other work goes on. Changes here apply at once and are not part of Save.
+        Enroll a project once. What its profile allows runs without asking; anything outside it
+        becomes one question that waits in the boundary inbox while other work goes on. Changes here
+        apply at once and are not part of Save.
       </p>
 
       <Field label="Project">
@@ -232,15 +329,37 @@ export function AutonomySettings() {
           <div className="flex flex-col gap-1" data-testid="autonomy-state">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{project?.name}</span>
-              {overview.enrollment ? <Badge tone="success">Enrolled: {PROFILE_LABEL[overview.enrollment.profile]}</Badge> : <Badge>Not enrolled</Badge>}
+              {overview.enrollment ? (
+                <Badge tone="success">Enrolled: {PROFILE_LABEL[overview.enrollment.profile]}</Badge>
+              ) : (
+                <Badge>Not enrolled</Badge>
+              )}
             </div>
-            {overview.enrollment ? null : <p className="m-0 text-text-secondary">NEXUS asks before sensitive actions in this project, one approval at a time.</p>}
+            {overview.enrollment ? null : (
+              <p className="m-0 text-text-secondary">
+                NEXUS asks before sensitive actions in this project, one approval at a time.
+              </p>
+            )}
           </div>
 
           {overview.enrollment && overview.policyChanged ? (
-            <Notice tone="warning" title="The capability table changed since you enrolled" data-testid="autonomy-policy-changed">
-              <p className="m-0">Review the lists below, then confirm again so this project follows the current table.</p>
-              <Button size="sm" className="mt-2" busy={busy} loading={enroll.isPending} onClick={() => doEnroll(overview.enrollment!.profile)} data-testid="autonomy-reconfirm">
+            <Notice
+              tone="warning"
+              title="The capability table changed since you enrolled"
+              data-testid="autonomy-policy-changed"
+            >
+              <p className="m-0">
+                Review the lists below, then confirm again so this project follows the current
+                table.
+              </p>
+              <Button
+                size="sm"
+                className="mt-2"
+                busy={busy}
+                loading={enroll.isPending}
+                onClick={() => doEnroll(overview.enrollment!.profile)}
+                data-testid="autonomy-reconfirm"
+              >
                 Review and confirm again
               </Button>
             </Notice>
@@ -248,18 +367,31 @@ export function AutonomySettings() {
 
           {pendingLabel ? (
             <Notice tone="warning" title={pendingLabel} data-testid="autonomy-pending">
-              <Button size="sm" onClick={() => setDrawer('boundary')} data-testid="autonomy-open-inbox">
+              <Button
+                size="sm"
+                onClick={() => setDrawer('boundary')}
+                data-testid="autonomy-open-inbox"
+              >
                 Open the boundary inbox
               </Button>
             </Notice>
           ) : null}
 
-          <ProfileChoice value={effective} current={enrolled} onChange={setChoice} disabled={busy} />
+          <ProfileChoice
+            value={effective}
+            current={enrolled}
+            onChange={setChoice}
+            disabled={busy}
+          />
 
           {summary ? (
             <SummaryLists
               summary={summary}
-              heading={considering ? `If you choose ${PROFILE_LABEL[effective]}` : `${PROFILE_LABEL[effective]}, as enrolled`}
+              heading={
+                considering
+                  ? `If you choose ${PROFILE_LABEL[effective]}`
+                  : `${PROFILE_LABEL[effective]}, as enrolled`
+              }
             />
           ) : considering && preview.isPending ? (
             <Loading label="Loading the summary" />
@@ -268,20 +400,42 @@ export function AutonomySettings() {
           <div className="flex flex-wrap items-center gap-2">
             {overview.enrollment ? (
               <>
-                <Button variant="primary" busy={busy} loading={enroll.isPending} disabled={!considering} onClick={() => doEnroll(effective)} data-testid="autonomy-change">
+                <Button
+                  variant="primary"
+                  busy={busy}
+                  loading={enroll.isPending}
+                  disabled={!considering}
+                  onClick={() => doEnroll(effective)}
+                  data-testid="autonomy-change"
+                >
                   Change profile
                 </Button>
-                <Button variant="danger" busy={busy} onClick={() => setConfirmStop(true)} data-testid="autonomy-stop">
+                <Button
+                  variant="danger"
+                  busy={busy}
+                  onClick={() => setConfirmStop(true)}
+                  data-testid="autonomy-stop"
+                >
                   Stop autonomous work
                 </Button>
               </>
             ) : (
-              <Button variant="primary" busy={busy} loading={enroll.isPending} onClick={() => doEnroll(effective)} data-testid="autonomy-enable">
+              <Button
+                variant="primary"
+                busy={busy}
+                loading={enroll.isPending}
+                onClick={() => doEnroll(effective)}
+                data-testid="autonomy-enable"
+              >
                 Enable
               </Button>
             )}
           </div>
-          <div role="status" data-testid="autonomy-action-error" className={cn('-mt-4 text-small', actionError ? 'text-danger' : 'sr-only')}>
+          <div
+            role="status"
+            data-testid="autonomy-action-error"
+            className={cn('-mt-4 text-small', actionError ? 'text-danger' : 'sr-only')}
+          >
             {actionError ? resolveErrorText(actionError) : ''}
           </div>
 
@@ -289,7 +443,12 @@ export function AutonomySettings() {
             <h3 id="autonomy-grants-title" className="m-0 text-body font-semibold">
               What you permanently authorized, and other grants
             </h3>
-            <GrantsTable grants={overview.grants} onRevoke={(g) => revoke.mutate({ grantId: g.id })} revoking={revoke.isPending} error={revoke.error} />
+            <GrantsTable
+              grants={overview.grants}
+              onRevoke={(g) => revoke.mutate({ grantId: g.id })}
+              revoking={revoke.isPending}
+              error={revoke.error}
+            />
           </section>
 
           <section className="flex flex-col gap-2" aria-labelledby="autonomy-denials-title">
@@ -304,7 +463,10 @@ export function AutonomySettings() {
             onClose={() => setConfirmStop(false)}
             onConfirm={() => {
               if (!selected) return
-              unenroll.mutate({ projectId: selected }, { onSuccess: () => setConfirmStop(false), onError: () => setConfirmStop(false) })
+              unenroll.mutate(
+                { projectId: selected },
+                { onSuccess: () => setConfirmStop(false), onError: () => setConfirmStop(false) },
+              )
             }}
             loading={unenroll.isPending}
             title={`Stop autonomous work in ${project?.name ?? 'this project'}?`}

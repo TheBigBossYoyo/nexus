@@ -27,6 +27,8 @@ export interface IsolationStatus {
   sandboxAccount: boolean
   /** The directories and files marked unreadable for contained code. */
   protectedPaths: string[]
+  /** Launches prepared inside a containment since this start, and launches refused because none could be made. */
+  launches: { shell: number; commands: number; programs: number; refused: number }
 }
 
 export interface IsolationServiceDeps {
@@ -136,6 +138,7 @@ export class IsolationService {
       isolated: this.deps.broker.status('ISOLATED'),
       restricted: this.deps.broker.status('RESTRICTED'),
       sandboxAccount: this.deps.broker.isolatedWorktreesRoot() !== null,
+      launches: this.deps.broker.counters(),
       protectedPaths: this.protectedPaths,
     }
   }

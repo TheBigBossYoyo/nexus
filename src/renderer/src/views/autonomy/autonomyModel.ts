@@ -38,14 +38,20 @@ export const PROFILE_SENTENCE: Record<AutonomyProfile, string> = {
     'NEXUS edits, builds and tests in the task worktree without asking. It uses no network, runs no application and drives no browser unless you decide otherwise.',
 }
 
-export const PROFILE_ORDER: readonly AutonomyProfile[] = ['AUTONOMOUS_PROJECT', 'BALANCED', 'LOCKED_DOWN']
+export const PROFILE_ORDER: readonly AutonomyProfile[] = [
+  'AUTONOMOUS_PROJECT',
+  'BALANCED',
+  'LOCKED_DOWN',
+]
 
 export const NEVER_POSSIBLE_LINE =
   'Whatever the profile, no agent can read provider credentials, reach the NEXUS runtime and its keys, use your own browser profile, change this policy, or shut down or suspend the machine. A profile is a set of permissions NEXUS checks; it is not a sandbox.'
 
 /** The compact line on the project page. */
 export function enrollmentLine(profile: AutonomyProfile | null): string {
-  return profile === null ? 'Not enrolled: NEXUS asks before sensitive actions.' : `${PROFILE_LABEL[profile]} profile: actions inside it run without asking.`
+  return profile === null
+    ? 'Not enrolled: NEXUS asks before sensitive actions.'
+    : `${PROFILE_LABEL[profile]} profile: actions inside it run without asking.`
 }
 
 export const SCOPE_WORDS: Record<GrantScope, string> = {
@@ -54,7 +60,10 @@ export const SCOPE_WORDS: Record<GrantScope, string> = {
   PROJECT: 'Always, for this project',
 }
 
-export const DECISION_BY_SCOPE: Record<GrantScope, Exclude<BoundaryDecision['decision'], 'DENY'>> = {
+export const DECISION_BY_SCOPE: Record<
+  GrantScope,
+  Exclude<BoundaryDecision['decision'], 'DENY'>
+> = {
   ONCE: 'ALLOW_ONCE',
   MISSION: 'ALLOW_MISSION',
   PROJECT: 'ALLOW_PROJECT',
@@ -77,7 +86,11 @@ export function decisionButtons(scopes: readonly GrantScope[]): DecisionButton[]
   const order: GrantScope[] = ['ONCE', 'MISSION', 'PROJECT']
   const buttons: DecisionButton[] = order
     .filter((s) => scopes.includes(s))
-    .map((s) => ({ decision: DECISION_BY_SCOPE[s], label: BUTTON_LABEL[s], variant: s === 'ONCE' ? ('primary' as const) : ('default' as const) }))
+    .map((s) => ({
+      decision: DECISION_BY_SCOPE[s],
+      label: BUTTON_LABEL[s],
+      variant: s === 'ONCE' ? ('primary' as const) : ('default' as const),
+    }))
   buttons.push({ decision: 'DENY', label: 'Deny', variant: 'danger' })
   return buttons
 }
@@ -147,7 +160,8 @@ export interface ProjectGroup {
   count: number
 }
 
-const byAge = (a: BoundaryRequestView, b: BoundaryRequestView) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
+const byAge = (a: BoundaryRequestView, b: BoundaryRequestView) =>
+  a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
 const oldest = (list: readonly BoundaryRequestView[]) => [...list].sort(byAge)[0]?.createdAt ?? ''
 
 /**
@@ -165,9 +179,25 @@ export function groupRequests(requests: readonly BoundaryRequestView[]): Project
         missions.set(key, [...(missions.get(key) ?? []), r])
       }
       const groups: MissionGroup[] = [...missions.entries()]
-        .map(([key, items]) => ({ key, missionTitle: items[0]?.missionTitle ?? null, requests: [...items].sort(byAge) }))
-        .sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : oldest(a.requests).localeCompare(oldest(b.requests)) || a.key.localeCompare(b.key)))
-      return { projectId, projectName: list[0]?.projectName ?? projectId, missions: groups, count: list.length, first: oldest(list) }
+        .map(([key, items]) => ({
+          key,
+          missionTitle: items[0]?.missionTitle ?? null,
+          requests: [...items].sort(byAge),
+        }))
+        .sort((a, b) =>
+          a.key === ''
+            ? 1
+            : b.key === ''
+              ? -1
+              : oldest(a.requests).localeCompare(oldest(b.requests)) || a.key.localeCompare(b.key),
+        )
+      return {
+        projectId,
+        projectName: list[0]?.projectName ?? projectId,
+        missions: groups,
+        count: list.length,
+        first: oldest(list),
+      }
     })
     .sort((a, b) => a.first.localeCompare(b.first) || a.projectName.localeCompare(b.projectName))
     .map(({ first: _first, ...group }) => group)
@@ -175,7 +205,11 @@ export function groupRequests(requests: readonly BoundaryRequestView[]): Project
 
 /** Newest decision first. */
 export function sortRecent(requests: readonly BoundaryRequestView[]): BoundaryRequestView[] {
-  return [...requests].sort((a, b) => (b.decidedAt ?? b.lastSeenAt).localeCompare(a.decidedAt ?? a.lastSeenAt) || a.id.localeCompare(b.id))
+  return [...requests].sort(
+    (a, b) =>
+      (b.decidedAt ?? b.lastSeenAt).localeCompare(a.decidedAt ?? a.lastSeenAt) ||
+      a.id.localeCompare(b.id),
+  )
 }
 
 export function occurrencesLabel(occurrences: number): string | null {
@@ -183,7 +217,10 @@ export function occurrencesLabel(occurrences: number): string | null {
 }
 
 /** Why a grant is no longer in force, or null when it is. */
-export function grantEndedWords(grant: Pick<CapabilityGrant, 'revokedAt' | 'consumedAt'>, active: boolean): string | null {
+export function grantEndedWords(
+  grant: Pick<CapabilityGrant, 'revokedAt' | 'consumedAt'>,
+  active: boolean,
+): string | null {
   if (active) return null
   if (grant.revokedAt) return 'Taken back'
   if (grant.consumedAt) return 'Used'

@@ -28,6 +28,8 @@ export interface IsolationStatusView {
   setupAvailable: boolean
   /** The folders and files marked unreadable for contained code. */
   protectedPaths: string[]
+  /** Since this start: agent shell commands, NEXUS's own project commands and long-running programs started inside a containment, and launches refused because none could be made. */
+  launches: { shell: number; commands: number; programs: number; refused: number }
 }
 
 export interface SandboxSetupOutcome {

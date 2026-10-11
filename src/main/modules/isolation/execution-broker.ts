@@ -102,6 +102,7 @@ export class ExecutionBroker {
   private shells: { gitRoot: string | null; powershell: string } | null = null
   private readonly msys = new Map<ContainmentProfile, { bash: string; binDir: string } | null>()
   private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
+  private readonly counts = { shell: 0, commands: 0, programs: 0, refused: 0 }
 
   constructor(private readonly deps: ExecutionBrokerDeps) {}
 
@@ -280,7 +281,13 @@ export class ExecutionBroker {
     } catch {
       // A listener's failure is not the broker's.
     }
+    this.counts.refused += 1
     return { ok: false, reason: detail }
+  }
+
+  /** How many launches were prepared inside a containment since this start, by kind, and how many were refused. */
+  counters(): { shell: number; commands: number; programs: number; refused: number } {
+    return { ...this.counts }
   }
 
   private spec(session: ContainSession, roots: SessionRoots, commandLine: string, env: Record<string, string>, extra: Partial<LaunchSpec> = {}): LaunchSpec {
@@ -348,6 +355,7 @@ export class ExecutionBroker {
       const cwd = within(roots.worktree, input.cwd) && existsSync(input.cwd) ? input.cwd : roots.worktree
       const specPath = this.deps.launcher.writeSpec({ ...this.spec(input, roots, commandLine, env, input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}), cwd })
       const { file, args } = this.deps.launcher.invocation(specPath)
+      this.counts.shell += 1
       return { ok: true, profile: input.profile, file, args, specPath, roots, withheldEnv: withheld }
     } catch (e) {
       return this.fail(input.projectId, input.profile, `The containment could not be set up, so the command was not run: ${e instanceof Error ? e.message : String(e)}`)
@@ -373,6 +381,7 @@ export class ExecutionBroker {
     const specPath = this.deps.launcher.writeSpec(this.spec(input, roots, `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`, env, options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs + 5000 } : {}))
     try {
       const { file, args } = this.deps.launcher.invocation(specPath)
+      this.counts.commands += 1
       return await runProcess(file, args, { ...options, cwd: roots.worktree, env: this.launcherEnv() })
     } finally {
       this.deps.launcher.removeSpec(specPath)
@@ -409,6 +418,7 @@ export class ExecutionBroker {
       const cwd = input.cwd !== undefined && within(roots.worktree, input.cwd) && existsSync(input.cwd) ? input.cwd : roots.worktree
       const specPath = this.deps.launcher.writeSpec({ ...this.spec(input, roots, commandLine, env, input.window ? { window: true, desktop: input.window.desktop, uiLimits: 0 } : {}), cwd })
       const { file, args } = this.deps.launcher.invocation(specPath)
+      this.counts.programs += 1
       return { ok: true, profile: input.profile, file, args, specPath, roots, launcherEnv: this.launcherEnv() }
     } catch (e) {
       return this.fail(input.projectId, input.profile, `The containment could not be set up, so nothing was started: ${e instanceof Error ? e.message : String(e)}`) as ContainProgramResult

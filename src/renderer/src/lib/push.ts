@@ -7,7 +7,7 @@ import { qkv4 } from './queries-v4'
 import { qkv5 } from './queries-v5'
 import { qkv6 } from './queries-v6'
 import { qkControl, qkRuntime } from './queries-v7'
-import { qkAutonomy } from './queries-autonomy'
+import { qkAutonomy, qkIsolation } from './queries-autonomy'
 import { useConnectionStore } from '../store/connection'
 import { useUiStore } from '../store/ui'
 import { quotaWaitActive } from './usageModel'
@@ -223,6 +223,10 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
         case 'autonomy':
           // An enrollment, a grant or a boundary request changed: the count, the inbox and the settings are read again.
           schedule([qkAutonomy.root()])
+          break
+        case 'apps':
+          // An application under test started or stopped.
+          schedule([qkIsolation.appsRoot()])
           break
         case 'connection':
           // A new connection or a restarted runtime: everything cached is old, so everything is read again.

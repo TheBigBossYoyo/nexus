@@ -6,6 +6,7 @@ import { applyAppearance } from '../../app/appearance'
 import { useUiStore } from '../../store/ui'
 import { Button, ErrorNote, Loading, PageHeader } from '../../components/ui'
 import { AutonomySettings } from '../autonomy/AutonomySettings'
+import { IsolationPanel } from '../autonomy/IsolationPanel'
 import { isSameSettings, normalizeSettings, validateSettings } from './settingsForm'
 import {
   AdvancedSection,
@@ -22,20 +23,63 @@ import {
   type SectionProps,
 } from './sections'
 
-type SectionId = 'claude' | 'autonomy' | 'models' | 'execution' | 'usage' | 'git' | 'permissions' | 'memory' | 'tokens' | 'mcp' | 'appearance' | 'advanced'
+type SectionId =
+  | 'claude'
+  | 'autonomy'
+  | 'models'
+  | 'execution'
+  | 'usage'
+  | 'git'
+  | 'permissions'
+  | 'memory'
+  | 'tokens'
+  | 'mcp'
+  | 'appearance'
+  | 'advanced'
 
-const SECTIONS: { id: SectionId; label: string; description?: string; render: (p: SectionProps) => ReactNode; prefix: string }[] = [
+const SECTIONS: {
+  id: SectionId
+  label: string
+  description?: string
+  render: (p: SectionProps) => ReactNode
+  prefix: string
+}[] = [
   { id: 'claude', label: 'Claude', prefix: 'claude', render: (p) => <ClaudeSection {...p} /> },
-  { id: 'autonomy', label: 'Autonomy', prefix: 'autonomy', render: () => <AutonomySettings /> },
+  {
+    id: 'autonomy',
+    label: 'Autonomy',
+    prefix: 'autonomy',
+    render: () => (
+      <div className="flex flex-col gap-8">
+        <AutonomySettings />
+        <IsolationPanel />
+      </div>
+    ),
+  },
   { id: 'models', label: 'Models', prefix: 'models', render: (p) => <ModelsSection {...p} /> },
-  { id: 'execution', label: 'Execution', prefix: 'execution', render: (p) => <ExecutionSection {...p} /> },
+  {
+    id: 'execution',
+    label: 'Execution',
+    prefix: 'execution',
+    render: (p) => <ExecutionSection {...p} />,
+  },
   { id: 'usage', label: 'Usage behavior', prefix: 'usage', render: (p) => <UsageSection {...p} /> },
   { id: 'git', label: 'Git', prefix: 'git', render: (p) => <GitSection {...p} /> },
-  { id: 'permissions', label: 'Permissions', prefix: 'permissions', render: (p) => <PermissionsSection {...p} /> },
+  {
+    id: 'permissions',
+    label: 'Permissions',
+    prefix: 'permissions',
+    render: (p) => <PermissionsSection {...p} />,
+  },
   { id: 'memory', label: 'Memory', prefix: 'memory', render: (p) => <MemorySection {...p} /> },
   { id: 'tokens', label: 'Tokens', prefix: 'tokens', render: (p) => <TokensSection {...p} /> },
   { id: 'mcp', label: 'MCP', prefix: 'mcp', render: (p) => <McpSection {...p} /> },
-  { id: 'appearance', label: 'Appearance', prefix: 'appearance', render: (p) => <AppearanceSection {...p} /> },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    prefix: 'appearance',
+    render: (p) => <AppearanceSection {...p} />,
+  },
   {
     id: 'advanced',
     label: 'About & advanced',
@@ -48,7 +92,9 @@ export function SettingsView() {
   const query = useSettings()
   const update = useUpdateSettings()
   const requested = useUiStore((s) => s.settingsSection)
-  const [section, setSection] = useState<SectionId>(() => (SECTIONS.some((s) => s.id === requested) ? (requested as SectionId) : 'claude'))
+  const [section, setSection] = useState<SectionId>(() =>
+    SECTIONS.some((s) => s.id === requested) ? (requested as SectionId) : 'claude',
+  )
   // "Resume settings" on the quota banner asks for the Usage behavior section while Settings may already be open.
   useEffect(() => {
     if (!requested) return
@@ -85,7 +131,8 @@ export function SettingsView() {
     })
 
   const errorFor = (path: string) => errors[path]
-  const hasErrorIn = (prefix: string) => Object.keys(errors).some((k) => k === prefix || k.startsWith(`${prefix}.`))
+  const hasErrorIn = (prefix: string) =>
+    Object.keys(errors).some((k) => k === prefix || k.startsWith(`${prefix}.`))
   const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]
   const invalidCount = Object.keys(errors).length
 
@@ -98,7 +145,10 @@ export function SettingsView() {
     <div className="flex h-full min-h-0 flex-col" data-testid="settings-view">
       <PageHeader title="Settings" context="System" />
       <div className="flex min-h-0 flex-1">
-        <nav className="w-52 shrink-0 overflow-y-auto border-r bg-background p-2" aria-label="Settings sections">
+        <nav
+          className="w-52 shrink-0 overflow-y-auto border-r bg-background p-2"
+          aria-label="Settings sections"
+        >
           <ul className="m-0 flex list-none flex-col gap-px p-0">
             {SECTIONS.map((s) => (
               <li key={s.id}>
@@ -109,11 +159,15 @@ export function SettingsView() {
                   onClick={() => setSection(s.id)}
                   className={cn(
                     'flex h-[var(--row-h)] w-full items-center justify-between rounded-md px-2.5 text-left font-medium transition-colors',
-                    s.id === section ? 'bg-accent-subtle text-accent' : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
+                    s.id === section
+                      ? 'bg-accent-subtle text-accent'
+                      : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
                   )}
                 >
                   {s.label}
-                  {hasErrorIn(s.prefix) ? <span className="size-1.5 rounded-full bg-danger" title="Has errors" /> : null}
+                  {hasErrorIn(s.prefix) ? (
+                    <span className="size-1.5 rounded-full bg-danger" title="Has errors" />
+                  ) : null}
                 </button>
               </li>
             ))}
@@ -137,7 +191,13 @@ export function SettingsView() {
             <Button disabled={!draft} onClick={() => setDraft(null)} data-testid="settings-revert">
               Revert
             </Button>
-            <Button variant="primary" loading={update.isPending} disabled={!dirty || !validation?.ok} onClick={save} data-testid="settings-save">
+            <Button
+              variant="primary"
+              loading={update.isPending}
+              disabled={!dirty || !validation?.ok}
+              onClick={save}
+              data-testid="settings-save"
+            >
               Save
             </Button>
           </footer>
