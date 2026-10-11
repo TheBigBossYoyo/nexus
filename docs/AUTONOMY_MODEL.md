@@ -128,6 +128,29 @@ Tested, with the real orchestrator and scripted agents (`tests/scenarios/v8-auto
 | A hostile page that tells the reader to fetch the local host and to push | 0 | 1, for the push the agent then tried, as for any push |
 | Research under Locked down, four reads | 0 | 1 |
 
+## Corrections after the real acceptance and the independent review (2026-10-11)
+
+- **Allow once** is for the action you were shown. Another action that needs the same capability (a push to
+  another remote, a request to another host) is a new question, not a use of that grant. Allow for the mission
+  and for the project are by capability and resource, as their names say.
+- **Only the isolated profile** makes a command NEXUS cannot read into (inline code, an encoded command, a
+  script it has no record of) run without a question. Under RESTRICTED that is one boundary request: "run
+  project code outside the isolated profile". Writes held to the task's directories and the allowlisted
+  environment count under both.
+- **What NEXUS did for a task is on the task's record.** A boundary request, a launch of the application and a
+  screenshot are artifacts of the task (and of the task it repairs). A reviewer or a verifier finds them
+  there; before this, real verifier sessions failed tasks for lack of evidence only NEXUS held.
+- **Fewer false boundaries.** Reading the worktree's own `.git` entry, the text `echo` and `printf` print, and
+  the text a .NET call writes are not places outside the project.
+- **A mission stops at a boundary it cannot go around.** With nothing else to do, the session reports a
+  blocker that names the request, the mission pauses, and one decision of yours is waiting. A grant given
+  later does not resume the task by itself in 0.8: you resume the mission.
+
+Measured with real sessions (Claude, the ISOLATED profile; `docs/acceptance/v08-acceptance-*.json`): a mission
+that fixes a bug, runs the tests, reads a page of public documentation and starts, clicks and screenshots the
+project's application: 0 tool approvals, 0 boundary requests, 0 dialogs. The same project with one deliberate
+`git push`: 1 boundary request, nothing on the remote.
+
 ## What this does not do
 
 - It does not make a model resist an instruction it reads. It makes the instruction worth nothing: what a
