@@ -32,7 +32,7 @@ import { combineExtensions, createAppTools } from '../modules/browser/tools'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
 import { readSandboxAccount, sandboxStateDir } from '../modules/isolation/sandbox-account'
-import { setupSandboxAccount } from '../modules/isolation/sandbox-setup'
+import { setupSandboxAccount, verifySandboxSetup } from '../modules/isolation/sandbox-setup'
 import { IsolationService } from '../modules/isolation/service'
 import type { ContainmentSetting } from '../modules/isolation/session-containment'
 import { mirrorTools, type ToolMirrorState } from '../modules/isolation/tools'
@@ -266,10 +266,28 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const depsProxy = await startPolicyProxy({ policy: policyForProjectCommands({ network: true }) }).catch(() => null)
   const proxyUrl = depsProxy ? `http://${depsProxy.username}:${depsProxy.password}@127.0.0.1:${depsProxy.port}` : null
   let toolState: ToolMirrorState | null = null
+  // 0.8: the account on record is looked at before it is used: that Windows has an account of that name with
+  // that identifier, made by NEXUS's setup, in no group but Users; that its folder is a real folder of this
+  // user's with the access the setup gives and nothing of anybody else's in it. When that does not hold, the
+  // isolated profile is not available, and says why.
+  let sandboxProblem: string | null = null
+  {
+    const recorded = readSandboxAccount(env)
+    if (recorded !== null) {
+      if (host.sandboxSetupDir === undefined) sandboxProblem = 'this build cannot verify it (the verification script is not part of it)'
+      else {
+        const verdict = await verifySandboxSetup(recorded, host.sandboxSetupDir, env)
+        if (!verdict.ok) sandboxProblem = verdict.problems.join('; ').slice(0, 600)
+        for (const note of verdict.notes) logger(`isolation: ${note}`)
+        logger(`isolation: sandbox account ${verdict.ok ? 'verified' : `NOT usable: ${sandboxProblem}`}`)
+      }
+    }
+  }
   const executionBroker = new ExecutionBroker({
     launcher,
     sandboxDir: join(dataDir, 'sandbox'),
     account: () => readSandboxAccount(env),
+    accountProblem: () => sandboxProblem,
     baseEnv: () => env,
     gitIdentity: () => {
       const g = repos.settings.get().git

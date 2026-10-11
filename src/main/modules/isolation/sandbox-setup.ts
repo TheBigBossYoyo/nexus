@@ -97,3 +97,41 @@ export async function setupSandboxAccount(input: SandboxSetupInput): Promise<San
     detail: `The sandbox account ${result.account} is set up, with ${result.root} as its directory${result.firewallOutbound === true ? ' and no route to the network of its own' : '; its firewall rule could NOT be made, so the isolated profile will not be used'}. Restart NEXUS: the isolated profile is verified at start.`,
   }
 }
+
+export interface SandboxVerification {
+  ok: boolean
+  /** What is wrong, each as a sentence fragment. Empty when ok. */
+  problems: string[]
+  /** What is not wrong and worth knowing: a setup of an earlier version that running it again would bring up to date. */
+  notes: string[]
+}
+
+/**
+ * Whether the account, the folder and the machine's record are what NEXUS's setup makes them, for this user.
+ * Not elevated and changes nothing (`verify-sandbox.ps1`). The record of the account that NEXUS keeps for the
+ * user says a name, an identifier and a folder; none of the three is believed until Windows agrees. When the
+ * verification cannot be run at all the answer is no, with the reason.
+ */
+export async function verifySandboxSetup(account: { account: string; sid: string; root: string }, scriptsDir: string, env: NodeJS.ProcessEnv): Promise<SandboxVerification> {
+  if (process.platform !== 'win32') return { ok: false, problems: ['the sandbox account exists on Windows only'], notes: [] }
+  const script = join(scriptsDir, 'verify-sandbox.ps1')
+  if (!existsSync(script) || !existsSync(join(scriptsDir, 'sandbox-checks.ps1'))) return { ok: false, problems: [`the verification script is missing: ${script}`], notes: [] }
+  if (!/^[A-Za-z][A-Za-z0-9]{2,19}$/.test(account.account) || !/^S-1-5-21-[0-9-]+$/.test(account.sid)) return { ok: false, problems: ['the record of the sandbox account is not a name and an identifier'], notes: [] }
+  const system32 = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+  const minimal: NodeJS.ProcessEnv = {}
+  for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'ProgramData', 'ProgramFiles', 'PSModulePath']) {
+    if (env[name] !== undefined) minimal[name] = env[name]
+  }
+  minimal['PATH'] = `${system32};${join(system32, 'WindowsPowerShell', 'v1.0')}`
+  try {
+    const result = await runProcess(join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-AccountName', account.account, '-AccountSid', account.sid, '-SandboxRoot', account.root], { cwd: system32, env: minimal, timeoutMs: 60_000, maxOutputBytes: 256 * 1024 })
+    const line = result.stdout.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop()
+    if (line === undefined) return { ok: false, problems: [`the verification gave no answer (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 200)}`], notes: [] }
+    const parsed = JSON.parse(line) as { ok?: unknown; problems?: unknown; notes?: unknown }
+    const list = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : typeof value === 'string' && value !== '' ? [value] : [])
+    const problems = list(parsed.problems)
+    return { ok: parsed.ok === true && problems.length === 0, problems: parsed.ok === true ? problems : problems.length > 0 ? problems : ['the verification did not pass'], notes: list(parsed.notes) }
+  } catch (e) {
+    return { ok: false, problems: [`the verification could not be run: ${e instanceof Error ? e.message : String(e)}`], notes: [] }
+  }
+}

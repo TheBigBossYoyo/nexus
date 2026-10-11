@@ -51,7 +51,7 @@ function readResult() {
 }
 
 if (args.has('--remove')) {
-  const run = elevated(join(here, 'native', 'sandbox-setup', 'remove-sandbox.ps1'), ['-ResultFile', `"${resultFile}"`, ...(args.has('--remove-root') ? ['-RemoveRoot'] : [])])
+  const run = elevated(join(here, 'native', 'sandbox-setup', 'remove-sandbox.ps1'), ['-ResultFile', `"${resultFile}"`, '-MainUserSid', sid, ...(args.has('--remove-root') ? ['-RemoveRoot'] : [])])
   const result = readResult()
   if (result?.ok) {
     rmSync(credentialPath, { force: true })

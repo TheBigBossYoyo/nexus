@@ -195,7 +195,7 @@ export class Launcher {
     }
     if (process.platform !== 'win32') return done(false, 'The containment exists on Windows only.')
     if (!existsSync(this.options.executable)) return done(false, `The launcher is missing: ${this.options.executable}`)
-    if (profile === 'ISOLATED' && place.sandboxError !== undefined) return done(false, `The sandbox account is set up, but its launcher could not be put in place: ${place.sandboxError}`)
+    if (profile === 'ISOLATED' && place.sandboxError !== undefined) return done(false, `The sandbox account on record cannot be used: ${place.sandboxError}`)
     if (profile === 'ISOLATED' && (place.sandbox === undefined || !existsSync(place.sandbox.credentialPath))) return done(false, 'The sandbox account is not set up on this machine.')
     const id = randomBytes(6).toString('hex')
     const root = join(place.scratchRoot, `verify-${id}`)

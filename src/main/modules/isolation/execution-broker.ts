@@ -45,6 +45,11 @@ export interface ExecutionBrokerDeps {
   sandboxDir: string
   /** The sandbox account as the setup recorded it; null when the setup was not run. Read when needed, so a setup made while NEXUS runs is seen. */
   account: () => SandboxAccount | null
+  /**
+   * Why the sandbox account that is on record may not be used, or null. Set when NEXUS's verification of the
+   * account, its folder and the machine's record did not pass at this start: a name on record proves nothing.
+   */
+  accountProblem?: () => string | null
   /** The environment the allowlist is applied to (the runtime's own). */
   baseEnv: () => NodeJS.ProcessEnv
   /** Directories dropped from PATH: NEXUS's own install directory. */
@@ -160,6 +165,8 @@ export class ExecutionBroker {
   /** Runs a profile's containment once to see that it holds here. See Launcher.verify. */
   async verify(profile: ContainmentProfile, force = false): Promise<ContainmentCheck> {
     if (profile === 'RESTRICTED') return this.deps.launcher.verify('RESTRICTED', { scratchRoot: join(this.deps.sandboxDir, 'verify') }, force)
+    const problem = this.deps.accountProblem?.() ?? null
+    if (problem !== null) return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify'), sandboxError: problem }, force)
     let sandbox: ReturnType<ExecutionBroker['sandbox']>
     try {
       sandbox = this.sandbox()
