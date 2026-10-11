@@ -159,6 +159,19 @@ export class CapacityRegistry {
     this.save(next)
     return next
   }
+  /**
+   * A request ended without the provider saying anything about its capacity: its answer was not valid JSON, the
+   * request was refused before it was sent, the network failed, the runtime is stopping. None of that is
+   * evidence about the allowance, so the pool keeps what it knew and no backoff is planned. A probe that ended
+   * this way may be tried again at once: it proved nothing either way and counts as no attempt.
+   */
+  inconclusive(binding: string): CapacityPool {
+    const pool = this.pool(binding)
+    if (pool.state !== 'PROBING') return pool
+    const due: CapacityPool = { ...pool, nextProbeAt: this.now() }
+    this.save(due)
+    return due
+  }
   reconnect(binding: string): void {
     const pool = this.pool(binding)
     if (pool.state !== 'AUTH_REQUIRED') return

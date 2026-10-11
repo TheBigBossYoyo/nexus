@@ -43,6 +43,25 @@ describe('durable provider capacity evidence', () => {
       h.close()
     }
   })
+  it('a request that ended without an answer about capacity changes nothing and plans no backoff', () => {
+    let now = 1000
+    const registry = new CapacityRegistry(undefined, () => now)
+    const binding = registry.binding(registration)
+    registry.success(binding)
+    const before = registry.pool(binding)
+    expect(registry.inconclusive(binding)).toEqual(before)
+    expect(registry.admit(binding).state).toBe('AVAILABLE')
+    // During a probe of a paused pool: the pause is not lifted, the probe may be tried again, no attempt is counted.
+    const paused = registry.failure(binding, 429, 'subscription_sharing_usage_limit_exceeded')
+    now = paused.nextProbeAt!
+    expect(registry.admit(binding).state).toBe('PROBING')
+    const after = registry.inconclusive(binding)
+    expect(after.state).toBe('PROBING')
+    expect(after.probeAttempts).toBe(paused.probeAttempts)
+    expect(registry.admit(binding).state).toBe('PROBING')
+    registry.failure(binding, 429, 'subscription_sharing_usage_limit_exceeded')
+    expect(() => registry.admit(binding)).toThrow(CapacityWaitError)
+  })
   it('does not clear quota evidence on reconnect and keeps temporary service failure distinct', () => {
     const registry = new CapacityRegistry(undefined, () => 1000)
     const binding = registry.binding(registration)

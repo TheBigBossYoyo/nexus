@@ -429,7 +429,8 @@ export class ChatGPTConnection {
                 this.capacity.failure(binding, error.status, error.code)
               // The refresh after a 401 was refused: the credentials are gone and only a sign-in brings them back.
               else if (rejected !== null) this.capacity.failure(binding, 401, null)
-              else this.capacity.failure(binding, 0, null)
+              // Anything else never reached the provider or was not an answer about its capacity.
+              else this.capacity.inconclusive(binding)
               throw error
             }
           } finally {
