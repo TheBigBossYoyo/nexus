@@ -152,6 +152,16 @@ export class Launcher {
     }
   }
 
+  /**
+   * Narrows a named pipe that already listens to the current user and the system, and keeps out everything
+   * below medium integrity (reading included). Throws when it could not be done: a pipe that is to be
+   * protected and is not must not be used.
+   */
+  async protectPipe(pipe: string): Promise<void> {
+    const result = await runProcess(this.options.executable, ['pipe-protect', pipe], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
+    if (result.exitCode !== 0) throw new Error(`The runtime's pipe could not be protected: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
+  }
+
   /** The program and arguments that run a spec. */
   invocation(specPath: string): { file: string; args: string[] } {
     return { file: this.options.executable, args: ['--spec', specPath] }

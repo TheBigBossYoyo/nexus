@@ -78,6 +78,8 @@ static class N {
     [DllImport(A, SetLastError = true)] public static extern bool GetSecurityDescriptorSacl(IntPtr sd, out bool present, out IntPtr acl, out bool defaulted);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern uint SetNamedSecurityInfoW(string name, int type, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
     [DllImport(K)] public static extern IntPtr LocalFree(IntPtr p);
+    [DllImport(A, SetLastError = true)] public static extern uint SetSecurityInfo(IntPtr handle, int type, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+    [DllImport(A, SetLastError = true)] public static extern bool GetSecurityDescriptorDacl(IntPtr sd, out bool present, out IntPtr acl, out bool defaulted);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr CreateDesktopW(string name, IntPtr device, IntPtr devmode, uint flags, uint access, ref SECURITY_ATTRIBUTES sa);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool CloseDesktop(IntPtr h);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool CreateProcessWithLogonW(string user, string domain, string password, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
@@ -428,6 +430,31 @@ static class Program {
         return 0;
     }
 
+    /**
+     * Narrows who may open a named pipe that already exists: the user who runs this and the system, and nobody
+     * at an integrity below medium, neither to write nor to read. Windows gives a pipe made without a security
+     * descriptor a list that lets everyone connect for reading; and a process of the same user at low
+     * integrity is the same user. The pipe is opened here with the right to change its protection only, by the
+     * user who made it; no byte is written to it.
+     */
+    static int PipeProtect(string pipe) {
+        if (!pipe.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase)) throw new Fail(EXIT_USAGE, "not a pipe name");
+        string user = System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
+        IntPtr sd; uint size;
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;GA;;;" + user + ")(A;;GA;;;SY)S:(ML;;NWNR;;;ME)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the pipe's protection could not be built: " + Marshal.GetLastWin32Error());
+        bool present, defaulted; IntPtr dacl, sacl;
+        if (!N.GetSecurityDescriptorDacl(sd, out present, out dacl, out defaulted) || !N.GetSecurityDescriptorSacl(sd, out present, out sacl, out defaulted)) throw new Fail(EXIT_CONTAINMENT, "the pipe's protection could not be read back: " + Marshal.GetLastWin32Error());
+        // READ_CONTROL | WRITE_DAC | WRITE_OWNER: enough to set the list and the label, not to read or write the pipe.
+        IntPtr h = N.CreateFileW(pipe, 0x00020000 | 0x00040000 | 0x00080000, 0, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        if (h == IntPtr.Zero || h == new IntPtr(-1)) throw new Fail(EXIT_CONTAINMENT, "the pipe could not be opened to protect it: " + Marshal.GetLastWin32Error());
+        // DACL | PROTECTED_DACL (nothing inherited) | LABEL.
+        uint result = N.SetSecurityInfo(h, 6 /* SE_KERNEL_OBJECT */, 0x4 | 0x80000000 | 0x10, IntPtr.Zero, IntPtr.Zero, dacl, sacl);
+        N.CloseHandle(h);
+        N.LocalFree(sd);
+        if (result != 0) throw new Fail(EXIT_CONTAINMENT, "the pipe's protection could not be set: " + result);
+        return 0;
+    }
+
     // The sandbox account's password, kept as a DPAPI blob only the user who stored it can open. The entropy
     // ties the blob to this use; the protection is the user's own key.
     static readonly byte[] CredentialEntropy = Encoding.UTF8.GetBytes("nexus-launch/sandbox-credential/1");
@@ -466,6 +493,7 @@ static class Program {
             if (args.Length == 3 && args[0] == "label") return Label(args[1], args[2]);
             if (args.Length == 3 && args[0] == "credential" && args[1] == "write") return CredentialWrite(args[2]);
             if (args.Length == 3 && args[0] == "credential" && args[1] == "check") { Console.Out.WriteLine(CredentialRead(args[2])[0]); return 0; }
+            if (args.Length == 2 && args[0] == "pipe-protect") return PipeProtect(args[1]);
             if (args.Length == 1 && args[0] == "--version") { Console.Out.WriteLine("nexus-launch 1"); return 0; }
             Err("usage: nexus-launch --spec <file> | label low|medium|protect|clear <path> | --version");
             return EXIT_USAGE;

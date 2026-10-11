@@ -42,15 +42,18 @@ const HARMLESS_REDIRECT = /(^|\s)(2>&1|2>\s?\/dev\/null|>\s?\/dev\/null|&>\s?\/d
 /**
  * The git subcommands that may run as the user. Each works on the worktree, its index and its own branch;
  * none takes a program to run once the options below are refused. Not here on purpose: grep (a pager option
- * runs a program), config, worktree, submodule, clone, fetch, pull, push, remote, archive, bundle, bisect,
+ * runs a program), rebase (it carries out a list of instructions kept in the worktree's own Git directory, which
+ * the task can write, and one instruction is `exec`), config, worktree, submodule, clone, fetch, pull, push, remote, archive, bundle, bisect,
  * difftool, mergetool, filter-branch, gc, init, daemon, and everything unknown.
  */
 const GIT_SUBCOMMANDS = new Set([
   'status', 'log', 'diff', 'show', 'add', 'commit', 'ls-files', 'rev-parse', 'blame', 'branch', 'restore', 'reset', 'checkout', 'switch', 'rm', 'mv',
-  'merge-base', 'describe', 'shortlog', 'cat-file', 'ls-tree', 'rev-list', 'for-each-ref', 'reflog', 'cherry-pick', 'revert', 'merge', 'rebase', 'stash', 'clean', 'tag',
+  'merge-base', 'describe', 'shortlog', 'cat-file', 'ls-tree', 'rev-list', 'for-each-ref', 'reflog', 'cherry-pick', 'revert', 'merge', 'stash', 'clean', 'tag',
 ])
 /** Long options refused in any git command: they run a program, name a file to read or write, or point git elsewhere. */
 const GIT_REFUSED_LONG = /^--(exec|exec-path|output|output-directory|open-files-in-pager|ext-diff|textconv|template|upload-pack|receive-pack|git-dir|work-tree|no-index|file|pathspec-from-file|patterns-from-file|config|config-env|attr-source|super-prefix|namespace|separate-git-dir|gpg-sign|show-signature|paginate|edit|interactive|patch-with-raw|strategy|strategy-option|contents|ignore-revs-file|reference|filter|to-stdin|stdin|batch|batch-check|batch-command|rebase-merges|autosquash|reschedule-failed-exec)(=|$)/
+/** The same names, for the test of beginnings. */
+const REFUSED_LONG_NAMES = ['exec', 'exec-path', 'output', 'output-directory', 'open-files-in-pager', 'ext-diff', 'textconv', 'template', 'upload-pack', 'receive-pack', 'git-dir', 'work-tree', 'no-index', 'file', 'pathspec-from-file', 'patterns-from-file', 'config', 'config-env', 'attr-source', 'super-prefix', 'namespace', 'separate-git-dir', 'gpg-sign', 'show-signature', 'paginate', 'edit', 'interactive', 'strategy', 'strategy-option', 'contents', 'ignore-revs-file', 'reference', 'filter', 'to-stdin', 'stdin', 'batch', 'batch-check', 'batch-command', 'recurse-submodules', 'pathspec-file-nul', 'trailer', 'cleanup', 'reuse-message', 'reedit-message', 'fixup', 'squash', 'signoff', 'autostash', 'rerere-autoupdate', 'conflict', 'filters', 'with-tree']
 /** Short option letters refused per subcommand: `-x` of rebase runs a command, `-F` reads a file, `-S` runs the signing program, `-i`/`-p`/`-e` open an editor or a prompt. */
 const GIT_REFUSED_SHORT: Record<string, RegExp> = {
   rebase: /[xiSs]/,
@@ -144,6 +147,17 @@ export function isSafeUserGit(args: readonly string[]): boolean {
       const letters = arg.slice(1).replace(/[0-9=].*$/, '')
       if (refusedShort !== undefined && refusedShort.test(letters)) return false
     }
+  }
+  // Taking up an operation again reads its saved state from the worktree's own Git directory, which the task can
+  // write: a sequence of instructions, a message, the commits to pick. That is not done as the user.
+  if (args.slice(1).some((a) => a.startsWith('--') && a.length >= 4 && ['continue', 'skip', 'abort', 'quit', 'edit-todo'].some((word) => word.startsWith(a.slice(2))))) return false
+  // git takes any unambiguous beginning of a long option for the option. An argument that begins one of the
+  // refused ones is refused: `--exe`, `--out`, `--no-ind`, `--ext`, `--open`.
+  for (const arg of args.slice(1)) {
+    if (arg === '--') break
+    if (!arg.startsWith('--') || arg.length < 4) continue
+    const name = arg.slice(2).split('=')[0] as string
+    if (REFUSED_LONG_NAMES.some((refused) => refused.startsWith(name))) return false
   }
   // Listing only: creating, moving or deleting a tag or a branch that is not the task's own is not this path's work.
   if (sub === 'tag' && args.slice(1).some((a) => !a.startsWith('-'))) return false

@@ -1474,6 +1474,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     identity,
     // The dispatcher accepts a channel of the closed contract and an input that passes its schema, nothing else.
     dispatch: (channel, input) => dispatchIpc(handlers, channel, input),
+    // 0.8: only this user and the system open the pipe, and nothing below medium integrity: project code inside
+    // a containment finds the name by listing and cannot open what it names. Without a launcher there is no
+    // containment either, and no project code that this would keep out.
+    ...(process.platform === 'win32' && host.launcherPath !== undefined && existsSync(host.launcherPath) ? { protect: (name: string) => launcher.protectPipe(name) } : {}),
     onClientsChange: () => {
       push({ kind: 'runtime' })
       stateChanged()

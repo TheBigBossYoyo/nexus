@@ -111,6 +111,36 @@ describe('git as the user: what qualifies', () => {
     yes('git log -- -Ocmd')
   })
 
+  it('nothing that carries out saved instructions from the Git directory of the worktree, and no shortened spelling of a refused option', () => {
+    for (const command of [
+      'git rebase main',
+      'git rebase --continue',
+      'git cherry-pick --continue',
+      'git cherry-pick --con',
+      'git revert --skip',
+      'git merge --continue',
+      'git merge --abort',
+      'git merge --ab',
+      'git stash --quit',
+      'git diff --exe=calc',
+      'git diff --out=x',
+      'git diff --no-ind a b',
+      'git diff --ext',
+      'git log --textc',
+      'git commit --fil=x -m m',
+      'git commit --cleanup=scissors -m m',
+      'git commit --trailer x=y -m m',
+      'git commit --fixup HEAD',
+      'git checkout --recurse-submodules main',
+      'git checkout --conflict=diff3 -- a',
+      'git merge --strat=evil other',
+      'git cat-file --filters HEAD:a',
+      'git ls-files --with-tree=HEAD',
+    ])
+      no(command)
+    for (const command of ['git rev-parse --abbrev-ref HEAD', 'git log --abbrev-commit -3', 'git cherry-pick abc1234', 'git merge other', 'git status --short', 'git commit --amend --no-edit', 'git log --stat', 'git diff --staged', 'git diff --cached --stat']) yes(command)
+  })
+
   it('a commit message as a quoted here-document is text; no other substitution is taken', () => {
     yes(`git add -A && git commit -m ${heredoc('Fix the counter\n\nIt added $2 `twice`; now (once).')}`)
     yes(`git commit -m ${heredoc('One line')} && git status --short`)
