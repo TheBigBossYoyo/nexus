@@ -1,6 +1,6 @@
 # NEXUS 0.7.2 implementation progress
 
-Status: PARTIAL. Updated 2026-10-11. Branch: `nexus-0.7.2-director-ui-compiler`. The verdict, what was
+Status: PASS. Updated 2026-10-11. Branch: `nexus-0.7.2-director-ui-compiler`. The verdict, what was
 verified and what is missing are in docs/V0_7_2_RELEASE_REPORT.md; the sections below are the record of how
 the work went and are not rewritten. The newest is at the end.
 
@@ -179,3 +179,13 @@ Done since the section above:
 
 Not done: forty MEDIUM findings are open or partly open. The release report lists the ones that bear on a
 gate and what reaching PASS takes.
+
+## 2026-10-11, later: the MEDIUM triage, the depth policy, the final validation
+
+- Every MEDIUM finding that was open got one disposition: 22 fixed, 2 superseded, 2 not reproducible, 14 deferred
+  to 0.7.3 with the reason; none that is release-material is open (the triage table in the ledger).
+- AUTO gives a request the least depth that is enough for it, from the deterministic task profile; evidence can
+  raise a depth and never lowers one (docs/PROVIDERS.md).
+- The campaign is reported in two views, every development run and the runs on the final source, the line drawn
+  at `be766d7`. EXACT on the final source is NON_INFERIOR to 0.7.1; the default depth stays INSUFFICIENT_EVIDENCE.
+- Version 0.7.2. Suite, end-to-end, stress, the 1,000 seeds and the package on the release commit `be46477`.

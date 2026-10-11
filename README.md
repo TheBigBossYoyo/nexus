@@ -27,14 +27,15 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md), [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md),
 [PROMPT_CACHING](docs/PROMPT_CACHING.md), [CONTEXT_LIFECYCLE](docs/CONTEXT_LIFECYCLE.md).
 
-## 0.7.2: in development, not released
+## 0.7.2: Directors, the Task Compiler and capacity admission
 
-The branch `nexus-0.7.2-director-ui-compiler` adds a sign-in with ChatGPT, a Strategic and a Technical Director
-and a Council that advise and never act, a Task Compiler that admits every request as a specification before
-work starts, capacity admission for every agent session, and the 2.0 interface on every view. Its verdict is
-PARTIAL: what it set out to build is built and verified, and findings of medium severity are still open. It is
-not merged and has no tag. What was verified, what it costs and what is missing:
-[V0_7_2_RELEASE_REPORT](docs/V0_7_2_RELEASE_REPORT.md).
+0.7.2 adds a sign-in with ChatGPT, a Strategic and a Technical Director and a Council that advise and never act,
+a Task Compiler that admits every request as a specification before work starts and gives it the least depth
+that is enough for it, capacity admission for every agent session, and the 2.0 interface on every view. What
+goes to OpenAI is stated where you connect, nothing is sent until you switch sending on, and a project can be
+kept from sending on its own. What was verified, what it costs and what is deferred:
+[V0_7_2_RELEASE_REPORT](docs/V0_7_2_RELEASE_REPORT.md); how the depth is chosen and what is sent:
+[PROVIDERS](docs/PROVIDERS.md).
 
 ## 0.7.1: context, memory and token intelligence
 
@@ -247,6 +248,7 @@ Dates are those of the tagged commit (+01:00).
 | 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended; has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
 | 0.7.0 | `v0.7.0` | 2026-10-07 | Recommended | Secure control plane; fixes the known defects of 0.6.0 listed below. Report: `docs/V0_7_RELEASE_REPORT.md` |
 | 0.7.1 | `v0.7.1` | 2026-10-10 | Recommended | Context Graph and token intelligence. A real campaign of fifty runs over eight task categories found it non-inferior to 0.7.0 with no case worse; with the Context Graph, on by default, missions used 16% fewer turns. It also fixes a defect that blocked real programs in 0.7.0. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
+| 0.7.2 | `v0.7.2` | 2026-10-11 | Recommended | Directors, the Task Compiler, capacity admission, the 2.0 interface. In a real campaign against 0.7.1 it was non-inferior when requests are admitted as written; the default depth passed every hidden evaluation and its comparison is incomplete. No saving is claimed. Report: `docs/V0_7_2_RELEASE_REPORT.md` |
 
 Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
 record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
