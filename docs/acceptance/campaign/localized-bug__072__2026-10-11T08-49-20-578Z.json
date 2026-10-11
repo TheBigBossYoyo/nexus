@@ -1,0 +1,224 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "startedAt": "2026-10-11T08:49:20.578Z",
+  "finishedAt": "2026-10-11T08:54:31.995Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/93ad0b1f/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ laps stay in driving order when the sequence counter wraps (2.1875ms)\n✔ packets of an ordinary batch are still ordered (0.2501ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 179.4679\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 4,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (1.2388ms)\n✔ orders packets by sequence number (2.6797ms)\n✔ orders packets across the sequence number wrap (0.3932ms)\n✔ applies laps of each car in driven order across the sequence number wrap (2.2409ms)\nℹ tests 4\nℹ suites 0\nℹ pass 4\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 334.7094\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "fix-seq-wrap-ordering-fix1",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"9fbfa88c-ca33-4488-a9d4-9254654326c4\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, cp, git, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, mkdir, cp, git, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, git, tar, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [
+        "{\"id\":\"fb4f3bfd-053c-463b-a089-5d8268118d73\",\"runId\":\"93ad0b1f-9412-43a3-806e-7415f60d2ff2\",\"taskId\":\"796894e2-45f2-411f-ba44-00b2d3d7b5b3\",\"agentId\":\"c1908b18-ac90-4a59-b80d-c8fba6b7a2b3\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"Not done: one task criterion fails. The task result contains no `npm test` output showing the new tests failing before the fix, and the implementer's own result says so. Everything else passes: the fix, both regression tests, scope, and a green `npm test` (4 pass, 0 fail).\\n\\nI could not run the new tests against the original comparator myself. The verifier role guard blocked both a throwaway copy with the old `order.js` and an in-memory `node -e` evaluation, and I did not work around it. That the tests fail on `a.seq - b.seq` therefore rests on my hand trace of the test data, not on an execution.\\n\\nRepair needed: restore the old comparator tempo"
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: rder.test.js` has a new test with raw seqs 65534–65537, shuffled, with increasing clocks and laps. It asserts laps `[1, 2, 3, 4]`.\n- **State test:** the new `src/telemetry/state.test.js` calls `applyBatch(emptyState(), batch)` with a wrap-straddling batch for two cars. It asserts car 1 gets laps `[9, 10]` and car 2 gets `[10, 11, 12]`.\n- **Diff:** `git diff --stat` shows only those three files changed.\n\nBy reading the code, the old `a.seq - b.seq` comparator would put the post-wrap packets (seq 0 and 1) first in both new tests, so they should fail on the unfixed code, but I haven't confirmed it by running them. To see that failure, restore the old comparator in `order.js` and run `npm test`.",
+        "reviewer: ",
+        "verifier: ",
+        "debugger: , and `applyBatch` then appended car 1's laps as `[10, 9]`.\n\n## Passing output after the fix\n\n`npm test` with `(a, b) => a.clock - b.clock` restored:\n\n```\n✔ pace of evenly spaced laps (1.1686ms)\n✔ orders packets by sequence number (2.2988ms)\n✔ orders packets across the sequence number wrap (0.3823ms)\n✔ applies laps of each car in driven order across the sequence number wrap (1.4109ms)\nℹ tests 4\nℹ pass 4\nℹ fail 0\nEXIT=0\n```\n\n## Scope\n\n`git diff --stat 0fafa29 HEAD` shows only the three expected files:\n\n```\n src/telemetry/order.js      |  4 ++--\n src/telemetry/order.test.js | 10 ++++++++++\n src/telemetry/state.test.js | 16 ++++++++++++++++\n 3 files changed, 28 insertions(+), 2 deletions(-)\n```",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/fix-seq-wrap-ordering [medium] Run shell command (bash): npm test 2>&1 | tail -12; git stash list | head -0; git show HEAD~1:src/telemetry/order.js > /tmp/o.js; cp src/telemetry/order.js /tmp/new.js; cp /tmp/o.js src/telemetry/order.js; npm test 2>&1 | grep -E \"^# (pass|fail)|not ok|ℹ (pass|fail)|✖\" ; git checkout src/telemetry/order.js; git status --shor | path outside the worktree: /tmp/o.js; path outside the worktree: /tmp/new.js"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 52,
+    "inputTokensUncached": 26819,
+    "outputTokens": 22857,
+    "cacheCreationTokens": 70051,
+    "cacheReadTokens": 517323,
+    "costUsdReported": 1.1019,
+    "toolCalls": 44,
+    "toolCallsRecorded": 44,
+    "filesChangedRecorded": 1,
+    "toolCallsByName": {
+      "Bash": 26,
+      "StructuredOutput": 6,
+      "Read": 8,
+      "Grep": 2,
+      "Edit": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 9,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 17,
+        "toolCalls": 15,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 19,
+        "toolCalls": 16,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 307667,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 9
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 10
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

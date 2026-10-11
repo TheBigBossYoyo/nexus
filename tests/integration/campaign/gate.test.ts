@@ -53,7 +53,12 @@ describe('real quality campaign through the quality gate', () => {
   const runs = load()
 
   it('every run was measured on the sources its arm names', () => {
-    for (const r of runs) expect(r.nexusVersion, `${r.task} ${r.arm}`).toBe(r.arm === '070' ? '0.7.0' : r.arm.startsWith('072') ? '0.7.2-development' : '0.7.1')
+    // The 0.7.2 arms were measured while the branch still carried its development identity; a run made on the
+    // released sources says 0.7.2.
+    for (const r of runs) {
+      if (r.arm.startsWith('072')) expect(['0.7.2-development', '0.7.2'], `${r.task} ${r.arm}`).toContain(r.nexusVersion)
+      else expect(r.nexusVersion, `${r.task} ${r.arm}`).toBe(r.arm === '070' ? '0.7.0' : '0.7.1')
+    }
     for (const r of runs) expect(CAMPAIGN_TASKS.some((t) => t.key === r.task), r.task).toBe(true)
   })
 

@@ -1,9 +1,16 @@
 {
   "kind": "campaign-gate-072",
-  "at": "2026-10-11T06:02:10.785Z",
+  "at": "2026-10-11T09:45:52.030Z",
   "baseline": "071-graph",
-  "finalSource": "be766d78ae319c469406a7891f96acc6cb4523e7",
-  "runsOnFinalSource": 15,
+  "finalSourceFrom": "be766d7",
+  "commitsBeforeIt": [
+    "6404450",
+    "ca43de4"
+  ],
+  "runsOnFinalSource": {
+    "072": 23,
+    "072-auto": 6
+  },
   "runsPerCell": {
     "071-graph": {
       "localized-bug": 6,
@@ -16,22 +23,22 @@
       "workspace": 2
     },
     "072": {
-      "localized-bug": 7,
+      "localized-bug": 8,
+      "cross-module-bug": 4,
+      "feature": 4,
+      "refactor": 4,
+      "architecture": 4,
+      "security": 4,
+      "program": 9,
+      "workspace": 4
+    },
+    "072-auto": {
+      "localized-bug": 3,
       "cross-module-bug": 3,
       "feature": 3,
       "refactor": 3,
       "architecture": 3,
       "security": 3,
-      "program": 8,
-      "workspace": 3
-    },
-    "072-auto": {
-      "localized-bug": 2,
-      "cross-module-bug": 2,
-      "feature": 2,
-      "refactor": 2,
-      "architecture": 2,
-      "security": 2,
       "program": 0,
       "workspace": 0
     }
@@ -40,51 +47,54 @@
     "072": {
       "pairs": 8,
       "baselinePassRate": 0.8541666666666667,
-      "optimizedPassRate": 0.8102678571428572,
-      "passRateLowerBound": -0.12185832610160395,
+      "optimizedPassRate": 0.8489583333333334,
+      "passRateLowerBound": -0.0972008332222226,
       "regressions": [
         "program"
       ],
       "improvements": [
-        "localized-bug"
+        "localized-bug",
+        "security"
       ],
       "severityDelta": {
         "critical": 0,
         "high": 0
       },
       "repairDelta": 0,
-      "inputTokenDelta": -0.06802229983084444,
-      "outputTokenDelta": -0.04431790466530424,
-      "turnDelta": -0.06957506095437122,
-      "wallClockDelta": 0.8473538547194168,
+      "inputTokenDelta": -0.043086390526858524,
+      "outputTokenDelta": -0.028765938630972036,
+      "turnDelta": -0.04998258446534313,
+      "wallClockDelta": 0.8070839209736812,
       "verdict": "INFERIOR",
       "mayBecomeDefault": false,
       "reasons": [
-        "The pass rate may be lower by more than 5 points (lower bound -12.2)."
+        "The pass rate may be lower by more than 5 points (lower bound -9.7)."
       ]
     },
     "072-final-source": {
       "pairs": 8,
       "baselinePassRate": 0.8541666666666667,
-      "optimizedPassRate": 0.84375,
-      "passRateLowerBound": -0.02755208333333335,
+      "optimizedPassRate": 0.9125,
+      "passRateLowerBound": -0.04567979517830108,
       "regressions": [
         "localized-bug"
       ],
-      "improvements": [],
+      "improvements": [
+        "security"
+      ],
       "severityDelta": {
         "critical": 0,
         "high": 0
       },
       "repairDelta": 0,
-      "inputTokenDelta": -0.02524365243154566,
-      "outputTokenDelta": 0.01060474530426871,
-      "turnDelta": -0.07492163009404393,
-      "wallClockDelta": 0.08042218900293185,
+      "inputTokenDelta": 0.012517099960432071,
+      "outputTokenDelta": 0.025169393564186744,
+      "turnDelta": -0.02563566701497733,
+      "wallClockDelta": 0.15060402754235103,
       "verdict": "NON_INFERIOR",
       "mayBecomeDefault": true,
       "reasons": [
-        "Pass rate 85% against 84% over 8 paired cases, within the margin; no rise in critical findings or repairs."
+        "Pass rate 85% against 91% over 8 paired cases, within the margin; no rise in critical findings or repairs."
       ]
     },
     "072-auto": {
@@ -101,10 +111,34 @@
         "high": 0
       },
       "repairDelta": 0,
-      "inputTokenDelta": 0.18313934692065656,
-      "outputTokenDelta": 0.12510588440194115,
-      "turnDelta": 0.17962962962962964,
-      "wallClockDelta": 0.14160392648101733,
+      "inputTokenDelta": 0.09635025297024717,
+      "outputTokenDelta": 0.07589107826605558,
+      "turnDelta": 0.0962962962962963,
+      "wallClockDelta": 0.10916226988280052,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "mayBecomeDefault": false,
+      "reasons": [
+        "2 baseline case(s) have no optimized trial (program, workspace). A case that was not run cannot be assumed to pass. The baseline stays the default."
+      ]
+    },
+    "072-auto-final-source": {
+      "pairs": 6,
+      "baselinePassRate": 0.8055555555555557,
+      "optimizedPassRate": 0.8333333333333334,
+      "passRateLowerBound": -0.017916666666666668,
+      "regressions": [],
+      "improvements": [
+        "localized-bug"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": -0.07722793493057144,
+      "outputTokenDelta": -0.022538534005715778,
+      "turnDelta": -0.07037037037037037,
+      "wallClockDelta": 0.04427895668636691,
       "verdict": "INSUFFICIENT_EVIDENCE",
       "mayBecomeDefault": false,
       "reasons": [

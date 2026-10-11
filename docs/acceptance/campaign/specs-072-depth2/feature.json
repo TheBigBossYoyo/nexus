@@ -1,0 +1,65 @@
+{
+  "task": "feature",
+  "compiledAt": "2026-10-11T08:16:28.699Z",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "spec": {
+    "id": "2a87d301-0565-4961-bd43-f94eeec83439",
+    "projectId": "d5b5ae1b-6336-4e14-b6dc-d75a62286629",
+    "requestedMode": "AUTO",
+    "mode": "LIGHT",
+    "status": "READY",
+    "reasons": [
+      "LOCALIZED_WELL_SPECIFIED_TASK",
+      "PROFILE:feature|medium|low:scope=few:ambiguity=low",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "recommendations": [
+      {
+        "text": "Verify the requested localized change and run the relevant existing checks.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "19c0efa24cf0e048fdc37f10153a0dc5eecf1b45becb4dac47fec9c197cf3891",
+    "createdAt": "2026-10-11T08:16:25.633Z",
+    "rawIntent": "Add a CSV export of the address book: `exportCsv(contacts)` in src/export/csv.js returns the file content as a string with the columns name, email and phone, in that order, with a header row. A missing value is an empty field. Follow the export conventions of this project (docs/CONVENTIONS.md). Include tests.",
+    "intentId": "c8bc8502-c219-436b-b59b-b866dfb7c7dc",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "Add a CSV export of the address book: `exportCsv(contacts)` in src/export/csv.js returns the file content as a string with the columns name, email and phone, in that order, with a header row. A missing value is an empty field. Follow the export conventions of this project (docs/CONVENTIONS.md). Include tests."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:d5b5ae1b-6336-4e14-b6dc-d75a62286629",
+        "version": "1531830a05ef5b267aecb2fbd035e661bdaf4c4b:82238ca6a0b5f9662209d2e43b725acf1fc709a23b279d193af69e3039d153c4"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "LIGHT",
+    "status": "READY",
+    "reasons": [
+      "LOCALIZED_WELL_SPECIFIED_TASK",
+      "PROFILE:feature|medium|low:scope=few:ambiguity=low",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "ms": 2223,
+    "recommendations": 1,
+    "recommendationChars": 190,
+    "byKind": {
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": []
+  }
+}

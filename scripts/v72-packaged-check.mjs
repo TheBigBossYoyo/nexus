@@ -11,7 +11,7 @@ const output = join(root, 'test-results/v72-package')
 mkdirSync(output, { recursive: true })
 mkdirSync(join(root, '.nexus-data'), { recursive: true })
 const dataDir = mkdtempSync(join(root, '.nexus-data/v72-packaged-'))
-const exe = join(root, 'release/v72-development/win-unpacked/NEXUS.exe')
+const exe = join(root, process.env.NEXUS_PACKAGED_DIR ?? 'release/v72-development', 'win-unpacked/NEXUS.exe')
 const expectedCommit = process.argv[2]
 if (!expectedCommit) throw new Error('Supply the committed candidate identity')
 const Database = createRequire(import.meta.url)('better-sqlite3')
@@ -45,7 +45,7 @@ try {
   }
   evidence.checks.identity =
     info.isPackaged &&
-    info.version === '0.7.2-development' &&
+    info.version === '0.7.2' &&
     info.build?.commit === expectedCommit &&
     info.build?.dirty === false &&
     info.build?.databaseSchema === 16 &&

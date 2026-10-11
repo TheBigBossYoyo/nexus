@@ -1,0 +1,65 @@
+{
+  "task": "refactor",
+  "compiledAt": "2026-10-11T08:16:41.772Z",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "spec": {
+    "id": "0972e56f-c53a-4325-bb6e-77763d682914",
+    "projectId": "ba0dcca4-1b18-463a-9bc0-1c56bc21b602",
+    "requestedMode": "AUTO",
+    "mode": "LIGHT",
+    "status": "READY",
+    "reasons": [
+      "LOCALIZED_WELL_SPECIFIED_TASK",
+      "PROFILE:bugfix|medium|low:scope=single:ambiguity=low",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "recommendations": [
+      {
+        "text": "Verify the requested localized change and run the relevant existing checks.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "1e9d696540995cedadb25a6bc9c1e6e8fcd5ec95a538a5f6de88bb89816503f4",
+    "createdAt": "2026-10-11T08:16:38.702Z",
+    "rawIntent": "The three handlers in src/handlers (createUser, updateUser, inviteUser) each carry their own copy of the email and name validation. Refactor: move the validation into one module, src/validation.js, exporting `validateEmail(value)` and `validateName(value)`, each returning null when the value is valid and the error message otherwise, and make all three handlers use it. Behaviour must not change: the same inputs give the same results, error messages included. Keep the existing tests passing and add tests for the new module.",
+    "intentId": "6753e1df-38ba-4c29-a91a-b8936e95cab1",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "The three handlers in src/handlers (createUser, updateUser, inviteUser) each carry their own copy of the email and name validation. Refactor: move the validation into one module, src/validation.js, exporting `validateEmail(value)` and `validateName(value)`, each returning null when the value is valid and the error message otherwise, and make all three handlers use it. Behaviour must not change: the same inputs give the same results, error messages included. Keep the existing tests passing and add tests for the new module."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:ba0dcca4-1b18-463a-9bc0-1c56bc21b602",
+        "version": "3e3b04f32afeba14e26954ccbb3c948cf4a4add4:de17ede38ed84070870e190d0c048e0c180fec2f206fc13eee765aea923538dc"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "LIGHT",
+    "status": "READY",
+    "reasons": [
+      "LOCALIZED_WELL_SPECIFIED_TASK",
+      "PROFILE:bugfix|medium|low:scope=single:ambiguity=low",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "ms": 2404,
+    "recommendations": 1,
+    "recommendationChars": 190,
+    "byKind": {
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": []
+  }
+}

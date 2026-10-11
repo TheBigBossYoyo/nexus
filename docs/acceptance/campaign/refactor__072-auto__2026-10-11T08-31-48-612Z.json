@@ -1,0 +1,217 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "072-auto",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection",
+  "compilation": {
+    "requestedMode": "AUTO",
+    "mode": "LIGHT",
+    "status": "READY",
+    "reasons": [
+      "LOCALIZED_WELL_SPECIFIED_TASK",
+      "PROFILE:bugfix|medium|low:scope=single:ambiguity=low",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "ms": 2404,
+    "recommendations": 1,
+    "recommendationChars": 190,
+    "byKind": {
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": []
+  },
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "startedAt": "2026-10-11T08:31:48.612Z",
+  "finishedAt": "2026-10-11T08:34:20.958Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/bd3a9102/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (1.2115ms)\n✔ updateUser gives the same results as before, the id checked last (0.1985ms)\n✔ inviteUser gives the same results as before, the role checked last (0.1951ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.1227ms)\n✔ the handlers use the shared module and no longer carry their own copy (0.8342ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 114.8943\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 10,
+          "fail": 0,
+          "output": "✔ a valid user is created with a normalised email (1.8256ms)\n✔ an invalid email is reported (0.1921ms)\n✔ an invitation needs a known role (0.1275ms)\n✔ validateEmail accepts valid addresses, with or without surrounding whitespace (0.6508ms)\n✔ validateEmail rejects non-strings and empty strings (0.1584ms)\n✔ validateEmail rejects malformed addresses (0.1165ms)\n✔ validateEmail applies the 254 limit to the trimmed value (0.247ms)\n✔ validateName accepts a normal name (0.1536ms)\n✔ validateName requires a non-blank string (0.1316ms)\n✔ validateName applies the 80 limit to the trimmed value (0.1128ms)\nℹ tests 10\nℹ suites 0\nℹ pass 10\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 145.3013\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "extract-validation-module",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"56b9f867-dde2-433a-91e1-ceba92649387\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  literals 254 or 80 any more, and there is no new null or undefined guard on `input`.\n- **Tests:** `src/validation.test.js` covers valid values, values with surrounding whitespace, non-strings, blank and malformed emails, and both sides of the 254 and 80 boundaries. Long values are built with `repeat`.\n\nI committed the five changed files on the current branch. `src/handlers/handlers.test.js`, `package.json` and `README.md` are untouched. Git printed LF-to-CRLF warnings for the new and edited files on commit; I didn't check or change the line-ending setup.\n\nMy first attempt to write the files through a shell script was denied and wrote nothing, so I redid the changes with the file-edit tools.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/extract-validation-module [medium] Run shell command (bash): cd src && cat > validation.js <<'EOF'\n/** Field validators: each returns null when the value is valid, otherwise the error message. */\nexport function validateEmail(value) {\n  if (typeof value !== 'string' || !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(value.trim())) return 'email: not a valid address'\n  if  | path outside the worktree: ../..; path outside the worktree: ../validation.js\\,,fn.replace; UNC path outside the worktree: //,"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 38,
+    "inputTokensUncached": 17876,
+    "outputTokens": 15072,
+    "cacheCreationTokens": 42586,
+    "cacheReadTokens": 326231,
+    "costUsdReported": 0.6336,
+    "toolCalls": 33,
+    "toolCallsRecorded": 33,
+    "filesChangedRecorded": 5,
+    "toolCallsByName": {
+      "Bash": 15,
+      "Read": 9,
+      "StructuredOutput": 4,
+      "Write": 5
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 4,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 11,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 150378,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 22
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 6
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

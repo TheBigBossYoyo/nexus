@@ -48,8 +48,8 @@ const ARMS: Record<Arm, { version: string; what: string }> = {
   // `072` in EXACT depth, which asks no provider and is what a project kept away from OpenAI gets; `072-auto` in
   // the default depth, compiled by the real application on the user's ChatGPT connection before the mission runs.
   // A program or a workspace task runs on the 0.7.2 engines as this runner builds them, without admission.
-  '072': { version: '0.7.2-development', what: 'NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)' },
-  '072-auto': { version: '0.7.2-development', what: 'NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection' },
+  '072': { version: '0.7.2', what: 'NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)' },
+  '072-auto': { version: '0.7.2', what: 'NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection' },
 }
 
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
