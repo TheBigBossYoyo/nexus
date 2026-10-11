@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AGENT_ROLES } from '@shared/domain'
 import type { AgentPurpose } from '@shared/domain'
 import { rolePrompt } from '@main/modules/context/prompts'
-import { criteriaSection } from '@main/modules/context/render'
+import { SECTION_LIMITS, criteriaSection, renderTaskSpec } from '@main/modules/context/render'
 
 const PURPOSES: AgentPurpose[] = [
   'plan',
@@ -124,5 +124,19 @@ describe('what a plan may ask of a read-only task', () => {
     expect(both).toContain('Task criteria:')
     expect(both).toContain('what belongs to another task is not a failure of this one')
     expect(criteriaSection({ acceptanceCriteria: [] }, ['the mission does everything'])).toBe('Mission criteria:\n- the mission does everything')
+  })
+})
+
+describe('text the user wrote is read at the length it was accepted', () => {
+  // Finding 6.6: a request and a task description are accepted up to 20,000 characters and feedback on a plan up
+  // to 10,000; they were then cut to 8,000 and 6,000 where the sessions that answer for all of it read them.
+  it('a long task description reaches its sessions whole, and what is longer than accepted is marked as cut', () => {
+    const end = 'THE LAST SENTENCE OF THE DESCRIPTION'
+    const description = `${'a'.repeat(19_000)} ${end}`
+    expect(renderTaskSpec({ key: 't', title: 'T', description, suggestedFiles: [] })).toContain(end)
+    const over = renderTaskSpec({ key: 't', title: 'T', description: 'b'.repeat(30_000), suggestedFiles: [] })
+    expect(over).toMatch(/truncated: \d+ more characters omitted/)
+    expect(SECTION_LIMITS.request).toBe(20_000)
+    expect(SECTION_LIMITS.userFeedback).toBe(10_000)
   })
 })

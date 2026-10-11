@@ -110,7 +110,7 @@ export function buildPlannerPrompt(input: PlannerPromptInput): Pack {
     : null
 
   const feedback = input.feedback?.trim()
-    ? `Reviewer/user feedback to incorporate:\n${truncate(input.feedback, SECTION_LIMITS.feedback)}`
+    ? `Reviewer/user feedback to incorporate:\n${truncate(input.feedback, SECTION_LIMITS.userFeedback)}`
     : null
 
   return assemble([
@@ -357,7 +357,7 @@ export function buildAuditSynthesisPrompt(input: AuditSynthesisInput): Pack {
       )
     : null
   return assemble([
-    { name: 'Audit request', body: truncate(input.run.prompt, SECTION_LIMITS.task) },
+    { name: 'Audit request', body: truncate(input.run.prompt, SECTION_LIMITS.request) },
     { name: 'Audit reports', body: outputs },
     {
       name: 'Mission criteria',
@@ -392,7 +392,7 @@ export interface CriticPromptInput {
 /** The critic sees only the structured candidate plans and the project profile: never a planner's transcript. */
 export function buildCriticPrompt(input: CriticPromptInput): Pack {
   return assemble([
-    { name: 'Request', body: truncate(input.run.prompt, SECTION_LIMITS.task) },
+    { name: 'Request', body: truncate(input.run.prompt, SECTION_LIMITS.request) },
     { name: 'Mode', body: MODE_GUIDANCE[input.run.mode] },
     { name: 'Project profile', body: renderProfile(input.profile) },
     { name: 'Candidate plans', body: renderCandidates(input.candidates) },
@@ -440,7 +440,7 @@ export function buildSynthesizerPrompt(input: SynthesizerPromptInput): Pack {
     ? `The previous synthesized plan was rejected for these reasons. Fix every one:\n${bullets(input.previousErrors)}`
     : null
   return assemble([
-    { name: 'Request', body: truncate(input.run.prompt, SECTION_LIMITS.task) },
+    { name: 'Request', body: truncate(input.run.prompt, SECTION_LIMITS.request) },
     { name: 'Mode', body: MODE_GUIDANCE[input.run.mode] },
     { name: 'Project profile', body: renderProfile(input.profile) },
     { name: 'Repository constraints', body: facts },

@@ -349,6 +349,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           selection,
           defaultIntentMetadata(feedback, 'MISSION_REPLAN'),
         )
+        // The compilation took time: the plan may have been approved or the run ended meanwhile. An instruction
+        // is put on record only when it is about to apply; one that was refused never becomes history.
+        if (repos.runs.require(runId).state !== 'awaiting_approval')
+          throw new NexusError('invalid_state', 'The plan is no longer awaiting approval. Nothing was changed.')
         repos.intelligenceArtifacts.bindAdmission('RUN_INSTRUCTION', runId, spec)
         return orchestrator.replan(
           runId,
@@ -412,11 +416,14 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           defaultIntentMetadata(instruction, 'TASK_INSTRUCTION'),
           taskId,
         )
-        repos.intelligenceArtifacts.bindAdmission('TASK_INSTRUCTION', taskId, spec)
-        return orchestrator.instruct(
-          taskId,
-          spec.mode === 'EXACT' ? instruction : withAdmittedIntent(instruction, spec),
-        )
+        // Recorded and delivered together: if the delivery is refused, the history does not keep the instruction.
+        return repos.transaction(() => {
+          repos.intelligenceArtifacts.bindAdmission('TASK_INSTRUCTION', taskId, spec)
+          return orchestrator.instruct(
+            taskId,
+            spec.mode === 'EXACT' ? instruction : withAdmittedIntent(instruction, spec),
+          )
+        })
       }),
     'tasks.resolveBlocker': ({ taskId, note, ...selection }) =>
       intelligenceOperations.serial(`task:${taskId}`, async () => {

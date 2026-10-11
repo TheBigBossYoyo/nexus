@@ -298,12 +298,12 @@ describe('buildContextPack', () => {
   })
 
   it('truncates oversized sections with an explicit marker', () => {
-    const big = 'x'.repeat(SECTION_LIMITS.task * 2)
+    const big = 'x'.repeat(SECTION_LIMITS.taskDescription * 2)
     const pack = buildContextPack(baseInput({ task: makeTask({ description: big }) }))
     const task = pack.sections.find((s) => s.name === 'Task')
     expect(task).toBeDefined()
     expect(pack.prompt).toMatch(/\[\.\.\. truncated: \d+ more characters omitted \.\.\.\]/)
-    expect(task?.chars ?? Infinity).toBeLessThan(SECTION_LIMITS.task + 300)
+    expect(task?.chars ?? Infinity).toBeLessThan(SECTION_LIMITS.taskDescription + 300)
   })
 
   it('bounds dependency outputs and reports omitted entries', () => {

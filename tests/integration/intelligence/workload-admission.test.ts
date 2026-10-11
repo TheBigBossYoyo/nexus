@@ -255,6 +255,11 @@ describe('canonical workload admission', () => {
       const second = 'Keep the public interface backward compatible'
       await handlers['tasks.instruct']({ taskId: existing.id, instruction: second, compilationMode: 'EXACT' })
       expect(h.repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', existing.id).map(s => s.rawIntent)).toEqual([instruction, second])
+      // Finding 6.7: an instruction whose delivery is refused does not stay in the history as if it applied.
+      instruct.mockImplementationOnce(() => { throw new Error('delivery refused') })
+      await expect(handlers['tasks.instruct']({ taskId: existing.id, instruction: 'Never delivered', compilationMode: 'EXACT' })).rejects.toThrow('delivery refused')
+      expect(h.repos.intelligenceArtifacts.admissionHistory('TASK_INSTRUCTION', existing.id).map(s => s.rawIntent)).toEqual([instruction, second])
+      expect(h.repos.intelligenceArtifacts.admission('TASK_INSTRUCTION', existing.id)?.rawIntent).toBe(second)
       const core = new Core({ repos: h.repos, bus: h.bus, git: h.git, runtime: {} as AgentRuntime, worktrees: {} as WorktreeManager, push: h.pushes })
       // Simulate replacement-worker context after messages have already been delivered.
       const composed = composeForTask(core, run, existing, 'implement', h.project.rootPath, null)

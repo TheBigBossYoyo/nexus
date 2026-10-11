@@ -6,7 +6,7 @@ import { truncate, SECTION_LIMITS } from './render'
  * since they are the two sessions that answer for all of it.
  */
 export function renderOriginalIntent(run: Run): string {
-  return run.config.compiledTaskSpec ? run.prompt : truncate(run.prompt, SECTION_LIMITS.task)
+  return run.config.compiledTaskSpec ? run.prompt : truncate(run.prompt, SECTION_LIMITS.request)
 }
 /**
  * The request as a task's worker reads it. A worker answers for its task, which the planner wrote from the whole

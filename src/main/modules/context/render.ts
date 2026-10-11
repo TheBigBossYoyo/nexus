@@ -8,6 +8,12 @@ export interface PackSection {
 
 /** Per-section character budgets. Truncation is always marked in the text. */
 export const SECTION_LIMITS = {
+  // What the user wrote is shown to the sessions that answer for all of it up to the length it was accepted
+  // at (the request and a task's description 20,000 characters, feedback on a plan 10,000). It used to be
+  // accepted at that length and cut to the general limits below, so the end of a long request was never read.
+  request: 20_000,
+  taskDescription: 20_000,
+  userFeedback: 10_000,
   task: 8_000,
   criteria: 4_000,
   decisions: 6_000,
@@ -117,7 +123,7 @@ export function renderTaskSpec(
   if (task.suggestedFiles.length > 0) {
     parts.push('', 'Expected files (a hint, not a limit):', bullets(task.suggestedFiles))
   }
-  return truncate(parts.join('\n'), SECTION_LIMITS.task)
+  return truncate(parts.join('\n'), SECTION_LIMITS.taskDescription)
 }
 
 export function criteriaSection(
