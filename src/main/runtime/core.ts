@@ -31,7 +31,7 @@ import { PlaywrightDirectProvider } from '../modules/browser/provider'
 import { combineExtensions, createAppTools } from '../modules/browser/tools'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
-import { readSandboxAccount } from '../modules/isolation/sandbox-account'
+import { readSandboxAccount, sandboxStateDir } from '../modules/isolation/sandbox-account'
 import { setupSandboxAccount } from '../modules/isolation/sandbox-setup'
 import { IsolationService } from '../modules/isolation/service'
 import type { ContainmentSetting } from '../modules/isolation/session-containment'
@@ -298,6 +298,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     enrolled: (projectId) => repos.enrollments.get(projectId) !== null,
     gitWritable: async (worktree) => (await git.ownedGitLayout(worktree))?.writable ?? [],
     dataDir,
+    sandboxStateDir: sandboxStateDir(env),
     logger,
   })
   const isolationStatus = await isolation.start()

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { FakeScript } from '@main/modules/agent-runtime/fake-runtime'
@@ -31,6 +31,27 @@ function runAs(tool: 'Bash' | 'PowerShell', input: Record<string, unknown>): str
     return `EXIT ${err.status}: ${err.stdout ?? ''}${err.stderr ?? ''}`
   }
 }
+
+const PLANT = `
+const fs = require('fs'); const path = require('path'); const cp = require('child_process');
+const say = (name, fn) => { try { fn(); console.log(name + ':PLANTED') } catch (e) { console.log(name + ':REFUSED:' + e.code) } };
+const marker = path.join(process.cwd(), 'ran-as-the-user.txt');
+const hook = '#!/bin/sh\\nwhoami > "' + marker.split(path.sep).join('/') + '"\\n';
+// 1. A hook in the directory the hardened git is told to look in, if contained code can reach it.
+say('hooks', () => { const dir = path.join(process.env.TMP, 'no-hooks'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'pre-commit'), hook) });
+// 2. A user-level configuration in the home the contained command has.
+say('home', () => fs.writeFileSync(path.join(process.env.HOME, '.gitconfig'), '[core]\\n\\thooksPath = ' + path.join(process.env.TMP, 'no-hooks').split(path.sep).join('/') + '\\n[alias]\\n\\tst = !whoami > ran-as-the-user.txt\\n'));
+// 3. The files of the worktree's entry that say where the repository is and what configuration applies.
+const entry = cp.execFileSync('git', ['rev-parse', '--git-dir']).toString().trim();
+for (const name of ['commondir', 'gitdir', 'config.worktree']) say(name, () => fs.writeFileSync(path.join(entry, name), name === 'config.worktree' ? '[core]\\n\\thooksPath = /x\\n' : 'C:/elsewhere\\n'));
+// 4. A sibling task's branch, and the mission's integration branch.
+const common = cp.execFileSync('git', ['rev-parse', '--git-common-dir']).toString().trim();
+const own = cp.execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD']).toString().trim();
+const dir = path.join(common, 'refs', 'heads', path.dirname(own));
+for (const name of fs.readdirSync(dir)) if (name !== path.basename(own)) say('sibling-' + (name === 'integration' ? 'integration' : 'task'), () => fs.writeFileSync(path.join(dir, name), '0000000000000000000000000000000000000000\\n'));
+// 5. The worktree's pointer, turned to a Git directory of the task's own making, with a hook of its own.
+say('pointer', () => { fs.mkdirSync('evilgit/hooks', { recursive: true }); fs.writeFileSync('evilgit/hooks/pre-commit', hook); fs.writeFileSync('evilgit/HEAD', 'ref: refs/heads/main\\n'); fs.writeFileSync('.git', 'gitdir: ' + path.join(process.cwd(), 'evilgit').split(path.sep).join('/') + '\\n') });
+`
 
 d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
   let h: Harness
@@ -79,6 +100,17 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
         return out['powershell-mixed']
       })
       await ctx.useTool('Bash', { command: 'git checkout -q -- agent-file.txt; git status --short' }, async (effective) => runAs('Bash', effective))
+      // Contained code arms everything it can reach; then git runs for a command that is git alone, as the user.
+      await writeFiles(spec, ctx, { 'plant.cjs': PLANT })
+      for (const [name, command] of [
+        ['plant', 'node plant.cjs'],
+        ['armed-commit', 'git add -A 2>&1; git commit -q -m "after the plant" 2>&1; git log --oneline -1; git status --short'],
+      ] as const) {
+        await ctx.useTool('Bash', { command }, async (effective) => {
+          out[name] = runAs('Bash', effective)
+          return out[name]
+        })
+      }
       await ctx.completeTurn({ text: 'done' })
     }
     h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('alpha')]), worker }), autonomy: { profile: 'AUTONOMOUS_PROJECT' }, containment: { profile: 'ISOLATED', launcher }, baseDir: BASE })
@@ -115,6 +147,18 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     for (const name of ['other-branch', 'config', 'hook']) expect(out[name], `${name}: ${all}`).toMatch(/REFUSED:(EPERM|EACCES)/)
     expect(await git(h.repoDir, 'rev-parse', 'main')).toBe(mainBefore)
     expect(existsSync(join(h.repoDir, '.git', 'hooks', 'pre-commit'))).toBe(false)
+    // What contained code planted for a git that runs as the user. Its own temporary directory and home are
+    // its own to write, and are not where that git looks; the entry's three files and the branches of others
+    // are refused by Windows; the pointer is the worktree's own file, and that git does not read it.
+    for (const name of ['commondir', 'gitdir', 'config.worktree', 'sibling-integration']) expect(out['plant'], `${name}: ${all}`).toMatch(new RegExp(`${name}:REFUSED:(EPERM|EACCES)`))
+    // (Whether the pointer could be rewritten is not a control: where it could, the git that runs as the user is told its Git directory by NEXUS.)
+    expect(out['plant'], all).toContain('hooks:PLANTED')
+    expect(out['plant'], all).toContain('home:PLANTED')
+    // The commit after the plant was made in the real repository, on the task's branch, and no hook ran.
+    expect(out['armed-commit'], all).toContain('after the plant')
+    expect(out['armed-commit']).not.toMatch(/fatal:|error:/)
+    expect(existsSync(join(h.worktreesDir, run.id.slice(0, 8), 'alpha', 'ran-as-the-user.txt')), all).toBe(false)
+    expect(readdirSync(h.worktreesDir).flatMap((r) => readdirSync(join(h.worktreesDir, r)).flatMap((t) => (existsSync(join(h.worktreesDir, r, t, 'ran-as-the-user.txt')) ? [t] : []))), all).toEqual([])
     expect(end.state, all).toBe('completed')
     expect(h.autonomy.missionMetrics(run.id).boundaryRequests, all).toBe(0)
   }, 300_000)

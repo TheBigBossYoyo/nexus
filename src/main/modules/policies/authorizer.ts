@@ -1,4 +1,4 @@
-import { isGitWithFilters } from './git-pipeline'
+import { isGitWithFilters, isPlainGitPowerShell } from './git-pipeline'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -319,7 +319,9 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     const contained = ctx.autonomy?.contained === true
     const baseNeed = shellBaseNeed(cls)
     // git alone, or git with nothing but text filters around it: such a command runs where the repository is readable.
-    const gitOnly = cls.findings.length === 0 && cls.segments.length > 0 && (cls.segments.every((s) => s.command === 'git') || (shell === 'bash' && shellRoots[0] !== undefined && isGitWithFilters(command, shellRoots[0], shellRoots[0])))
+    // Decided by its own strict reading of the command, never by the absence of findings alone: what qualifies
+    // runs as the user.
+    const gitOnly = cls.findings.length === 0 && shellRoots[0] !== undefined && (shell === 'bash' ? isGitWithFilters(command, shellRoots[0], shellRoots[0]) : isPlainGitPowerShell(command))
     const shellInfo = { kind: shell, command, gitOnly } as const
     if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
       const findings = [

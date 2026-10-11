@@ -221,18 +221,49 @@ export class ExecutionBroker {
       paths.add(resolve(path))
     }
     await once(layout.commonDir, 'read', [`${sid}:(OI)(CI)(RX)`])
-    for (const dir of layout.writable) {
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-      // Objects are only ever added: who creates a file may finish writing it; nothing that is there is replaced or removed.
-      if (basename(dir).toLowerCase() === 'objects') await once(dir, 'add', [`${sid}:(OI)(CI)(RX,WD,AD)`, '*S-1-3-0:(OI)(CI)(IO)(F)'])
-      else await once(dir, 'modify', [`${sid}:(OI)(CI)(M)`])
-      await this.ensureLow(dir)
+    const common = resolve(layout.commonDir).toLowerCase()
+    for (const path of layout.writable) {
+      const isFile = existsSync(path) && statSync(path).isFile()
+      const isEntry = !isFile && basename(dirname(path)).toLowerCase() === 'worktrees' && resolve(path, '..', '..').toLowerCase() === common
+      if (isFile) {
+        // The task's own branch and its log: these two files, and no other ref, may be rewritten.
+        await once(path, 'modify-file', [`${sid}:(M)`])
+        continue
+      }
+      // A path that names a branch that does not exist yet as a file is not made into a directory.
+      if (!existsSync(path) && !isEntry && basename(path).toLowerCase() !== 'objects' && layout.writable.some((other) => other !== path && resolve(other).toLowerCase() === resolve(dirname(path)).toLowerCase())) continue
+      if (!existsSync(path)) mkdirSync(path, { recursive: true })
+      // The worktree's own entry is the account's to change. Everywhere else it may add and not replace: objects
+      // are only ever added, and among the refs it makes git's lock files, which it then owns, beside branches of
+      // other tasks that it cannot touch.
+      if (isEntry) await once(path, 'modify', [`${sid}:(OI)(CI)(M)`])
+      else await once(path, 'add', [`${sid}:(OI)(CI)(RX,WD,AD)`, '*S-1-3-0:(OI)(CI)(IO)(F)'])
+      await this.ensureLow(path)
+      if (isEntry) await this.pinWorktreeEntry(path)
     }
     if (paths.size !== (record[key] ?? []).length) {
       record[key] = [...paths]
       mkdirSync(this.deps.sandboxDir, { recursive: true })
       writeFileSync(this.grantsRecord(), JSON.stringify(record, null, 2))
     }
+  }
+
+  /**
+   * The three files of a worktree's entry that say where the repository is and what configuration applies are
+   * not the task's to write: `commondir`, `gitdir`, and `config.worktree` (made empty if it is not there, so
+   * that it cannot be made). Each gets a label of its own, above the one of the directory: code at low
+   * integrity, whichever account it runs as, can read them and not replace them.
+   */
+  private async pinWorktreeEntry(entry: string): Promise<void> {
+    const mark = `pinned|${resolve(entry).toLowerCase()}`
+    if (this.granted.has(mark)) return
+    const config = join(entry, 'config.worktree')
+    if (!existsSync(config)) writeFileSync(config, '')
+    for (const name of ['commondir', 'gitdir', 'config.worktree']) {
+      const file = join(entry, name)
+      if (existsSync(file)) await this.deps.launcher.label('medium', file)
+    }
+    this.granted.add(mark)
   }
 
   /** Takes back the access to every repository on record that is not one of `keep` (the Git directories of the projects still enrolled). */
@@ -287,7 +318,9 @@ export class ExecutionBroker {
       if (!within(sandbox.account.root, session.worktree)) throw new Error(`The worktree is not inside the sandbox root (${sandbox.account.root}), so the sandbox account cannot work in it.`)
       stateRoot = sandbox.account.root
     }
-    const base = join(stateRoot, 'sessions', shortHash(`${session.projectId}|${session.sessionKey}|${session.worktree}`))
+    // By instance: the sandbox root is the machine's, and two NEXUS instances (an installed one and a development
+    // one, or two test processes) each sweep only what is their own.
+    const base = join(stateRoot, 'sessions', shortHash(this.deps.sandboxDir), shortHash(`${session.projectId}|${session.sessionKey}|${session.worktree}`))
     const roots: SessionRoots = { worktree: session.worktree, temp: join(base, 'tmp'), home: join(base, 'home'), cache: join(stateRoot, 'cache', shortHash(session.projectId)) }
     await this.ensureLow(roots.worktree)
     await this.ensureLow(base)
@@ -444,12 +477,17 @@ export class ExecutionBroker {
       gitWritable?: readonly string[]
       /** The repository's Git directory (the common one). With it, under ISOLATED, the sandbox account is given what git needs there. */
       gitCommonDir?: string
+      /** The worktree's own Git directory, from NEXUS's record. A git-only command is pointed at it, whatever the worktree's `.git` file says. */
+      gitDir?: string
     },
   ): Promise<ContainResult> {
     const state = this.usable(input.profile)
     if (!state.usable) return this.fail(input.projectId, input.profile, `The ${input.profile} execution profile is not available, so the command was not run: ${state.detail}`)
     try {
-      const roots = await this.roots({ ...input, profile: input.sessionProfile === 'ISOLATED' ? 'ISOLATED' : input.profile })
+      // The directories of the profile the command runs under. A git that runs as the user in an ISOLATED
+      // session gets its home, its temporary directory, its empty hooks directory and its script where the
+      // sandbox account cannot write: nothing contained code left there is read by a process of the user.
+      const roots = await this.roots(input)
       // Whether git can read this repository from inside the command. Under ISOLATED that is so once the sandbox
       // account was given its access; a command that runs as the user (RESTRICTED) reads it anyway.
       let gitReadable = input.profile === 'RESTRICTED'
@@ -459,11 +497,18 @@ export class ExecutionBroker {
           () => true,
           () => false,
         )
-      } else if (input.gitOnly === true) for (const dir of input.gitWritable ?? []) if (existsSync(dir)) await this.ensureLow(dir)
+      } else if (input.gitOnly === true) {
+        const common = input.gitDir !== undefined ? resolve(input.gitDir, '..', '..').toLowerCase() : null
+        for (const dir of input.gitWritable ?? []) {
+          if (!existsSync(dir) || !statSync(dir).isDirectory()) continue
+          await this.ensureLow(dir)
+          if (common !== null && resolve(dir).toLowerCase() === resolve(input.gitDir as string).toLowerCase()) await this.pinWorktreeEntry(dir)
+        }
+      }
       const shells = await this.findShells()
       const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
       // git is hardened wherever it can reach the repository: in a command that is git alone, and in every command of a session whose account was given access.
-      const { env, withheld } = this.environment(input, roots, input.gitOnly === true || (input.profile === 'ISOLATED' && gitReadable) ? this.gitHardening(roots, input.profile === 'ISOLATED') : {})
+      const { env, withheld } = this.environment(input, roots, input.gitOnly === true || (input.profile === 'ISOLATED' && gitReadable) ? { ...this.gitHardening(roots, input.profile === 'ISOLATED'), ...(input.gitOnly === true ? this.gitPins(roots, input.gitDir) : {}) } : {})
       if (bash !== null) {
         // The copy's own tools first, then Git itself, so that `git`, `ls` and `grep` are what a Git Bash user expects.
         const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
@@ -636,6 +681,23 @@ export class ExecutionBroker {
     return env
   }
 
+  /**
+   * Where a git that runs for a git-only command looks: the Git directory NEXUS recorded for the worktree and
+   * the repository above it, said in its environment, so that the `.git` file of the worktree (which the task
+   * can rewrite) decides nothing; and an empty file as the user-level configuration.
+   */
+  private gitPins(roots: SessionRoots, gitDir: string | undefined): Record<string, string> {
+    const empty = join(roots.home, 'gitconfig-empty')
+    if (!existsSync(empty)) writeFileSync(empty, '')
+    const pins: Record<string, string> = { GIT_CONFIG_GLOBAL: empty, GIT_ATTR_NOSYSTEM: '1' }
+    if (gitDir !== undefined) {
+      pins['GIT_DIR'] = gitDir
+      pins['GIT_COMMON_DIR'] = resolve(gitDir, '..', '..')
+      pins['GIT_WORK_TREE'] = roots.worktree
+    }
+    return pins
+  }
+
   /** The launcher itself needs almost nothing; what the command gets is in its spec. */
   private launcherEnv(): Record<string, string> {
     const base = this.deps.baseEnv()
@@ -655,7 +717,7 @@ export class ExecutionBroker {
     let removed = 0
     const stateRoots = [this.deps.sandboxDir, ...(this.deps.account() ? [(this.deps.account() as SandboxAccount).root] : [])]
     for (const stateRoot of stateRoots) {
-      const sessions = join(stateRoot, 'sessions')
+      const sessions = join(stateRoot, 'sessions', shortHash(this.deps.sandboxDir))
       if (existsSync(sessions)) {
         for (const name of readdirSync(sessions)) {
           if (keepSessions(name)) continue

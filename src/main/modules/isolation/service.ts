@@ -40,6 +40,8 @@ export interface IsolationServiceDeps {
   gitWritable?: (worktree: string) => Promise<string[]>
   /** NEXUS's data directory: protected as a whole, except the worktrees and the sandbox state inside it. */
   dataDir: string
+  /** Where the sandbox account's record and protected credential are kept (`%LOCALAPPDATA%\\NexusSandbox`). Protected with the data directory. */
+  sandboxStateDir?: string | null
   logger?: (line: string) => void
 }
 
@@ -104,7 +106,10 @@ export class IsolationService {
     }
     // One enrolled repository cannot be protected from the code of another with a label: a label says who may
     // read by integrity, not by project. Only the sandbox account keeps projects apart.
-    const wanted = [this.deps.dataDir, ...(options.userStores ? credentialPaths() : [])].filter((p) => existsSync(p))
+    // The sandbox account's credential is NEXUS's own, like its data directory: a process of the user at low
+    // integrity has no business opening it.
+    const own = [this.deps.dataDir, ...(this.deps.sandboxStateDir ? [this.deps.sandboxStateDir] : [])]
+    const wanted = [...own, ...(options.userStores ? credentialPaths() : [])].filter((p) => existsSync(p))
     const done = new Set(known.map((p) => p.toLowerCase()))
     let changed = false
     for (const path of wanted) {

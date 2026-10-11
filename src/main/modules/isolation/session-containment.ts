@@ -55,7 +55,8 @@ export function createShellContainment(input: {
       const use: ContainmentProfile = options.gitOnly && profile === 'ISOLATED' && broker.usable('RESTRICTED').usable ? 'RESTRICTED' : profile
       const objects = gitWritable.find((dir) => basename(dir).toLowerCase() === 'objects')
       const gitCommonDir = use === 'ISOLATED' && objects !== undefined ? dirname(objects) : undefined
-      const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell, command, gitOnly: options.gitOnly, gitWritable, ...(gitCommonDir !== undefined ? { gitCommonDir } : {}) })
+      const gitDir = objects !== undefined ? gitWritable.find((dir) => basename(dirname(dir)).toLowerCase() === 'worktrees' && dirname(dirname(dir)).toLowerCase() === dirname(objects).toLowerCase()) : undefined
+      const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell, command, gitOnly: options.gitOnly, gitWritable, ...(gitCommonDir !== undefined ? { gitCommonDir } : {}), ...(gitDir !== undefined ? { gitDir } : {}) })
       if (!contained.ok) return { ok: false, reason: contained.reason }
       const [spec] = contained.args.slice(-1)
       const text = shell === 'bash' ? `${singleQuoted(contained.file)} --spec ${singleQuoted(spec as string)}` : `& ${psQuoted(contained.file)} --spec ${psQuoted(spec as string)}; exit $LASTEXITCODE`

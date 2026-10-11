@@ -390,6 +390,9 @@ export class GitService {
     if (own.branch !== null && own.branch.includes('/')) {
       const namespace = own.branch.split('/').slice(0, -1)
       writable.push(join(commonDir, 'refs', 'heads', ...namespace), join(commonDir, 'logs', 'refs', 'heads', ...namespace))
+      // The branch itself and its log, as files: the only refs the task may change. The directories above are
+      // where git makes its lock files; a sibling task's branch is in them and is not this task's to write.
+      writable.push(join(commonDir, 'refs', 'heads', ...own.branch.split('/')), join(commonDir, 'logs', 'refs', 'heads', ...own.branch.split('/')))
     }
     return { gitDir: own.gitDir, commonDir, branch: own.branch, writable }
   }
