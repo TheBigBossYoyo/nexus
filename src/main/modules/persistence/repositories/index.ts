@@ -43,6 +43,7 @@ import { ProviderSessionStore } from './provider'
 import { ControlIncidentStore, ControlScheduleStore, WorkItemStore } from './control-plane'
 import { ScheduleFiringStore, SchedulerDecisionStore, WorkerLeaseStore, WorkerStore } from './workers'
 import { FileProvenanceRepository, SecurityDecisionRepository } from './security'
+import { AutonomyAuditRepository, BoundaryRequestRepository, CapabilityGrantRepository, EnrollmentRepository } from './autonomy'
 import { contextGraphStores, type ContextGraphStores } from './context-graph'
 import {
   ArtifactContextRefStore,
@@ -202,6 +203,11 @@ export interface Repositories {
   releaseTrains: ReleaseTrainStore
   workspaceMemory: WorkspaceMemoryStore
   workspaceDecisions: WorkspaceDecisionStore
+  /** 0.8: enrolled projects, grants, boundary requests and the broker's audit log. */
+  enrollments: EnrollmentRepository
+  capabilityGrants: CapabilityGrantRepository
+  boundaryRequests: BoundaryRequestRepository
+  autonomyAudit: AutonomyAuditRepository
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -304,6 +310,10 @@ export function createRepositories(db: Database): Repositories {
     releaseTrains: new ReleaseTrainStore(db),
     workspaceMemory: new WorkspaceMemoryStore(db),
     workspaceDecisions: new WorkspaceDecisionStore(db),
+    enrollments: new EnrollmentRepository(db),
+    capabilityGrants: new CapabilityGrantRepository(db),
+    boundaryRequests: new BoundaryRequestRepository(db),
+    autonomyAudit: new AutonomyAuditRepository(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }

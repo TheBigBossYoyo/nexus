@@ -14,6 +14,7 @@ import { intelligenceSchema } from './013-intelligence'
 import { canonicalIntentsSchema } from './014-canonical-intents'
 import { capacityDirectorSchema } from './015-capacity-director'
 import { adviceOutcomesSchema } from './016-advice-outcomes'
+import { autonomySchema } from './017-autonomy'
 
 export interface Migration {
   version: number
@@ -39,4 +40,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 14, name: 'canonical-intents', sql: canonicalIntentsSchema },
   { version: 15, name: 'capacity-director', sql: capacityDirectorSchema },
   { version: 16, name: 'advice-outcomes', sql: adviceOutcomesSchema },
+  { version: 17, name: 'autonomy', sql: autonomySchema },
 ]
