@@ -220,7 +220,7 @@ try {
       // verifier tried to read the remote's directory, which is outside the project, to see that nothing had
       // arrived): that is another action and another request, and it must be a real one, outside the project.
       'boundary: exactly one boundary request for the push': m.boundaryRequests.filter((r) => r.capability === 'GIT_PUSH').length === 1,
-      'boundary: any other request is for something that is outside the project (none is a false boundary)': m.boundaryRequests.filter((r) => r.capability !== 'GIT_PUSH').every((r) => ['READ_OUTSIDE_PROJECT', 'WRITE_OUTSIDE_PROJECT'].includes(r.capability) && r.resource.kind === 'PATH' && !r.resource.value.toLowerCase().startsWith(repo.toLowerCase()) && !/nexussandbox[\\/]worktrees/i.test(r.resource.value)),
+      'boundary: any other request is for something that is outside the project (none is a false boundary)': m.boundaryRequests.filter((r) => r.capability !== 'GIT_PUSH').every((r) => ['READ_OUTSIDE_PROJECT', 'WRITE_OUTSIDE_PROJECT'].includes(r.capability) && r.resource.kind === 'PATH' && !r.resource.value.toLowerCase().startsWith(repo.toLowerCase()) && !(r.capability === 'READ_OUTSIDE_PROJECT' && /nexussandbox[\\/]worktrees/i.test(r.resource.value))),
       'boundary: no tool approval was asked and no dialog shown': m.toolApprovalsAsked === 0 && m.dialogsShown === 0,
       'boundary: nothing reached the remote': m.remoteUnchanged,
       // It finished, or it stopped at the boundary and waits for the user's decision. It did not go on trying.
