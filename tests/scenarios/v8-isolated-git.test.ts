@@ -60,6 +60,8 @@ say('nested', () => {
   for (const h of ['pre-commit', 'post-index-change', 'reference-transaction']) fs.writeFileSync(path.join(sub, 'hooks', h), hook);
   fs.writeFileSync(path.join(sub, 's.txt'), 's changed\\n');
 });
+// 7. The places git takes whole sets of objects from on trust: a pack, another object store, a commit-graph.
+for (const name of ['pack/pack-0000000000000000000000000000000000000000.idx', 'info/alternates', 'info/commit-graph']) say('objects-' + name.split('/')[0] + '-' + name.split('/')[1].split('-')[0].split('.')[0], () => fs.writeFileSync(path.join(common, 'objects', name), 'x'));
 // 5. The worktree's pointer, turned to a Git directory of the task's own making, with a hook of its own.
 say('pointer', () => { fs.mkdirSync('evilgit/hooks', { recursive: true }); fs.writeFileSync('evilgit/hooks/pre-commit', hook); fs.writeFileSync('evilgit/HEAD', 'ref: refs/heads/main\\n'); fs.writeFileSync('.git', 'gitdir: ' + path.join(process.cwd(), 'evilgit').split(path.sep).join('/') + '\\n') });
 `
@@ -161,7 +163,7 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     // What contained code planted for a git that runs as the user. Its own temporary directory and home are
     // its own to write, and are not where that git looks; the entry's three files and the branches of others
     // are refused by Windows; the pointer is the worktree's own file, and that git does not read it.
-    for (const name of ['commondir', 'gitdir', 'config.worktree', 'sibling-integration']) expect(out['plant'], `${name}: ${all}`).toMatch(new RegExp(`${name}:REFUSED:(EPERM|EACCES)`))
+    for (const name of ['commondir', 'gitdir', 'config.worktree', 'sibling-integration', 'objects-pack-pack', 'objects-info-alternates', 'objects-info-commit']) expect(out['plant'], `${name}: ${all}`).toMatch(new RegExp(`${name}:REFUSED:(EPERM|EACCES)`))
     // (Whether the pointer could be rewritten is not a control: where it could, the git that runs as the user is told its Git directory by NEXUS.)
     expect(out['plant'], all).toContain('hooks:PLANTED')
     expect(out['plant'], all).toContain('nested:PLANTED')

@@ -250,6 +250,7 @@ export class ExecutionBroker {
       else await once(path, 'add', [`${sid}:(OI)(CI)(RX,WD,AD)`, '*S-1-3-0:(OI)(CI)(IO)(F)'])
       await this.ensureLow(path)
       if (isEntry) await this.pinWorktreeEntry(path)
+      if (basename(path).toLowerCase() === 'objects') await this.pinObjectStore(path)
     }
     if (paths.size !== (record[key] ?? []).length) {
       record[key] = [...paths]
@@ -272,6 +273,24 @@ export class ExecutionBroker {
     for (const name of ['commondir', 'gitdir', 'config.worktree']) {
       const file = join(entry, name)
       if (existsSync(file)) await this.deps.launcher.label('medium', file)
+    }
+    this.granted.add(mark)
+  }
+
+  /**
+   * Contained code adds objects one file at a time, in the two-letter directories. It has no business in the
+   * places from which git takes whole sets of objects on trust: a pack with an index of its own making can
+   * stand in for an object the repository already has, `info/alternates` names another object store, and a
+   * commit-graph answers which commit descends from which. Those directories carry a label of their own:
+   * code at low integrity reads them and writes nothing there, under either profile.
+   */
+  private async pinObjectStore(objects: string): Promise<void> {
+    const mark = `objects|${resolve(objects).toLowerCase()}`
+    if (this.granted.has(mark)) return
+    for (const name of ['pack', 'info']) {
+      const dir = join(objects, name)
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      await this.deps.launcher.label('medium', dir)
     }
     this.granted.add(mark)
   }
@@ -513,6 +532,7 @@ export class ExecutionBroker {
           if (!existsSync(dir) || !statSync(dir).isDirectory()) continue
           await this.ensureLow(dir)
           if (common !== null && resolve(dir).toLowerCase() === resolve(input.gitDir as string).toLowerCase()) await this.pinWorktreeEntry(dir)
+          if (basename(dir).toLowerCase() === 'objects') await this.pinObjectStore(dir)
         }
       }
       const shells = await this.findShells()
