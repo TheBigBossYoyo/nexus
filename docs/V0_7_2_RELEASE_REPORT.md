@@ -231,7 +231,7 @@ from an earlier commit.
 | End-to-end (`pnpm test:e2e`) | 35 passed, 0 failed, 3 skipped (capture specs that run on request). It holds the eleven visual baselines and the accessibility check of every page in both themes, with keyboard order, names, states and contrast |
 | Stress (`pnpm stress`, every file but the orchestrator seeds) | 11 files, 18 tests passed, 1 skipped: Arena, Context Graph, control plane and its runtime (scheduling and recovery), Overnight and its workloads, policy, Program, usage, Workspace, and the new `intelligence-stress` (Task Compiler, Director gateway, ChatGPT capacity registry, capacity kernel, depth policy; 300 seeds each) |
 | 1,000 orchestrator seeds | Passed. Seeds 1 to 1,000 with the test's own switches (`NEXUS_STRESS_START`, `NEXUS_STRESS_RUNS`), the same seeds and assertions as one run, in batches of 250 and 125 so that each batch gives its memory back. Test processes stayed near 0.7 GB together |
-| Package | PACKAGE_LINE_PENDING |
+| Package | `release/v0.7.2/NEXUS-Setup-0.7.2.exe`, 208,194,604 bytes, built from `4c75a98` (the release source with its documents) on a clean tree. The unpacked application was started and walked through by `scripts/v72-packaged-check.mjs`: identity (version 0.7.2, that commit, not dirty, schema 16), runtime ready with its endpoint restricted, a worker started (claude and codex), a project opened, every page rendered, no mission and no overnight run left, signed out of ChatGPT, no renderer error: all true. The installer itself was not run |
 
 How the seeds were obtained, because it took more than one attempt. On `91fa759`, which is this source but
 for its version string, all 1,000 passed in one go. On `be46477`, seeds 1 to 750 passed at the first attempt.
