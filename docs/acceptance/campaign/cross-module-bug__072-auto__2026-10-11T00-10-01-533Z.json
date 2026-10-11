@@ -1,0 +1,271 @@
+{
+  "kind": "campaign-run",
+  "task": "cross-module-bug",
+  "category": "cross-module bug",
+  "arm": "072-auto",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection",
+  "compilation": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 21724,
+    "recommendations": 8,
+    "recommendationChars": 2556,
+    "byKind": {
+      "UNKNOWN": 2,
+      "REQUIREMENT": 3,
+      "ACCEPTANCE": 2,
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 816,
+          "outputTokens": 698,
+          "totalTokens": 1514,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 951,
+          "outputTokens": 63,
+          "totalTokens": 1014,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 29
+        }
+      }
+    ]
+  },
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T00:10:01.533Z",
+  "finishedAt": "2026-10-11T00:14:55.265Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "shopfront",
+        "ref": "nexus/2b66c0ef/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 14,
+          "fail": 0,
+          "output": "✔ order 0: the cart follows the money rules (0.714ms)\n✔ order 0: the invoice follows the money rules and equals the cart (0.1491ms)\n✔ order 1: the cart follows the money rules (0.0683ms)\n✔ order 1: the invoice follows the money rules and equals the cart (0.063ms)\n✔ order 2: the cart follows the money rules (0.0881ms)\n✔ order 2: the invoice follows the money rules and equals the cart (0.0653ms)\n✔ order 3: the cart follows the money rules (0.056ms)\n✔ order 3: the invoice follows the money rules and equals the cart (0.05ms)\n✔ order 4: the cart follows the money rules (0.0691ms)\n✔ order 4: the invoice follows the money rules and equals the cart (0.1276ms)\n✔ order 5: the cart follows the money rules (0.0603ms)\n✔ order 5: the invoice follows the money rules and equals the cart (0.0456ms)\n✔ order 6: the cart follows the money rules (0.0635ms)\n✔ order 6: the invoice follows the money rules and equals the cart (0.0426ms)\nℹ tests 14\nℹ suites 0\nℹ pass 14\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 91.0331\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 17,
+          "fail": 0,
+          "output": "✔ a cart without discount or tax is the sum of its lines (0.7142ms)\n✔ cartTotal: three 35-cent lines at 15% / 20% (0.114ms)\n✔ cartTotal: one 35-cent line x3 at 15% / 20% (0.7952ms)\n✔ cartTotal: one 50-cent item at 15% / 20% (0.0795ms)\n✔ cartTotal: tax half-cent boundary (0.0865ms)\n✔ cartTotal: mixed multi-line order (0.068ms)\n✔ an invoice without discount or tax is the sum of its lines (1.3018ms)\n✔ buildInvoice: three 35-cent lines at 15% / 20% (0.5748ms)\n✔ buildInvoice: one 35-cent line x3 at 15% / 20% (0.1311ms)\n✔ buildInvoice: one 50-cent item at 15% / 20% (0.1061ms)\n✔ buildInvoice: tax half-cent boundary (0.1615ms)\n✔ buildInvoice: mixed multi-line order (0.1411ms)\n✔ invoice lines carry only the gross amount (0.1519ms)\n✔ three 35-cent lines: discount and tax are rounded once on the order (1.046ms)\n✔ discount 7.5 rounds up and tax 8.4 rounds down (0.1411ms)\n✔ tax of exactly half a cent rounds up (0.0974ms)\n✔ mixed multi-line order differs from per-line rounding (0.1084ms)\nℹ tests 17\nℹ suites 0\nℹ pass 17\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 181.6096\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "shared-order-totals",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "review-money-rules",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 2,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"d9af46ff-1b8a-4fea-8c91-868d9352deac\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}",
+        "{\"approvalId\":\"9d94d642-797b-44ff-a5ad-95366bd7b21f\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "reviewer: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  or tax is the sum of its lines\n✔ buildInvoice: three 35-cent lines at 15% / 20%\n✔ buildInvoice: one 35-cent line x3 at 15% / 20%\n✔ buildInvoice: one 50-cent item at 15% / 20%\n✔ buildInvoice: tax half-cent boundary\n✔ buildInvoice: mixed multi-line order\n✔ invoice lines carry only the gross amount\n✔ three 35-cent lines: discount and tax are rounded once on the order\n✔ discount 7.5 rounds up and tax 8.4 rounds down\n✔ tax of exactly half a cent rounds up\n✔ mixed multi-line order differs from per-line rounding\nℹ tests 17\nℹ pass 17\nℹ fail 0\n```\n\nI created no scratch files. The commit printed LF-to-CRLF warnings for the changed files; that is a line-ending conversion notice from git, not an error.",
+        "reviewer: ",
+        "verifier: ",
+        "reviewer: ues (the reviewer role could not execute `node -e`, so this is not run): subtotal 10000 at 1.005% is exactly 100.5 cents and should give 101, but `10000 * 1.005` evaluates to 10049.999999999998, which gives 100.\n- MONEY.md does not say whether percentages are integers, so this is not a violation of the rules as written.\n- Suggested correction: only if fractional rates are in scope, state in MONEY.md that percentages are integers, or carry rates as integer basis points and round with integer arithmetic.\n\n**Nit — mid-file import** (`src/invoice/invoice.test.js:11`): `import { cartTotal }` sits after the first test rather than with the imports at lines 1-3. It works because imports are hoisted.",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/shared-order-totals [medium] Run shell command (bash): cat > src/cart/total.js <<'EOF'\nimport { orderTotals } from '../money.js'\n\n/** The total of a cart in cents. `order` is { items: [{ priceCents, quantity }], discountPercent, taxPercent }. */\nexport function cartTotal(order) {\n  return orderTotals(order).total\n}\nEOF\ncat > src/invoice/invoice.js <<'EO | the script path is computed at run time and cannot be inspected",
+        "Reviewer/shared-order-totals [high] Run shell command (bash): cat src/money.js docs/MONEY.md package.json; git status --short; git diff --stat HEAD~1; grep -rn \"\\.net\\|\\.lines\\|l\\.tax\\|buildInvoice\\|cartTotal\" --include=*.js --include=*.md --include=*.json . --exclude-dir=node_modules --exclude-dir=.git | grep -v \"test.js\"; ls -R . | grep -v node_modules | hea | path outside the worktree: \\.net\\|\\.lines\\|l\\.tax\\|buildInvoice\\|cartTotal; touching Git's own files: .git"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 6,
+    "turns": 57,
+    "inputTokensUncached": 27172,
+    "outputTokens": 30450,
+    "cacheCreationTokens": 89019,
+    "cacheReadTokens": 515087,
+    "costUsdReported": 1.3431,
+    "toolCalls": 51,
+    "toolCallsRecorded": 51,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 28,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Read": 13,
+      "Grep": 2,
+      "Glob": 1,
+      "mcp__nexus__context_search": 1
+    },
+    "contextToolCalls": [
+      "verifier: context_search {\"query\":\"shared-order-totals report root cause npm test output\"}"
+    ],
+    "deniedToolCalls": 9,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 23,
+        "toolCalls": 21,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 20,
+        "toolCalls": 18,
+        "contextToolCalls": 1
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 291636,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 22
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

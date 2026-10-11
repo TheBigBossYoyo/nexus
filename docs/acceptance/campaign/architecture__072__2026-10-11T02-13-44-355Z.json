@@ -1,0 +1,231 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T02:13:44.355Z",
+  "finishedAt": "2026-10-11T02:18:46.161Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/f8ec914f/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (1.611ms)\n✔ an unknown format names itself and the known formats (0.2846ms)\n✔ a format is added from outside, without touching the module (0.1305ms)\n✔ registering a name twice throws and keeps the first exporter (0.0926ms)\n✔ the decision is recorded with its three sections (7.8186ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 85.9349\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 14,
+          "fail": 0,
+          "output": "✔ json output (0.605ms)\n✔ csv output (0.1247ms)\n✔ listFormats returns the default formats sorted (0.5451ms)\n✔ json output matches the literal report bytes (0.079ms)\n✔ csv output matches the literal report bytes (0.094ms)\n✔ json output for empty rows (0.072ms)\n✔ csv output for empty rows (0.0632ms)\n✔ csv writes null and undefined values as empty cells (0.0802ms)\n✔ csv does not quote or escape values (0.085ms)\n✔ exportData uses a registered custom exporter (0.1276ms)\n✔ listFormats stays sorted after registering names out of order (0.142ms)\n✔ registering a custom name twice throws and keeps the first exporter (0.2711ms)\n✔ registering json again throws and keeps the default exporter (0.0855ms)\n✔ unknown format error names the format and lists the known formats (0.1174ms)\nℹ tests 14\nℹ suites 0\nℹ pass 14\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 121.8245\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "exporter-registry-fix1",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"57d84904-4256-4b3c-bb21-3f9638e72c6b\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [
+        "{\"id\":\"8acd076e-b49e-4fcb-aff8-15c1ebdd3950\",\"runId\":\"f8ec914f-0c59-4bdf-963e-071c621fcea7\",\"taskId\":\"19ccfc6d-58a0-45cd-b7ab-cb4dd55eeb79\",\"agentId\":\"5d6384ed-b100-4820-84f3-51711ec941b2\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"The work is not done: nothing was implemented. The worktree is identical to commit ad1406a (`git status --short` and `git diff --stat ad1406a` are both empty), which matches the implementer's own report that their command was denied and no file was written. `src/export/index.js` is still the original switch exporting only `exportData`; there is no `src/export/formats/` directory, no ADR, and no new tests. `npm test` exits 0, but only because the two original tests pass against the untouched code. 13 of 16 criteria fail. The three that pass are the json/csv output criteria, which hold only because the original code is unchanged; I confirmed them by"
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: I tried to run the whole implementation as one shell command, and you denied it, so nothing was written or tested. I haven't changed any file in the worktree.\n\nThe command would have:\n- created `src/export/formats/json.js` and `src/export/formats/csv.js`;\n- rewritten `src/export/index.js` as the registry;\n- created `docs/adr/0001-exporter-registry.md`;\n- appended the new tests to `src/export/index.test.js`;\n- run `npm test`.\n\nTell me if the single batched command was the problem. I can redo it with the dedicated file tools, one file at a time, or in some other way you prefer.",
+        "verifier: ",
+        "debugger: 2ms)\n✔ csv output matches the literal report bytes (0.0845ms)\n✔ json output for empty rows (0.082ms)\n✔ csv output for empty rows (0.0544ms)\n✔ csv writes null and undefined values as empty cells (0.0732ms)\n✔ csv does not quote or escape values (0.0819ms)\n✔ exportData uses a registered custom exporter (0.1255ms)\n✔ listFormats stays sorted after registering names out of order (0.1512ms)\n✔ registering a custom name twice throws and keeps the first exporter (0.262ms)\n✔ registering json again throws and keeps the default exporter (0.0853ms)\n✔ unknown format error names the format and lists the known formats (0.1308ms)\nℹ tests 14\nℹ pass 14\nℹ fail 0\n```\n\n`README.md` and `package.json` are untouched.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: the known ones. This matches `index.js` lines 7–22.\n- **Built-in formats:** `json` and `csv` are registered by default from `src/export/formats/`, with the output unchanged.\n- **Adding a format:** a new module imports `registerExporter` and calls it, with no existing file edited.\n- **Consequences:** it covers the points you listed: a format is only available once its module is imported, the registry is global with no unregister, and name clashes fail loudly. It also notes that the format modules must not import `index.js` because of the ESM import cycle, that arguments aren't validated, and that csv still does no quoting or escaping.\n\nI didn't run `npm test`, since this task changes no code.",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/exporter-registry [medium] Run shell command (bash): mkdir -p src/export/formats docs/adr\ncat > src/export/formats/json.js <<'E'\nexport function json(rows) {\n  return JSON.stringify(rows, null, 2) + '\\n'\n}\nE\ncat > src/export/formats/csv.js <<'E'\nexport function csv(rows) {\n  if (rows.length === 0) return ''\n  const columns = Object.keys(rows[0])\n  con | Two does not exist yet; another part of this command may create it; Registering does not exist yet; another part of this command may create it; csv.js does not exist yet; another part of this command "
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 9,
+    "turns": 76,
+    "inputTokensUncached": 32825,
+    "outputTokens": 30753,
+    "cacheCreationTokens": 91127,
+    "cacheReadTokens": 581148,
+    "costUsdReported": 1.4081,
+    "toolCalls": 67,
+    "toolCallsRecorded": 67,
+    "filesChangedRecorded": 5,
+    "toolCallsByName": {
+      "Bash": 33,
+      "StructuredOutput": 6,
+      "Read": 22,
+      "Glob": 1,
+      "Write": 5
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 8,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 4,
+        "turns": 46,
+        "toolCalls": 42,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 12,
+        "toolCalls": 11,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 300163,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 33
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 35
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,199 @@
+{
+  "kind": "campaign-run",
+  "task": "feature",
+  "category": "normal feature",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T02:07:17.825Z",
+  "finishedAt": "2026-10-11T02:10:25.969Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "addressbook",
+        "ref": "nexus/85766464/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ header row, columns in order, byte order mark and CRLF after every line (0.7382ms)\n✔ an empty address book is the header alone (0.1788ms)\n✔ missing values are empty fields (0.1601ms)\n✔ fields with a comma, a quote or a line break are quoted, and quotes are doubled (0.7699ms)\n✔ contacts keep the order given (0.1694ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 117.5506\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ the CSV export starts with the byte order mark and the header row (0.6709ms)\n✔ every line ends with CRLF, the last one too, without a blank line (0.1043ms)\n✔ the empty list gives the BOM and the header only (0.6227ms)\n✔ missing and null values are empty fields (0.1096ms)\n✔ a comma or a double quote encloses the field in quotes (0.124ms)\n✔ a line feed or a carriage return encloses the field, content preserved (0.1079ms)\n✔ plain and empty fields are not quoted (0.1401ms)\n✔ contacts keep their input order (0.1145ms)\n✔ the JSON export starts with the byte order mark and parses (0.9403ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 148.2705\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "csv-export",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (xxd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  changed.\n\n**Behaviour:**\n- **Format:** the output starts with the BOM and the `name,email,phone` header, and every line ends in CRLF, the last one included.\n- **Quoting:** only fields containing a comma, double quote, CR or LF are quoted, with inner quotes doubled.\n- **Missing values:** `undefined` and `null` become empty fields.\n- **Order:** rows come out in input order.\n\n**Tests:** `src/export/csv.test.js` covers every case you listed, and most assert on the exact full output string.\n\nGit printed a warning on commit that LF in the two new files will be converted to CRLF the next time Git touches them. I left line endings alone. The existing files were not checked for how they handle this.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 48,
+    "inputTokensUncached": 15302,
+    "outputTokens": 17158,
+    "cacheCreationTokens": 35733,
+    "cacheReadTokens": 331720,
+    "costUsdReported": 0.6615,
+    "toolCalls": 43,
+    "toolCallsRecorded": 43,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 14,
+      "Read": 15,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Grep": 8
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 11,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 21,
+        "toolCalls": 19,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 185301,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 30
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 31
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -18,6 +18,8 @@ interface Run {
   task: string
   arm: '070' | '071' | '071-graph' | '072' | '072-auto'
   nexusVersion: string
+  nexusCommit?: string
+  startedAt?: string
   quality: { completed: boolean; hiddenPassed: boolean; firstPassAllPassed: boolean; findingsBySeverity: Record<string, number>; repairs: number; regressions: string[]; humanIntervention: { approvalsRequestedAndRefused: number; pauses: string[] } }
   efficiency: { turns: number; inputTokensUncached: number; cacheCreationTokens: number; cacheReadTokens: number; outputTokens: number; wallMs: number; contextToolCalls: string[] }
 }
@@ -77,12 +79,17 @@ describe('real quality campaign through the quality gate', () => {
     const started = (arm: Run['arm']): TrialOutcome[] => runs.filter((r) => r.arm === arm && !String((r.quality as { finalState?: string }).finalState ?? '').startsWith('not started')).map(trial)
     if (of('072').length === 0) return
     const base = of('071-graph')
-    const gates: Record<string, GateResult> = { '072': evaluateGate(base, of('072')), ...(started('072-auto').length ? { '072-auto': evaluateGate(base, started('072-auto')) } : {}) }
+    // The EXACT arm ran on several commits of the branch. Its runs on the newest of them are judged apart: what an
+    // earlier commit did before a defect was fixed is evidence of the defect, and stays in the first comparison.
+    const exact = runs.filter((r) => r.arm === '072')
+    const finalSource = [...exact].sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).at(-1)?.nexusCommit ?? null
+    const onFinal = exact.filter((r) => finalSource !== null && r.nexusCommit === finalSource).map(trial)
+    const gates: Record<string, GateResult> = { '072': evaluateGate(base, of('072')), ...(onFinal.length && onFinal.length < exact.length ? { '072-final-source': evaluateGate(base, onFinal) } : {}), ...(started('072-auto').length ? { '072-auto': evaluateGate(base, started('072-auto')) } : {}) }
     const line = (name: string, g: GateResult): string => `${name}: ${g.verdict} over ${g.pairs} paired cases; pass rate ${(g.baselinePassRate * 100).toFixed(0)}% -> ${(g.optimizedPassRate * 100).toFixed(0)}%; regressions ${g.regressions.length}`
     console.log(`\ncampaign gate, 0.7.2 against 0.7.1 with the Context Graph (its released default)\n${Object.entries(gates).map(([k, g]) => line(`071-graph -> ${k}`, g)).join('\n')}`)
     if (process.env['NEXUS_WRITE_BENCHMARK'] === '1') {
       const count = (arm: Run['arm']): Record<string, number> => Object.fromEntries(CAMPAIGN_TASKS.map((t) => [t.key, runs.filter((r) => r.arm === arm && r.task === t.key).length]))
-      writeFileSync(join(resolve(DIR, '..'), 'campaign-gate-072.json'), `${JSON.stringify({ kind: 'campaign-gate-072', at: new Date().toISOString(), baseline: '071-graph', runsPerCell: { '071-graph': count('071-graph'), '072': count('072'), '072-auto': count('072-auto') }, gates }, null, 2)}\n`)
+      writeFileSync(join(resolve(DIR, '..'), 'campaign-gate-072.json'), `${JSON.stringify({ kind: 'campaign-gate-072', at: new Date().toISOString(), baseline: '071-graph', finalSource, runsOnFinalSource: onFinal.length, runsPerCell: { '071-graph': count('071-graph'), '072': count('072'), '072-auto': count('072-auto') }, gates }, null, 2)}\n`)
     }
     for (const g of Object.values(gates)) if (g.pairs < 8) expect(g.mayBecomeDefault).toBe(false)
   })

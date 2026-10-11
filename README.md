@@ -27,6 +27,15 @@ Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/
 [CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md), [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md),
 [PROMPT_CACHING](docs/PROMPT_CACHING.md), [CONTEXT_LIFECYCLE](docs/CONTEXT_LIFECYCLE.md).
 
+## 0.7.2: in development, not released
+
+The branch `nexus-0.7.2-director-ui-compiler` adds a sign-in with ChatGPT, a Strategic and a Technical Director
+and a Council that advise and never act, a Task Compiler that admits every request as a specification before
+work starts, capacity admission for every agent session, and the 2.0 interface on every view. Its verdict is
+PARTIAL: what it set out to build is built and verified, and findings of medium severity are still open. It is
+not merged and has no tag. What was verified, what it costs and what is missing:
+[V0_7_2_RELEASE_REPORT](docs/V0_7_2_RELEASE_REPORT.md).
+
 ## 0.7.1: context, memory and token intelligence
 
 This section describes 0.7.1 as it is implemented. What was measured, what is on by default and what is not

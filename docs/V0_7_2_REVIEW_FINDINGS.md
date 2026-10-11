@@ -60,7 +60,7 @@ record limits cannot be reached; changing the agent limit does not strand admitt
 | 3.2 | HIGH | When the dispatch itself throws (a missing CLI), the leases are quarantined with no handle to confirm the stop, and stay held for the life of the process; the same shape exists in the advisory lane when the adapter cannot be created | | FIXED `edc5577`: no handle means nothing was started; the leases are released. The same in the advisory lane |
 | 3.3 | MEDIUM | An exception while releasing in the `finally` block leaves the leases HELD, skips the outcome record and ends the event stream without `session.ended` | | FIXED `edc5577`: a failed release no longer takes the terminal event and the outcome with it; the leases are settled on the next pass |
 | 3.4 | MEDIUM | Claude observations are applied to whatever account profile is current: after an account switch, the limits of account A can be written into the pool of account B | | OPEN |
-| 3.5 | MEDIUM | Truthfulness of facts: a reset time and a utilization are stamped as observed now when the observation is older; a percentage kept across later events is shown as fresh; a retry time from local policy is stored as provider-reported; a concurrent observation can be overwritten by a stale copy | | OPEN |
+| 3.5 | MEDIUM | Truthfulness of facts: a reset time and a utilization are stamped as observed now when the observation is older; a percentage kept across later events is shown as fresh; a retry time from local policy is stored as provider-reported; a concurrent observation can be overwritten by a stale copy | | PARTLY FIXED `ca43de4`: a reset time and a utilization keep the time they were observed, through the usage service, the pools and the routing; a value kept across later events keeps its first time. The retry time from local policy and the overwrite by a stale copy: OPEN |
 | 3.6 | MEDIUM | HTTP leases of an earlier start are reclaimed only at boot; with a reused process id the single OpenAI slot stays quarantined until the next restart | | OPEN |
 | 3.7 | MEDIUM | Recovery assesses every waiting session against the same free slot and resumes them all; all but one wait again, every 2 s | | FIXED `1403123`: one run is resumed per pass |
 | 3.8 | LOW | After a quota or authentication refusal the routing record stays WAITING with no outcome, although a request was sent | | OPEN |
@@ -223,7 +223,7 @@ of 2,000 characters, about 50,000 for one of 20,000.
 |---|---|---|---|---|
 | 9.1 | HIGH | With a compiled specification the request is rendered without the 8,000 character limit, and is added to every worker's first pack, which never carried it: a 20,000 character request is in the planner, every worker session and the mission verifier (32,000 is the only bound) | | FIXED `b66f758` for workers: their copy keeps the 8,000 character limit and says so. The planner and the mission verifier read the request whole, on purpose: they answer for all of it. Tests on size and on copies |
 | 9.2 | HIGH | The compiled advice (up to 8,000 characters) is added to every worker pack, the planner and the mission verifier, although the planner has already turned it into tasks | | FIXED `01ebf97`: a worker reads the constraints, non-goals, risks and assumptions; the rest stays with the planner and the mission verifier. Asserted in the default-path scenario |
-| 9.3 | HIGH | The default AUTO path costs two ChatGPT calls before planning, three for TECHNICAL and four for COUNCIL (chosen by common words), the last two with a Claude session on the strongest model; without ChatGPT a mission in AUTO cannot start | | OPEN |
+| 9.3 | HIGH | The default AUTO path costs two ChatGPT calls before planning, three for TECHNICAL and four for COUNCIL (chosen by common words), the last two with a Claude session on the strongest model; without ChatGPT a mission in AUTO cannot start | | MEASURED, OPEN as a cost: in the real campaign a mission admitted in the default depth used 18% more turns and 18% more input than on 0.7.1 over six categories (twelve runs, every hidden evaluation passed); admitted in EXACT it used 5% more turns and 3% more input over twenty-two runs, within the noise. Compiling took 19 to 24 s for STANDARD, 53 s for TECHNICAL, 106 s for COUNCIL. The release claims no saving; the report states the cost. Whether AUTO stays the default is the user's decision |
 | 9.4 | MEDIUM | A session that only waited for capacity writes a session-efficiency row with no turns, and the campaign runner counts it as a session | | OPEN |
 | 9.5 | MEDIUM | Compiler and Director spend is kept only as receipts on routing records, with no run or mission, and appears nowhere in the Usage page | | OPEN |
 | 9.6 | MEDIUM | `withAdmittedIntent` carries the raw text twice (as intent and as the first goal); Program and Workspace runs embed that blob in the run's prompt, which every later prompt repeats; the new sections are not itemized as pack entries | | OPEN |
@@ -348,6 +348,17 @@ panel of a paused mission, the signed-in ChatGPT card and its switch, the loadin
 | U2.5 | LOW | The preview button is not the main button of its panel; at 1024 the header drops the approvals count; three sidebar entries share an icon; "Adaptive (recommended)" is cut in its select at 1024 | Screenshot | OPEN |
 | U2.6 | LOW | "Not connected" on Providers, "signed out" on Usage | Screenshot | FIXED |
 
+| R.9 | HIGH | The program cell of the real campaign paused three runs of three on 0.7.2. The mission planner asked its verifier task for a `node -e` probe, which the verifier role may not run; the verifier reported a blocker, the mission paused for intervention and the program with it until its budget ended. Not a change of 0.7.2: the planner and the verifier are told the same as in 0.7.1 | Real campaign; the run's database, read while it ran | FIXED `be766d7`: the planner is told what a read-only task can run and that behaviour to exercise belongs in a test a worker writes. On that commit the cell completed five of five with the hidden evaluation passed |
+| R.10 | MEDIUM | A control run of the same cell on the 0.7.1 sources paused too: a task's verifier failed a finished task on mission criteria that only a later task could meet, and its repair had nothing to fix | Real campaign, `program__071-graph__control-observed-2026-10-11T04-28-10Z.json` | FIXED `be766d7`: mission criteria shown with a task say that the task answers for them as far as its own scope goes. Test |
+| R.11 | LOW | A repair session that made a scratch directory in its worktree could not delete it (the deletion was refused) and reported the task failed for that alone. Once in seven runs of the localized-bug cell on 0.7.2. The same cell failed once in six on 0.7.1 with the same two tasks failed; why was not recorded then | Real campaign | OPEN |
+| R.12 | LOW | The security cell ends paused in every arm of every version, with its hidden evaluation passed: the planner adds a review task whose reviewer reports a finding nobody is there to answer | Real campaign | OPEN, as in 0.7.1 |
+
+## Count on 2026-10-11
+
+1 CRITICAL, 33 HIGH, 59 MEDIUM and 40 LOW rows. The CRITICAL is fixed. Thirty-two HIGH are fixed; 9.3 is measured
+and stays open as a cost the report states. Nineteen MEDIUM are fixed and forty are open or partly open: that
+is why the verdict is PARTIAL. Thirty-five LOW are open.
+
 ## Count on 2026-10-10, after fourteen reviews (the two of the UI in their first round)
 
 First six reviews: 1 CRITICAL, 10 HIGH (two of them one defect seen twice), about 25 MEDIUM, the rest LOW.
@@ -365,5 +376,7 @@ Open and HIGH:
 - 9.3: the default AUTO depth costs two to four provider calls before planning. This is what the feature is;
   what is open is that nothing measured says the 0.7.1 saving survives it. The release report may not claim it.
 - 10.1: no switch per project.
+
+Since then: the workspace half of 6.3 and 10.1 are fixed (their rows say where), and 9.3 is measured.
 
 0.7.2 cannot pass its gate while a CRITICAL or a HIGH that contradicts a release claim is open.

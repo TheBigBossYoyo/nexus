@@ -1,0 +1,256 @@
+{
+  "kind": "campaign-run",
+  "task": "feature",
+  "category": "normal feature",
+  "arm": "072-auto",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection",
+  "compilation": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 19106,
+    "recommendations": 7,
+    "recommendationChars": 2003,
+    "byKind": {
+      "REQUIREMENT": 2,
+      "ACCEPTANCE": 1,
+      "UNKNOWN": 1,
+      "VERIFICATION": 2,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 812,
+          "outputTokens": 588,
+          "totalTokens": 1400,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 854,
+          "outputTokens": 58,
+          "totalTokens": 912,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 24
+        }
+      }
+    ]
+  },
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T00:15:02.635Z",
+  "finishedAt": "2026-10-11T00:18:24.989Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "addressbook",
+        "ref": "nexus/759530ee/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ header row, columns in order, byte order mark and CRLF after every line (1.1747ms)\n✔ an empty address book is the header alone (0.1421ms)\n✔ missing values are empty fields (0.1218ms)\n✔ fields with a comma, a quote or a line break are quoted, and quotes are doubled (0.8894ms)\n✔ contacts keep the order given (0.3019ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 165.6309\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 10,
+          "fail": 0,
+          "output": "✔ the CSV export has the mark, the header and the column order (1.265ms)\n✔ contacts keep their input order (1.2485ms)\n✔ missing values are empty fields (0.3356ms)\n✔ an empty list gives the mark and the header only (0.2153ms)\n✔ a field with a comma is quoted (0.2804ms)\n✔ a field with a double quote is quoted and the quote doubled (0.1931ms)\n✔ fields with a line feed or a carriage return are quoted (0.2084ms)\n✔ plain fields, even with spaces, are not quoted (0.1865ms)\n✔ the output ends with CRLF (0.2479ms)\n✔ the JSON export starts with the byte order mark and parses (2.2694ms)\nℹ tests 10\nℹ suites 0\nℹ pass 10\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 239.6959\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "medium": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "csv-export",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (sed). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: nly fields containing a comma, double quote, CR or LF are quoted, with inner quotes doubled. Values are passed through `String()` first.\n- **Style:** it mirrors `json.js`, with a module-level `BOM`, a one-line JSDoc, `??` for missing values, and a small local `field` helper for escaping.\n\nThe tests assert exact strings with explicit `\\uFEFF` and `\\r\\n` escapes. They cover:\n- **Format:** header and column order for a full contact, several contacts in input order, the empty array, and output ending in CRLF.\n- **Missing values:** missing phone, email and name, plus a `null` value.\n- **Quoting:** comma, double quote, line feed and carriage return are quoted, and a plain field with spaces is not.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 46,
+    "inputTokensUncached": 16839,
+    "outputTokens": 19208,
+    "cacheCreationTokens": 39556,
+    "cacheReadTokens": 380849,
+    "costUsdReported": 0.7389,
+    "toolCalls": 41,
+    "toolCallsRecorded": 41,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 15,
+      "Read": 13,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Grep": 7
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 20,
+        "toolCalls": 18,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 198870,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 24
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

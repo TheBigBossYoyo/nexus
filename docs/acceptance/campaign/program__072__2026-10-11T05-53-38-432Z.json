@@ -1,0 +1,318 @@
+{
+  "kind": "campaign-run",
+  "task": "program",
+  "category": "Program-style task",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "be766d78ae319c469406a7891f96acc6cb4523e7",
+  "startedAt": "2026-10-11T05:53:38.432Z",
+  "finishedAt": "2026-10-11T06:01:52.522Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 90,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "COMPLETED",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "kvlib",
+        "ref": "nexus/program-c36a6173",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 8,
+          "fail": 0,
+          "output": "✔ set, get, has, delete and size (1.3668ms)\n✔ a key expires when the clock reaches its time (0.2398ms)\n✔ setting a key again replaces its value and its expiry (0.197ms)\n✔ the default clock works without options (0.1434ms)\n✔ save and load keep the entries and their absolute expiry (5.9331ms)\n✔ an entry that expired between save and load is not loaded (4.868ms)\n✔ loading a missing file gives an empty store (0.954ms)\n✔ save replaces the file and leaves no temporary file behind (8.7632ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 131.0204\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 21,
+          "fail": 0,
+          "output": "✔ the package loads (4.8596ms)\n✔ no-TTL keys: set/get/has/size/delete (1.0581ms)\n✔ expiry boundary (1.013ms)\n✔ ttlMs 0 is expired immediately (0.1528ms)\n✔ re-set replaces value and expiry: TTL to longer TTL (0.1136ms)\n✔ re-set replaces TTL with no TTL (0.1258ms)\n✔ size counts only live keys (0.1201ms)\n✔ delete of missing and expired keys does not throw (0.1396ms)\n✔ entries returns live entries with absolute expiresAt (0.644ms)\n✔ restore uses absolute expiry (0.2027ms)\n✔ default clock works for a no-TTL key (0.1961ms)\n✔ round trip keeps values and absolute expiry (8.4303ms)\n✔ entry expired at save time is not written (7.7182ms)\n✔ entry expired at load time is not returned (6.201ms)\n✔ no-TTL entry never expires (6.8333ms)\n✔ nonexistent file gives empty store (1.9828ms)\n✔ no leftover temp file; overwrite replaces content (9.0412ms)\n✔ temp file is in the target directory (6.265ms)\n✔ failed writeFileSync leaves target intact and no temp file (6.6299ms)\n✔ failed renameSync leaves target intact and no temp file (10.8902ms)\n✔ malformed expiresAt entries are skipped (5.693ms)\nℹ tests 21\nℹ suites 0\nℹ pass 21\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 258.7597\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 1
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "implement-persist",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-persistence",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "implement-kv-store",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-kv-milestone",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "ask",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "verifier: PowerShell: Command not permitted for the verifier role (exit=$lastexitcode, ---). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "planner: Bash: Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Glob: Read denied: C:\\Users\\user\\AppData\\Local\\Temp is outside the worktree, project and approved read locations. Use paths inside C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-072-FQWNov\\worktrees\\de7b46ce\\implement-persist.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Glob: Read denied: C:\\Users\\user\\AppData\\Local\\Temp is outside the worktree, project and approved read locations. Use paths inside C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-072-FQWNov\\worktrees\\de7b46ce\\integration.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Glob: Read denied: C:\\Users\\user\\AppData\\Local\\Temp is outside the worktree, project and approved read locations. Use paths inside C:\\Users\\user\\AppData\\Local\\Temp\\nexus-campaign-program-072-FQWNov\\worktrees\\de7b46ce\\integration."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "researcher: so atomic-replace tests may be flaky\",\n    \"Persisting expiry needs an internal access path on the store, and a poor design could leak into or break the public API\",\n    \"Values that JSON cannot represent, such as undefined, Date or Map, will not round-trip\",\n    \"A boundary mismatch (expire at >= versus >) between the store and the load filter would produce inconsistent results\"\n  ],\n  \"constraints\": [\n    \"Files are replaced atomically: write a temporary file in the same directory, then rename it over the target\",\n    \"Time is injected: Date.now appears only as the default of the now option\",\n    \"Pure Node.js ES modules with no dependencies, tested with node --test via npm test\"\n  ]\n}\n```",
+        "planner: ",
+        "worker: te.now } = {})` returns the store with `set`, `get`, `has`, `delete`, `size`, `entries` and `restore`, as specified.\n- **Date.now:** it appears exactly once in `src/kv.js`, as the default for `now`.\n- **Expired entries:** they are dropped lazily when a lookup, `size()` or `entries()` encounters them. There are no timers.\n- **Tests:** they cover every case in the brief and advance time only by assigning to a fake clock. They use no timers, sleeps or mock timers.\n- **Unchanged files:** I did not touch `src/index.js`, `src/index.test.js` or `package.json`.\n- **Line endings:** git warned that LF will be converted to CRLF in the two new files the next time it touches them. I did nothing about it.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: ired ones (`:9-11`). | `:66-74` (3, then 2 after one key expires); also `:33` |\n| 5 | `delete` does not throw on a missing or expired key | pass | `delete` returns `false` when `find` yields nothing (`:28-33`); there is no throwing path. | `:78` (missing), `:79-81` (expired) |\n| 6 | `entries()` and `restore()` exist and behave as specified | pass | `entries()` (`:41-48`) returns `{ key, value, expiresAt }` for live entries only. `restore()` (`:49-51`) stores `expiresAt ?? null` without adding `now()`. | `:87-97` (expired key omitted, absolute 1100, `null` for no TTL); `:99-111` (boundary at 1499/1500, already-expired entry invisible) |\n\nNo scratch files were created and nothing was modified.",
+        "verifier: ",
+        "researcher: ",
+        "researcher: ```json\n{\n  \"action\": \"keep\",\n  \"reason\": \"The store milestone is done and exposes entries() and restore(), as program memory records. The remaining persistence milestone already covers atomic save, load with absolute expiry preserved, skipping expired entries, and returning an empty store when the file is missing. The open backlog items are low-priority. The ttlMs/expiresAt validation can be handled inside the persistence work, and the re-set test gap can be handled alongside it. Neither changes the plan.\",\n  \"milestones\": [],\n  \"defer\": [],\n  \"strategyNote\": null\n}\n```",
+        "planner: ",
+        "worker: ) and rethrows. The existing target is never opened for writing.\n- **`load`:** the only use of `Date.now` is the default of the `now` option. A missing file gives an empty store, and other errors, including invalid JSON, are rethrown. Entries whose `expiresAt` is neither `null` nor a finite number are skipped, as are entries already expired at load time.\n- **Tests:** they cover every case in the task. Each test uses its own `fs.mkdtempSync` directory, removed with `t.after`, and a fake clock, with no sleeping.\n- **Other files:** `src/kv.js` and every other existing file are untouched.\n\nGit printed LF-to-CRLF line-ending warnings when I committed the two new files. It didn't block the commit.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier:  **Expired-at-load test** (`src/persist.test.js:46-54`): it cannot tell load-time skipping from lazy expiry. Asserting on a spied `store.restore`, or loading with a clock that later moves backwards, would pin it down.\n- **Failed `writeFileSync` test** (`:91`): have the mock write partial content before throwing so the cleanup path is actually exercised.\n- **Default-clock calls** (`:67`, `:77`): pass an explicit fake `now`.\n- **`mock.restoreAll()`** (`:102`): this is probably a no-op, since the mocks were made with `t.mock` and the top-level `mock` is a different tracker. I did not run anything to confirm this. It is harmless either way, because the assertions after it use unmocked functions.",
+        "verifier: ",
+        "researcher: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {
+      "blockedReason": null,
+      "outcome": {
+        "result": "completed",
+        "summary": "2 of 2 milestone(s) completed and verified.",
+        "milestonesCompleted": 2,
+        "milestonesTotal": 2,
+        "missions": 2,
+        "replans": 1,
+        "finishedAt": "2026-10-11T06:01:49.036Z"
+      },
+      "replans": 1,
+      "milestones": [
+        {
+          "key": "store",
+          "state": "COMPLETED",
+          "attempts": 1
+        },
+        {
+          "key": "persistence",
+          "state": "COMPLETED",
+          "attempts": 1
+        }
+      ],
+      "missions": [
+        {
+          "outcome": "completed",
+          "strategy": "BUILD"
+        },
+        {
+          "outcome": "completed",
+          "strategy": "BUILD"
+        }
+      ],
+      "decisions": [
+        "created: Program created with the autonomous policy.",
+        "plan_proposed: Plan version 1 proposed: 2 milestone(s).",
+        "plan_accepted: Plan version 1 accepted (policy).",
+        "milestone_started: Milestone \"In-memory TTL key-value store\" started.",
+        "mission_generated: Mission 1 for \"In-memory TTL key-value store\" (BUILD).",
+        "mission_ended: Mission completed.",
+        "milestone_accepted: Milestone \"In-memory TTL key-value store\" verified and accepted (2 backlog item(s), 1 memory entry).",
+        "replan_requested: Milestone \"In-memory TTL key-value store\" was accepted. Reassessing the plan.",
+        "replan_kept: The plan stands: The store milestone is done and exposes entries() and restore(), as program memory records. The remaining persistence milestone already covers ",
+        "milestone_started: Milestone \"Atomic save and load with expiry preserved\" started.",
+        "mission_generated: Mission 1 for \"Atomic save and load with expiry preserved\" (BUILD, 1 memory entry).",
+        "mission_ended: Mission completed.",
+        "milestone_accepted: Milestone \"Atomic save and load with expiry preserved\" verified and accepted (2 backlog item(s), 1 memory entry).",
+        "completed: 2 of 2 milestone(s) completed and verified."
+      ]
+    }
+  },
+  "efficiency": {
+    "runs": 6,
+    "sessions": 16,
+    "turns": 88,
+    "inputTokensUncached": 65668,
+    "outputTokens": 45963,
+    "cacheCreationTokens": 125650,
+    "cacheReadTokens": 794452,
+    "costUsdReported": 1.8731,
+    "toolCalls": 70,
+    "toolCallsRecorded": 70,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 22,
+      "StructuredOutput": 12,
+      "Write": 2,
+      "Read": 21,
+      "PowerShell": 6,
+      "Grep": 4,
+      "Glob": 3
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 9,
+    "byRole": {
+      "researcher": {
+        "sessions": 4,
+        "turns": 13,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "planner": {
+        "sessions": 2,
+        "turns": 11,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 8,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 8,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 6,
+        "turns": 48,
+        "toolCalls": 42,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 491749,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 34
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 21
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 37
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 21
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

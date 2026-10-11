@@ -1,0 +1,197 @@
+{
+  "kind": "campaign-run",
+  "task": "feature",
+  "category": "normal feature",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "be766d78ae319c469406a7891f96acc6cb4523e7",
+  "startedAt": "2026-10-11T04:59:52.961Z",
+  "finishedAt": "2026-10-11T05:02:26.486Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "addressbook",
+        "ref": "nexus/4fe782dd/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ header row, columns in order, byte order mark and CRLF after every line (0.6121ms)\n✔ an empty address book is the header alone (0.09ms)\n✔ missing values are empty fields (0.0872ms)\n✔ fields with a comma, a quote or a line break are quoted, and quotes are doubled (0.5902ms)\n✔ contacts keep the order given (0.1546ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 82.1724\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 13,
+          "fail": 0,
+          "output": "✔ the CSV export starts with the byte order mark and the header row (1.636ms)\n✔ a contact with a missing phone ends every line with CRLF (0.1587ms)\n✔ an empty list gives the mark, the header and one CRLF (0.11ms)\n✔ contacts keep the given order and fields are name, email, phone (0.111ms)\n✔ a missing name gives an empty field (0.1061ms)\n✔ a missing email gives an empty field (0.1031ms)\n✔ a missing phone gives an empty field (0.1942ms)\n✔ a field with a comma is enclosed in double quotes (0.1682ms)\n✔ a field with a double quote is enclosed and the quote doubled (0.223ms)\n✔ a field with a line feed is enclosed in double quotes (0.1653ms)\n✔ a field with a carriage return is enclosed in double quotes (0.121ms)\n✔ plain fields with spaces or accents stay unquoted (0.0897ms)\n✔ the JSON export starts with the byte order mark and parses (0.9878ms)\nℹ tests 13\nℹ suites 0\nℹ pass 13\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 119.6823\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "csv-export",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (od, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: defined` and `null` become empty fields, so every row has three fields.\n- **Quoting:** a field containing a comma, a double quote, CR or LF is enclosed in double quotes with inner quotes doubled. Other fields are left unquoted. Non-string values go through `String()` first.\n- **Tests:** they cover every case listed in the task, using exact equality on the whole string. Every line break is written as an escape sequence, with no template literals.\n\nGit printed \"LF will be replaced by CRLF\" warnings for the two new files at commit time. The files were written with LF and git will convert them to match the checkout. Because the tests use escape sequences, this doesn't affect the expected output.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 33,
+    "inputTokensUncached": 16135,
+    "outputTokens": 14807,
+    "cacheCreationTokens": 34517,
+    "cacheReadTokens": 309120,
+    "costUsdReported": 0.5946,
+    "toolCalls": 28,
+    "toolCallsRecorded": 28,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 13,
+      "StructuredOutput": 4,
+      "Read": 6,
+      "Write": 2,
+      "Grep": 3
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 4,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 12,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 151841,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

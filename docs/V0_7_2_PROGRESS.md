@@ -1,6 +1,8 @@
 # NEXUS 0.7.2 implementation progress
 
-Status: PARTIAL. Updated 2026-10-09. Branch: `nexus-0.7.2-director-ui-compiler`.
+Status: PARTIAL. Updated 2026-10-11. Branch: `nexus-0.7.2-director-ui-compiler`. The verdict, what was
+verified and what is missing are in docs/V0_7_2_RELEASE_REPORT.md; the sections below are the record of how
+the work went and are not rewritten. The newest is at the end.
 
 The user has requested continued implementation, not another checkpoint stop. No merge,
 tag, push, parent-verdict change, or real Claude campaign is authorized. Real GPT acceptance
@@ -157,3 +159,23 @@ Not done, and needed for a verdict other than PARTIAL: real Claude Technical Dir
 and real Task Compiler acceptance (both need ChatGPT inference, which only the provider's own paid-credit
 confirmation in the app may allow); Director outcome learning; the provider-scoped wait in the UI; UI 2.0 with
 its two reviews; a full end-to-end, stress and package run on final source.
+
+## 2026-10-10 and 2026-10-11: real acceptance, the rest of the brief, the real campaign
+
+Done since the section above:
+
+- Real acceptance of the Technical Director, the Strategic Director, a Council and the STANDARD and TECHNICAL
+  depths of the Task Compiler, with the defects they showed fixed (R.1 to R.5 in the ledger).
+- Director outcome learning (migration 16); the switch per project for OpenAI; the workspace planner on the
+  admitted snapshot; UI 2.0 on the 0.7.2 screens, with both UI reviews and a second round on rendered pages;
+  an automated accessibility check in the end-to-end tests.
+- The default depth stopped every real request (R.8): the user now decides in the preview.
+- A wait for a provider holds one task, not its mission (4.4, 4.6); capacity facts keep the time they were
+  observed (3.5, partly).
+- The real campaign of 0.7.1 on the 0.7.2 sources, in EXACT and in the default depth, against 0.7.1 as
+  released. It showed the cost of the default depth (9.3) and two gaps in what a plan and a verifier are
+  told (R.9, R.10), fixed in `be766d7`.
+- Full suite, end-to-end, stress and the 1,000 seeds on the final source; the package.
+
+Not done: forty MEDIUM findings are open or partly open. The release report lists the ones that bear on a
+gate and what reaching PASS takes.
