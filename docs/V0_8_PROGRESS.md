@@ -157,12 +157,48 @@ generic channel for tool groups through the worker protocol). Search backend: an
 
 docs/V0_8_SECURITY_MODEL.md, docs/AUTONOMY_MODEL.md.
 
+### Applications under test and the browser (2026-10-11)
+
+- `src/main/modules/browser/`: `provider.ts` (Playwright direct, `playwright-core` 1.63.0 pinned, Edge headless,
+  profile per session, proxy with the loopback bypass removed), `manifest.ts`, `app-manager.ts`
+  (`ApplicationUnderTestManager`, the endpoint registry), `tools.ts` (the `app` group; `combineExtensions`).
+- The launcher has a `desktop` key: a desktop made for the command, labeled low. An Electron application is
+  started on it, attached to over its debugging endpoint (`connectOverCDP`), never through Playwright's own
+  Electron launcher (its loader lives in NEXUS's node_modules, which the sandbox account cannot read).
+- Measured: Electron 44 ends at once (0x80000003) when started at low integrity in a job with Chromium's own
+  sandbox on; with `--no-sandbox` it runs, under both profiles. Recorded in `APP_BROWSER_AUTOMATION.md`.
+- `ExecutionBroker.containProgram` (long-running programs), `counters()`; `spawn-process.ts` (a second process
+  runner, on the list of `tests/unit/power/isolation.test.ts`).
+- The sandbox account's launcher copy is named by its content (`bin/nexus-launch-<sha16>.exe`): two builds, or
+  two test processes, no longer replace a file the other is running. A failure to place it is now reported as
+  what it is, not as "not set up".
+- `IsolationService.protect` is called when a project is enrolled and at start if one is. NEXUS's data is
+  always marked; the user's credential stores only when the host says so (`protectUserStores`: a packaged
+  build, or `NEXUS_PROTECT_USER_STORES=1`), so that no test changes a folder of the person running it.
+- IPC: `isolation.status|setup|apps|appScreenshot`, `research.list`; `sandbox-setup.ts` (the setup from the
+  window: native confirmation, then one UAC prompt). The setup from the window has NOT been run: the account
+  on this machine was made by the script.
+- UI (subagent, not rendered yet): `IsolationPanel`, `AppSessionsPanel`, `ResearchPanel`, `isolationModel.ts`.
+- Tests: `tests/integration/browser/app-web.test.ts` (14), `app-electron.test.ts` (10), both profiles;
+  `tests/scenarios/v8-app.test.ts` (2). Full suite before this work: 210 files, 4,384 tests, green.
+
+### Real acceptance (2026-10-11)
+
+- `scripts/v08-acceptance.mjs`: two bounded missions with real Claude sessions in an enrolled disposable
+  project under `test-results/v08/accept/`. Evidence in `docs/acceptance/v08-acceptance-*.json`.
+- A confirmation is shown by the RUNTIME process (`askNatively`), not by the window: a stub in the window does
+  not answer it. The first attempt put the enrollment dialog on the user's screen. Since then a development
+  build with `NEXUS_ACCEPT_CONFIRM=window` puts confirmations to the (off-screen) window; a package never does.
+- `runs.create` needs `compilationMode: 'EXACT'` from a script (otherwise the 0.7.2 admission asks for a preview).
+
 ## Next
 
-1. BrowserAutomationProvider (Playwright direct), ApplicationUnderTestManager, the local endpoint registry,
-   the agent tools (`app` group), Electron; the application under test inside the containment.
-2. Real acceptance, bounded: a Claude session in an enrolled project (wrapped commands, research, app use).
+1. Read the result of the real acceptance (`test-results/v08/accept-*.log`) and fix what it shows.
+2. End-to-end and accessibility runs of the new UI (boundary inbox, autonomy settings, isolation, application
+   and research panels). Nothing of it has been rendered yet.
 3. RoleCapabilityContract in planning; unattended rules for enrolled projects; a grant resumes a waiting task.
-4. UI: isolation status and setup, research and application panels; end-to-end and accessibility runs.
-5. The pipe's DACL; Context Graph nodes for research; removal of labels on unenroll.
-6. Hostile corpora as permanent suites, fault injection, soak, reviews, final regression, package, report.
+4. The pipe's DACL; Context Graph nodes for research; removal of labels on unenroll; the search page against
+   the real site.
+5. Hostile corpora as permanent suites, fault injection, soak, independent reviews.
+6. Full suite again, version 0.8.0, package, `V0_8_RELIABILITY.md`, `V0_8_RELEASE_REPORT.md`. Merge and tag
+   only on PASS; never push.
