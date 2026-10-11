@@ -35,6 +35,7 @@ export interface UserGitInvocation {
 /** Words that may stand unquoted: letters, digits and the marks git's revisions and paths use. No shell mark is among them. */
 const BARE = /^[A-Za-z0-9_@%+=:,./^~-]$/
 /** Control characters other than tab and newline. */
+// eslint-disable-next-line no-control-regex
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/
 
 /**
