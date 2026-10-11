@@ -8,7 +8,7 @@
 //
 // Build (C# 5, the compiler that ships with Windows):
 //   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /optimize+ /platform:x64 /target:exe
-//       /out:nexus-launch.exe nexus-launch.cs
+//       /r:System.Security.dll /out:nexus-launch.exe nexus-launch.cs
 //
 // Exit codes: the command's own, or 120..127 for the launcher's failures (125: the containment could not be made).
 using System;
@@ -16,6 +16,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -291,12 +292,44 @@ static class Program {
         return 0;
     }
 
+    // The sandbox account's password, kept as a DPAPI blob only the user who stored it can open. The entropy
+    // ties the blob to this use; the protection is the user's own key.
+    static readonly byte[] CredentialEntropy = Encoding.UTF8.GetBytes("nexus-launch/sandbox-credential/1");
+
+    /** Reads `account` and a password from standard input (two lines) and stores them protected at `path`. */
+    static int CredentialWrite(string path) {
+        string account = Console.In.ReadLine();
+        string password = Console.In.ReadLine();
+        if (string.IsNullOrEmpty(account) || string.IsNullOrEmpty(password) || password.Length < 24) throw new Fail(EXIT_SPEC, "expected an account name and a password on standard input");
+        byte[] blob = ProtectedData.Protect(Encoding.UTF8.GetBytes(account + "\n" + password), CredentialEntropy, DataProtectionScope.CurrentUser);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+        string temp = path + ".tmp";
+        File.WriteAllBytes(temp, blob);
+        if (File.Exists(path)) File.Delete(path);
+        File.Move(temp, path);
+        return 0;
+    }
+
+    /** The stored account and password, or a Fail when the blob is missing or is not this user's. */
+    internal static string[] CredentialRead(string path) {
+        byte[] blob;
+        try { blob = File.ReadAllBytes(path); } catch (Exception) { throw new Fail(EXIT_CONTAINMENT, "the sandbox account's credential is missing; run the sandbox setup"); }
+        string text;
+        try { text = Encoding.UTF8.GetString(ProtectedData.Unprotect(blob, CredentialEntropy, DataProtectionScope.CurrentUser)); }
+        catch (Exception) { throw new Fail(EXIT_CONTAINMENT, "the sandbox account's credential cannot be opened by this user"); }
+        int nl = text.IndexOf('\n');
+        if (nl <= 0) throw new Fail(EXIT_CONTAINMENT, "the sandbox account's credential is damaged");
+        return new string[] { text.Substring(0, nl), text.Substring(nl + 1) };
+    }
+
     static int Main(string[] args) {
         // No error dialog, ever: a child that cannot start fails with a code, not with a window on the user's screen.
         N.SetErrorMode(0x8003);
         try {
             if (args.Length == 2 && args[0] == "--spec") return Run(ReadSpec(args[1]));
             if (args.Length == 3 && args[0] == "label") return Label(args[1], args[2]);
+            if (args.Length == 3 && args[0] == "credential" && args[1] == "write") return CredentialWrite(args[2]);
+            if (args.Length == 3 && args[0] == "credential" && args[1] == "check") { Console.Out.WriteLine(CredentialRead(args[2])[0]); return 0; }
             if (args.Length == 1 && args[0] == "--version") { Console.Out.WriteLine("nexus-launch 1"); return 0; }
             Err("usage: nexus-launch --spec <file> | label low|protect|clear <path> | --version");
             return EXIT_USAGE;
