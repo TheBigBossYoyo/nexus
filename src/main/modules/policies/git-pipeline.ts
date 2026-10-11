@@ -223,8 +223,10 @@ const SUBCOMMANDS: Record<string, SubcommandRule> = {
   'rev-parse': { options: { '--abbrev-ref': true, '--short': true, '--verify': true, '-q': true, '--quiet': true, '--show-toplevel': true, '--is-inside-work-tree': true, '--symbolic-full-name': true, '--show-prefix': true }, operands: 5 },
   branch: { options: { '--show-current': true, '-a': true, '--all': true, '-v': true, '-vv': true, '--list': true, '-l': true, '--no-color': true, '-r': true }, operands: 0 },
   'ls-files': { options: { '-m': true, '--modified': true, '-o': true, '--others': true, '-s': true, '--stage': true, '-d': true, '--deleted': true, '--exclude-standard': true, '-c': true, '--cached': true }, operands: 50 },
-  checkout: { options: { '-b': plainOperand, '-B': plainOperand, '-q': true, '--quiet': true, '-f': true, '--force': true }, operands: 200 },
-  switch: { options: { '-c': plainOperand, '--create': plainOperand, '-q': true, '--quiet': true }, operands: 1 },
+  // Files only: `checkout [<revision>] -- <paths>`. Not a change of branch: the worktree stays on the branch NEXUS
+  // made for the task, and no other branch of the user's repository is created, moved or checked out here
+  // (`checkout -B release` moved a branch of the user's; found by the third review). `switch` is not listed.
+  checkout: { options: { '-q': true, '--quiet': true, '-f': true, '--force': true }, operands: 200 },
   restore: { options: { '--staged': true, '-S': true, '--worktree': true, '-W': true, '--source': plainOperand, '-s': plainOperand, '-q': true, '--quiet': true }, operands: 200 },
   reset: { options: { '--hard': true, '--soft': true, '--mixed': true, '-q': true, '--quiet': true }, operands: 200 },
   rm: { options: { '--cached': true, '-r': true, '-f': true, '--force': true, '-q': true, '--quiet': true }, letters: 'rfq', operands: 200 },
@@ -257,6 +259,7 @@ export function isSafeUserGit(args: readonly string[]): boolean {
   const rule = SUBCOMMANDS[sub] as SubcommandRule
   let operands = 0
   let onlyOperands = false
+  let afterSeparator = 0
   for (let i = 1; i < args.length; i += 1) {
     const arg = args[i] as string
     if (!onlyOperands && arg === '--') {
@@ -301,6 +304,7 @@ export function isSafeUserGit(args: readonly string[]): boolean {
       return false
     }
     operands += 1
+    if (onlyOperands) afterSeparator += 1
     if (operands > rule.operands) return false
     if (arg === '.' && TAKES_DOT.has(sub)) continue
     if (rule.operand !== undefined) {
@@ -309,6 +313,8 @@ export function isSafeUserGit(args: readonly string[]): boolean {
     }
     if (!plainOperand(arg)) return false
   }
+  // A checkout names files after `--`, and at most one revision before it.
+  if (sub === 'checkout' && (afterSeparator === 0 || operands - afterSeparator > 1)) return false
   return true
 }
 
@@ -376,7 +382,10 @@ export function renderUserGitScript(invocations: readonly UserGitInvocation[]): 
       if (scope === 'all') call = `{ nx_links; ${words} ':(top)' "\${nx_ex[@]}"; }`
       else if (scope === 'operands') call = `{ nx_links; ${words} "\${nx_ex[@]}"; }`
     } else if (sub === 'rm') call = `{ nx_links; ${words} "\${nx_ex[@]}"; }`
-    else if (sub === 'stash' && rest.find((arg) => !arg.startsWith('-')) !== 'list' && rest.find((arg) => !arg.startsWith('-')) !== 'drop') call = `{ nx_nolinks && ${words}; }`
+    // Only `stash list` and `stash drop`, said as the first word, leave the files alone. Anything else is a push,
+    // a pop or an apply, whatever comes later on the line (`stash -m list` is a push with the message "list":
+    // found by the third review).
+    else if (sub === 'stash' && rest[0] !== 'list' && rest[0] !== 'drop') call = `{ nx_nolinks && ${words}; }`
     const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
     // An operator at the end of a line continues on the next one; `;` is the end of the line itself.
     const join = invocation.then === '&&' || invocation.then === '||' ? ` ${invocation.then}` : ''

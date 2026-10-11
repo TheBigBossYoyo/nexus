@@ -415,7 +415,7 @@ static class Program {
 
     /**
      * Refuses the sandbox account the desktop the user works on (every right), and on the window station the
-     * screen, the clipboard, making desktops and changing attributes. Both lists are the user's to change, and the
+     * screen, the clipboard, listing and making desktops and changing attributes. Both lists are the user's to change, and the
      * entries stay for the session: they name an account that has no business there. If it cannot be done,
      * nothing is started.
      */
@@ -425,8 +425,10 @@ static class Program {
         try { SetWindowObjectAccess(users, sid, 3 /* DENY_ACCESS */, 0x000F01FF, "the user's desktop"); } finally { N.CloseDesktop(users); }
         IntPtr station = N.GetProcessWindowStation();
         if (station == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "this process has no window station");
-        // WINSTA_ACCESSCLIPBOARD | WINSTA_CREATEDESKTOP | WINSTA_WRITEATTRIBUTES | WINSTA_READSCREEN
-        SetWindowObjectAccess(station, sid, 3, 0x4 | 0x8 | 0x10 | 0x200, "the window station");
+        // WINSTA_ENUMDESKTOPS | WINSTA_ACCESSCLIPBOARD | WINSTA_CREATEDESKTOP | WINSTA_WRITEATTRIBUTES | WINSTA_READSCREEN.
+        // Not listing desktops: the desktop of another contained command is open to the same account, and what
+        // keeps one command from another's is that it cannot learn its name (64 random bits).
+        SetWindowObjectAccess(station, sid, 3, 0x1 | 0x4 | 0x8 | 0x10 | 0x200, "the window station");
     }
 
     /**

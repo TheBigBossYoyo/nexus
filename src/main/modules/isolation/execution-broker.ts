@@ -109,9 +109,9 @@ const REF_CHANGING = ['commit', 'merge', 'rebase', 'reset', 'checkout', 'switch'
  * After every commit git removes a leftover of merges (`AUTO_MERGE`), and for that it tries to lock the
  * repository's `packed-refs`, which a contained git may not create. git goes on and the commit stands, but it
  * prints "error: Unable to create '…/packed-refs.lock': Permission denied", which reads as a failure and is
- * none (traced with GIT_TRACE_REFS, git 2.53). That one line is left out; git's exit code is its own.
+ * none (traced with GIT_TRACE_REFS, git 2.53). That one line is left out by the `git` function of the script
+ * (bashGitGuardian); git's exit code is its own.
  */
-const BASH_GIT_QUIET_LOCK = `git() { command git "$@" 2> >(grep -v "packed-refs.lock': Permission denied" >&2); local rc=$?; wait $! 2>/dev/null; return $rc; }\n`
 
 /**
  * Around the script of a git-only command that has an index of its own (see gitPins): the index is made from
@@ -119,12 +119,39 @@ const BASH_GIT_QUIET_LOCK = `git() { command git "$@" 2> >(grep -v "packed-refs.
  * worktree's own index file is replaced by a copy, so that a git the task runs as the sandbox account sees
  * what was staged. The copy is for reading only: nothing of the user's git reads it back.
  */
-const BASH_OWN_INDEX_BEFORE = `if [ -n "$GIT_INDEX_FILE" ] && [ ! -s "$GIT_INDEX_FILE" ]; then command git read-tree HEAD || { echo 'NEXUS: the index for this command could not be made, so it was not run.' >&2; exit 128; }; fi\nnx_main() {\n`
+const BASH_OWN_INDEX_BEFORE = `if [ -n "$GIT_INDEX_FILE" ] && [ ! -s "$GIT_INDEX_FILE" ]; then nx_guard && command git read-tree HEAD || { echo 'NEXUS: the index for this command could not be made, so it was not run.' >&2; exit 128; }; fi\nnx_main() {\n`
 const BASH_OWN_INDEX_AFTER = `}\nnx_main\nnx_rc=$?\nif [ -n "$GIT_INDEX_FILE" ] && [ -s "$GIT_INDEX_FILE" ] && [ -n "$GIT_DIR" ]; then cp -f "$GIT_INDEX_FILE" "$GIT_DIR/index" 2>/dev/null; fi\nexit $nx_rc\n`
 
-/** The whole bash script of a git-only command: `invocations` is what NEXUS rendered from the parsed command. */
-export function gitOnlyScript(invocations: string): string {
-  return `${BASH_GIT_QUIET_LOCK}${BASH_OWN_INDEX_BEFORE}${invocations}\n${BASH_OWN_INDEX_AFTER}`
+/**
+ * Looked at before every git of a git-only script, by the script itself:
+ *  - the worktree is on the branch NEXUS made for it. `HEAD` in the worktree's entry is a file the task's code
+ *    may be able to replace; a git that commits "on HEAD" would then move whatever branch it names;
+ *  - the entry has no configuration of its own (`config.worktree`), which a repository that reads such files
+ *    would take filters, drivers and programs from;
+ *  - no directory on the way to a tracked file is a link: Git for Windows writes, deletes and reads through a
+ *    junction that stands where a tracked directory was.
+ * When one does not hold, git is not run and the command fails with 128. These are checks made a moment before
+ * the use, not locks: what cannot be replaced at all is said where the entry's access is set (grantGit).
+ */
+function bashGitGuardian(branch: string): string {
+  return [
+    `nx_guard() {`,
+    `  local head; head=$(cat "$GIT_DIR/HEAD" 2>/dev/null)`,
+    `  if [ "$head" != 'ref: refs/heads/${branch}' ]; then echo "NEXUS: this worktree is no longer on its own branch (${branch}), so git was not run here." >&2; return 1; fi`,
+    `  if [ -s "$GIT_DIR/config.worktree" ] || [ -L "$GIT_DIR/config.worktree" ] || [ -d "$GIT_DIR/config.worktree" ]; then echo 'NEXUS: the worktree has a configuration of its own that NEXUS did not write, so git was not run here.' >&2; return 1; fi`,
+    `  local p d; local -A seen=()`,
+    `  while IFS= read -r -d '' p; do d="$p"; while [[ "$d" == */* ]]; do d="\${d%/*}"; [ -n "\${seen[$d]:-}" ] && break; seen[$d]=1; if [ -L "$GIT_WORK_TREE/$d" ]; then echo "NEXUS: $d is a link to another place where a directory of tracked files should be, so git was not run here. Remove the link." >&2; return 1; fi; done; done < <(command git ls-files -z --full-name -- ':(top)' 2>/dev/null)`,
+    `  return 0`,
+    `}`,
+    `git() { nx_guard || return 128; command git "$@" 2> >(grep -v "packed-refs.lock': Permission denied" >&2); local rc=$?; wait $! 2>/dev/null; return $rc; }`,
+    '',
+  ].join('\n')
+}
+
+/** The whole bash script of a git-only command: `invocations` is what NEXUS rendered from the parsed command, `branch` the worktree's own branch. */
+export function gitOnlyScript(invocations: string, branch: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$/.test(branch) || branch.includes('..')) throw new Error('The worktree has no branch of its own that can be named.')
+  return `${bashGitGuardian(branch)}${BASH_OWN_INDEX_BEFORE}${invocations}\n${BASH_OWN_INDEX_AFTER}`
 }
 
 /** A `git` function for the command's script: it stops the subcommands that cannot work here and says what to do, and passes the rest to git. */
@@ -251,6 +278,21 @@ export class ExecutionBroker {
       paths.add(resolve(path))
     }
     await once(layout.commonDir, 'read', [`${sid}:(OI)(CI)(RX)`])
+    // What the account may do in a directory it is let into: read everything, add files and directories, and do
+    // what it likes with what it added itself (the entry for the creator). It is given no right to write into,
+    // delete or replace a file somebody else put there. Measured for 0.8: a mandatory label does not give that
+    // (code at low integrity deletes and replaces a file labeled medium in a directory labeled low, through the
+    // directory's own rights), and a right to write that is inherited by files lets every existing object and
+    // every other task's branch be overwritten in place. So the right to add is inherited by directories only.
+    const addOnly = async (path: string): Promise<void> => {
+      const mark = `add-only|${resolve(path).toLowerCase()}`
+      if (this.granted.has(mark) || !existsSync(path)) return
+      // An entry from an earlier version (write inherited by files, or modify) is taken out first.
+      await this.icacls([path, '/remove:g', sid, '/Q'])
+      await this.icacls([path, '/grant', `${sid}:(OI)(CI)(RX)`, '/grant', `${sid}:(CI)(WD,AD)`, '/grant', '*S-1-3-0:(OI)(CI)(IO)(F)', '/Q'])
+      this.granted.add(mark)
+      paths.add(resolve(path))
+    }
     const common = resolve(layout.commonDir).toLowerCase()
     for (const path of layout.writable) {
       const isFile = existsSync(path) && statSync(path).isFile()
@@ -263,11 +305,14 @@ export class ExecutionBroker {
       // A path that names a branch that does not exist yet as a file is not made into a directory.
       if (!existsSync(path) && !isEntry && basename(path).toLowerCase() !== 'objects' && layout.writable.some((other) => other !== path && resolve(other).toLowerCase() === resolve(dirname(path)).toLowerCase())) continue
       if (!existsSync(path)) mkdirSync(path, { recursive: true })
-      // The worktree's own entry is the account's to change. Everywhere else it may add and not replace: objects
-      // are only ever added, and among the refs it makes git's lock files, which it then owns, beside branches of
-      // other tasks that it cannot touch.
-      if (isEntry) await once(path, 'modify', [`${sid}:(OI)(CI)(M)`])
-      else await once(path, 'add', [`${sid}:(OI)(CI)(RX,WD,AD)`, '*S-1-3-0:(OI)(CI)(IO)(F)'])
+      // Everywhere the account may add and not replace: objects are only ever added; among the refs it makes git's
+      // lock files, which it then owns, beside branches of other tasks that it cannot touch; and in the worktree's
+      // own entry it finds `HEAD`, `commondir`, `gitdir` and `config.worktree` as NEXUS left them and cannot put
+      // others in their place.
+      await addOnly(path)
+      // The one file of the entry the account's own git rewrites: the index it stages into. Nothing of the
+      // user's git or of NEXUS's reads that index back (each has its own).
+      if (isEntry && existsSync(join(path, 'index'))) await once(join(path, 'index'), 'modify-file', [`${sid}:(M)`])
       await this.ensureLow(path)
       if (isEntry) await this.pinWorktreeEntry(path)
       if (basename(path).toLowerCase() === 'objects') await this.pinObjectStore(path)
@@ -545,6 +590,8 @@ export class ExecutionBroker {
       gitCommonDir?: string
       /** The worktree's own Git directory, from NEXUS's record. A git-only command is pointed at it, whatever the worktree's `.git` file says. */
       gitDir?: string
+      /** The branch NEXUS made for the worktree. A git-only command runs only while the worktree is on it. */
+      gitBranch?: string
     },
   ): Promise<ContainResult> {
     const state = this.usable(input.profile)
@@ -553,7 +600,7 @@ export class ExecutionBroker {
       // The directories of the profile the command runs under. A git that runs as the user in an ISOLATED
       // session gets its home, its temporary directory, its empty hooks directory and its script where the
       // sandbox account cannot write: nothing contained code left there is read by a process of the user.
-      if (input.gitOnly === true && (input.gitDir === undefined || input.shell !== 'bash')) return this.fail(input.projectId, input.profile, 'A command that is git alone runs only as the bash script NEXUS wrote, with the Git directory NEXUS recorded for the worktree. One of the two is missing, so it was not run.')
+      if (input.gitOnly === true && (input.gitDir === undefined || input.gitBranch === undefined || input.shell !== 'bash')) return this.fail(input.projectId, input.profile, 'A command that is git alone runs only as the bash script NEXUS wrote, with the Git directory and the branch NEXUS recorded for the worktree. One of them is missing, so it was not run.')
       const roots = await this.roots(input)
       // Whether git can read this repository from inside the command. Under ISOLATED that is so once the sandbox
       // account was given its access; a command that runs as the user (RESTRICTED) reads it anyway.
@@ -592,7 +639,7 @@ export class ExecutionBroker {
       if (input.shell === 'bash') {
         if (bash === null) return this.fail(input.projectId, input.profile, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
         const script = join(roots.temp, `nx-${id}.sh`)
-        const body = input.gitOnly === true ? gitOnlyScript(input.command) :`${gitHint !== null ? bashGitGuard(gitHint) : ''}${input.command}\n`
+        const body = input.gitOnly === true ? gitOnlyScript(input.command, input.gitBranch ?? '') :`${gitHint !== null ? bashGitGuard(gitHint) : ''}${input.command}\n`
         writeFileSync(script, body, { flag: 'wx' })
         commandLine = `${quoteArg(bash.bash)} --noprofile --norc ${quoteArg(script)}`
       } else {

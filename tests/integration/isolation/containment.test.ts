@@ -369,6 +369,55 @@ setTimeout(() => { for (const n of ['tcp', 'http', 'dns', 'udp', 'lookup']) done
       console.info(`ISOLATED, a name looked up through Windows' resolver: ${r.lines['lookup']}`)
     }, 60_000)
 
+    it("in the user's repository it adds and never replaces: objects, other branches and the worktree's own entry stay as they were", async () => {
+      // A repository's Git directory as NEXUS lets the account into it: laid out by hand, so that every file is known.
+      const common = join(SCRATCH, 'grant-repo', '.git')
+      const entry = join(common, 'worktrees', 'task')
+      const refs = join(common, 'refs', 'heads', 'nexus', 'run1')
+      for (const dir of [join(common, 'objects', 'ab'), refs, join(common, 'logs', 'refs', 'heads', 'nexus', 'run1'), entry]) mkdirSync(dir, { recursive: true })
+      const files = { object: join(common, 'objects', 'ab', 'existing'), sibling: join(refs, 'sibling'), own: join(refs, 'task'), head: join(entry, 'HEAD'), commondir: join(entry, 'commondir'), index: join(entry, 'index') }
+      for (const file of Object.values(files)) writeFileSync(file, 'ORIGINAL')
+      await broker.grantGit({ commonDir: common, writable: [entry, join(common, 'objects'), refs, join(common, 'logs', 'refs', 'heads', 'nexus', 'run1'), files.own] })
+      try {
+        const r = await probe('ISOLATED', 'grant', `${ATTEMPT}
+const f = JSON.parse(process.env.PROBE_FILES); const entry = path.dirname(f.head); const objects = path.dirname(f.object); const refs = path.dirname(f.sibling);
+attempt('read-object', () => fs.readFileSync(f.object, 'utf8'));
+attempt('overwrite-object', () => fs.writeFileSync(f.object, 'CHANGED'));
+attempt('delete-object', () => fs.unlinkSync(f.object));
+attempt('rename-object', () => fs.renameSync(f.object, f.object + '.gone'));
+attempt('add-object', () => { fs.writeFileSync(path.join(objects, 'new-object'), 'new'); return 'added'; });
+attempt('replace-own-object', () => { fs.writeFileSync(path.join(objects, 'new-object'), 'again'); fs.unlinkSync(path.join(objects, 'new-object')); return 'own'; });
+attempt('overwrite-sibling-branch', () => fs.writeFileSync(f.sibling, 'CHANGED'));
+attempt('delete-sibling-branch', () => fs.unlinkSync(f.sibling));
+attempt('replace-sibling-branch', () => { fs.writeFileSync(path.join(refs, 'x.lock'), 'CHANGED'); fs.renameSync(path.join(refs, 'x.lock'), f.sibling); });
+attempt('write-own-branch', () => { fs.writeFileSync(f.own, 'MOVED'); return 'moved'; });
+attempt('overwrite-head', () => fs.writeFileSync(f.head, 'ref: refs/heads/release'));
+attempt('delete-head', () => fs.unlinkSync(f.head));
+attempt('replace-head', () => { fs.writeFileSync(path.join(entry, 'HEAD.new'), 'ref: refs/heads/release'); fs.renameSync(path.join(entry, 'HEAD.new'), f.head); });
+attempt('replace-commondir', () => { fs.writeFileSync(path.join(entry, 'c.new'), 'x'); fs.renameSync(path.join(entry, 'c.new'), f.commondir); });
+attempt('replace-config', () => { fs.writeFileSync(path.join(entry, 'cfg.new'), '[core]'); fs.renameSync(path.join(entry, 'cfg.new'), path.join(entry, 'config.worktree')); });
+attempt('write-config', () => fs.writeFileSync(path.join(entry, 'config.worktree'), '[core]'));
+attempt('stage-through-lock', () => { fs.writeFileSync(path.join(entry, 'index.lock'), 'STAGED'); fs.renameSync(path.join(entry, 'index.lock'), f.index); return 'staged'; });
+`, { PROBE_FILES: JSON.stringify(files) })
+        console.info(`ISOLATED in a granted repository: ${JSON.stringify(r.lines)}`)
+        // What git needs: read, add objects, its own lock files, its own branch, its index.
+        expect(r.lines['read-object'], r.raw).toBe('OK:ORIGINAL')
+        expect(r.lines['add-object']).toBe('OK:added')
+        expect(r.lines['replace-own-object']).toBe('OK:own')
+        expect(r.lines['write-own-branch']).toBe('OK:moved')
+        expect(r.lines['stage-through-lock']).toBe('OK:staged')
+        // What is not the account's: nothing that was there is written, deleted, renamed or replaced.
+        for (const name of ['overwrite-object', 'delete-object', 'rename-object', 'overwrite-sibling-branch', 'delete-sibling-branch', 'replace-sibling-branch', 'overwrite-head', 'delete-head', 'replace-head', 'replace-commondir', 'replace-config', 'write-config']) expect(r.lines[name], name).toMatch(/^DENIED:/)
+        expect(readFileSync(files.object, 'utf8')).toBe('ORIGINAL')
+        expect(readFileSync(files.sibling, 'utf8')).toBe('ORIGINAL')
+        expect(readFileSync(files.head, 'utf8')).toBe('ORIGINAL')
+        expect(readFileSync(files.commondir, 'utf8')).toBe('ORIGINAL')
+        expect(readFileSync(join(entry, 'config.worktree'), 'utf8')).toBe('')
+      } finally {
+        await broker.revokeGit(common)
+      }
+    }, 120_000)
+
     it('reaches the loopback, which is where its proxy is', async () => {
       const before = localHits
       const r = await probe('ISOLATED', 'loopback', `const http = require('http'); http.get('http://127.0.0.1:' + process.env.PROBE_PORT + '/', (res) => { console.log('loopback=OK:' + res.statusCode); process.exit(0); }).on('error', (e) => { console.log('loopback=DENIED:' + e.code); process.exit(0); });`)

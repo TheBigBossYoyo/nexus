@@ -131,14 +131,19 @@ describe('git as the user: the text is parsed, and what does not parse to git al
 
   it('operands are revisions, branch names and paths of the worktree: no pathspec magic, no step out, nothing absolute', () => {
     for (const command of ['git add ../outside.txt', 'git add C:/Users/x/a', 'git add /etc/passwd', 'git diff -- ../x', 'git checkout -- :(top)../x', 'git add :/', 'git add :(attr:x)', 'git log -- a/../../b', "git add 'a*'", "git add 'a?'", 'git checkout -b ../x', 'git show HEAD:../x']) no(command)
-    for (const command of ['git diff HEAD~1..HEAD', 'git log main..HEAD', 'git add src/a.ts test/a.test.ts', 'git add .', 'git checkout -- src/a.ts', 'git show HEAD:src/a.ts', 'git reset HEAD~1', 'git restore --staged a.txt', 'git checkout -b feature/x', 'git stash pop', "git stash drop 'stash@{1}'", 'git cherry-pick abc1234']) yes(command)
+    for (const command of ['git diff HEAD~1..HEAD', 'git log main..HEAD', 'git add src/a.ts test/a.test.ts', 'git add .', 'git checkout -- src/a.ts', 'git checkout HEAD~1 -- src/a.ts', 'git checkout -- .', 'git show HEAD:src/a.ts', 'git reset HEAD~1', 'git restore --staged a.txt', 'git stash pop', "git stash drop 'stash@{1}'", 'git cherry-pick abc1234']) yes(command)
+  })
+
+  it('third review: no command changes the branch the worktree is on, or makes or moves another', () => {
+    for (const command of ['git checkout main', 'git checkout -b feature/x', 'git checkout -B release', 'git checkout -B release HEAD', 'git checkout HEAD~1', 'git checkout a.txt', 'git checkout main other -- a.txt', 'git checkout --', 'git switch main', 'git switch -c x', 'git switch --create=x', 'git branch x', 'git branch -f main HEAD']) no(command)
+    for (const command of ['git checkout -- a.txt', 'git checkout main -- a.txt b.txt', 'git checkout -f -- .', 'git checkout -q HEAD~2 -- src']) yes(command)
   })
 
   it('accepts the everyday commands', () => {
     for (const command of [
       'git status', 'git status --short', 'git status -sb', 'git status --porcelain', 'git status --porcelain=v2', 'git add -A', 'git add --all', 'git add -u', 'git commit -m "a message"', "git commit -m 'a message'",
       'git commit -am "x"', 'git commit -a -m "x"', 'git commit --amend --no-edit', 'git commit -q -m "x"', 'git commit --allow-empty -m "x"', 'git log --oneline -5', 'git log --oneline -n 5', 'git log -n5 --stat',
-      'git log --format=%H -1', 'git log --pretty=format:"%h %s" -3', 'git log --max-count=3', 'git log --date=short -1', 'git diff -U5', 'git describe --abbrev=7', 'git restore --source=HEAD~1 a.txt', 'git restore -s HEAD~1 a.txt', 'git switch -c feature/y', 'git log -S needle --oneline'.replace(' -S needle', ''), 'git diff', 'git diff --stat', 'git diff --cached', 'git diff --staged --name-only', 'git diff HEAD',
+      'git log --format=%H -1', 'git log --pretty=format:"%h %s" -3', 'git log --max-count=3', 'git log --date=short -1', 'git diff -U5', 'git describe --abbrev=7', 'git restore --source=HEAD~1 a.txt', 'git restore -s HEAD~1 a.txt', 'git log -S needle --oneline'.replace(' -S needle', ''), 'git diff', 'git diff --stat', 'git diff --cached', 'git diff --staged --name-only', 'git diff HEAD',
       'git show --stat HEAD', 'git show HEAD', 'git rev-parse HEAD', 'git rev-parse --abbrev-ref HEAD', 'git rev-parse --short HEAD', 'git branch --show-current', 'git branch -a', 'git ls-files', 'git ls-files -m',
       'git reset --hard HEAD', 'git reset --hard', 'git clean -fd', 'git stash', 'git stash push -u', 'git stash list', 'git merge other --no-edit', 'git rm --cached a.txt', 'git mv a.txt b.txt', 'git tag -l', 'git describe --tags --always',
       'git add -A && git commit -q -m "agent commit" 2>&1 && git status --short && git log --oneline -1',
@@ -162,7 +167,7 @@ describe('git as the user: the text is parsed, and what does not parse to git al
     // git reads `--format --output=x` as two options, and the second writes a file wherever it names.
     for (const command of [
       'git log --format --output=C:/x/pwn.txt', 'git log --pretty --output=../pwn.txt', 'git show --format -p', 'git log --format --ext-diff', 'git log --format --no-index', 'git log --date --output=x',
-      'git log --format %H', 'git log --pretty oneline', 'git log --max-count 3', 'git log --author me', 'git log --grep x', 'git log --since yesterday', 'git commit --message x', 'git switch --create x',
+      'git log --format %H', 'git log --pretty oneline', 'git log --max-count 3', 'git log --author me', 'git log --grep x', 'git log --since yesterday', 'git commit --message x',
       'git restore --source HEAD a.txt', 'git describe --abbrev 7', 'git diff --unified 3', 'git diff -U 3', 'git diff -U',
     ])
       no(command)
@@ -225,6 +230,9 @@ describe('git as the user: what runs is written by NEXUS', () => {
     expect(body('git stash push -u 2>&1')).toBe("{ nx_nolinks && git 'stash' 'push' '-u'; } 2>&1\n")
     expect(body('git stash pop')).toBe("{ nx_nolinks && git 'stash' 'pop'; }\n")
     expect(body('git stash list')).toBe("git 'stash' 'list'\n")
+    // The word after `-m` is the message, whatever it says: this is a push.
+    expect(body('git stash -m list')).toBe("{ nx_nolinks && git 'stash' '-m' 'list'; }\n")
+    expect(body('git stash -m drop')).toBe("{ nx_nolinks && git 'stash' '-m' 'drop'; }\n")
   })
 
   const d = process.platform === 'win32' && existsSync(BASH) ? it : it.skip
@@ -234,7 +242,7 @@ describe('git as the user: what runs is written by NEXUS', () => {
       `git commit -m ${heredoc("Fix: it's \"quoted\"\n\n$HOME `backticks` $(not run) \\ back\\slash %PATH% !bang\n\ttab")}`,
       "git commit -m 'single ''glued'' quotes' 2>&1; git status --short 2>/dev/null",
       'git log --pretty=format:"%h %s (%an) <%ae>" -3',
-      'git checkout -b feature/x-1 && git add src/a.ts "with space.txt" || git status',
+      'git checkout -q -- src/a.ts && git add src/a.ts "with space.txt" || git status',
       "git stash drop 'stash@{2}'",
       'git rm -r --cached old && git diff --cached --stat',
     ]

@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join, resolve } from 'node:path'
@@ -86,7 +86,7 @@ function asUser(command: string, options: { powershell?: boolean; ownIndex?: boo
   const parsed = options.powershell === true ? userGitOfPowerShell(command) : userGitOf(command)
   if (parsed === null) throw new Error(`does not qualify: ${command}`)
   const script = join(base, `nx-${createHash('sha1').update(`${command}${Math.random()}`).digest('hex').slice(0, 10)}.sh`)
-  writeFileSync(script, gitOnlyScript(renderUserGitScript(parsed)))
+  writeFileSync(script, gitOnlyScript(renderUserGitScript(parsed), 'nexus/run1/task'))
   const r = spawnSync(BASH, ['--noprofile', '--norc', script], { cwd: options.cwd ?? worktree, env: pinnedEnv(options.ownIndex !== false), encoding: 'utf8', windowsHide: true, timeout: 120_000 })
   return { code: r.status, out: `${r.stdout}${r.stderr}` }
 }
@@ -96,7 +96,7 @@ function asUserAsync(command: string): Promise<string> {
   const parsed = userGitOf(command)
   if (parsed === null) throw new Error(`does not qualify: ${command}`)
   const script = join(base, `nx-${createHash('sha1').update(`${command}${Math.random()}`).digest('hex').slice(0, 10)}.sh`)
-  writeFileSync(script, gitOnlyScript(renderUserGitScript(parsed)))
+  writeFileSync(script, gitOnlyScript(renderUserGitScript(parsed), 'nexus/run1/task'))
   return new Promise((done) => execFile(BASH, ['--noprofile', '--norc', script], { cwd: worktree, env: pinnedEnv(true), encoding: 'utf8', windowsHide: true, timeout: 120_000 }, (_error, stdout, stderr) => done(`${stdout}${stderr}`)))
 }
 
@@ -292,18 +292,64 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     }
   }, 180_000)
 
-  it('a link where a tracked directory was: what the junction leads to is written by stock git, recorded; see hostile-index for NEXUS', () => {
+  it('third review: a junction where a tracked directory was stops every git of the script; nothing is written, deleted or read through it', () => {
     const outside = join(base, 'outside')
     mkdirSync(outside, { recursive: true })
     writeFileSync(join(outside, 'precious.txt'), 'precious\n')
+    // What stock git does with it, in a copy of the state: the tracked file is written into the junction's target.
     rmSync(join(worktree, 'src'), { recursive: true, force: true })
     symlinkSync(outside, join(worktree, 'src'), 'junction')
-    const r = asUser('git reset -q --hard HEAD')
-    void r
-    // Recorded, not asserted: Git for Windows writes the tracked file through the junction. What limits it for a
-    // command that runs at low integrity is Windows: code at low integrity can make a junction only to a
-    // directory it can write itself (tests/integration/isolation/containment.test.ts, "junctions").
+    spawnSync('git', ['reset', '-q', '--hard', 'HEAD'], { cwd: worktree, env: pinnedEnv(false), windowsHide: true })
     console.info(`stock: git reset --hard wrote src/b.txt through a junction into its target: ${existsSync(join(outside, 'b.txt'))}`)
-    expect(readFileSync(join(outside, 'precious.txt'), 'utf8')).toBe('precious\n')
-  }, 60_000)
+    expect(existsSync(join(outside, 'b.txt')), 'stock git writes through the junction (the reason for the measure)').toBe(true)
+    rmSync(join(outside, 'b.txt'), { force: true })
+    writeFileSync(join(outside, 'extra.txt'), 'extra\n')
+
+    for (const command of ['git reset -q --hard HEAD', 'git checkout -- .', 'git restore .', 'git rm -r -q -f .', 'git clean -fdq', 'git stash', 'git add -A', 'git status --short', 'git diff']) {
+      const r = asUser(command)
+      expect(r.code, `${command}: ${r.out}`).toBe(128)
+      expect(r.out, command).toContain('src is a link to another place')
+    }
+    expect(readdirSync(outside).sort(), 'the target is as it was').toEqual(['extra.txt', 'precious.txt'])
+    // Without the link everything works again.
+    rmSync(join(worktree, 'src'), { recursive: false, force: true })
+    expect(asUser('git reset -q --hard HEAD && git status --short').code).toBe(0)
+    expect(readFileSync(join(worktree, 'src', 'b.txt'), 'utf8')).toBe('b\n')
+  }, 120_000)
+
+  it('third review: the worktree stays on its own branch; a forged HEAD or a configuration planted in the entry stops git', () => {
+    raw(repo, 'branch', 'release', 'main')
+    const release = raw(repo, 'rev-parse', 'release')
+    // No command that changes the branch qualifies at all.
+    for (const command of ['git checkout -B release', 'git checkout -b other', 'git checkout release', 'git switch release', 'git switch -c other', 'git checkout -q -B release && git commit -m x']) expect(userGitOf(command), command).toBeNull()
+    // The entry's HEAD, rewritten as the task's code can: stock git would now commit on that branch.
+    writeFileSync(join(worktree, 'new.txt'), 'new\n')
+    const head = readFileSync(join(entry, 'HEAD'), 'utf8')
+    writeFileSync(join(entry, 'HEAD'), 'ref: refs/heads/release\n')
+    const r = asUser('git add -A && git commit -q -m "on the wrong branch"; git status --short; git log --oneline -1')
+    expect(r.out).toContain('no longer on its own branch')
+    expect(r.code).toBe(128)
+    expect(raw(repo, 'rev-parse', 'release'), 'the other branch did not move').toBe(release)
+    writeFileSync(join(entry, 'HEAD'), head)
+    // A configuration of the worktree's own, planted in the entry.
+    writeFileSync(join(entry, 'config.worktree'), '[core]\n\tfsmonitor = calc\n')
+    const planted = asUser('git status --short')
+    expect(planted.code).toBe(128)
+    expect(planted.out).toContain('configuration of its own')
+    rmSync(join(entry, 'config.worktree'))
+    expect(asUser('git add -A && git commit -q -m "on its own branch" && git log --oneline -1').code).toBe(0)
+    expect(raw(repo, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('on its own branch')
+  }, 120_000)
+
+  it('third review: "stash -m list" is a push with a message, and is stopped like any other while a nested repository is in the index', () => {
+    plantNestedRepository()
+    expect(asUser('git add -A').code).toBe(0)
+    writeFileSync(join(worktree, 'sub', 's.txt'), 'y\n')
+    for (const command of ['git stash -m list', 'git stash -m drop', 'git stash push -m list', 'git stash -u']) {
+      const r = asUser(command)
+      expect(r.out, command).toContain('git stash is not run here')
+    }
+    expect(markers(), 'nothing of the nested repository ran').toEqual([])
+    expect(asUser('git stash list').out).not.toContain('NEXUS:')
+  }, 120_000)
 })

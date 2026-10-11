@@ -357,7 +357,7 @@ export async function removeLinksUnder(root: string): Promise<number> {
  * a worktree NEXUS created, every directory on the way to a file it may write is looked at, and one that is a
  * link is removed as a link.
  */
-const WRITES_FILES = new Set(['reset', 'merge', 'checkout', 'switch', 'cherry-pick', 'revert', 'stash', 'restore', 'am', 'rebase', 'read-tree', 'checkout-index'])
+const WRITES_FILES = new Set(['reset', 'merge', 'checkout', 'switch', 'cherry-pick', 'revert', 'stash', 'restore', 'am', 'rebase', 'read-tree', 'checkout-index', 'clean', 'rm', 'mv'])
 
 /** Subcommands of NEXUS's own that add to or rewrite the branch a working tree is on. */
 const WRITES_BRANCH = new Set(['commit', 'merge', 'reset', 'cherry-pick', 'rebase', 'revert', 'am', 'stash', 'checkout', 'switch'])
@@ -749,7 +749,7 @@ export class GitService {
     for (const arg of args.slice(args.indexOf(sub) + 1)) if (!arg.startsWith('-') && arg !== '.' && arg.length <= 300) revisions.add(arg)
     let looked = 0
     for (const revision of revisions) {
-      if (looked >= 6) break
+      if (looked >= 12) break
       const commit = await this.exec(own, ['rev-parse', '--verify', '-q', `${revision}^{commit}`], {}, index)
       if (commit.exitCode !== 0) continue
       looked += 1

@@ -51,6 +51,11 @@ export const DEFAULT_REGISTRY_HOSTS: readonly string[] = [
   'nodejs.org',
   'codeload.github.com',
   'objects.githubusercontent.com',
+  // Release downloads: where the install scripts of packages fetch their prebuilt binaries from (Electron's own
+  // binary among them, without which an Electron project cannot be installed or started), and where GitHub
+  // sends such a download on.
+  'github.com',
+  'release-assets.githubusercontent.com',
 ]
 
 export type NetworkDenial =
