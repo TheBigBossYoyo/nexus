@@ -679,7 +679,11 @@ export class ExecutionBroker {
           () => true,
           () => false,
         )
-      } else if (input.gitOnly === true) {
+      } else if (input.gitOnly === true || input.profile === 'RESTRICTED') {
+        // Under RESTRICTED every command of the session is the user at low integrity, the git inside a longer
+        // command too (`git add x && npm test`): what git must write is writable for all of them, not only once
+        // a command that is git alone has run (the first real mission under RESTRICTED met "index.lock:
+        // permission denied" in exactly that order).
         for (const dir of input.gitWritable ?? []) {
           if (!existsSync(dir) || !statSync(dir).isDirectory()) continue
           await this.ensureLow(dir)

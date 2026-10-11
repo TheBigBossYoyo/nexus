@@ -335,3 +335,22 @@ Four focused independent audits ran on the code of this session. Each finding is
   refused. [x] E7 bidi and control characters stripped.
 - [d] D8 LOW loopback v4/v6 equivalence in the policy (the port-ownership check now covers the case).
   [d] D9 LOW a browser profile folder can be left in the temp folder after a hard kill of the runtime.
+
+### Real missions on the final code (2026-10-11/12)
+
+ISOLATED, five missions (`scripts/v08-acceptance.mjs`, steps normal, boundary, resume, render, electron): normal,
+boundary, render (a page read through the research browser) and electron (an Electron application installed,
+started on its own desktop, operated, screenshot, stopped; nothing asked) passed every gate on the first run.
+The resume mission did not, and found two things: the script looked 95 ms too early (NEXUS had resumed the
+mission by itself; fixed in the script), and a push that was allowed could not run under ISOLATED (fixed in the
+product: "A push you allowed" in `AUTONOMY_MODEL.md`). Evidence of that first run:
+`docs/acceptance/v08-acceptance-2026-10-11T23-27-51-749Z.json`.
+After the fix the resume mission passed under ISOLATED (the push arrived; a verifier's own attempt to read the
+remote's folder became two real outside-project requests that expired with the mission).
+
+RESTRICTED, three missions (normal, boundary, resume). The first run found that no mission could work under
+RESTRICTED at all once a project was enrolled: the worktrees lay inside NEXUS's data directory, which is closed
+to code at low integrity, and Node is refused when it looks at the directories above its files; and git inside a
+longer command could not write its lock file. Fixed: worktrees beside the data directory under RESTRICTED, git's
+directories writable for every command of a RESTRICTED session. Second run: 20 gates of 20
+(`docs/acceptance/v08-acceptance-2026-10-11T23-51-10-291Z.json`).

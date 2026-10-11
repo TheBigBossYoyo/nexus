@@ -203,6 +203,30 @@ Tested in `tests/unit/autonomy/resume.test.ts`, `tests/scenarios/v8-resume.test.
 deny, a mission that waits for something else and stays paused, a grant taken back) and the last test of
 `tests/e2e/v8.spec.ts`.
 
+### A push you allowed
+
+Pushing is outside every profile, so it waits for you. Once you allow it, it has to run where it can work: as
+you, with your network and your way of signing in to the remote. No containment of NEXUS has those, and the
+first real mission that was resumed after a grant showed it: the grant was honoured, the task was started
+again, and the push then ran as the sandbox account and failed. So an allowed push is the one command that
+runs outside the containment, and it is held to the rule of git as the user: the agent's text is parsed and
+NEXUS writes what runs.
+
+- What qualifies is one `git push` and nothing else on the line, with options from a short list
+  (`-u`, `--set-upstream`, `--force-with-lease`, `-q`, `-v`, `--porcelain`; not `--force`, `--delete`,
+  `--mirror`, `--all`, `--tags`, `--receive-pack`, `--no-verify`), at most a remote and one refspec. The remote
+  is a name your repository's configuration knows, never an address or a path on the line.
+- The script names the Git directory and the repository NEXUS recorded, an empty hooks directory (a `pre-push`
+  hook is a program of the repository), and says `HEAD` as the worktree's own branch. It lies in NEXUS's data,
+  where no contained code writes. Your own git configuration applies: it holds the remote and the sign-in.
+- A push in any other form (chained after other commands, with another option) is still refused inside the
+  containment after a grant, with a message that says to run it as a command of its own.
+- Git LFS objects are not uploaded by it (no hooks run).
+
+`tests/unit/policies/git-user.test.ts` ("a push the user allowed"), `tests/integration/git/user-git-script.test.ts`
+(a real push to a local remote with a hostile hook, a forged `HEAD` and a planted configuration), and the
+"resume" mission of `scripts/v08-acceptance.mjs`.
+
 ## While you are away
 
 A mission runs in the runtime, not in a window. A closed window, a locked screen or a night changes nothing

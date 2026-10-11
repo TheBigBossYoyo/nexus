@@ -336,6 +336,14 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   if (isolationStatus.effective === 'ISOLATED' && isolationStatus.usable && isolatedRoot !== null) {
     worktreesDir = join(isolatedRoot, createHash('sha256').update(dataDir.toLowerCase()).digest('hex').slice(0, 12))
     mkdirSync(worktreesDir, { recursive: true })
+  } else if (isolationStatus.effective === 'RESTRICTED' && isolationStatus.usable) {
+    // Under RESTRICTED a worktree must not lie inside NEXUS's data: that directory is closed to code at low
+    // integrity once a project is enrolled, and a program that looks at the directories above its own (Node
+    // does, for every file it loads) is refused there. Found by the first real mission under RESTRICTED: the
+    // tests of the project could not start. The worktrees go beside the data directory, in a directory that
+    // carries no mark of its own.
+    worktreesDir = `${dataDir.replace(/[\\/]+$/, '')}-worktrees`
+    mkdirSync(worktreesDir, { recursive: true })
   }
   executionBroker.sweep()
   const bus = new EventBus(repos.events, repos.transaction)

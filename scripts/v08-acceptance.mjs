@@ -306,7 +306,11 @@ try {
     Object.assign(gates, {
       'resume: the mission stopped at the push with one request, which the script answered once': m.answered !== null && m.boundaryRequests.filter((r) => r.capability === 'GIT_PUSH').length === 1,
       'resume: NEXUS restarted the task and resumed the mission by itself, and says so on the request': m.resumedEvents >= 1 && /started again/.test(pushed?.followUp ?? ''),
-      'resume: the mission completed after the answer, with nothing else asked': m.state === 'completed' && m.toolApprovalsAsked === 0 && m.dialogsShown === 0 && m.boundaryRequests.length === 1,
+      'resume: the mission completed after the answer, with no tool approval and no dialog': m.state === 'completed' && m.toolApprovalsAsked === 0 && m.dialogsShown === 0,
+      // As in the boundary mission: a session that checks the result may meet a boundary of its own (run of 2026-10-11:
+      // a verifier tried to read the remote's directory to see that the push had arrived). That is another request,
+      // and it must be a real one: for something outside the project.
+      'resume: any other request is for something that is outside the project (none is a false boundary)': m.boundaryRequests.filter((r) => r.capability !== 'GIT_PUSH').every((r) => ['READ_OUTSIDE_PROJECT', 'WRITE_OUTSIDE_PROJECT'].includes(r.capability) && r.resource.kind === 'PATH' && !r.resource.value.toLowerCase().startsWith(repo.toLowerCase()) && !(r.capability === 'READ_OUTSIDE_PROJECT' && /nexussandbox[\\/]worktrees/i.test(r.resource.value))),
       'resume: the push that was allowed arrived at the remote': m.remoteAfter !== remoteBefore,
     })
   }

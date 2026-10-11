@@ -195,6 +195,13 @@ command that was more than git, and reported themselves blocked.
   per-worktree configuration (`extensions.worktreeConfig`, which `git sparse-checkout` switches on): in such a
   repository, under RESTRICTED, code that wins the race between NEXUS's check and git's start could have a
   planted `config.worktree` read by NEXUS's own git. Stated as a limit of RESTRICTED.
+  *One command leaves the containment: a push the user allowed.* It runs as the user at the user's own
+  integrity, because only there are the network and the sign-in to the remote. It is one `git push` that NEXUS
+  writes from the parsed command, with the remote by name, listed options, no hooks and the recorded Git
+  directory (`AUTONOMY_MODEL.md`, "A push you allowed"). It runs only after the capability broker found the
+  user's grant for it. What it trusts that the task's code can touch: the commits it pushes (that is the point
+  of a push), and, under RESTRICTED in a repository that reads per-worktree configuration, the race stated
+  above.
   Four more things were added after the second audit of git (below):
   - *An index of its own in an ISOLATED session.* The index in the worktree's entry is written by the sandbox
     account, and an entry in it can name a file outside the worktree (`../x`, an absolute path); stock git,
