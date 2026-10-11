@@ -62,8 +62,8 @@ if (args.has('--remove')) {
 }
 
 const password = `${randomBytes(30).toString('base64url')}aA1!`
-let result = null
-let run = null
+let result
+let run
 try {
   writeFileSync(passwordFile, password, { flag: 'wx' })
   spawnSync(join(system32, 'icacls.exe'), [passwordFile, '/inheritance:r', '/grant:r', `*${sid}:F`, '/grant:r', '*S-1-5-32-544:F'], { windowsHide: true })

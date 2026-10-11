@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { containedEnv } from '@main/modules/process/contained-env'
 import { tokenizeCommandLine } from '@main/modules/process/command-line'
 import { runProcess, type ProcessResult, type RunProcessOptions } from '@main/modules/process/run-process'
-import { quoteArg, type ContainmentCheck, type ContainmentProfile, type Launcher, type LaunchSpec } from './launcher'
+import { quoteArg, type ContainmentCheck, type ContainmentProfile, type Launcher, type LaunchSpec, type SandboxAccountRef } from './launcher'
+import { prepareSandboxLauncher, type SandboxAccount } from './sandbox-account'
+import { mirrorMsys } from './tools'
 
 /**
  * 0.8: the execution broker. Whoever wants project code run (an agent's shell tool, NEXUS's own check and setup
@@ -12,11 +14,15 @@ import { quoteArg, type ContainmentCheck, type ContainmentProfile, type Launcher
  * which directories, with which environment, through the launcher. A caller never gets a bare spawn by asking.
  *
  * Profiles, honestly:
- *  ISOLATED    a job object the tree cannot leave, a token with no privileges and low integrity (it can write
- *              only where NEXUS labeled a directory for it), an allowlist environment with its own home, temp
- *              and caches, and no read access to what NEXUS marked protected. It does not limit the network,
- *              and it does not stop reads of files nobody protected.
- *  RESTRICTED  the job object, the token without privileges, the allowlist environment. Files are as for the user.
+ *  ISOLATED    the command runs as the machine's sandbox account, at low integrity, in a job object its tree
+ *              cannot leave. That account has no access to the user's profile, credential vault or keys;
+ *              Windows Firewall lets none of its traffic out, so the loopback proxy NEXUS gives it is its only
+ *              network. It writes in the directories of its session and reads the system and its own tools.
+ *              Needs the one-time elevated setup of the account. Not contained: loopback services other than
+ *              the proxy, and whatever every local account may read.
+ *  RESTRICTED  the command runs as the user, at low integrity, in the same kind of job. It can write only
+ *              where NEXUS labeled a directory for it and cannot read what NEXUS marked protected. It keeps the
+ *              user's network, credential vault and every file nobody protected.
  *  STANDARD    no containment: the 0.7 behaviour. Never chosen as a fallback for the other two.
  */
 
@@ -35,8 +41,10 @@ export interface SessionRoots {
 
 export interface ExecutionBrokerDeps {
   launcher: Launcher
-  /** NEXUS's directory for sandbox state: `sessions/`, `cache/`, `specs/`, `verify/`. */
+  /** NEXUS's directory for the state of RESTRICTED sessions and for verification scratch, inside its data directory. */
   sandboxDir: string
+  /** The sandbox account as the setup recorded it; null when the setup was not run. Read when needed, so a setup made while NEXUS runs is seen. */
+  account: () => SandboxAccount | null
   /** The environment the allowlist is applied to (the runtime's own). */
   baseEnv: () => NodeJS.ProcessEnv
   /** Directories dropped from PATH: NEXUS's own install directory. */
@@ -45,8 +53,15 @@ export interface ExecutionBrokerDeps {
   extraEnvNames?: (projectId: string) => string[]
   /** The commit identity for git commands an agent runs: with a home of its own git finds no user configuration. */
   gitIdentity?: () => { name: string; email: string }
+  /**
+   * Under ISOLATED: PATH entries that replace the user's own for tools the account cannot read where they are
+   * installed (a mirror in the sandbox root). Absent: the PATH is used as it is.
+   */
+  toolPath?: (profile: ContainmentProfile, path: string) => string
+  /** Variables of the network a session is given: the proxy it must use. */
+  networkEnv?: (session: { projectId: string; sessionKey: string; profile: ContainmentProfile }) => Record<string, string>
   /** Told when a containment that was asked for could not be made. */
-  onFailure?: (info: { projectId: string | null; detail: string }) => void
+  onFailure?: (info: { projectId: string | null; profile: ContainmentProfile; detail: string }) => void
   /** Limits of one command's process tree. */
   limits?: { maxProcesses?: number; maxJobMemoryBytes?: number }
 }
@@ -57,34 +72,73 @@ export type ContainResult =
   | { ok: true; profile: ContainmentProfile; file: string; args: string[]; specPath: string; roots: SessionRoots; withheldEnv: string[] }
   | { ok: false; reason: string }
 
+export interface ContainSession {
+  profile: ContainmentProfile
+  projectId: string
+  /** What identifies the session among those of its project: a run and a task. */
+  sessionKey: string
+  worktree: string
+}
+
 const DEFAULT_MAX_PROCESSES = 512
 
 function shortHash(text: string): string {
   return createHash('sha256').update(text.toLowerCase()).digest('hex').slice(0, 16)
 }
 
+const within = (root: string, path: string): boolean => {
+  const r = resolve(root).toLowerCase()
+  const p = resolve(path).toLowerCase()
+  return p === r || p.startsWith(`${r}\\`)
+}
+
 export class ExecutionBroker {
   private readonly labeled = new Set<string>()
-  private shells: { bash: string | null; powershell: string } | null = null
+  private shells: { gitRoot: string | null; powershell: string } | null = null
+  private readonly msys = new Map<ContainmentProfile, { bash: string; binDir: string } | null>()
+  private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
 
   constructor(private readonly deps: ExecutionBrokerDeps) {}
 
-  /** Runs the containment once to see that it holds here. See Launcher.verify. */
-  verify(force = false): Promise<ContainmentCheck> {
-    return this.deps.launcher.verify(join(this.deps.sandboxDir, 'verify'), force)
+  /** What ISOLATED needs of the account, with the launcher copy in place. Null when there is no account. */
+  private sandbox(): { account: SandboxAccount; ref: SandboxAccountRef } | null {
+    const account = this.deps.account()
+    if (account === null) return null
+    if (this.sandboxRef === null || this.sandboxRef.root !== account.root) this.sandboxRef = { root: account.root, ref: prepareSandboxLauncher(account, this.deps.launcher.executable) }
+    return { account, ref: this.sandboxRef.ref }
   }
 
-  status(): ContainmentCheck | null {
-    return this.deps.launcher.status()
+  /** Where the worktrees of ISOLATED sessions must be: a directory of the sandbox root. Null when there is no account. */
+  isolatedWorktreesRoot(): string | null {
+    const account = this.deps.account()
+    return account === null ? null : join(account.root, 'worktrees')
+  }
+
+  /** Runs a profile's containment once to see that it holds here. See Launcher.verify. */
+  async verify(profile: ContainmentProfile, force = false): Promise<ContainmentCheck> {
+    if (profile === 'RESTRICTED') return this.deps.launcher.verify('RESTRICTED', { scratchRoot: join(this.deps.sandboxDir, 'verify') }, force)
+    let sandbox: ReturnType<ExecutionBroker['sandbox']>
+    try {
+      sandbox = this.sandbox()
+    } catch (e) {
+      sandbox = null
+      void e
+    }
+    if (sandbox === null) return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify') }, force)
+    return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(sandbox.account.root, 'verify'), userOnlyRoot: join(this.deps.sandboxDir, 'verify-user'), sandbox: sandbox.ref }, force)
+  }
+
+  status(profile: ContainmentProfile): ContainmentCheck | null {
+    return this.deps.launcher.status(profile)
   }
 
   /**
-   * Whether a profile can be used now. ISOLATED and RESTRICTED need the launcher to have been verified at this
-   * start; when it was not, the answer is no, with the reason. There is no downgrade here.
+   * Whether a profile can be used now. ISOLATED and RESTRICTED must have been verified at this start; when
+   * one was not, or did not hold, the answer is no, with the reason. There is no downgrade here.
    */
   usable(profile: ExecutionProfileName): { usable: boolean; detail: string } {
-    if (profile === 'STANDARD') return { usable: true, detail: 'No containment: commands run as the user.' }
-    const check = this.status()
+    if (profile === 'STANDARD') return { usable: true, detail: 'No containment: commands run as you.' }
+    const check = this.status(profile)
     if (check === null) return { usable: false, detail: 'The containment has not been verified at this start.' }
     return { usable: check.available, detail: check.detail }
   }
@@ -97,10 +151,20 @@ export class ExecutionBroker {
     this.labeled.add(key)
   }
 
-  /** The directories of a session, created and labeled so that a contained command may write in them. */
-  async roots(session: { projectId: string; sessionKey: string; worktree: string }): Promise<SessionRoots> {
-    const base = join(this.deps.sandboxDir, 'sessions', shortHash(`${session.projectId}|${session.sessionKey}|${session.worktree}`))
-    const roots: SessionRoots = { worktree: session.worktree, temp: join(base, 'tmp'), home: join(base, 'home'), cache: join(this.deps.sandboxDir, 'cache', shortHash(session.projectId)) }
+  /**
+   * The directories of a session, created and labeled so that a contained command may write in them. Under
+   * ISOLATED they are in the sandbox root, and so must the worktree be: the account can reach nothing else.
+   */
+  async roots(session: ContainSession): Promise<SessionRoots> {
+    let stateRoot = this.deps.sandboxDir
+    if (session.profile === 'ISOLATED') {
+      const sandbox = this.sandbox()
+      if (sandbox === null) throw new Error('The sandbox account is not set up on this machine.')
+      if (!within(sandbox.account.root, session.worktree)) throw new Error(`The worktree is not inside the sandbox root (${sandbox.account.root}), so the sandbox account cannot work in it.`)
+      stateRoot = sandbox.account.root
+    }
+    const base = join(stateRoot, 'sessions', shortHash(`${session.projectId}|${session.sessionKey}|${session.worktree}`))
+    const roots: SessionRoots = { worktree: session.worktree, temp: join(base, 'tmp'), home: join(base, 'home'), cache: join(stateRoot, 'cache', shortHash(session.projectId)) }
     await this.ensureLow(roots.worktree)
     await this.ensureLow(base)
     for (const dir of [roots.temp, join(roots.home, 'AppData', 'Roaming'), join(roots.home, 'AppData', 'Local'), roots.cache]) mkdirSync(dir, { recursive: true })
@@ -113,11 +177,11 @@ export class ExecutionBroker {
     this.labeled.delete(worktree.toLowerCase())
   }
 
-  environment(projectId: string, roots: SessionRoots, set: Record<string, string> = {}): { env: Record<string, string>; withheld: string[] } {
+  environment(session: ContainSession, roots: SessionRoots, set: Record<string, string> = {}): { env: Record<string, string>; withheld: string[] } {
     const identity = this.deps.gitIdentity?.()
-    return containedEnv(this.deps.baseEnv(), {
+    const built = containedEnv(this.deps.baseEnv(), {
       tempDir: roots.temp,
-      extraNames: this.deps.extraEnvNames?.(projectId) ?? [],
+      extraNames: this.deps.extraEnvNames?.(session.projectId) ?? [],
       dropPathEntries: this.deps.nexusPathEntries?.() ?? [],
       set: {
         USERPROFILE: roots.home,
@@ -133,60 +197,94 @@ export class ExecutionBroker {
         PIP_CACHE_DIR: join(roots.cache, 'pip'),
         PIP_DISABLE_PIP_VERSION_CHECK: '1',
         ELECTRON_CACHE: join(roots.cache, 'electron'),
-        GIT_CONFIG_NOSYSTEM: '0',
         GIT_TERMINAL_PROMPT: '0',
         ...(identity ? { GIT_AUTHOR_NAME: identity.name, GIT_AUTHOR_EMAIL: identity.email, GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email } : {}),
+        ...(this.deps.networkEnv?.({ projectId: session.projectId, sessionKey: session.sessionKey, profile: session.profile }) ?? {}),
         ...set,
       },
     })
+    const key = Object.keys(built.env).find((k) => k.toLowerCase() === 'path')
+    if (key !== undefined) {
+      if (this.deps.toolPath) built.env[key] = this.deps.toolPath(session.profile, built.env[key] as string)
+      // The user's own MSYS tools cannot run contained (see mirrorMsys): a PATH entry that holds them is left out,
+      // so that `whoami` or `find` is the Windows program and not a tool that dies at its first step.
+      built.env[key] = (built.env[key] as string)
+        .split(';')
+        .filter((entry) => entry !== '' && !existsSync(join(entry, 'msys-2.0.dll')))
+        .join(';')
+    }
+    return built
   }
 
-  private async findShells(): Promise<{ bash: string | null; powershell: string }> {
+  /**
+   * Bash for a profile: a copy of Git's MSYS runtime of the profile's own (see mirrorMsys), in a directory the
+   * contained process can read. Null when Git for Windows is not installed.
+   */
+  private async bashFor(profile: ContainmentProfile): Promise<{ bash: string; binDir: string; gitRoot: string } | null> {
+    const { gitRoot } = await this.findShells()
+    if (gitRoot === null) return null
+    if (!this.msys.has(profile)) {
+      const toolsRoot = profile === 'ISOLATED' ? join((this.sandbox() as { account: SandboxAccount }).account.root, 'tools') : join(this.deps.sandboxDir, 'tools')
+      this.msys.set(profile, mirrorMsys({ toolsRoot, gitRoot }))
+    }
+    const copy = this.msys.get(profile) ?? null
+    return copy === null ? null : { ...copy, gitRoot }
+  }
+
+  private async findShells(): Promise<{ gitRoot: string | null; powershell: string }> {
     if (this.shells !== null) return this.shells
     const env = this.deps.baseEnv()
     const path = (Object.entries(env).find(([k]) => k.toLowerCase() === 'path')?.[1] ?? '').split(';').filter((d) => d !== '')
     const systemRoot = env['SystemRoot'] ?? env['SYSTEMROOT'] ?? 'C:\\Windows'
     // Git for Windows' bash, found from where git itself is: never the WSL launcher in System32.
-    let bash: string | null = null
+    let gitRoot: string | null = null
     for (const dir of path) {
       const clean = dir.replace(/^"(.*)"$/, '$1')
+      if (!existsSync(join(clean, 'git.exe'))) continue
       for (const candidate of [join(clean, '..', 'bin', 'bash.exe'), join(clean, '..', 'usr', 'bin', 'bash.exe'), join(clean, '..', '..', 'bin', 'bash.exe')]) {
-        if (existsSync(join(clean, 'git.exe')) && existsSync(candidate)) {
-          bash = join(dirname(candidate), 'bash.exe')
+        if (existsSync(candidate) && existsSync(join(dirname(candidate), '..', 'usr', 'bin', 'msys-2.0.dll')) ) {
+          gitRoot = resolve(dirname(candidate), '..')
+          break
+        }
+        if (existsSync(candidate) && existsSync(join(dirname(candidate), 'msys-2.0.dll'))) {
+          gitRoot = resolve(dirname(candidate), '..', '..')
           break
         }
       }
-      if (bash !== null) break
+      if (gitRoot !== null) break
     }
     let powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     for (const dir of path) {
       const candidate = join(dir.replace(/^"(.*)"$/, '$1'), 'pwsh.exe')
-      if (existsSync(candidate)) {
+      // Only a PowerShell every account can read: one installed in the user's profile is of no use to the sandbox account.
+      if (existsSync(candidate) && !/\\users\\/i.test(candidate)) {
         powershell = candidate
         break
       }
     }
-    this.shells = { bash, powershell }
+    this.shells = { gitRoot, powershell }
     return this.shells
   }
 
-  private fail(projectId: string | null, detail: string): ContainResult {
+  private fail(projectId: string | null, profile: ContainmentProfile, detail: string): ContainResult {
     try {
-      this.deps.onFailure?.({ projectId, detail })
+      this.deps.onFailure?.({ projectId, profile, detail })
     } catch {
       // A listener's failure is not the broker's.
     }
     return { ok: false, reason: detail }
   }
 
-  private spec(profile: ContainmentProfile, roots: SessionRoots, commandLine: string, env: Record<string, string>, extra: Partial<LaunchSpec> = {}): LaunchSpec {
+  private spec(session: ContainSession, roots: SessionRoots, commandLine: string, env: Record<string, string>, extra: Partial<LaunchSpec> = {}): LaunchSpec {
+    const sandbox = session.profile === 'ISOLATED' ? this.sandbox() : null
     return {
-      profile,
+      profile: session.profile,
       cwd: roots.worktree,
       commandLine,
       env,
       maxProcesses: this.deps.limits?.maxProcesses ?? DEFAULT_MAX_PROCESSES,
       ...(this.deps.limits?.maxJobMemoryBytes !== undefined ? { maxJobMemoryBytes: this.deps.limits.maxJobMemoryBytes } : {}),
+      ...(sandbox ? { sandbox: sandbox.ref } : {}),
       ...extra,
     }
   }
@@ -196,33 +294,41 @@ export class ExecutionBroker {
    * directory and the launcher runs the shell on that script, so nothing of the command is ever spliced into a
    * command line. Returns what to run instead of the command, or the reason nothing will run.
    */
-  async containShell(input: { profile: ContainmentProfile; projectId: string; sessionKey: string; worktree: string; cwd: string; shell: ShellKind; command: string; timeoutMs?: number }): Promise<ContainResult> {
+  async containShell(input: ContainSession & { cwd: string; shell: ShellKind; command: string; timeoutMs?: number }): Promise<ContainResult> {
     const state = this.usable(input.profile)
-    if (!state.usable) return this.fail(input.projectId, `The ${input.profile} execution profile is not available, so the command was not run: ${state.detail}`)
+    if (!state.usable) return this.fail(input.projectId, input.profile, `The ${input.profile} execution profile is not available, so the command was not run: ${state.detail}`)
     try {
       const roots = await this.roots(input)
       const shells = await this.findShells()
-      const { env, withheld } = this.environment(input.projectId, roots)
+      const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
+      const { env, withheld } = this.environment(input, roots)
+      if (bash !== null) {
+        // The copy's own tools first, then Git itself, so that `git`, `ls` and `grep` are what a Git Bash user expects.
+        const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
+        env[key] = [bash.binDir, join(bash.gitRoot, 'mingw64', 'bin'), join(bash.gitRoot, 'cmd'), env[key] ?? ''].filter((e) => e !== '').join(';')
+        env['MSYSTEM'] = 'MINGW64'
+        env['MSYS'] = 'winsymlinks:nativestrict'
+      }
       const id = randomBytes(8).toString('hex')
       let commandLine: string
       if (input.shell === 'bash') {
-        if (shells.bash === null) return this.fail(input.projectId, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
+        if (bash === null) return this.fail(input.projectId, input.profile, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
         const script = join(roots.temp, `nx-${id}.sh`)
         writeFileSync(script, `${input.command}\n`, { flag: 'wx' })
-        commandLine = `${quoteArg(shells.bash)} --noprofile --norc ${quoteArg(script)}`
+        commandLine = `${quoteArg(bash.bash)} --noprofile --norc ${quoteArg(script)}`
       } else {
         const script = join(roots.temp, `nx-${id}.ps1`)
         // A UTF-8 byte order mark: Windows PowerShell reads a script without one in the ANSI code page.
-        writeFileSync(script, `\ufeff${input.command}\nexit $LASTEXITCODE\n`, { flag: 'wx' })
+        writeFileSync(script, `${String.fromCharCode(0xfeff)}${input.command}\nexit $LASTEXITCODE\n`, { flag: 'wx' })
         commandLine = `${quoteArg(shells.powershell)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${quoteArg(script)}`
       }
       // The command starts where the agent's shell is, when that is inside the worktree; else at the worktree.
-      const cwd = input.cwd.toLowerCase().startsWith(roots.worktree.toLowerCase()) && existsSync(input.cwd) ? input.cwd : roots.worktree
-      const specPath = this.deps.launcher.writeSpec({ ...this.spec(input.profile, roots, commandLine, env, input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}), cwd })
+      const cwd = within(roots.worktree, input.cwd) && existsSync(input.cwd) ? input.cwd : roots.worktree
+      const specPath = this.deps.launcher.writeSpec({ ...this.spec(input, roots, commandLine, env, input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}), cwd })
       const { file, args } = this.deps.launcher.invocation(specPath)
       return { ok: true, profile: input.profile, file, args, specPath, roots, withheldEnv: withheld }
     } catch (e) {
-      return this.fail(input.projectId, `The containment could not be set up, so the command was not run: ${e instanceof Error ? e.message : String(e)}`)
+      return this.fail(input.projectId, input.profile, `The containment could not be set up, so the command was not run: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -231,18 +337,60 @@ export class ExecutionBroker {
    * containment. The command line is one the project configured; it is refused if it uses shell operators, as
    * before 0.8. Throws when the containment cannot be made: the caller records a failed command, not a run.
    */
-  async runProjectCommand(input: { profile: ContainmentProfile; projectId: string; sessionKey: string; worktree: string; commandLine: string }, options: Omit<RunProcessOptions, 'cwd' | 'env'>): Promise<ProcessResult> {
+  async runProjectCommand(input: ContainSession & { commandLine: string }, options: Omit<RunProcessOptions, 'cwd' | 'env'>): Promise<ProcessResult> {
     const state = this.usable(input.profile)
     if (!state.usable) {
-      this.fail(input.projectId, state.detail)
+      this.fail(input.projectId, input.profile, state.detail)
       throw new Error(`The ${input.profile} execution profile is not available, so the command was not run: ${state.detail}`)
     }
     // The same validation as an uncontained run: a configured command is a program and its arguments.
     tokenizeCommandLine(input.commandLine)
     const roots = await this.roots(input)
-    const { env } = this.environment(input.projectId, roots)
+    const { env } = this.environment(input, roots)
     const comspec = this.deps.baseEnv()['ComSpec'] ?? this.deps.baseEnv()['COMSPEC'] ?? 'C:\\Windows\\System32\\cmd.exe'
-    const specPath = this.deps.launcher.writeSpec(this.spec(input.profile, roots, `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`, env, options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs + 5000 } : {}))
+    const specPath = this.deps.launcher.writeSpec(this.spec(input, roots, `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`, env, options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs + 5000 } : {}))
+    try {
+      const { file, args } = this.deps.launcher.invocation(specPath)
+      return await runProcess(file, args, { ...options, cwd: roots.worktree, env: this.launcherEnv() })
+    } finally {
+      this.deps.launcher.removeSpec(specPath)
+    }
+  }
+
+  /**
+   * The command line for a program and its arguments, with the program found on the PATH the command will
+   * have, not on the launcher's: the contained process is started by path, never by a name looked up elsewhere.
+   */
+  private commandLineFor(file: string, args: readonly string[], env: Record<string, string>): string {
+    let program = file
+    if (!/[\\/]/.test(file)) {
+      const path = (Object.entries(env).find(([k]) => k.toLowerCase() === 'path')?.[1] ?? '').split(';').filter((e) => e !== '')
+      const hasExt = /\.[a-z0-9]{1,4}$/i.test(file)
+      outer: for (const dir of path) {
+        for (const ext of hasExt ? [''] : ['.exe', '.cmd', '.bat', '.com']) {
+          const candidate = join(dir, `${file}${ext}`)
+          if (existsSync(candidate)) {
+            program = candidate
+            break outer
+          }
+        }
+      }
+    }
+    if (/\.(cmd|bat)$/i.test(program)) {
+      const comspec = this.deps.baseEnv()['ComSpec'] ?? this.deps.baseEnv()['COMSPEC'] ?? 'C:\\Windows\\System32\\cmd.exe'
+      return `${quoteArg(comspec)} /d /s /c "${[program, ...args].map(quoteArg).join(' ')}"`
+    }
+    return [program, ...args].map(quoteArg).join(' ')
+  }
+
+  /** Runs a program with arguments inside the containment and waits for it. For NEXUS's own use and for tests of the containment. */
+  async run(input: ContainSession & { file: string; args: readonly string[]; cwd?: string; set?: Record<string, string> }, options: Omit<RunProcessOptions, 'cwd' | 'env'> = {}): Promise<ProcessResult> {
+    const state = this.usable(input.profile)
+    if (!state.usable) throw new Error(`The ${input.profile} execution profile is not available: ${state.detail}`)
+    const roots = await this.roots(input)
+    const { env } = this.environment(input, roots, input.set ?? {})
+    const spec = this.spec(input, roots, this.commandLineFor(input.file, input.args, env), env, options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs + 5000 } : {})
+    const specPath = this.deps.launcher.writeSpec({ ...spec, ...(input.cwd !== undefined && within(roots.worktree, input.cwd) ? { cwd: input.cwd } : {}) })
     try {
       const { file, args } = this.deps.launcher.invocation(specPath)
       return await runProcess(file, args, { ...options, cwd: roots.worktree, env: this.launcherEnv() })
@@ -255,7 +403,7 @@ export class ExecutionBroker {
   private launcherEnv(): Record<string, string> {
     const base = this.deps.baseEnv()
     const env: Record<string, string> = {}
-    for (const name of ['SystemRoot', 'SYSTEMROOT', 'SystemDrive', 'windir', 'ComSpec', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP']) {
+    for (const name of ['SystemRoot', 'SYSTEMROOT', 'SystemDrive', 'windir', 'ComSpec', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA']) {
       const value = base[name]
       if (value !== undefined) env[name] = value
     }
@@ -268,26 +416,29 @@ export class ExecutionBroker {
    */
   sweep(keepSessions: (dirName: string) => boolean = () => false): { removed: number } {
     let removed = 0
-    const sessions = join(this.deps.sandboxDir, 'sessions')
-    if (existsSync(sessions)) {
-      for (const name of readdirSync(sessions)) {
-        if (keepSessions(name)) continue
-        try {
-          rmSync(join(sessions, name), { recursive: true, force: true, maxRetries: 2, retryDelay: 50 })
-          removed += 1
-        } catch {
-          // In use by a process that is still ending; the next sweep takes it.
+    const stateRoots = [this.deps.sandboxDir, ...(this.deps.account() ? [(this.deps.account() as SandboxAccount).root] : [])]
+    for (const stateRoot of stateRoots) {
+      const sessions = join(stateRoot, 'sessions')
+      if (existsSync(sessions)) {
+        for (const name of readdirSync(sessions)) {
+          if (keepSessions(name)) continue
+          try {
+            rmSync(join(sessions, name), { recursive: true, force: true, maxRetries: 2, retryDelay: 50 })
+            removed += 1
+          } catch {
+            // In use by a process that is still ending; the next sweep takes it.
+          }
         }
       }
-    }
-    const specs = join(this.deps.sandboxDir, 'specs')
-    if (existsSync(specs)) {
-      const cutoff = Date.now() - 86_400_000
-      for (const name of readdirSync(specs)) {
-        try {
-          if (statSync(join(specs, name)).mtimeMs < cutoff) rmSync(join(specs, name), { force: true })
-        } catch {
-          // gone already
+      const specs = join(stateRoot, 'specs')
+      if (existsSync(specs)) {
+        const cutoff = Date.now() - 86_400_000
+        for (const name of readdirSync(specs)) {
+          try {
+            if (statSync(join(specs, name)).mtimeMs < cutoff) rmSync(join(specs, name), { force: true })
+          } catch {
+            // gone already
+          }
         }
       }
     }

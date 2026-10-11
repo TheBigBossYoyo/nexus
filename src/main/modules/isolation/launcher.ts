@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { runProcess } from '@main/modules/process/run-process'
 
 /**
@@ -10,8 +10,22 @@ import { runProcess } from '@main/modules/process/run-process'
  * once per start whether the containment really works on this machine, by running it.
  */
 
-/** What the launcher is asked to do. ISOLATED: job, no privileges, low integrity. RESTRICTED: job and no privileges. */
+/**
+ * What the launcher is asked to do. Both make a job object and a token with no privileges at low integrity.
+ * RESTRICTED runs the command as the user. ISOLATED runs it as the machine's sandbox account, which has no
+ * access to the user's profile, credential vault or keys, and no network but the loopback.
+ */
 export type ContainmentProfile = 'ISOLATED' | 'RESTRICTED'
+
+/** What ISOLATED needs besides the command: who to run as, and where that account finds the launcher. */
+export interface SandboxAccountRef {
+  /** The DPAPI blob with the account's name and password, readable by the user alone. */
+  credentialPath: string
+  /** A copy of nexus-launch.exe the account can run. */
+  stage2Path: string
+  /** A directory the account can read, for the inner spec. */
+  stage2Dir: string
+}
 
 export interface LaunchSpec {
   profile: ContainmentProfile
@@ -29,6 +43,8 @@ export interface LaunchSpec {
   uiLimits?: number
   /** Where the launcher writes what the job did (process count, peak memory, exit). */
   reportPath?: string
+  /** Required for ISOLATED. */
+  sandbox?: SandboxAccountRef
 }
 
 /** Launcher exit codes that are its own, not the command's. */
@@ -48,6 +64,10 @@ export function renderSpec(spec: LaunchSpec): string {
   if (spec.uiLimits !== undefined) lines.push(`ui-limits=${spec.uiLimits >>> 0}`)
   if (spec.window === true) lines.push('window=1')
   if (spec.reportPath !== undefined) lines.push(`report=${b64(spec.reportPath)}`)
+  if (spec.profile === 'ISOLATED') {
+    if (spec.sandbox === undefined) throw new Error('The ISOLATED profile needs the sandbox account.')
+    lines.push(`credential=${b64(spec.sandbox.credentialPath)}`, `stage2=${b64(spec.sandbox.stage2Path)}`, `stage2-dir=${b64(spec.sandbox.stage2Dir)}`)
+  }
   return `${lines.join('\n')}\n`
 }
 
@@ -87,8 +107,17 @@ export interface ContainmentCheck {
   checkedAt: string
 }
 
+/** The directories a verification of a profile works in: one the command may write, one beside it, one protected. */
+export interface VerifyPlace {
+  /** A directory under which the scratch is made. For ISOLATED it must be inside the sandbox account's root. */
+  scratchRoot: string
+  /** A directory the sandbox account has no access to at all (inside the user's profile). ISOLATED only. */
+  userOnlyRoot?: string
+  sandbox?: SandboxAccountRef
+}
+
 export class Launcher {
-  private check: ContainmentCheck | null = null
+  private readonly checks = new Map<ContainmentProfile, ContainmentCheck>()
 
   constructor(private readonly options: LauncherOptions) {}
 
@@ -123,63 +152,88 @@ export class Launcher {
    * the access list are not touched.
    */
   async label(mode: 'low' | 'protect' | 'clear', path: string): Promise<void> {
-    const result = await runProcess(this.options.executable, ['label', mode, path], { cwd: this.options.specDir, timeoutMs: 10 * 60_000, env: minimalEnv() })
+    const result = await runProcess(this.options.executable, ['label', mode, path], { cwd: dirname(this.options.executable), timeoutMs: 10 * 60_000, env: minimalEnv() })
     if (result.exitCode !== 0) throw new Error(`The integrity label of ${path} could not be set: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
   }
 
   /**
-   * Establishes that the containment works here, by using it: a contained process must be able to write in a
-   * low-labeled directory, must not be able to write beside it, and must not be able to read a protected one.
+   * Establishes that a profile works here, by using it. A contained process must be able to write in its own
+   * directory and must not be able to write beside it or to read a protected file; under ISOLATED it must also
+   * be a different account, unable to read a directory of the user's, and without a route to the Internet.
    * The answer is kept for this start. Any doubt is "not available": a profile that was not shown to hold is
    * not reported as holding.
    */
-  async verify(scratchRoot: string, force = false): Promise<ContainmentCheck> {
-    if (this.check !== null && !force) return this.check
-    const done = (available: boolean, detail: string): ContainmentCheck => (this.check = { available, detail, checkedAt: new Date().toISOString() })
+  async verify(profile: ContainmentProfile, place: VerifyPlace, force = false): Promise<ContainmentCheck> {
+    const known = this.checks.get(profile)
+    if (known !== undefined && !force) return known
+    const done = (available: boolean, detail: string): ContainmentCheck => {
+      const check = { available, detail, checkedAt: new Date().toISOString() }
+      this.checks.set(profile, check)
+      return check
+    }
     if (process.platform !== 'win32') return done(false, 'The containment exists on Windows only.')
     if (!existsSync(this.options.executable)) return done(false, `The launcher is missing: ${this.options.executable}`)
-    const root = join(scratchRoot, `verify-${randomBytes(6).toString('hex')}`)
+    if (profile === 'ISOLATED' && (place.sandbox === undefined || !existsSync(place.sandbox.credentialPath))) return done(false, 'The sandbox account is not set up on this machine.')
+    const id = randomBytes(6).toString('hex')
+    const root = join(place.scratchRoot, `verify-${id}`)
     const inside = join(root, 'inside')
     const beside = join(root, 'beside')
     const secret = join(root, 'secret')
+    const userOnly = profile === 'ISOLATED' && place.userOnlyRoot !== undefined ? join(place.userOnlyRoot, `verify-${id}`) : null
     try {
       for (const dir of [inside, beside, secret]) mkdirSync(dir, { recursive: true })
       writeFileSync(join(secret, 'sentinel.txt'), 'nexus-verify-sentinel')
+      if (userOnly !== null) {
+        mkdirSync(userOnly, { recursive: true })
+        writeFileSync(join(userOnly, 'sentinel.txt'), 'nexus-verify-user-sentinel')
+      }
       await this.label('low', inside)
       await this.label('protect', secret)
-      // cmd.exe only: present on every Windows, no runtime to load, cannot raise a dialog of its own.
-      const script = [
+      const systemRoot = process.env['SystemRoot'] ?? 'C:\\Windows'
+      // cmd.exe and tools of System32 only: present on every Windows, no runtime to load, no dialog of their own.
+      const lines = [
         `echo ok> "${join(inside, 'w.txt')}"`,
         `(echo x> "${join(beside, 'w.txt')}") 2>nul`,
         `(type "${join(secret, 'sentinel.txt')}" > "${join(inside, 'r.txt')}") 2>nul`,
-        'exit /b 0',
-      ].join(' & ')
+        `"${join(systemRoot, 'System32', 'whoami.exe')}" > "${join(inside, 'who.txt')}" 2>nul`,
+      ]
+      if (userOnly !== null) lines.push(`(type "${join(userOnly, 'sentinel.txt')}" > "${join(inside, 'u.txt')}") 2>nul`)
+      // A public resolver's address on the DNS port: reached means the account has a route out.
+      if (profile === 'ISOLATED') lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://1.1.1.1/ && echo reached> "${join(inside, 'net.txt')}"`)
+      lines.push('exit /b 0')
       const comspec = process.env['ComSpec'] ?? 'C:\\Windows\\System32\\cmd.exe'
-      const specPath = this.writeSpec({ profile: 'ISOLATED', cwd: inside, commandLine: `${quoteArg(comspec)} /d /s /c "${script}"`, env: minimalEnv(inside), timeoutMs: 20_000, maxProcesses: 8 })
+      const specPath = this.writeSpec({ profile, cwd: inside, commandLine: `${quoteArg(comspec)} /d /s /c "${lines.join(' & ')}"`, env: minimalEnv(inside), timeoutMs: 30_000, maxProcesses: 16, ...(place.sandbox ? { sandbox: place.sandbox } : {}) })
       const { file, args } = this.invocation(specPath)
-      const result = await runProcess(file, args, { cwd: inside, timeoutMs: 30_000, env: minimalEnv() })
+      const result = await runProcess(file, args, { cwd: inside, timeoutMs: 45_000, env: minimalEnv() })
       this.removeSpec(specPath)
+      const read = (name: string): string => (existsSync(join(inside, name)) ? readFileSync(join(inside, name), 'utf8') : '')
       if (result.exitCode !== 0) return done(false, `The launcher could not run a contained command (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 300)}`)
       if (!existsSync(join(inside, 'w.txt'))) return done(false, 'A contained process could not write in its own directory.')
       if (existsSync(join(beside, 'w.txt'))) return done(false, 'A contained process wrote outside its directory: the containment does not hold on this machine.')
-      const leaked = existsSync(join(inside, 'r.txt')) ? readFileSync(join(inside, 'r.txt'), 'utf8') : ''
-      if (leaked.includes('nexus-verify-sentinel')) return done(false, 'A contained process read a protected file: the containment does not hold on this machine.')
-      return done(true, 'Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file.')
+      if (read('r.txt').includes('nexus-verify-sentinel')) return done(false, 'A contained process read a protected file: the containment does not hold on this machine.')
+      if (profile === 'RESTRICTED') return done(true, 'Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault and unprotected files are within its reach.')
+      const who = read('who.txt').trim().toLowerCase()
+      const self = `${(process.env['USERDOMAIN'] ?? '').toLowerCase()}\\${(process.env['USERNAME'] ?? '').toLowerCase()}`
+      if (who === '' || who === self) return done(false, 'The contained process did not run as the sandbox account.')
+      if (read('u.txt').includes('nexus-verify-user-sentinel')) return done(false, "The sandbox account read a file in the user's profile: the containment does not hold on this machine.")
+      if (read('net.txt').includes('reached')) return done(false, 'The sandbox account reached the Internet directly: its firewall rule is missing or not effective.')
+      return done(true, `Verified at this start: a contained process ran as ${who}, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, and had no direct route to the Internet.`)
     } catch (e) {
       return done(false, `The containment could not be verified: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       try {
         await this.label('clear', secret).catch(() => undefined)
         rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+        if (userOnly !== null) rmSync(userOnly, { recursive: true, force: true })
       } catch {
         // scratch
       }
     }
   }
 
-  /** The last verification, or null when none was made at this start. */
-  status(): ContainmentCheck | null {
-    return this.check
+  /** The last verification of a profile, or null when none was made at this start. */
+  status(profile: ContainmentProfile): ContainmentCheck | null {
+    return this.checks.get(profile) ?? null
   }
 }
 
