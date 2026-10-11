@@ -49,6 +49,15 @@ export interface CommandClassification {
   commandClass: CommandClass
   /** Every distinct class seen, most severe last. */
   classes: CommandClass[]
+  /** 0.8: each finding with its own class and risk, for callers that decide per finding (the capability broker). */
+  findings: CommandFinding[]
+}
+
+export interface CommandFinding {
+  level: 'needs_approval' | 'forbidden'
+  risk: CommandRisk
+  reason: string
+  cls: CommandClass
 }
 
 export interface ClassifyOptions {
@@ -61,12 +70,7 @@ export interface ClassifyOptions {
 const MAX_NESTING = 6
 const RISK_ORDER: Record<CommandRisk, number> = { low: 0, medium: 1, high: 2 }
 
-interface Finding {
-  level: 'needs_approval' | 'forbidden'
-  risk: CommandRisk
-  reason: string
-  cls: CommandClass
-}
+type Finding = CommandFinding
 
 class Analysis {
   readonly findings: Finding[] = []
@@ -119,14 +123,14 @@ export function classifyCommand(command: string, shell: Shell, opts: ClassifyOpt
   const commandClass = maxClass(all)
   if (a.findings.some((f) => f.level === 'forbidden')) {
     const forbidden = a.findings.filter((f) => f.level === 'forbidden')
-    return { level: 'forbidden', reasons: [...new Set(forbidden.map((f) => f.reason))], risk: 'high', segments, commandClass, classes }
+    return { level: 'forbidden', reasons: [...new Set(forbidden.map((f) => f.reason))], risk: 'high', segments, commandClass, classes, findings: forbidden }
   }
   if (a.findings.length > 0) {
     const risk = a.findings.reduce<CommandRisk>((m, f) => (RISK_ORDER[f.risk] > RISK_ORDER[m] ? f.risk : m), 'low')
-    return { level: 'needs_approval', reasons, risk, segments, commandClass, classes }
+    return { level: 'needs_approval', reasons, risk, segments, commandClass, classes, findings: a.findings }
   }
   const readOnly = segments.every((s) => s.kind === 'readonly')
-  return { level: readOnly ? 'safe' : 'write', reasons: [], risk: null, segments, commandClass, classes }
+  return { level: readOnly ? 'safe' : 'write', reasons: [], risk: null, segments, commandClass, classes, findings: [] }
 }
 
 // ---------------------------------------------------------------------------------------------

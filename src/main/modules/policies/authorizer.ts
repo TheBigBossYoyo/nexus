@@ -3,6 +3,8 @@ import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
 import { SECURITY_POLICY_VERSION, type ExecutionDecision, type ExecutionProfile, type ProvenanceKind, type TrustClass } from '@shared/security'
 import type { ToolDecision, ToolRequest } from '@main/modules/agent-runtime/types'
+import type { AutonomyGate } from '@main/modules/autonomy/gate'
+import { needForExecutionReason, needsForFindings, type CapabilityNeed } from '@main/modules/autonomy/tool-capabilities'
 import { capabilitiesForRole } from './capabilities'
 import { classifyCommand } from './command-classifier'
 import type { SegmentKind } from './command-classifier'
@@ -29,6 +31,12 @@ export interface PolicyContext {
   allowedMcpServers?: string[]
   /** 0.7 execution security: profile, provenance, the base commit reader and the decision log. All optional. */
   execution?: ExecutionContext
+  /**
+   * 0.8: present for a project the user enrolled. Where the policy would ask the user, or refuse something a
+   * grant could cover, the capability broker decides instead: the call is allowed or refused, never put to the
+   * user as an approval. Absent, the approvals of 0.7 apply unchanged.
+   */
+  autonomy?: AutonomyGate
 }
 
 export interface ExecutionContext {
@@ -54,7 +62,16 @@ interface AuditInfo {
 interface Outcome {
   tool: ToolDecision
   audit?: AuditInfo
+  /** 0.8: what the call needs of the capability broker. Read only when the project is enrolled. */
+  needs?: CapabilityNeed[]
 }
+
+/** A decision of the file tools with the capability a grant would have to cover, when there is one. */
+type Decided = ToolDecision & { need?: CapabilityNeed }
+const needing = (decision: ToolDecision, capability: CapabilityNeed['capability'], why: string, pathValue?: string): Decided => ({
+  ...decision,
+  need: { capability, why, inBoundary: false, resource: pathValue === undefined ? { kind: 'ANY', value: '' } : { kind: 'PATH', value: pathValue } },
+})
 
 type Risk = 'low' | 'medium' | 'high'
 const NEXUS_DATA_DENY = "Denied: NEXUS's own database, key files and runtime endpoint (named pipe, endpoint.json, runtime.log) are not available to agents."
@@ -196,21 +213,21 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
   const safePrefixes = ctx.safeCommandPrefixes.map((p) => p.trim().toLowerCase().split(/\s+/).filter(Boolean)).filter((p) => p.length > 0)
   const inReadRoots = (c: string): boolean => readRoots.some((r) => isPathInside(r, c))
 
-  function authorizeRead(raw: string | null, field: string, base: string = worktree): ToolDecision {
+  function authorizeRead(raw: string | null, field: string, base: string = worktree): Decided {
     if (raw === null) return deny(`${field} is required`)
     const target = canon(raw, base)
-    if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return deny(NEXUS_DATA_DENY)
+    if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return needing(deny(NEXUS_DATA_DENY), 'ACCESS_NEXUS_CONTROL_PLANE', 'names NEXUS application data', target)
     if (!inReadRoots(target)) {
-      return deny(`Read denied: ${raw} is outside the worktree, project and approved read locations. Use paths inside ${worktree}.`)
+      return needing(deny(`Read denied: ${raw} is outside the worktree, project and approved read locations. Use paths inside ${worktree}.`), 'READ_OUTSIDE_PROJECT', 'reads a file outside the enrolled project', target)
     }
-    if (isSecretPath(target) || isSecretPath(raw)) return ask(`accessing secrets: ${raw} looks like a credential or secret file`, 'high')
+    if (isSecretPath(target) || isSecretPath(raw)) return needing(ask(`accessing secrets: ${raw} looks like a credential or secret file`, 'high'), 'READ_PROJECT_SECRETS', 'reads a file that looks like a credential or secret', target)
     return ALLOW
   }
 
-  function authorizeWrite(raw: string | null, field: string, agentId: string, content?: string): ToolDecision {
+  function authorizeWrite(raw: string | null, field: string, agentId: string, content?: string): Decided {
     if (raw === null) return deny(`${field} is required`)
     const target = canon(raw, worktree)
-    if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return deny(NEXUS_DATA_DENY)
+    if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return needing(deny(NEXUS_DATA_DENY), 'ACCESS_NEXUS_CONTROL_PLANE', 'names NEXUS application data', target)
     if (isPathInside(worktree, target)) {
       if (isInsideGitDir(worktree, target)) return deny(`Write denied: ${raw} is inside a .git directory, which agents must never modify.`)
       // Remember who wrote it: running this file later is judged as agent-authored code.
@@ -222,8 +239,11 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
         `Write denied: ${raw} is in the project root but outside your task worktree. Edit the equivalent file under ${worktree} instead.`,
       )
     }
-    return deny(
-      `Write denied: ${raw} is outside the project and worktree. Files outside the task worktree cannot be modified (denied by default; no approval path).`,
+    return needing(
+      deny(`Write denied: ${raw} is outside the project and worktree. Files outside the task worktree cannot be modified (denied by default; no approval path).`),
+      'WRITE_OUTSIDE_PROJECT',
+      'writes a file outside the task worktree',
+      target,
     )
   }
 
@@ -253,7 +273,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     })
     if (cls.level === 'forbidden') {
       const reason = `Command forbidden: ${cls.reasons.join('; ')}. This cannot be approved; choose a different approach.`
-      return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }
+      return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason }, needs: forbiddenNeeds(cls.reasons) }
     }
     const base = authorizeShellByClass(input, cls)
     if (base.behavior === 'deny') {
@@ -286,19 +306,61 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     // The command will run or be put to the user: remember the files it writes so later runs know who wrote them.
     recordShellWrites(command, shell, agentId)
 
+    const contained = ctx.autonomy?.contained === true
+    const baseNeed = shellBaseNeed(cls)
     if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
+      const findings = [
+        ...cls.findings,
+        ...(input.dangerouslyDisableSandbox === true ? [{ reason: 'requests to run outside the tool sandbox', cls: 'UNKNOWN' as const }] : []),
+        ...(base.behavior === 'ask' && cls.findings.length === 0 && input.dangerouslyDisableSandbox !== true ? [{ reason: base.reason, cls: 'UNKNOWN' as const }] : []),
+      ]
+      const needs = [
+        baseNeed,
+        ...needsForFindings(findings, { contained }),
+        ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons.map((r) => needForExecutionReason(r, verdict.trust, { contained })) : []),
+      ]
       const reasons = [...(base.behavior === 'ask' ? [base.reason] : []), ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons : [])]
       const reason = [...new Set(reasons)].join('; ')
       const baseRisk: Risk = base.behavior === 'ask' ? base.risk : 'low'
       const risk: Risk = baseRisk === 'high' || (verdict.decision === 'REQUIRE_APPROVAL' && verdict.trust === 'SYSTEM_SENSITIVE') ? 'high' : verdict.decision === 'REQUIRE_APPROVAL' ? 'medium' : baseRisk
       const classification: TrustClass =
         verdict.decision === 'REQUIRE_APPROVAL' ? verdict.trust : cls.commandClass === 'SYSTEM_CHANGE' || cls.commandClass === 'DESTRUCTIVE' ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED'
-      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason } }
+      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs }
     }
     if (verdict.decision === 'ALLOW_WITH_AUDIT') {
-      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') } }
+      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') }, needs: [baseNeed] }
     }
-    return { tool: base }
+    return { tool: base, needs: [baseNeed] }
+  }
+
+  /** The profile capability a shell command is an exercise of, from what its parts are. */
+  function shellBaseNeed(cls: ReturnType<typeof classifyCommand>): CapabilityNeed {
+    const kinds = new Set(cls.segments.map((s) => s.kind))
+    const capability: CapabilityNeed['capability'] = kinds.has('install')
+      ? 'INSTALL_PROJECT_DEPENDENCIES'
+      : kinds.has('other')
+        ? cls.segments.every((s) => s.kind !== 'other' || s.class === 'GIT_LOCAL')
+          ? 'GIT_LOCAL'
+          : 'RUN_PROJECT_COMMAND'
+        : kinds.has('verify')
+          ? 'RUN_TESTS'
+          : 'READ_PROJECT'
+    return { capability, resource: { kind: 'ANY', value: '' }, why: 'runs a command in the task roots', inBoundary: true }
+  }
+
+  /** A forbidden command is refused whatever the broker says; these needs only make the broker record what was tried. */
+  function forbiddenNeeds(reasons: string[]): CapabilityNeed[] {
+    const text = reasons.join('; ')
+    const capability: CapabilityNeed['capability'] | null = /credential stores/i.test(text)
+      ? 'ACCESS_PROVIDER_SECRETS'
+      : /NEXUS application data/i.test(text)
+        ? 'ACCESS_NEXUS_CONTROL_PLANE'
+        : /security tooling/i.test(text)
+          ? 'DISABLE_SECURITY_SOFTWARE'
+          : /shutting down|powering off/i.test(text)
+            ? 'HOST_POWER'
+            : null
+    return capability === null ? [] : [{ capability, resource: { kind: 'ANY', value: '' }, why: text.slice(0, 300), inBoundary: false }]
   }
 
   function recordShellWrites(command: string, shell: 'bash' | 'powershell', agentId: string): void {
@@ -356,10 +418,11 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       if (!tools.has(toolName)) return { tool: deny(`Tool ${toolName} is not available to the ${ctx.role} role. Available tools: ${[...tools].join(', ')}.`) }
       return authorizeShell(toolName, input, req.agentId)
     }
-    return { tool: decideOther(req) }
+    const { need, ...tool } = decideOther(req)
+    return { tool: tool as ToolDecision, ...(need !== undefined ? { needs: [need] } : {}) }
   }
 
-  function decideOther(req: ToolRequest): ToolDecision {
+  function decideOther(req: ToolRequest): Decided {
     const { toolName, input } = req
     if (toolName.startsWith('mcp__')) {
       if (toolName.startsWith('mcp__nexus__')) return ALLOW
@@ -447,9 +510,40 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     }
   }
 
+  /**
+   * 0.8, enrolled projects only. A call with needs is decided by the capability broker: an `ask` never reaches
+   * the user as an approval, and a refusal that a grant could cover becomes a boundary request. A call the
+   * policy forbids outright stays forbidden; the broker is only told, so that the attempt is on record.
+   */
+  function throughBroker(req: ToolRequest, outcome: Outcome): Outcome {
+    const gate = ctx.autonomy
+    if (gate === undefined) return outcome
+    const needs = outcome.needs ?? []
+    const forbidden = outcome.tool.behavior === 'deny' && outcome.audit?.decision === 'DENY'
+    if (needs.length === 0) {
+      // An `ask` with nothing the broker could decide is refused: an enrolled project has no approval dialog.
+      if (outcome.tool.behavior === 'ask') {
+        const reason = `Denied: ${outcome.tool.reason}. This project works without approval dialogs; choose a different approach.`
+        return { tool: deny(reason), audit: { classification: outcome.audit?.classification ?? 'UNTRUSTED_AGENT_AUTHORED', provenance: outcome.audit?.provenance ?? 'not_applicable', decision: 'DENY', reason } }
+      }
+      return outcome
+    }
+    const decided = gate.resolve(req, actionSummary(req.toolName, req.input), needs, outcome.audit?.classification)
+    if (forbidden) return outcome
+    if (decided.behavior === 'allow') {
+      // What the policy only wanted to ask about, and the broker authorized, runs. The entry of the inspection
+      // is kept as an audited allow, so the decision log still shows what was looked at.
+      const audit: AuditInfo | undefined =
+        outcome.audit?.decision === 'REQUIRE_APPROVAL' ? { ...outcome.audit, decision: 'ALLOW_WITH_AUDIT' } : outcome.audit?.decision === 'ALLOW_WITH_AUDIT' ? outcome.audit : undefined
+      return { tool: ALLOW, ...(audit !== undefined ? { audit } : {}) }
+    }
+    const reason = decided.behavior === 'deny' ? decided.reason : 'Denied.'
+    return { tool: deny(reason), audit: { classification: outcome.audit?.classification ?? 'UNTRUSTED_AGENT_AUTHORED', provenance: outcome.audit?.provenance ?? 'not_applicable', decision: 'DENY', reason } }
+  }
+
   return async (req: ToolRequest): Promise<ToolDecision> => {
     try {
-      const outcome = await decide(req)
+      const outcome = throughBroker(req, await decide(req))
       log(req, outcome)
       return outcome.tool
     } catch (e) {
