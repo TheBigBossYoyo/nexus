@@ -219,6 +219,11 @@
     outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
   }
+  /* The main region takes the focus after a navigation so that reading starts at the new view. It is not a
+     control: a ring around the whole page would mark nothing a key can act on. */
+  #main-content:focus-visible {
+    outline: none;
+  }
   button,
   select,
   input,
