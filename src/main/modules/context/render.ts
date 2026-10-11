@@ -130,7 +130,10 @@ export function criteriaSection(
   }
   if (mission.length > 0) {
     if (parts.length > 0) parts.push('')
-    parts.push('Mission criteria:', bullets(mission))
+    // Said with the list, because a task's verifier failed a finished task on criteria only a later task can
+    // meet. With no task criteria the mission's are all there is to judge by, and the note would only mislead.
+    const scoped = task.acceptanceCriteria.length > 0
+    parts.push(scoped ? 'Mission criteria (of the whole mission: this task answers for them as far as its own scope goes; what belongs to another task is not a failure of this one):' : 'Mission criteria:', bullets(mission))
   }
   return parts.length > 0 ? truncate(parts.join('\n'), SECTION_LIMITS.criteria) : null
 }

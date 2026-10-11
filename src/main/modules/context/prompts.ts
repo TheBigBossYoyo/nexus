@@ -45,7 +45,8 @@ Rules:
 - Maximize safe parallelism: tasks that touch disjoint files and do not need each other's output should have no dependency between them.
 - suggestedFiles must be accurate repository-relative paths you verified (existing files, or new files you intend to create). The scheduler serializes tasks whose files overlap, so omissions cause merge conflicts and padding wastes parallelism.
 - Include test tasks, or test acceptance criteria inside implementation tasks, so behaviour is verified.
-- Every task needs acceptance criteria that a verifier can check independently.`
+- Every task needs acceptance criteria that a verifier can check independently.
+- A task given to a read-only role (verifier, reviewer, security_reviewer, researcher, architect) cannot run ad-hoc code. Its agent reads files and runs read-only inspection commands; a verifier also runs the project's test, build, lint and typecheck commands. Never ask such a task for a one-off script or an interpreter one-liner (node -e, python -c), and never write a criterion that needs one: behaviour that must be exercised belongs in a test written by a worker task, which the verifier then runs and reads.`
 
 const ARCHITECT = `Role: ARCHITECT. You are read-only and do not implement. Produce design decisions grounded in the existing code: the chosen approach and rejected alternatives, the interfaces and data shapes (exact signatures), a file impact map (which files change or are created, and why), constraints and invariants the implementation must respect, and risks. Record notable decisions with mcp__nexus__record_decision. Prefer extending existing patterns over introducing new ones.`
 
