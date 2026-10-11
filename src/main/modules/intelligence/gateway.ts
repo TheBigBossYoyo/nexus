@@ -196,7 +196,7 @@ export class DirectorGateway {
             error instanceof CapacityWaitError ||
             error instanceof ChatGPTBusyError ||
             error instanceof CapacityRoutingWaitError ||
-            error instanceof PlanInferenceError
+            (error instanceof PlanInferenceError && !error.refusal)
               ? 'WAITING_FOR_PROVIDER'
               : 'FAILED'
           invocation.message =
@@ -204,6 +204,8 @@ export class DirectorGateway {
             error instanceof CapacityRoutingWaitError ||
             error instanceof ChatGPTBusyError
               ? error.message
+              : error instanceof PlanInferenceError && error.refusal
+                ? `${error.message} Original objective is saved; no automatic retry was sent.`
               : error instanceof PlanInferenceError
                 ? `Provider reported ${error.state.toLowerCase().replaceAll('_', ' ')}. Original objective is saved. A later explicit request may probe after backoff; no automatic retry was sent.`
                 : 'Director request failed. Original intent is saved. Inspect the provider connection and retry explicitly; no automatic duplicate request was sent.'

@@ -88,7 +88,7 @@ export function MissionAdmissionInspector({ run }: { run: Run }) {
       <CompilationPreview projectId={run.projectId} raw={raw} mode={mode} spec={preview}
         metadata={run.config.compiledTaskSpec?.userMetadata ?? defaultIntentMetadata(raw)} executionScope={{ runId: run.id }}
         onModeChange={m => { setMode(m); setPreview(null) }} onSpec={setPreview} />
-      <Button size="sm" disabled={preview?.status !== 'READY' || resume.isPending} loading={resume.isPending}
+      <Button size="sm" disabled={preview?.status !== 'READY'} loading={resume.isPending}
         onClick={() => preview && resume.mutate({ runId: run.id, compilationMode: mode, compiledSpecId: preview.id })}>Resume with this specification</Button>
       {resume.error ? <ErrorNote error={resume.error} /> : null}
     </> : null}
@@ -133,11 +133,11 @@ export function AdmissionInspector({
       data-testid="admission-inspector"
     >
       <summary className="cursor-pointer font-medium">Specification of this mission</summary>
+      {/* Always in the page, so that what appears in it is announced. */}
+      <p role="status">{saved.isPending && open ? 'Loading saved specification…' : ''}</p>
       {saved.isError ? (
         <ErrorNote error={saved.error} />
-      ) : saved.isPending ? (
-        <p role="status">Loading saved specification…</p>
-      ) : saved.data ? (
+      ) : saved.isPending ? null : saved.data ? (
         <SavedSpecification spec={saved.data} />
       ) : (
         <p>This draft needs a specification before it starts.</p>
@@ -178,11 +178,10 @@ export function CompilationHistory({ projectId }: { projectId: string }) {
   return (
     <details className="mt-3 rounded-md border p-3" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className="cursor-pointer font-medium">Specification history</summary>
+      <p role="status">{history.isPending && open ? 'Loading history…' : ''}</p>
       {history.isError ? (
         <ErrorNote error={history.error} />
-      ) : history.isPending ? (
-        <p role="status">Loading history…</p>
-      ) : history.data?.length ? (
+      ) : history.isPending ? null : history.data?.length ? (
         <div className="space-y-3">
           {history.data.map((spec) => (
             <details key={spec.id} className="rounded-md border p-3">

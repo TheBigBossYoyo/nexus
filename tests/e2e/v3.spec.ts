@@ -187,7 +187,7 @@ test.describe('NEXUS 0.3 UI', () => {
       const banner = page.getByTestId('quota-banner')
       await expect(banner).toBeVisible({ timeout: 60_000 })
       await expect(banner).toContainText(/usage limit/i)
-      await expect(banner).toContainText(/No work has been lost/i)
+      await expect(banner).toContainText(/Finished tasks are kept/i)
       // The reset time is the one the runtime gave, shown as a clock time, with the planned resume after it.
       await expect(page.getByTestId('quota-reset')).toHaveText(/\d{1,2}:\d{2}/)
       await expect(page.getByTestId('quota-resume-at')).toHaveText(/\d{1,2}:\d{2}/)

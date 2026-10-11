@@ -270,7 +270,8 @@ export async function compileTask(input: {
         status: 'WAITING_FOR_PROVIDER',
         reasons: [...spec.reasons, ...error.decision.reasons],
       }
-    if (error instanceof CapacityWaitError || error instanceof PlanInferenceError) {
+    // A refused request is not a wait: nothing would change by waiting, and the caller is told why.
+    if (error instanceof CapacityWaitError || (error instanceof PlanInferenceError && !error.refusal)) {
       const state = error instanceof CapacityWaitError ? error.pool.state : error.state
       return {
         ...spec,

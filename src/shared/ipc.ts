@@ -277,6 +277,8 @@ export const ipcInputs = {
     .object({ model: z.string().min(1).max(200), includedOnlyConfirmed: z.boolean() })
     .strict(),
   'chatgpt.disconnect': Empty,
+  'chatgpt.cancelConnect': Empty,
+  'chatgpt.recoverStorage': z.object({ discard: z.boolean() }).strict(),
   'chatgpt.manageUsage': Empty,
   /** The user's decision on a specification that asked for one: the additions to keep, by position. */
   'compilation.decide': z.object({ projectId: Id, specId: Id, accept: z.array(z.number().int().min(0).max(39)).max(40) }).strict(),
@@ -1040,6 +1042,8 @@ export interface IpcOutputs {
   'chatgpt.models': ChatGPTStatus
   'chatgpt.configure': ChatGPTStatus
   'chatgpt.disconnect': ChatGPTStatus
+  'chatgpt.cancelConnect': ChatGPTStatus
+  'chatgpt.recoverStorage': ChatGPTStatus
   'chatgpt.manageUsage': null
   'compilation.preview': CompiledTaskSpec
   'compilation.decide': CompiledTaskSpec

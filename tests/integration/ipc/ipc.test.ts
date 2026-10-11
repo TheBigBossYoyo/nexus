@@ -54,6 +54,8 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'chatgpt.models': {},
   'chatgpt.configure': { model: 'test', includedOnlyConfirmed: false },
   'chatgpt.disconnect': {},
+  'chatgpt.cancelConnect': {},
+  'chatgpt.recoverStorage': { discard: false },
   'chatgpt.manageUsage': {},
   'compilation.preview': { projectId: 'p1', raw: 'Fix typo', mode: 'EXACT' },
   'compilation.history': { projectId: 'p1' },

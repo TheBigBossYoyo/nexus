@@ -107,7 +107,8 @@ describe('quotaState', () => {
   })
   it('reassures and handles an unknown reset', () => {
     const q = quotaState({ state: 'paused', pauseReason: 'quota' }, overview(), NOW)
-    expect(q?.lines.join(' ')).toContain('No work has been lost')
+    expect(q?.lines.join(' ')).toContain('Finished tasks are kept, and unfinished work resumes from its last checkpoint')
+    expect(q?.lines.join(' ')).not.toContain('No work has been lost')
     expect(q?.lines.join(' ')).toContain('did not report')
     expect(q?.lines.join(' ')).toContain('Automatic resume is on')
   })

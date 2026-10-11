@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { assertNever } from '@shared/result'
 import { useUiStore, type View } from '../store/ui'
+import { isDialogOpen, shouldFocusMainOnNavigation } from './navFocus'
 import { PageHeader } from '../components/ui'
 import { HomeView } from '../views/home/HomeView'
 import { ProjectsView } from '../views/projects/ProjectsView'
@@ -83,6 +84,15 @@ export function ViewRouter() {
   useEffect(() => {
     document.title = `${meta.title} · NEXUS`
   }, [meta.title])
+  // After a navigation the focus moves to the main region, so a keyboard or screen-reader user starts at the new
+  // view and not on a control of the old one. Not on the first render and not while a dialog is open.
+  const previousView = useRef<View | null>(null)
+  useEffect(() => {
+    if (shouldFocusMainOnNavigation(previousView.current, view, isDialogOpen())) {
+      document.getElementById('main-content')?.focus({ preventScroll: true })
+    }
+    previousView.current = view
+  }, [view])
   return (
     <ErrorBoundary resetKey={view}>
       <div className="flex h-full min-h-0 flex-col" data-testid={`view-${view}`}>

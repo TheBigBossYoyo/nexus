@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -323,6 +324,47 @@ export class ChatGPTConnection {
       throw error
     }
   }
+  /**
+   * Ends a sign-in that is waiting for the browser: the listener is closed and the connection is free again.
+   * Without it a closed browser tab left every control waiting for the ten-minute timeout. A callback that
+   * arrives afterwards finds the attempt finished and saves nothing.
+   */
+  cancelConnect(): ChatGPTStatus {
+    if (this.connecting && this.stopCallback) {
+      this.error = null
+      this.stopCallback()
+    }
+    return this.status()
+  }
+  /**
+   * Leaves a storage fault without a restart. The protected file is the only truth: when it can be read, what
+   * it holds is loaded again (after a write that failed, that is the state before the write; tokens rotated
+   * since are gone and the provider will ask for a sign-in). When it cannot be read, nothing is done unless
+   * the user chose to discard it; then the file is removed and the connection starts signed out.
+   */
+  recoverStorage(discard: boolean): ChatGPTStatus {
+    if (this.disposed) throw new Error('ChatGPT connection is shutting down')
+    if (this.busy || this.connecting) throw new ChatGPTBusyError()
+    if (!this.protection?.available())
+      throw new Error('Protected credential storage is still unavailable. Restore storage access, then try again.')
+    if (!this.storageFault) return this.status()
+    let next: Saved = { hostId: `urn:uuid:${randomUUID()}`, active: null, profiles: [] }
+    if (existsSync(this.path)) {
+      try {
+        next = SavedSchema.parse(JSON.parse(this.protection.decrypt(readFileSync(this.path))))
+      } catch {
+        if (!discard)
+          throw new Error('The stored ChatGPT sign-in cannot be read. It can be discarded; you would then sign in again.')
+        rmSync(this.path, { force: true })
+      }
+    }
+    this.saved = next
+    this.sessions.clear()
+    this.catalog = []
+    this.storageFault = null
+    this.error = null
+    return this.status()
+  }
   select(profileId: string): ChatGPTStatus {
     this.claim()
     try {
@@ -346,6 +388,16 @@ export class ChatGPTConnection {
         '',
         this.transport,
       ).models()
+      // A model the account no longer offers would be sent and refused. It is dropped, and with it the
+      // confirmation that was given for it: nothing is sent until the user has chosen again.
+      if (profile.model && !this.catalog.some((m) => m.slug === profile.model)) {
+        const next = structuredClone(this.saved)
+        const stored = next.profiles.find((p) => p.id === profile.id)!
+        stored.model = null
+        stored.includedOnlyConfirmed = false
+        this.commit(next)
+        this.error = 'The model saved for this connection is no longer offered for this account. Choose another; nothing is sent until you do.'
+      } else this.error = null
       return this.status()
     } finally {
       this.busy = false
@@ -425,7 +477,9 @@ export class ChatGPTConnection {
               this.capacity.success(binding)
               return result
             } catch (error) {
-              if (error instanceof PlanInferenceError)
+              // A refused request says nothing about the allowance: no state, no backoff.
+              if (error instanceof PlanInferenceError && error.refusal) this.capacity.inconclusive(binding)
+              else if (error instanceof PlanInferenceError)
                 this.capacity.failure(binding, error.status, error.code)
               // The refresh after a 401 was refused: the credentials are gone and only a sign-in brings them back.
               else if (rejected !== null) this.capacity.failure(binding, 401, null)

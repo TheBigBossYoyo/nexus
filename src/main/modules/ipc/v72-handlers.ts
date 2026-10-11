@@ -120,6 +120,8 @@ export function createV72Handlers(
     'chatgpt.configure': ({ model, includedOnlyConfirmed }) =>
       chatgpt().configure(model, includedOnlyConfirmed),
     'chatgpt.disconnect': () => operations.run(() => chatgpt().disconnect()),
+    'chatgpt.cancelConnect': () => chatgpt().cancelConnect(),
+    'chatgpt.recoverStorage': ({ discard }) => chatgpt().recoverStorage(discard),
     'chatgpt.manageUsage': async () => {
       await chatgpt().manageUsage()
       return null

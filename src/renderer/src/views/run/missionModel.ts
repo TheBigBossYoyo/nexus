@@ -159,7 +159,7 @@ export function quotaState(
 ): QuotaStateView | null {
   if (run.state !== 'paused' || run.pauseReason !== 'quota') return null
   const lines: string[] = [
-    'No work has been lost. Finished tasks are kept and unfinished work resumes from its last checkpoint.',
+    'Finished tasks are kept, and unfinished work resumes from its last checkpoint when Claude is available again.',
   ]
   if (!overview) {
     lines.unshift('Waiting for the Claude usage limit to clear. The reset time is not known yet.')

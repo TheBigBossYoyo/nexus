@@ -217,3 +217,107 @@ describe('protected ChatGPT connection owner', () => {
     await expect(connection.connect()).rejects.toThrow('shutting down')
   })
 })
+
+describe('leaving a state the connection used to be stuck in', () => {
+  const json = (status: number, body: unknown): Response =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+  it('a sign-in waiting for the browser can be cancelled, and the connection is free at once', async () => {
+    let callback = ''
+    const open = vi.fn(async (url: string) => {
+      callback = new URL(url).searchParams.get('redirect_uri')!
+    })
+    const { connection } = setup({ open })
+    expect((await connection.connect()).state).toBe('CONNECTING')
+    expect(() => connection.configure('model-test', false)).toThrow('in progress')
+    const status = connection.cancelConnect()
+    expect(status.state).toBe('SIGNED_IN_PLAN_USAGE')
+    expect(status.error).toBeNull()
+    // The listener is gone and the next operation is not refused as busy.
+    await expect(fetch(callback)).rejects.toThrow()
+    expect(connection.configure('model-test', false).includedOnlyConfirmed).toBe(false)
+    // Cancelling when nothing waits changes nothing.
+    expect(connection.cancelConnect().state).toBe('SIGNED_IN_PLAN_USAGE')
+  })
+
+  it('a failed write is left without a restart: the file as it was is loaded again', () => {
+    let fail = true
+    const { connection, path } = setup({
+      storage: {
+        ...protection,
+        encrypt: (v) => {
+          if (fail) throw new Error('disk denied')
+          return Buffer.from(v)
+        },
+      },
+    })
+    const before = readFileSync(path)
+    expect(() => connection.configure('model-test', false)).toThrow('could not be saved')
+    expect(connection.status().state).toBe('STORAGE_UNAVAILABLE')
+    fail = false
+    const status = connection.recoverStorage(false)
+    expect(status.state).toBe('SIGNED_IN_PLAN_USAGE')
+    // What the failed write wanted is not applied: the confirmation is as the file has it.
+    expect(status.includedOnlyConfirmed).toBe(true)
+    expect(readFileSync(path)).toEqual(before)
+    expect(connection.configure('model-test', false).includedOnlyConfirmed).toBe(false)
+  })
+
+  it('a file that cannot be read is discarded only when the user chose that', () => {
+    const { connection, path } = setup()
+    writeFileSync(path, 'not what was written')
+    const broken = new ChatGPTConnection(resolve(path, '..'), protection, undefined, vi.fn())
+    connections.push(broken)
+    expect(broken.status().state).toBe('STORAGE_UNAVAILABLE')
+    expect(() => broken.recoverStorage(false)).toThrow('cannot be read')
+    expect(readFileSync(path, 'utf8')).toBe('not what was written')
+    expect(broken.recoverStorage(true).state).toBe('SIGNED_OUT')
+    expect(() => readFileSync(path)).toThrow()
+    expect(connection).toBeDefined()
+  })
+
+  it('storage that is still unavailable is not recovered', () => {
+    const { connection } = setup({ storage: { ...protection, available: () => false } })
+    expect(() => connection.recoverStorage(true)).toThrow('still unavailable')
+    expect(connection.status().state).toBe('STORAGE_UNAVAILABLE')
+  })
+
+  it('a saved model the account no longer offers is dropped with its confirmation when the catalog is read', async () => {
+    const transport = vi.fn(async () => json(200, { models: [{ slug: 'model-new', display_name: 'New', visibility: 'list' }] })) as unknown as typeof fetch
+    const { connection, path } = setup({ transport })
+    expect(connection.provider()).toBeDefined()
+    const status = await connection.models()
+    expect(status.model).toBeNull()
+    expect(status.includedOnlyConfirmed).toBe(false)
+    expect(status.error).toContain('no longer offered')
+    expect(connection.provider()).toBeUndefined()
+    expect(JSON.parse(readFileSync(path, 'utf8')).profiles[0].model).toBeNull()
+    expect(connection.configure('model-new', true).model).toBe('model-new')
+  })
+
+  it('a refused request is not a capacity state and plans no wait; a limit named in the stream is one', async () => {
+    const refused = vi.fn(async () => json(404, { error: { code: 'model_not_found' } })) as unknown as typeof fetch
+    const a = setup({ transport: refused }).connection
+    await expect(a.provider()!.complete('Return JSON', {})).rejects.toThrow('refused this request (404; model_not_found)')
+    expect(a.status().capacity?.state).toBe('USAGE_UNKNOWN')
+    expect(a.status().capacity?.nextProbeAt).toBeNull()
+    const limited = vi.fn(async () =>
+      new Response(`data: ${JSON.stringify({ type: 'response.failed', response: { error: { code: 'rate_limit_exceeded' } } })}\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    ) as unknown as typeof fetch
+    const b = setup({ transport: limited }).connection
+    await expect(b.provider()!.complete('Return JSON', {})).rejects.toThrow()
+    expect(b.status().capacity?.state).toBe('THROTTLED')
+    const quota = vi.fn(async () => json(429, { error: { code: 'insufficient_quota' } })) as unknown as typeof fetch
+    const c = setup({ transport: quota }).connection
+    await expect(c.provider()!.complete('Return JSON', {})).rejects.toThrow()
+    expect(c.status().capacity?.state).toBe('QUOTA_PAUSED')
+    // An answer that is not JSON is no evidence about capacity either (finding 1.2).
+    const garbled = vi.fn(async () =>
+      new Response(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'not json' })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    ) as unknown as typeof fetch
+    const d = setup({ transport: garbled }).connection
+    await expect(d.provider()!.complete('Return JSON', {})).rejects.toThrow('not valid JSON')
+    expect(d.status().capacity?.state).toBe('USAGE_UNKNOWN')
+    expect(d.status().capacity?.nextProbeAt).toBeNull()
+  })
+})

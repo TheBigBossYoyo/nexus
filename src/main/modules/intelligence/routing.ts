@@ -135,7 +135,7 @@ export class AdvisoryRoutingService {
               : error instanceof CapacityWaitError ||
                   error instanceof ChatGPTBusyError ||
                   error instanceof CapacityRoutingWaitError ||
-                  error instanceof PlanInferenceError
+                  (error instanceof PlanInferenceError && !error.refusal)
                 ? 'CAPACITY'
                 : 'PROVIDER',
             adapter?.usage?.() ?? null,

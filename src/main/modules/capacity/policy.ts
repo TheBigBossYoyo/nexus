@@ -7,11 +7,27 @@ import type {
   RoutingCandidate,
 } from '@shared/capacity'
 
+/**
+ * A refusal of the request itself: the provider understood it and will refuse it again unchanged (a model this
+ * plan does not offer, a malformed or oversize request, a forbidden one). It says nothing about the allowance,
+ * so it is neither a state of the capacity pool nor a reason to wait and probe. A code that names a limit wins
+ * over the status it came with.
+ */
+export function isRequestRefusal(status: number, code: string | null): boolean {
+  if (code !== null && (LIMIT_CODES.has(code) || code.startsWith('subscription_sharing_'))) return false
+  return REFUSAL_STATUS.has(status) || (code !== null && REFUSAL_CODES.has(code))
+}
+const LIMIT_CODES: ReadonlySet<string> = new Set(['insufficient_quota', 'rate_limit_exceeded'])
+const REFUSAL_STATUS: ReadonlySet<number> = new Set([400, 403, 404, 413, 422])
+const REFUSAL_CODES: ReadonlySet<string> = new Set(['model_not_found', 'unsupported_model', 'invalid_request_error', 'context_length_exceeded', 'invalid_prompt'])
+
 export function classifyOpenAIError(status: number, code: string | null): CapacityState {
-  if (code === 'subscription_sharing_usage_limit_exceeded') return 'QUOTA_PAUSED'
+  // The account's allowance is used up, whichever status or stream event carried the word.
+  if (code === 'subscription_sharing_usage_limit_exceeded' || code === 'insufficient_quota') return 'QUOTA_PAUSED'
   if (code === 'subscription_sharing_usage_unavailable') return 'USAGE_SERVICE_UNAVAILABLE'
   if (code === 'subscription_sharing_invalid_user' || status === 401) return 'AUTH_REQUIRED'
-  if (status === 429) return 'THROTTLED'
+  // A rate limit reported inside the event stream has no status of its own.
+  if (status === 429 || code === 'rate_limit_exceeded') return 'THROTTLED'
   return 'RUNTIME_UNAVAILABLE'
 }
 

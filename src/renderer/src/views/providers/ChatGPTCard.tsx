@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ChatGPTStatus } from '@shared/chatgpt'
 import { api } from '../../lib/bridge'
@@ -24,9 +25,13 @@ export function ChatGPTCard() {
     onSettled: () => client.invalidateQueries({ queryKey: ['chatgpt-status'] }),
   })
   const status = query.data
+  // A control that has the focus when it starts a request stays focusable while this holds (aria-disabled, `busy`):
+  // a disabled control would drop the focus to the page.
   const blocked =
     action.isPending || status?.state === 'CONNECTING' || status?.state === 'STORAGE_UNAVAILABLE'
   const run = (fn: () => Promise<unknown>) => action.mutate(fn)
+  // Discarding a stored sign-in that cannot be read is asked for twice: it cannot be undone.
+  const [discarding, setDiscarding] = useState(false)
   return (
     <Card
       title="ChatGPT"
@@ -67,15 +72,61 @@ export function ChatGPTCard() {
                 id={id}
                 value={status.activeProfile ?? ''}
                 options={status.profiles.map((p) => ({ value: p.id, label: p.label }))}
-                disabled={blocked}
+                busy={blocked}
                 onChange={(profileId) => run(() => api.invoke('chatgpt.select', { profileId }))}
               />
             )}
           </Field>
         ) : null}
+        {status?.state === 'CONNECTING' ? (
+          <div className="flex flex-wrap items-center gap-2" data-testid="chatgpt-connecting">
+            <p className="text-small text-text-secondary">
+              Waiting for the sign-in in your browser. If you closed that tab, cancel and connect again.
+            </p>
+            <Button busy={action.isPending} onClick={() => run(() => api.invoke('chatgpt.cancelConnect', {}))} data-testid="chatgpt-cancel-connect">
+              Cancel sign-in
+            </Button>
+          </div>
+        ) : null}
+        {status?.state === 'STORAGE_UNAVAILABLE' ? (
+          <div className="space-y-2" data-testid="chatgpt-storage-recovery">
+            <div className="flex flex-wrap gap-2">
+              <Button busy={action.isPending} onClick={() => run(() => api.invoke('chatgpt.recoverStorage', { discard: false }))}>
+                Read the stored sign-in again
+              </Button>
+              {discarding ? null : (
+                <Button busy={action.isPending} onClick={() => setDiscarding(true)}>
+                  Discard the stored sign-in…
+                </Button>
+              )}
+            </div>
+            {discarding ? (
+              <Notice tone="warning" title="Discard the stored ChatGPT sign-in?">
+                <p>
+                  If it can still be read it is kept and loaded. If it cannot, it is deleted from this computer and
+                  you sign in again. This cannot be undone.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    variant="danger"
+                    busy={action.isPending}
+                    onClick={() => {
+                      setDiscarding(false)
+                      run(() => api.invoke('chatgpt.recoverStorage', { discard: true }))
+                    }}
+                  >
+                    Discard and start signed out
+                  </Button>
+                  <Button onClick={() => setDiscarding(false)}>Keep it</Button>
+                </div>
+              </Notice>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={blocked || !status}
+            busy={blocked}
+            disabled={!status}
             onClick={() => run(() => api.invoke('chatgpt.connect', {}))}
           >
             Connect an account
@@ -83,7 +134,7 @@ export function ChatGPTCard() {
           {status?.activeProfile ? (
             <>
               <Button
-                disabled={blocked}
+                busy={blocked}
                 onClick={() =>
                   run(() => api.invoke('chatgpt.connect', { profileId: status.activeProfile! }))
                 }
@@ -91,7 +142,7 @@ export function ChatGPTCard() {
                 Reconnect
               </Button>
               <Button
-                disabled={blocked}
+                busy={blocked}
                 onClick={() => run(() => api.invoke('chatgpt.disconnect', {}))}
               >
                 Disconnect
@@ -100,14 +151,14 @@ export function ChatGPTCard() {
           ) : null}
           <Button
             onClick={() => run(() => api.invoke('chatgpt.manageUsage', {}))}
-            disabled={action.isPending}
+            busy={action.isPending}
           >
             Manage ChatGPT usage
           </Button>
         </div>
         {status?.state === 'SIGNED_IN_PLAN_USAGE' ? (
           <>
-            <Button disabled={blocked} onClick={() => run(() => api.invoke('chatgpt.models', {}))}>
+            <Button busy={blocked} onClick={() => run(() => api.invoke('chatgpt.models', {}))}>
               Refresh available models
             </Button>
             {status.models.length ? (
@@ -116,7 +167,7 @@ export function ChatGPTCard() {
                   <Select
                     id={id}
                     value={status.model ?? ''}
-                    disabled={blocked}
+                    busy={blocked}
                     options={[
                       { value: '', label: 'Choose a model', disabled: true },
                       ...status.models.map((m) => ({ value: m.slug, label: m.display_name })),
@@ -140,9 +191,8 @@ export function ChatGPTCard() {
             )}
             <Toggle
               checked={status.includedOnlyConfirmed}
-              disabled={
-                blocked || !status.model || (!status.includedOnlyConfirmed && !status.models.length)
-              }
+              busy={blocked}
+              disabled={!status.model || (!status.includedOnlyConfirmed && !status.models.length)}
               label="I have disabled paid credits in ChatGPT Usage settings"
               description="This switch is also what lets NEXUS send anything to OpenAI: while it is off, nothing is sent, and you stay signed in. ChatGPT controls the paid-credit setting; NEXUS cannot verify it or enforce a spending cap."
               onChange={(includedOnlyConfirmed) =>

@@ -52,7 +52,7 @@ function QuotaPaused() {
       <span className="font-medium text-text-primary" data-testid="quota-paused-title">
         Waiting for the Claude usage limit.
       </span>{' '}
-      <span data-testid="quota-paused-lines">No work has been lost; the mission resumes when Claude is available.</span>
+      <span data-testid="quota-paused-lines">Finished tasks are kept; unfinished work resumes from its last checkpoint when Claude is available again.</span>
     </div>
   )
 }

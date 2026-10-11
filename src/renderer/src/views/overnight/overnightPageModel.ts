@@ -63,7 +63,7 @@ export function overnightPageModel(status: OvernightStatus, now: number): Overni
     status.state === 'RUNNING' || status.state === 'QUOTA_PAUSED' || status.state === 'ARMING'
   const summary =
     status.state === 'QUOTA_PAUSED'
-      ? 'Waiting for Claude to be available again. No work has been lost.'
+      ? 'Waiting for Claude to be available again. Finished tasks are kept; unfinished work resumes from its last checkpoint.'
       : status.state === 'RUNNING'
         ? runningSummary(workloadNoun(status))
         : (banner.detail ?? 'See the state below.')

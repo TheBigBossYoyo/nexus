@@ -22,6 +22,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
   loading?: boolean
+  /** Not usable right now (another request runs), without the spinner. Stays focusable, like `loading`. */
+  busy?: boolean
   icon?: ReactNode
 }
 
@@ -29,6 +31,7 @@ export function Button({
   variant = 'default',
   size = 'md',
   loading = false,
+  busy = false,
   icon,
   className,
   children,
@@ -43,10 +46,10 @@ export function Button({
       disabled={disabled}
       // While it works, the button stays focusable and says it is busy: a button that disables itself drops the
       // keyboard focus to the page, and the user who pressed it has to find their place again.
-      aria-disabled={loading || undefined}
+      aria-disabled={loading || busy || undefined}
       aria-busy={loading || undefined}
       onClick={(event) => {
-        if (loading) {
+        if (loading || busy) {
           event.preventDefault()
           return
         }

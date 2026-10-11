@@ -304,7 +304,8 @@ export function DirectorView() {
               </Field>
               <Button
                 variant="primary"
-                disabled={pending || !projectId || !objective.trim()}
+                busy={pending}
+                disabled={!projectId || !objective.trim()}
                 loading={invoke.isPending}
                 onClick={() => {
                   setOffset(0)
@@ -318,7 +319,8 @@ export function DirectorView() {
                 Request advice
               </Button>
               <Button
-                disabled={pending || !projectId || !objective.trim() || level === '0'}
+                busy={pending}
+                disabled={!projectId || !objective.trim() || level === '0'}
                 loading={escalate.isPending}
                 onClick={() => escalate.mutate()}
               >
@@ -372,7 +374,7 @@ export function DirectorView() {
                       {record.state === 'REQUESTED' ? (
                         <div className="flex flex-wrap gap-2">
                           <Button
-                            disabled={pending}
+                            busy={pending}
                             onClick={() =>
                               invoke.mutate({
                                 projectId: record.projectId,
@@ -384,7 +386,7 @@ export function DirectorView() {
                           >
                             Request escalation advice
                           </Button>
-                          <Button disabled={pending} onClick={() => dismiss.mutate(record.id)}>
+                          <Button busy={pending} onClick={() => dismiss.mutate(record.id)}>
                             Dismiss
                           </Button>
                         </div>

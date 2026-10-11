@@ -48,6 +48,7 @@ export function Select<T extends string>({
   options,
   className,
   disabled,
+  busy,
   ...rest
 }: {
   value: T
@@ -55,6 +56,8 @@ export function Select<T extends string>({
   options: readonly SelectOption<T>[]
   className?: string
   disabled?: boolean
+  /** Not usable right now (a request runs), but it keeps the focus: aria-disabled, changes are ignored. */
+  busy?: boolean
   id?: string
   'aria-label'?: string
   'data-testid'?: string
@@ -64,8 +67,11 @@ export function Select<T extends string>({
     <select
       value={value}
       disabled={disabled}
-      onChange={(e) => onChange(e.target.value as T)}
-      className={cn(CONTROL, 'h-[var(--control-h)] pr-1', className)}
+      aria-disabled={busy || undefined}
+      onChange={(e) => {
+        if (!busy) onChange(e.target.value as T)
+      }}
+      className={cn(CONTROL, 'h-[var(--control-h)] pr-1', busy && 'cursor-not-allowed opacity-60', className)}
       {...aria}
       {...rest}
     >
@@ -85,6 +91,7 @@ export function Toggle({
   label,
   description,
   disabled,
+  busy,
   className,
   ...rest
 }: {
@@ -93,6 +100,8 @@ export function Toggle({
   label?: ReactNode
   description?: ReactNode
   disabled?: boolean
+  /** Not usable right now (a request runs), but it keeps the focus: aria-disabled, activation is ignored. */
+  busy?: boolean
   className?: string
   'data-testid'?: string
   'aria-label'?: string
@@ -109,9 +118,12 @@ export function Toggle({
         aria-labelledby={named ? `${id}-label` : undefined}
         aria-describedby={description ? `${id}-description` : undefined}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
+        aria-disabled={busy || undefined}
+        onClick={() => {
+          if (!busy) onChange(!checked)
+        }}
         className={cn(
-          'relative mt-px h-[18px] w-8 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+          'relative mt-px h-[18px] w-8 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
           checked ? 'border-accent bg-accent' : 'border-control-border bg-surface-hover',
         )}
         {...rest}

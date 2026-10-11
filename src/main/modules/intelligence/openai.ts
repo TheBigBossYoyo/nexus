@@ -1,20 +1,30 @@
 import type { AdvisoryShape } from './compiler'
 import { z } from 'zod'
 import type { AdvisoryProvider } from './compiler'
-import { classifyOpenAIError } from '../capacity/policy'
+import { classifyOpenAIError, isRequestRefusal } from '../capacity/policy'
 import { readBoundedJSON } from './transport'
 import type { ProviderUsageReceipt } from '@shared/capacity'
 
 export const OPENAI_API = 'https://api.openai.com/v1'
 export class PlanInferenceError extends Error {
   readonly state
+  /** The request itself was refused: not a capacity state, and the same request will be refused again. */
+  readonly refusal: boolean
   constructor(
     readonly status: number,
     readonly code: string | null,
     readonly requestId: string | null,
   ) {
     // Raw provider bodies are deliberately excluded: they can echo prompts or credentials.
-    super(`ChatGPT plan request failed (${status}; ${classifyOpenAIError(status, code)})`)
+    const refusal = isRequestRefusal(status, code)
+    // Only a short code of the provider's own vocabulary is repeated, never text it wrote.
+    const named = code !== null && /^[a-z0-9_.-]{1,80}$/i.test(code) ? `; ${code}` : ''
+    super(
+      refusal
+        ? `ChatGPT refused this request (${status}${named}). This is not a capacity limit: the same request will be refused again. Check the model chosen for this connection.`
+        : `ChatGPT plan request failed (${status}; ${classifyOpenAIError(status, code)})`,
+    )
+    this.refusal = refusal
     this.state = classifyOpenAIError(status, code)
   }
 }
