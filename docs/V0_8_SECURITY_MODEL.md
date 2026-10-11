@@ -122,7 +122,8 @@ command that was more than git, and reported themselves blocked.
 - *Under ISOLATED, the sandbox account is given access to the Git data of the enrolled project* (`icacls`, by
   the user's own right as owner; no elevation): read on `.git`; create-only on the object store (who creates a
   file may finish it; nothing that is there can be replaced or removed); modify on the worktree's own entry
-  (`.git/worktrees/<name>`) and on the directory of the mission's branches among the refs and their logs. The
+  (`.git/worktrees/<name>`) and on the task's own branch and its log, as files; in the directories they are in
+  it may create (git's lock files) and not replace, so a sibling task's branch is not its to write. The
   paths come from NEXUS's record of the worktree, never from the `.git` file an agent can rewrite. Each grant is
   on record and is taken back when the project is no longer enrolled. The enrollment confirmation says so.
   With it, `git status`, `log`, `diff`, `show`, `add` work in any contained command, as the sandbox account.
@@ -130,15 +131,36 @@ command that was more than git, and reported themselves blocked.
   the account can see none of the user's above the repository ("cannot lock ref 'HEAD': unable to create
   directory"). A junction from the sandbox root does not help: git resolves it. Giving the account rights on
   the user's own folders above the repository is not something NEXUS does.
-- *So a command that is git alone still runs as the user at low integrity*, in an ISOLATED session too. "Git
-  alone" includes git with nothing around it but text filters and listings (`git log | head -3`, `git status;
-  git diff --stat | tail`): every program is git or one of a few tools that only read (`head`, `tail`, `grep`,
-  `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `ls`, `nl`, `echo`, `pwd`, `cd`), every file named is inside the
-  worktree (links resolved), and the shell is given nothing to expand, substitute, redirect or group
-  (`policies/git-pipeline.ts`, `tests/unit/policies/git-pipeline.test.ts`). Such a command has the user's
-  network and reads what the user's low-integrity processes read; what it can run is git, hardened, and those
-  tools. git there runs with hooks, the file-system monitor, the pager, the editor, automatic housekeeping and
-  the `ext` transport switched off in its environment, which outranks the repository's configuration.
+- *So a command that is git alone still runs as the user at low integrity*, in an ISOLATED session too. This is
+  the one place where an agent's text decides what runs as the user, so what qualifies is a closed list
+  (`policies/git-pipeline.ts`; `tests/unit/policies/git-user.test.ts`, `git-pipeline.test.ts`):
+  - every program is git, or (bash) one of a few tools that only read: `head`, `tail`, `grep`, `wc`, `sort`,
+    `uniq`, `cut`, `tr`, `cat`, `ls`, `nl`, `echo`, `pwd`, `cd`, each file they are named inside the worktree,
+    links resolved;
+  - every git names a subcommand from a fixed list as its first word (`status`, `log`, `diff`, `show`, `add`,
+    `commit`, `checkout`, `reset`, `stash`, `merge`, `rebase` and the like). Nothing stands between `git` and
+    it: no `-c`, `-C`, `--git-dir`, `--exec-path`. `grep`, `config`, `worktree`, `submodule`, the commands that
+    reach a remote, and everything unknown (an alias, a program beside git) are not on the list;
+  - no argument makes git run a program, read or write a file somebody names, or look at another repository
+    (`-O`, `--open-files-in-pager`, `--exec`, `-x`, `--output`, `--ext-diff`, `--textconv`, `--no-index`, `-F`,
+    `-S`, `--strategy`, `--template`, interactive modes);
+  - the shell is given nothing to expand, substitute, redirect or group. The one substitution taken is a commit
+    message as a quoted here-document, which the shell reads literally.
+  Anything else runs as the sandbox account. In PowerShell only git itself qualifies.
+  What that git looks at is fixed by NEXUS, not by the worktree: `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE`
+  from NEXUS's record (the worktree's `.git` file decides nothing); a home, a temporary directory, an empty
+  hooks directory and the command's script in a directory of the user's that the sandbox account cannot write;
+  an empty user-level configuration; hooks, the file-system monitor, the pager, the editor, automatic
+  housekeeping and the `ext` transport switched off. In the worktree's entry, `commondir`, `gitdir` and
+  `config.worktree` (made empty) carry a label of their own that code at low integrity cannot write.
+  Such a command has the user's network and reads what the user's low-integrity processes read. What it can
+  run is git doing one of those things. `tests/scenarios/v8-isolated-git.test.ts` has contained code plant a
+  hook, a user-level configuration, the entry's files, a sibling branch and the pointer, then commits: the
+  commit is made in the real repository and nothing planted runs.
+  The first version of this path took the classifier's "no finding" as "git alone" and was found, by the
+  independent review of 2026-10-11, to let `git grep -Ocmd`, `git --exec-path=.` and `git --git-dir=<own
+  directory with an alias>` run programs as the user, with the hooks directory, the home and the script in a
+  place contained code could write. That version was never released.
 - *A ref-changing git inside a larger command* (`npm test && git commit`) is stopped before git, with a sentence
   that says to run it as a command of its own. Nothing is changed.
 - The user's branches, tags, configuration and hooks stay out of reach of both: Windows refuses the write
@@ -164,6 +186,11 @@ default), optional job memory, die on unhandled exception, and the UI restrictio
 display or system-parameter changes, no `ExitWindows`, no global atoms, no handles of other processes' windows,
 no clipboard). A contained process at low integrity cannot open a medium process of the user for reading
 (probe D3) and cannot send input to a medium window.
+
+An application with a window (an Electron application under test) keeps those restrictions except the one on
+handles, which a browser engine needs among its own processes; under ISOLATED the one on desktops is off as
+well, because the launcher's second step runs inside the job and is what makes the application's desktop. That
+desktop is open to its owner only (the account the application runs as) and is not the one on the screen.
 
 **Error dialogs.** The launcher sets the process error mode before creating anything, so a program that cannot
 start under a restricted identity fails with a code. (During the probes a .NET test target raised a dialog on
@@ -243,9 +270,36 @@ Stated plainly, by profile.
 **Both contained profiles**: the provider's own process is not contained. Its file tools are confined by the
 authorizer (canonical paths), as in 0.7. Codex sessions rely on Codex's own read-only sandbox, as in 0.7.
 
+## Independent review (2026-10-11)
+
+A reviewer that had not written the code read it against this document (read-only; report kept with the
+session). What it found, and what was done:
+
+| # | Finding | State |
+|---|---|---|
+| 1 | CRITICAL: an ISOLATED session could run programs as the user through the "git alone" path (git options, aliases through a redirected Git directory; hooks directory, home and script writable by contained code) | Fixed: closed list of subcommands and arguments, pins, user-only directories (Git, above). Regression tests. |
+| 2 | HIGH: the access to `.git` let one task rewrite a sibling task's branch; the entry's `commondir`, `gitdir`, `config.worktree` were writable | Fixed: refs by file; the three files pinned. Not closed: a forged `index` or commit-graph in the entry or the object store (below). |
+| 3 | HIGH: the sandbox account's credential blob was readable by a low-integrity process of the user | Fixed: `%LOCALAPPDATA%\NexusSandbox` is protected with the data directory. |
+| 4 | MEDIUM: an "allow once" could be spent on another action needing the same capability | Fixed: bound to the action shown. Allow for the mission and for the project remain by capability and resource, as they say. |
+| 5 | MEDIUM: RESTRICTED counted as the isolated profile, so commands NEXUS cannot read into ran without a question, with the user's network | Fixed: only ISOLATED does. Under RESTRICTED such a command is one boundary request ("run project code outside the isolated profile"). |
+| 6 | MEDIUM: windowed applications had no UI restrictions (clipboard); their desktop was open to everyone | Fixed (Processes, above). |
+| 7 | MEDIUM: any loopback address an application printed was taken as its own | Fixed: Windows must say a process the launcher started holds the port; else nothing is opened. |
+| 8 | MEDIUM, suspicion: a junction swapped under a file tool of the provider | Not changed. A low-integrity process cannot make a junction to a directory it cannot write (Windows), so a swap leads nowhere new. Not tested here. |
+| 9 | LOW: the launcher inherits handles without a list | Not changed. No inheritable handle beyond the three standard ones was found. |
+| 10 | LOW: sibling-prefix directory check; unfiltered Electron arguments; the setup script trusts an existing `C:\ProgramData\NexusSandbox` and an existing account of that name | First two fixed. The setup script is unchanged: run it on a machine where another local user could have made either, and that user chose the directory. |
+
+Not closed by this review or after it:
+
+- The worktree's entry holds `index` and `HEAD`, and the object store takes new files. NEXUS checks `HEAD`
+  before it adds to a branch; it does not validate an index or a commit-graph that contained code wrote. What a
+  forged one can make NEXUS's own git do is not established.
+- The registry hosts include GitHub's download hosts; over a tunnel the proxy sees no method. A project can be
+  sent to an allowed host. This is in "What is not contained".
+
 ## Not yet built (2026-10-11)
 
-Browser sessions and application automation (the proxy and policies exist; no browser uses them yet); the
-pipe's explicit DACL and per-kind dispatch; the hostile repository corpus as a permanent suite beyond the
-containment tests; fault injection; the isolation and research panels in the UI; removal of the protected
-labels when the last project is unenrolled. The release report will say which of these exist at the end.
+The pipe's explicit DACL and per-kind dispatch; a handle list in the launcher; validation of a worktree's index
+before NEXUS's own git acts on it; a research browser; a setting for what a project's application may reach
+besides itself. Built since this section was first written: application and browser automation
+(`APP_BROWSER_AUTOMATION.md`), fault injection and a soak of the containment, the isolation, application and
+research panels, removal of the labels and of the Git access when no project is enrolled.

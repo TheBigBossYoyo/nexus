@@ -40,7 +40,9 @@ of the machine, opens an address outside the application, or drives a browser th
    `V0_8_SECURITY_MODEL.md`). Needing a port or a window is not a reason to run outside it. If the profile is
    not available, nothing is started. A project that is not contained has no application started by NEXUS.
 3. **Web.** The launch command is a program and its arguments, with no shell operators. A port that already
-   answers before the start is somebody else's server and is not adopted. When the application is ready (a line
+   answers before the start is somebody else's server and is not adopted. An address the application prints
+   is the repository's text: it is taken for the application's own only when Windows says a process the
+   launcher started holds that port, and a port registered to another session is refused. When the application is ready (a line
    it prints, a port, or an address that answers), its endpoint is registered for the session.
 4. **Electron.** The project's own Electron binary, with a profile directory of the session, on a desktop the
    launcher makes for it: its windows are on no screen and take none of the user's input. If that desktop
@@ -107,6 +109,8 @@ the mission asks for nothing).
 - A setting in the window for what a project's application may reach besides itself.
 - Screenshots as images for the model. The agent sees the tree.
 - Desktop applications that are not Electron (Win32, WPF, WinUI): not started and not driven.
+- The manifest's Electron arguments may not name the switches NEXUS sets (debugging endpoint, profile
+  directory, proxy, engine containment); an application whose manifest does is not started.
 - The debugging endpoint of an Electron application is a loopback port: another process on the machine that
   finds it can drive that application. It is the application under test, inside its containment; the endpoint
   gives nothing outside it.
