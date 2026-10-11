@@ -68,7 +68,7 @@ describe('the advisory path under seeded providers', () => {
         raw, projectId: 'p', mode, context, policyVersion: '1', strategy: 'stress',
         ...(withStrategic ? { strategic: provider() } : {}),
         ...(withTechnical ? { technical: scripted(rand, () => ({ agreements: [], disagreements: [], missingEvidence: [], proposedChanges: [], evidenceRefs: [] })) } : {}),
-      }).catch((error: unknown) => error)
+      }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
       const tag = `seed ${seed} mode ${mode}`
       if (outcome instanceof Error) {
         // A provider's own failure passes through; an answer of the wrong shape is refused by position and kind,
