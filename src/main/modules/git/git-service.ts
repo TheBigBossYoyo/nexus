@@ -902,7 +902,7 @@ export class GitService {
     this.assertTreePaths(worktree, expectedFiles)
     // The commit is made from that tree and that parent, by name, and the branch moves to it only if it still
     // names the parent: nothing that happened in the worktree or to the branch in between is picked up.
-    let commit: string | null = null
+    let commit: string | null
     if (own.branch !== null) {
       const made = await this.run(worktree, ['commit-tree', expectedTree, '-p', parent, '-m', message], { env: { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_COMMITTER_NAME: author.name, GIT_COMMITTER_EMAIL: author.email } })
       const sha = made.stdout.trim()
