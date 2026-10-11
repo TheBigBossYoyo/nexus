@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { isSafeUserGit, parseUserGit, renderUserGitScript, userGitOf, userGitOfPowerShell } from '@main/modules/policies/git-pipeline'
+import { grantedPushOf, isSafeUserGit, parseUserGit, renderGrantedPush, renderUserGitScript, userGitOf, userGitOfPowerShell } from '@main/modules/policies/git-pipeline'
 
 // What an agent's text can make run AS THE USER (at low integrity) in a project whose code otherwise runs as
 // the sandbox account. The text is parsed into git invocations with exact arguments; each must be a listed
@@ -263,5 +263,33 @@ describe('git as the user: what runs is written by NEXUS', () => {
       const ran = expected.filter((_line, index) => index === 0 || (parsed ?? [])[index - 1]?.then !== '||')
       expect(printed, command).toEqual(ran)
     }
+  })
+})
+
+describe('a push the user allowed: one git push, read into arguments, written by NEXUS', () => {
+  it('qualifies as one push with listed options, a remote by name and at most one refspec', () => {
+    for (const command of ['git push', 'git push origin', 'git push origin HEAD', 'git push -u origin HEAD', 'git push --set-upstream origin nexus/run/task', 'git push origin HEAD 2>&1', 'git push --force-with-lease origin HEAD', 'git push -q origin main', 'git push origin HEAD:refs/heads/review']) expect(grantedPushOf(command), command).not.toBeNull()
+    for (const command of [
+      'git push --force origin HEAD', 'git push -f origin HEAD', 'git push origin +HEAD', 'git push --delete origin main', 'git push origin :main', 'git push --mirror', 'git push --all', 'git push --tags', 'git push --receive-pack=calc origin HEAD',
+      'git push --exec=calc origin HEAD', 'git push --repo=x', 'git push -o ci.skip origin HEAD', 'git push --push-option=x origin HEAD', 'git push --no-verify origin HEAD', 'git push --signed origin HEAD',
+      // The remote is a name the repository's own configuration knows: never an address or a path on the line.
+      'git push https://example.com/x.git HEAD', 'git push ../elsewhere HEAD', 'git push C:/x HEAD', 'git push ext::calc HEAD', 'git push file:///c/x HEAD', 'git push git@host:x.git HEAD', 'git push origin HEAD main',
+      // One push and nothing else.
+      'git add -A && git push origin HEAD', 'git push origin HEAD; git status', 'git push origin HEAD | cat', 'git push origin HEAD > out.txt', 'git -c core.sshCommand=calc push origin HEAD', 'git push origin $(calc)', 'git fetch origin', 'git pull', 'git push origin HEAD -u',
+    ])
+      expect(grantedPushOf(command), command).toBeNull()
+    expect(grantedPushOf("git push origin 'HEAD'", 'powershell')).not.toBeNull()
+    expect(grantedPushOf('git push origin "HEAD"', 'powershell')).toBeNull()
+    expect(grantedPushOf('git push origin HEAD 2>&1', 'powershell')).toBeNull()
+  })
+
+  it('is written with every argument quoted, and HEAD said as the branch of the worktree', () => {
+    const line = (command: string): string => renderGrantedPush(grantedPushOf(command) ?? { args: [], then: null, stderr: null }, 'nexus/run1/task')
+    expect(line('git push origin HEAD')).toBe("command git 'push' 'origin' 'nexus/run1/task'")
+    expect(line('git push -u origin HEAD 2>&1')).toBe("command git 'push' '-u' 'origin' 'nexus/run1/task' 2>&1")
+    expect(line('git push origin main')).toBe("command git 'push' 'origin' 'main'")
+    expect(line('git push')).toBe("command git 'push'")
+    // A remote that happens to be called HEAD stays what it is: only the refspec is the branch.
+    expect(line('git push HEAD HEAD')).toBe("command git 'push' 'HEAD' 'nexus/run1/task'")
   })
 })

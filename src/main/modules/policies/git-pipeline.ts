@@ -408,6 +408,14 @@ export function isGitWithFilters(command: string): boolean {
  * same, anywhere in the command, so that the text reads the same to whoever compares it with what ran.
  */
 export function userGitOfPowerShell(command: string): UserGitInvocation[] | null {
+  const parsed = parsePowerShellGit(command)
+  if (parsed === null) return null
+  for (const invocation of parsed) if (!isSafeUserGit(invocation.args)) return null
+  return parsed
+}
+
+/** A PowerShell command read into git invocations, or null: the reading alone, before any question of which git. */
+function parsePowerShellGit(command: string): UserGitInvocation[] | null {
   if (command.length > 4000 || /[^\x20-\x7e]/.test(command)) return null
   if (/["\\]/.test(command)) return null
   if (/[`$|&<>(){}@#%!*?[\]~]/.test(command.replace(/'[^']*'/g, "''"))) return null
@@ -420,9 +428,55 @@ export function userGitOfPowerShell(command: string): UserGitInvocation[] | null
     if (invocation.stderr !== null) return null
     // `--%` stops PowerShell's own reading of the line; an empty word is dropped by it.
     if (invocation.args.some((arg) => arg === '' || arg === '--%')) return null
-    if (!isSafeUserGit(invocation.args)) return null
   }
   return parsed
+}
+
+/**
+ * A push, for when the user has allowed one. Pushing is outside every profile: it becomes a boundary request,
+ * and nothing here runs before the user's grant. Once there is a grant the push must run where it can work:
+ * as the user, with the user's network and the user's way of signing in to the remote, which no containment
+ * of NEXUS has. So it is the one command that runs outside the containment, and it is held to the same rule as
+ * git as the user: the text is parsed, and NEXUS writes what runs.
+ *
+ * What qualifies: one `git push` and nothing else on the line; options from a short list (none that deletes or
+ * overwrites without a check on the remote: `--force` is not among them, `--force-with-lease` is); at most a
+ * remote and one refspec, the remote by its NAME as the repository's own configuration knows it (never an
+ * address or a path given on the line).
+ */
+const PUSH_OPTIONS = new Set(['-u', '--set-upstream', '--force-with-lease', '-q', '--quiet', '--porcelain', '-v', '--verbose'])
+const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
+
+export function grantedPushOf(command: string, shell: 'bash' | 'powershell' = 'bash'): UserGitInvocation | null {
+  const parsed = shell === 'bash' ? parseUserGit(command) : parsePowerShellGit(command)
+  if (parsed === null || parsed.length !== 1) return null
+  const invocation = parsed[0] as UserGitInvocation
+  if (invocation.args[0] !== 'push') return null
+  const operands: string[] = []
+  for (const arg of invocation.args.slice(1)) {
+    if (arg.startsWith('-')) {
+      if (!PUSH_OPTIONS.has(arg) || operands.length > 0) return null
+      continue
+    }
+    operands.push(arg)
+  }
+  if (operands.length > 2) return null
+  if (operands[0] !== undefined && !REMOTE_NAME.test(operands[0])) return null
+  if (operands[1] !== undefined && (!plainOperand(operands[1]) || operands[1].startsWith('+'))) return null
+  return invocation
+}
+
+/** The line of the script for an allowed push. `HEAD` is said as the worktree's own branch, so that the entry's `HEAD` file decides nothing. */
+export function renderGrantedPush(invocation: UserGitInvocation, branch: string): string {
+  const [, ...rest] = invocation.args as [string, ...string[]]
+  let operand = 0
+  const words = rest.map((arg) => {
+    if (arg.startsWith('-')) return arg
+    operand += 1
+    return operand === 2 && arg === 'HEAD' ? branch : arg
+  })
+  const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
+  return `command git ${['push', ...words].map(shellQuote).join(' ')}${stderr}`
 }
 
 export function isPlainGitPowerShell(command: string): boolean {

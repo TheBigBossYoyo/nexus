@@ -1,6 +1,7 @@
 import { basename, dirname, join } from 'node:path'
 import type { ExecutionBroker, ExecutionProfileName, ShellKind } from './execution-broker'
 import type { ContainmentProfile } from './launcher'
+import { renderGrantedPush, type UserGitInvocation } from '@main/modules/policies/git-pipeline'
 
 /**
  * 0.8: how the shell commands of one agent session run. The tool authorizer of an enrolled project holds one
@@ -13,7 +14,11 @@ export interface ShellContainment {
   /** Why the profile cannot be used now, or null. A session whose profile is unusable runs no command. */
   readonly unavailable: string | null
   /** `gitScript`: for a command that is git and nothing else, the script NEXUS wrote from its parsed invocations. It is what runs; the command's text is not. */
-  wrap(shell: ShellKind, command: string, options: { gitOnly: boolean; gitScript?: string }): Promise<{ ok: true; command: string } | { ok: false; reason: string }>
+  /**
+   * `grantedPush`: the command is one `git push` that the user allowed (the capability broker authorized it by a
+   * grant). It runs as the user, outside the containment, as the script NEXUS writes from it.
+   */
+  wrap(shell: ShellKind, command: string, options: { gitOnly: boolean; gitScript?: string; grantedPush?: UserGitInvocation }): Promise<{ ok: true; command: string } | { ok: false; reason: string }>
 }
 
 /** What the user asked for in Settings. STRONGEST: the sandbox account when it is set up and holds, else the low-integrity profile. */
@@ -67,6 +72,14 @@ export function createShellContainment(input: {
       // in an ISOLATED session: only there can git change a ref of a repository that is in the user's profile.
       // Every other command runs as the sandbox account, which is given what git needs to read the repository
       // and to stage. The repository's Git directory is the one above the `objects` directory NEXUS recorded.
+      if (options.grantedPush !== undefined) {
+        // Without NEXUS's record of the worktree the push is not made at all: nothing of it is taken from the worktree.
+        if (gitDir === undefined || gitBranch === undefined) return { ok: false, reason: 'NEXUS has no record of the Git directory and branch of this worktree, so the push that was allowed was not made.' }
+        const granted = await broker.grantedPush({ projectId: input.projectId, worktree: input.worktree, gitDir, pushLine: renderGrantedPush(options.grantedPush, gitBranch) })
+        if (!granted.ok) return { ok: false, reason: granted.reason }
+        const text = shell === 'bash' ? `${singleQuoted(granted.bash)} --noprofile --norc ${singleQuoted(granted.script)}` : `& ${psQuoted(granted.bash)} --noprofile --norc ${psQuoted(granted.script)}; exit $LASTEXITCODE`
+        return { ok: true, command: text }
+      }
       const use: ContainmentProfile = gitOnly ? asUser : profile
       const gitCommonDir = use === 'ISOLATED' && objects !== undefined ? dirname(objects) : undefined
       const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell: gitOnly ? 'bash' : shell, command: gitOnly ? (options.gitScript as string) : command, gitOnly, gitWritable, ...(gitCommonDir !== undefined ? { gitCommonDir } : {}), ...(gitDir !== undefined ? { gitDir } : {}), ...(gitBranch !== undefined ? { gitBranch } : {}) })

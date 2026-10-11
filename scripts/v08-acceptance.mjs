@@ -297,6 +297,8 @@ try {
       if (detail.run.state !== 'paused' || pending.length !== 1) return null
       log('answering the push request as the user would: allow for this mission')
       await call('autonomy.resolve', { requestId: pending[0].id, decision: 'ALLOW_MISSION' })
+      // NEXUS restarts the work a moment after the answer is stored: the script waits for that moment and does nothing.
+      for (let i = 0; i < 120 && (await call('runs.get', { runId: run.id })).run.state === 'paused'; i += 1) await new Promise((r) => setTimeout(r, 250))
       return { requestId: pending[0].id, decision: 'ALLOW_MISSION', at: new Date().toISOString() }
     })
     m.remoteAfter = remoteRefs()

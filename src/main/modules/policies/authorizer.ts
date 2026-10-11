@@ -1,4 +1,4 @@
-import { renderUserGitScript, userGitOf, userGitOfPowerShell } from './git-pipeline'
+import { grantedPushOf, renderUserGitScript, userGitOf, userGitOfPowerShell, type UserGitInvocation } from './git-pipeline'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -73,7 +73,7 @@ interface Outcome {
   /** 0.8: what the call needs of the capability broker. Read only when the project is enrolled. */
   needs?: CapabilityNeed[]
   /** 0.8: set for a shell call: whether the command is git and nothing else, with no finding. */
-  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean; gitScript?: string }
+  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean; gitScript?: string; grantedPush?: UserGitInvocation }
 }
 
 /** A decision of the file tools with the capability a grant would have to cover, when there is one. */
@@ -344,7 +344,10 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       const risk: Risk = baseRisk === 'high' || (verdict.decision === 'REQUIRE_APPROVAL' && verdict.trust === 'SYSTEM_SENSITIVE') ? 'high' : verdict.decision === 'REQUIRE_APPROVAL' ? 'medium' : baseRisk
       const classification: TrustClass =
         verdict.decision === 'REQUIRE_APPROVAL' ? verdict.trust : cls.commandClass === 'SYSTEM_CHANGE' || cls.commandClass === 'DESTRUCTIVE' ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED'
-      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs, shell: { kind: shell, command, gitOnly: false } }
+      // One `git push` and nothing else: if the user's grant lets it run, it runs as the script NEXUS writes, as the
+      // user. Only when a push is all that was asked about: a call with any other need is not treated so.
+      const push = needs.some((need) => need.capability === 'GIT_PUSH') && needs.every((need) => need.capability === 'GIT_PUSH' || need.inBoundary) ? grantedPushOf(command, shell) : null
+      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs, shell: { kind: shell, command, gitOnly: false, ...(push !== null ? { grantedPush: push } : {}) } }
     }
     if (verdict.decision === 'ALLOW_WITH_AUDIT') {
       return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') }, needs: [baseNeed], shell: { kind: shell, command, gitOnly: false } }
@@ -575,7 +578,8 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }
     }
     if (containment.unavailable !== null) return refuse(`the ${containment.profile} execution profile is not available (${containment.unavailable}).`)
-    const wrapped = await containment.wrap(outcome.shell.kind, outcome.shell.command, { gitOnly: outcome.shell.gitOnly, ...(outcome.shell.gitOnly && outcome.shell.gitScript !== undefined ? { gitScript: outcome.shell.gitScript } : {}) })
+    // `grantedPush` is on an outcome that was an `ask` and is an `allow` now: the broker found the user's grant for it.
+    const wrapped = await containment.wrap(outcome.shell.kind, outcome.shell.command, { gitOnly: outcome.shell.gitOnly, ...(outcome.shell.gitOnly && outcome.shell.gitScript !== undefined ? { gitScript: outcome.shell.gitScript } : {}), ...(outcome.shell.grantedPush !== undefined ? { grantedPush: outcome.shell.grantedPush } : {}) })
     if (!wrapped.ok) return refuse(wrapped.reason)
     // The tool's other inputs (its time limit, running in the background) stay the agent's; a request to leave the tool's own sandbox is dropped.
     const { dangerouslyDisableSandbox: _dropped, ...rest } = req.input

@@ -148,6 +148,42 @@ function bashGitGuardian(branch: string): string {
   ].join('\n')
 }
 
+const bashQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
+
+/**
+ * The whole bash script of a push the user allowed. It runs as the user, outside the containment, so everything
+ * it depends on is said in it and nothing is taken from the worktree: the Git directory and the repository
+ * NEXUS recorded, an empty hooks directory (a `pre-push` hook is a program of the repository), no file-system
+ * monitor, no `ext` transport, no entering of nested repositories. The user's own git configuration applies:
+ * it is where the remote's address and the way of signing in to it are. `pushLine` is what NEXUS rendered from
+ * the parsed command.
+ */
+export function grantedPushScript(input: { pushLine: string; gitDir: string; worktree: string; hooksDir: string; gitCmdDir?: string }): string {
+  const config: [string, string][] = [
+    ['core.hooksPath', input.hooksDir],
+    ['core.fsmonitor', 'false'],
+    ['core.pager', 'cat'],
+    ['protocol.ext.allow', 'never'],
+    ['gc.auto', '0'],
+    ['maintenance.auto', 'false'],
+    ['submodule.recurse', 'false'],
+    ['push.recurseSubmodules', 'no'],
+  ]
+  const lines = [
+    ...(input.gitCmdDir !== undefined ? [`PATH="$(cygpath -u ${bashQuote(input.gitCmdDir)}):$PATH"`] : []),
+    `export GIT_DIR=${bashQuote(input.gitDir)} GIT_COMMON_DIR=${bashQuote(resolve(input.gitDir, '..', '..'))} GIT_WORK_TREE=${bashQuote(input.worktree)}`,
+    `export GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 GIT_LFS_SKIP_SMUDGE=1 GIT_EDITOR=true GIT_PAGER=cat GIT_CONFIG_COUNT=${config.length}`,
+    'unset GIT_INDEX_FILE GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS GIT_EXEC_PATH GIT_PROXY_COMMAND',
+    ...config.map(([key, value], i) => `export GIT_CONFIG_KEY_${i}=${bashQuote(key)} GIT_CONFIG_VALUE_${i}=${bashQuote(value)}`),
+    // A repository that reads per-worktree configuration would take programs from a file in the entry, which the task's code may have put there.
+    `if [ -s "$GIT_DIR/config.worktree" ] || [ -L "$GIT_DIR/config.worktree" ] || [ -d "$GIT_DIR/config.worktree" ]; then echo 'NEXUS: the worktree has a configuration of its own that NEXUS did not write, so the push was not made.' >&2; exit 128; fi`,
+    input.pushLine,
+    'exit $?',
+    '',
+  ]
+  return lines.join('\n')
+}
+
 /** The whole bash script of a git-only command: `invocations` is what NEXUS rendered from the parsed command, `branch` the worktree's own branch. */
 export function gitOnlyScript(invocations: string, branch: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$/.test(branch) || branch.includes('..')) throw new Error('The worktree has no branch of its own that can be named.')
@@ -485,6 +521,38 @@ export class ExecutionBroker {
    * Bash for a profile: a copy of Git's MSYS runtime of the profile's own (see mirrorMsys), in a directory the
    * contained process can read. Null when Git for Windows is not installed.
    */
+  /**
+   * A push the user allowed, as a command for the agent's shell: Git Bash on a script NEXUS wrote, as the user
+   * and outside the containment (see grantedPushScript). The script lies where no contained code writes: in
+   * NEXUS's own data, which is closed to code at low integrity and is not the sandbox account's.
+   */
+  async grantedPush(input: { projectId: string; worktree: string; gitDir: string; pushLine: string }): Promise<{ ok: true; bash: string; script: string } | { ok: false; reason: string }> {
+    const { gitRoot } = await this.findShells()
+    const bash = gitRoot === null ? null : [join(gitRoot, 'bin', 'bash.exe'), join(gitRoot, 'usr', 'bin', 'bash.exe')].find((candidate) => existsSync(candidate))
+    if (gitRoot === null || bash === undefined || bash === null) return { ok: false, reason: 'Git Bash was not found, so the push that was allowed cannot be run by NEXUS.' }
+    if (!existsSync(input.gitDir)) return { ok: false, reason: 'The Git directory of the worktree is gone, so the push was not made.' }
+    try {
+      const dir = join(this.deps.sandboxDir, 'granted')
+      const hooksDir = join(dir, 'no-hooks')
+      mkdirSync(hooksDir, { recursive: true })
+      // Scripts of earlier pushes are not kept.
+      const cutoff = Date.now() - 3_600_000
+      for (const name of readdirSync(dir)) {
+        if (!/^nx-[0-9a-f]{16}\.sh$/.test(name)) continue
+        try {
+          if (statSync(join(dir, name)).mtimeMs < cutoff) rmSync(join(dir, name), { force: true })
+        } catch {
+          // gone already
+        }
+      }
+      const script = join(dir, `nx-${randomBytes(8).toString('hex')}.sh`)
+      writeFileSync(script, grantedPushScript({ pushLine: input.pushLine, gitDir: input.gitDir, worktree: input.worktree, hooksDir, gitCmdDir: join(gitRoot, 'cmd') }), { flag: 'wx' })
+      return { ok: true, bash, script }
+    } catch (e) {
+      return { ok: false, reason: `The push that was allowed could not be prepared: ${e instanceof Error ? e.message : String(e)}` }
+    }
+  }
+
   /** Whether a bash script can run under this profile: Git Bash was found and its copy for the profile could be made. */
   async hasBash(profile: ContainmentProfile): Promise<boolean> {
     return (await this.bashFor(profile).catch(() => null)) !== null

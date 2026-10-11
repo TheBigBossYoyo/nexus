@@ -6,8 +6,8 @@ import type { AddressInfo } from 'node:net'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { GitService } from '@main/modules/git/git-service'
-import { gitOnlyScript } from '@main/modules/isolation/execution-broker'
-import { renderUserGitScript, userGitOf, userGitOfPowerShell } from '@main/modules/policies/git-pipeline'
+import { gitOnlyScript, grantedPushScript } from '@main/modules/isolation/execution-broker'
+import { grantedPushOf, renderGrantedPush, renderUserGitScript, userGitOf, userGitOfPowerShell } from '@main/modules/policies/git-pipeline'
 
 // 0.8, after the second independent audit of the git path. A command of an agent that is git and nothing else
 // runs as the user (at low integrity) even in an ISOLATED session. What it works on, the worktree, is written by
@@ -352,4 +352,49 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     expect(markers(), 'nothing of the nested repository ran').toEqual([])
     expect(asUser('git stash list').out).not.toContain('NEXUS:')
   }, 120_000)
+
+  it('a push the user allowed: it arrives, on the branch of the worktree, and no hook, forged HEAD or planted configuration has a say', () => {
+    const remote = join(base, 'remote.git')
+    raw(base, 'init', '-q', '--bare', '-b', 'main', remote)
+    raw(repo, 'remote', 'add', 'origin', remote)
+    raw(repo, 'branch', 'secret-work', 'main')
+    // A hook of the repository that would run before a push, and one in the entry.
+    mkdirSync(join(repo, '.git', 'hooks'), { recursive: true })
+    writeFileSync(join(repo, '.git', 'hooks', 'pre-push'), `#!/bin/sh\necho ran > "${slash(marker('hook'))}"\n`)
+    writeFileSync(join(worktree, 'new.txt'), 'new\n')
+    expect(asUser('git add -A && git commit -q -m "work to publish"').code).toBe(0)
+    const hooksDir = join(base, 'granted-no-hooks')
+    mkdirSync(hooksDir, { recursive: true })
+    const push = (command: string): { code: number | null; out: string } => {
+      const invocation = grantedPushOf(command)
+      if (invocation === null) throw new Error(`does not qualify: ${command}`)
+      const script = join(base, `push-${Math.random().toString(16).slice(2, 10)}.sh`)
+      writeFileSync(script, grantedPushScript({ pushLine: renderGrantedPush(invocation, 'nexus/run1/task'), gitDir: entry, worktree, hooksDir }))
+      // As the agent's shell would start it: with the user's environment, not the contained one.
+      const r = spawnSync(BASH, ['--noprofile', '--norc', script], { cwd: worktree, env: { ...process.env, GIT_CONFIG_GLOBAL: join(base, 'gitconfig-empty') }, encoding: 'utf8', windowsHide: true, timeout: 120_000 })
+      return { code: r.status, out: `${r.stdout}${r.stderr}` }
+    }
+    // The entry's HEAD forged to another branch of the user's: `HEAD` on the line still means the worktree's own branch.
+    const head = readFileSync(join(entry, 'HEAD'), 'utf8')
+    writeFileSync(join(entry, 'HEAD'), 'ref: refs/heads/secret-work\n')
+    const first = push('git push origin HEAD 2>&1')
+    writeFileSync(join(entry, 'HEAD'), head)
+    expect(first.code, first.out).toBe(0)
+    expect(raw(remote, 'for-each-ref', '--format=%(refname)').split('\n')).toEqual(['refs/heads/nexus/run1/task'])
+    expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('work to publish')
+    expect(markers(), 'no hook ran').toEqual([])
+    // A configuration planted in the entry: the push is not made.
+    writeFileSync(join(entry, 'config.worktree'), '[core]\n\tsshCommand = calc\n')
+    writeFileSync(join(worktree, 'more.txt'), 'more\n')
+    rmSync(join(entry, 'config.worktree'))
+    expect(asUser('git add -A && git commit -q -m "more"').code).toBe(0)
+    writeFileSync(join(entry, 'config.worktree'), '[core]\n\tsshCommand = calc\n')
+    const refused = push('git push origin HEAD')
+    expect(refused.code).toBe(128)
+    expect(refused.out).toContain('the push was not made')
+    expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('work to publish')
+    rmSync(join(entry, 'config.worktree'))
+    expect(push('git push -u origin HEAD').code).toBe(0)
+    expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('more')
+  }, 180_000)
 })

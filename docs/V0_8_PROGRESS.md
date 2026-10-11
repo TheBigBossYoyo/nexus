@@ -259,7 +259,16 @@ Four focused independent audits ran on the code of this session. Each finding is
   now taken by the runtime (`workingState` call).
 - [x] A2-8 MEDIUM a git-only command without a recorded Git directory ran unpinned: it no longer qualifies.
 - [x] NEXUS's own `add -A` leaves out nested repositories the index names (`leavingOutNestedRepositories`).
-- [ ] A2 follow-up: third-round confirmation by an independent reviewer.
+- [x] Third review (independent, on the fixes): one HIGH (`git stash -m list` is a push and skipped the guard
+  for nested repositories), two MEDIUM (the user's git could move any branch: `checkout -B`, a forged `HEAD`;
+  the user-git script had no check for links on tracked directories), LOW (NEXUS's own link removal did not
+  cover `clean`, `rm`, `mv`; the account could list desktops). All fixed with tests
+  (`tests/unit/policies/git-user.test.ts`, `tests/integration/git/user-git-script.test.ts`).
+- [x] Found while fixing it, measured: a label does not keep a file from being replaced. Under ISOLATED the
+  account's access to the repository is now "add, never replace" (inherited by directories only).
+  `tests/integration/isolation/containment.test.ts` ("it adds and never replaces"). Under RESTRICTED the entry
+  stays replaceable by the task's code: a stated limit, which matters for repositories that read per-worktree
+  configuration.
 
 ### B/C. Windows containment, setup, pipe (no CRITICAL or HIGH)
 

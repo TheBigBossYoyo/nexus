@@ -130,10 +130,18 @@ profiles and personal folders are not on it, and are named in "What is not conta
 command that was more than git, and reported themselves blocked.
 
 - *Under ISOLATED, the sandbox account is given access to the Git data of the enrolled project* (`icacls`, by
-  the user's own right as owner; no elevation): read on `.git`; create-only on the object store (who creates a
-  file may finish it; nothing that is there can be replaced or removed); modify on the worktree's own entry
-  (`.git/worktrees/<name>`) and on the task's own branch and its log, as files; in the directories they are in
-  it may create (git's lock files) and not replace, so a sibling task's branch is not its to write. The
+  the user's own right as owner; no elevation): read on `.git`; and in the object store, in the worktree's own
+  entry (`.git/worktrees/<name>`) and in the directory of the task's branch and of its log, the right to add
+  files and directories and nothing else. Who creates a file may finish it and remove it; nothing that was
+  there can be written, deleted, renamed or replaced. Two files are the account's to rewrite: the task's own
+  branch (and its log), and the entry's `index`, which it stages into. So an existing object, a sibling task's
+  branch, and the entry's `HEAD`, `commondir`, `gitdir` and `config.worktree` stay as NEXUS left them.
+  The right to add is inherited by directories only. Measured while fixing the third review, and the reason for
+  this form: a right to write that files inherit lets every existing object and branch be overwritten in place;
+  and a mandatory label does not keep a file from being replaced (code at low integrity deleted, renamed and
+  replaced a file labeled medium in a directory labeled low, through the directory's own rights; only writing
+  into the file was refused). `tests/integration/isolation/containment.test.ts` ("it adds and never replaces")
+  runs every one of these attempts as the sandbox account. The
   paths come from NEXUS's record of the worktree, never from the `.git` file an agent can rewrite. Each grant is
   on record and is taken back when the project is no longer enrolled. The enrollment confirmation says so.
   With it, `git status`, `log`, `diff`, `show`, `add` work in any contained command, as the sandbox account.
@@ -172,8 +180,21 @@ command that was more than git, and reported themselves blocked.
   from NEXUS's record (the worktree's `.git` file decides nothing); a home, a temporary directory, an empty
   hooks directory and the command's script in a directory of the user's that the sandbox account cannot write;
   an empty user-level configuration; hooks, the file-system monitor, the pager, the editor, automatic
-  housekeeping and the `ext` transport switched off. In the worktree's entry, `commondir`, `gitdir` and
-  `config.worktree` (made empty) carry a label of their own that code at low integrity cannot write.
+  housekeeping and the `ext` transport switched off.
+  *It changes no branch but the worktree's own.* No command that checks out a branch, makes one or moves one
+  qualifies: `checkout` is for files only (`checkout [<revision>] -- <paths>`), `-b`, `-B` and `switch` are
+  not on the list (the third review moved a branch of the user's with `checkout -B`). And before every git of
+  the script, the script itself looks at three things and runs nothing when one does not hold: the entry's
+  `HEAD` names the branch NEXUS made for the worktree; the entry has no configuration of its own
+  (`config.worktree`); no directory on the way to a tracked file is a link (Git for Windows writes, deletes
+  and reads through a junction; measured). `tests/integration/git/user-git-script.test.ts`.
+  These are checks a moment before the use. What makes them more than that under ISOLATED is the access list
+  above: the sandbox account cannot replace `HEAD` or `config.worktree` at all. Under RESTRICTED the task's
+  code is the user at low integrity, the entry must be writable for its own git, and a label does not stop a
+  replacement: there the checks are what there is. It matters for one kind of repository, one that reads
+  per-worktree configuration (`extensions.worktreeConfig`, which `git sparse-checkout` switches on): in such a
+  repository, under RESTRICTED, code that wins the race between NEXUS's check and git's start could have a
+  planted `config.worktree` read by NEXUS's own git. Stated as a limit of RESTRICTED.
   Four more things were added after the second audit of git (below):
   - *An index of its own in an ISOLATED session.* The index in the worktree's entry is written by the sandbox
     account, and an entry in it can name a file outside the worktree (`../x`, an absolute path); stock git,
@@ -390,7 +411,7 @@ session). What it found, and what was done:
 | # | Finding | State |
 |---|---|---|
 | 1 | CRITICAL: an ISOLATED session could run programs as the user through the "git alone" path (git options, aliases through a redirected Git directory; hooks directory, home and script writable by contained code) | Fixed: closed list of subcommands and arguments, pins, user-only directories (Git, above). Regression tests. |
-| 2 | HIGH: the access to `.git` let one task rewrite a sibling task's branch; the entry's `commondir`, `gitdir`, `config.worktree` were writable | Fixed: refs by file; the three files pinned. A forged `index` in the entry: NEXUS's own git and the user's git in an ISOLATED session no longer read it (Git, above). Not closed: a forged commit-graph in the object store (below). |
+| 2 | HIGH: the access to `.git` let one task rewrite a sibling task's branch; the entry's `commondir`, `gitdir`, `config.worktree` were writable | Fixed: refs by file; under ISOLATED the account adds and replaces nothing (the labels first put on the three files did not keep them from being replaced: measured later, see Git above). A forged `index` in the entry: NEXUS's own git and the user's git in an ISOLATED session no longer read it (Git, above). Not closed: a forged commit-graph in the object store (below). |
 | 3 | HIGH: the sandbox account's credential blob was readable by a low-integrity process of the user | Fixed: `%LOCALAPPDATA%\NexusSandbox` is protected with the data directory. |
 | 4 | MEDIUM: an "allow once" could be spent on another action needing the same capability | Fixed: bound to the action shown, since then to a hash of the whole call (`AUTONOMY_MODEL.md`). Allow for the mission and for the project remain by capability and resource, as they say. |
 | 5 | MEDIUM: RESTRICTED counted as the isolated profile, so commands NEXUS cannot read into ran without a question, with the user's network | Fixed: only ISOLATED does. Under RESTRICTED such a command is one boundary request ("run project code outside the isolated profile"). |
@@ -406,7 +427,9 @@ Not closed by this review or after it:
   to a branch; it does not validate a commit-graph that contained code wrote. What a forged one can make
   NEXUS's own git do is not established. (The entry's `index` is no longer an open point: no git of NEXUS's
   and no user's git in an ISOLATED session reads it.)
-- The registry hosts include GitHub's download hosts; over a tunnel the proxy sees no method. A project can be
+- The registry hosts include GitHub's download hosts and, since the Electron acceptance, `github.com` itself and
+  `release-assets.githubusercontent.com` (where install scripts fetch prebuilt binaries, Electron's among them);
+  over a tunnel the proxy sees no method. A project can be
   sent to an allowed host. This is in "What is not contained".
 
 ### Four focused audits that followed
