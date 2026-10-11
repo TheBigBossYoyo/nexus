@@ -208,6 +208,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'autonomy.resolve': { requestId: 'r1', decision: 'DENY' },
   'autonomy.revokeGrant': { grantId: 'g1' },
   'autonomy.audit': { limit: 20 },
+  'research.list': { projectId: 'p1' },
   'isolation.status': {},
   'isolation.setup': {},
   'isolation.apps': {},

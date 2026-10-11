@@ -114,6 +114,7 @@ import {
 import type { AuthStatus, ModelOption } from './auth'
 import type { PushMessage, RunEvent } from './events'
 import type { AppSessionView, IsolationStatusView, SandboxSetupOutcome } from './isolation'
+import type { ResearchArtifact, ResearchDownloadView } from './research'
 import type {
   ContextPack,
   GraphProposal,
@@ -1007,6 +1008,8 @@ export const ipcInputs = {
   'autonomy.audit': AutonomyAuditInputSchema,
   // 0.8: the containment of project code. `setup` starts the one-time elevated setup of the sandbox account,
   // after a native confirmation; the others read.
+  /** 0.8: what was read on the web for a project: the artifacts (without their text) and the held downloads. */
+  'research.list': z.object({ projectId: Id, runId: Id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
   'isolation.status': Empty,
   'isolation.setup': Empty,
   'isolation.apps': z.object({ projectId: Id.optional() }).strict(),
@@ -1245,6 +1248,7 @@ export interface IpcOutputs {
   'autonomy.resolve': { requestId: string; state: BoundaryRequestState; grantId: string | null; alsoResolved: string[] }
   'autonomy.revokeGrant': { revoked: boolean }
   'autonomy.audit': AutonomyAuditPage
+  'research.list': { artifacts: ResearchArtifact[]; downloads: ResearchDownloadView[] }
   'isolation.status': IsolationStatusView
   'isolation.setup': SandboxSetupOutcome
   'isolation.apps': AppSessionView[]

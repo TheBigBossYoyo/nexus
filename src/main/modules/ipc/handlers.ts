@@ -817,6 +817,11 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       projectName: (projectId) => repos.projects.get(projectId)?.name ?? null,
       ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
     }),
+    'research.list': ({ projectId, runId, limit }) => ({
+      // The path of the kept text and of a held file stays in the runtime.
+      artifacts: repos.researchArtifacts.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((a) => ({ ...a, textPath: null })),
+      downloads: repos.researchDownloads.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((d) => ({ id: d.id, projectId: d.projectId, runId: d.runId, url: d.url, finalUrl: d.finalUrl, fileName: d.suggestedName, sniffed: d.sniffed, bytes: d.bytes, sha256: d.sha256, state: d.state, refusal: d.refusal, downloadedAt: d.downloadedAt })),
+    }),
     ...createIsolationHandlers({
       ...(ctx.isolation ?? {
         status: () => ({ requested: repos.settings.get().execution.containment, effective: 'STANDARD' as const, usable: false, detail: 'This runtime has no containment.', isolated: null, restricted: null, sandboxAccount: false, setupAvailable: false, protectedPaths: [] }),

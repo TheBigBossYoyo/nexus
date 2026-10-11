@@ -146,3 +146,20 @@ export interface ResearchCapabilities {
   /** Why a backend is absent, for the capability matrix the user can read. */
   unavailable: { backend: ResearchBackend; reason: string }[]
 }
+
+/** A file fetched into quarantine, as the window shows it. Where it is kept is not part of the view. */
+export interface ResearchDownloadView {
+  id: string
+  projectId: string
+  runId: string | null
+  url: string
+  finalUrl: string
+  fileName: string | null
+  /** What the first bytes say the file is. */
+  sniffed: string
+  bytes: number
+  sha256: string
+  state: 'QUARANTINED' | 'REFUSED' | 'RELEASED' | 'REMOVED'
+  refusal: string | null
+  downloadedAt: string
+}
