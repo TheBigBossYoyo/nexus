@@ -22,6 +22,13 @@ describe('0.8 classifier corrections', () => {
     expect(findings('[IO.File]::Move("README.md", "..\\..\\elsewhere.md")', 'powershell').join(' ')).toMatch(/outside|\.NET/)
   })
 
+  it('the text echo and printf print is not a path, and where it is sent still is', () => {
+    expect(findings("printf '\\r\\nMaintained with NEXUS.\\r\\n' >> README.md && git diff && npm test 2>&1 | tail -15")).toEqual([])
+    expect(findings("echo '\\Users\\x is where it lives' >> notes.txt")).toEqual([])
+    expect(findings("printf 'x' >> ../../outside.txt").join(' ')).toMatch(/outside/)
+    expect(findings('echo x > C:\\Users\\x\\.bashrc').join(' ')).toMatch(/outside/)
+  })
+
   it("reading the worktree's own .git entry is not a finding", () => {
     expect(findings('cat .git')).toEqual([])
     expect(findings('git status; cat .git; ls src')).toEqual([])

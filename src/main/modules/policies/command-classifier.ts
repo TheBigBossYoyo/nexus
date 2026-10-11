@@ -535,6 +535,8 @@ function skipXargsFlags(words: string[], from: number): number {
 const GIT_ENTRY_WRITERS = new Set([...PROJECT_WRITE_CMDS, ...DELETE_CMDS, ...MOVE_CMDS, 'mklink', 'ln', 'out-file', 'sc', 'ac', 'cpi', 'xcopy', 'robocopy', 'set-itemproperty', 'clear-content', 'sed', 'dd', 'install'])
 /** Cmdlets whose first positional (or -Path/-FilePath/-LiteralPath/-Destination value) is the path; later words are content. */
 const PATH_FIRST_ONLY = new Set(['set-content', 'sc', 'add-content', 'ac', 'out-file', 'new-item', 'ni', 'tee-object', 'export-csv', 'export-clixml', 'clear-content'])
+/** Commands whose arguments are text to print. */
+const TEXT_PRINTERS = new Set(['echo', 'printf', 'write-output', 'write-host'])
 /** Commands that only read the one file they are named. */
 const GIT_POINTER_READERS = new Set(['cat', 'type', 'get-content', 'gc', 'head', 'tail', 'wc', 'file', 'stat'])
 const GIT_ENTRY_REASON ="writing, moving or deleting a worktree's own .git entry (touching Git's own files) is never allowed: it decides which repository NEXUS's later git commands act on"
@@ -582,7 +584,8 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
         // reason to name them.
         a.ask('high', `touching Git's own files: ${v}`, 'SYSTEM_CHANGE')
       }
-      const outside = outsideRoots(v, a)
+      // What echo and printf are given is text they print, not a place: only where their output is sent is one.
+      const outside = TEXT_PRINTERS.has(head[0] ?? '') && !redirectTargets.has(w) ? null : outsideRoots(v, a)
       if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
     }
   }
