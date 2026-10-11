@@ -191,14 +191,46 @@ docs/V0_8_SECURITY_MODEL.md, docs/AUTONOMY_MODEL.md.
   build with `NEXUS_ACCEPT_CONFIRM=window` puts confirmations to the (off-screen) window; a package never does.
 - `runs.create` needs `compilationMode: 'EXACT'` from a script (otherwise the 0.7.2 admission asks for a preview).
 
+### What the real acceptance found (2026-10-11, runs 2 and 3; evidence in `docs/acceptance/`)
+
+Worked with real sessions under ISOLATED, first time: commands of the Bash and PowerShell tools handed over as
+contained launches (the `updatedInput` rewrite holds in the real SDK), `npm test` as the sandbox account,
+`research_read` on nodejs.org into an artifact, `app_launch` / `app_find` / `app_act` / `app_snapshot` /
+`app_screenshot` / `app_stop` by worker and verifier, NEXUS's own check commands contained, no tool approval,
+nothing on the remote. Both missions nevertheless ended paused. Causes, each fixed and tested:
+
+1. git under ISOLATED. A command that was more than git ran as the sandbox account and found no repository.
+   Now: the account is granted read on the project's `.git`, create-only on objects, modify on its own worktree
+   entry and its mission's refs (`ExecutionBroker.grantGit`, `revokeGit`, `revokeGitExcept`; record in
+   `<sandboxDir>/git-grants.json`); git alone, or git with text filters (`policies/git-pipeline.ts`), runs as
+   the user at low integrity; a ref-changing git inside a larger command is stopped with a sentence
+   (`bashGitGuard`). MEASURED AND REJECTED: commits as the sandbox account (git stats every directory above
+   the repository; a junction is resolved by git; rights on the user's own folders are not given).
+   `tests/scenarios/v8-isolated-git.test.ts`; the harness takes `containment.profile: 'ISOLATED'`.
+2. `error: Unable to create '.../packed-refs.lock'` after every contained commit: git deletes `AUTO_MERGE`
+   (traced). Harmless, read as failure by sessions. The line is filtered (`BASH_GIT_QUIET_LOCK`).
+3. `diff.external=''` in the hardening made `git diff` die. Removed; `gc.auto=0`, `maintenance.auto=false`
+   and, for the sandbox account, `safe.directory=*` added.
+4. `cat .git` (the worktree's pointer file) and `[IO.File]::AppendAllText("$PWD\\x", text)` were boundary
+   requests. Classifier corrected; `tests/unit/policies/v8-classifier.test.ts`.
+5. Verifiers failed tasks for lack of evidence held by NEXUS: that a screenshot was taken, that a push was
+   refused. Now artifacts of the task (and of the task it repairs): kinds `app-evidence`, `boundary-request`;
+   `app_status` reports launches and screenshots of the task.
+6. Found while reading: NEXUS's own git read `commondir` from a worktree entry that contained code may write.
+   It now sets `GIT_COMMON_DIR` itself.
+7. `npm.ps1` looked for a newer npm in the user's profile: `npm_config_prefix` is the session's.
+
+Not fixed, noted: reviewer and verifier roles are refused `git reflog`, `git branch -vv`, `od` by the 0.7 role
+policy; `npm ci` as setup fails in a project without a lock file (exit 1, as before 0.8).
+
 ## Next
 
-1. Read the result of the real acceptance (`test-results/v08/accept-*.log`) and fix what it shows.
-2. End-to-end and accessibility runs of the new UI (boundary inbox, autonomy settings, isolation, application
-   and research panels). Nothing of it has been rendered yet.
-3. RoleCapabilityContract in planning; unattended rules for enrolled projects; a grant resumes a waiting task.
-4. The pipe's DACL; Context Graph nodes for research; removal of labels on unenroll; the search page against
-   the real site.
-5. Hostile corpora as permanent suites, fault injection, soak, independent reviews.
-6. Full suite again, version 0.8.0, package, `V0_8_RELIABILITY.md`, `V0_8_RELEASE_REPORT.md`. Merge and tag
+1. Run 4 of the real acceptance (`test-results/v08/accept-4.log`): read it, fix what it shows.
+2. Run the e2e and accessibility specs of the new UI (`tests/e2e/v8.spec.ts`, the new case of `a11y.spec.ts`;
+   written by a subagent, NEVER RUN). They rebuild `out/`: not while an acceptance runs.
+3. Full suite (`npx vitest run`, about 12 minutes), then fixes.
+4. Independent reviews (security, UX); soak; the search page against the real site.
+5. Version 0.8.0, final regression, package, `V0_8_RELIABILITY.md`, `V0_8_RELEASE_REPORT.md`. Merge and tag
    only on PASS; never push.
+6. Open, not started: the pipe's DACL; Context Graph nodes for research; a grant resuming a waiting task;
+   unattended rules for enrolled projects; a setting for an application's external network.
