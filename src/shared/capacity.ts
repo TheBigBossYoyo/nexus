@@ -66,6 +66,16 @@ export interface CapacityRoutingRecord extends CapacityRoutingDecision {
   consumption?: 'NOT_SENT' | 'PROVIDER_REPORTED' | 'UNKNOWN'
   usage?: ProviderUsageReceipt | null
 }
+/**
+ * What the advisory roles (compiler, Strategic and Technical Director) used over a period, per provider, from
+ * the receipts kept with each request. `reported` requests came back with the provider's own token counts and
+ * are what the sums are made of; `unreported` ones were sent and say nothing of what they used. Neither is a
+ * share of any allowance.
+ */
+export interface AdvisoryUsageSummary {
+  since: string
+  providers: { provider: IntelligenceProvider; requests: number; reported: number; unreported: number; notSent: number; inputTokens: number; outputTokens: number }[]
+}
 /** Numeric fields are reported by the adapter; absence stays null, never an estimate of allowance. */
 export interface ProviderUsageReceipt {
   models: string[]

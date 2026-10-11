@@ -96,6 +96,7 @@ export function createV72Handlers(
       repos.intelligenceArtifacts.saveDirectorRecord(dismissed)
       return dismissed
     },
+    'director.advisoryUsage': ({ days }) => repos.intelligenceArtifacts.advisoryUsage(new Date(Date.now() - days * 86_400_000).toISOString()),
     'director.routing': ({ projectId, operationId }) => {
       repos.projects.require(projectId)
       return repos.intelligenceArtifacts.routingHistory(projectId, operationId)

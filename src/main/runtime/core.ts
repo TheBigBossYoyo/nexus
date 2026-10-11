@@ -197,6 +197,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       currentPid: process.pid,
     })
   reclaimHostedLeases()
+  // Read here, before the worker records of the earlier start are closed: the processes a new session waits for.
+  const earlierWorkerPids = repos.workers.listLive().flatMap((w) => (w.bootId !== identity.bootId && w.pid !== null ? [w.pid] : []))
   const bus = new EventBus(repos.events, repos.transaction)
   const git = new GitService()
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
@@ -623,6 +625,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const workerRouting = new WorkerCapacityRouting({
     repos, providers, usage, bootId: identity.bootId, dataDir,
     maxAgents: () => control.limits().maxAgents,
+    earlierStart: { pids: earlierWorkerPids, isProcessStopped: processStopped },
   })
   heldTaskReady = (taskId) => workerRouting.taskReady(taskId)
   const taskAdmission = new TaskAdmissionService(

@@ -49,6 +49,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'director.records': { projectId: 'p1' },
   'director.dismissEscalation': { projectId: 'p1', escalationId: 'es1' },
   'director.routing': { projectId: 'p1' },
+  'director.advisoryUsage': { days: 7 },
   'chatgpt.connect': {},
   'chatgpt.select': { profileId: 'p1' },
   'chatgpt.models': {},

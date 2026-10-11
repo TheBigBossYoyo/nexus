@@ -118,6 +118,27 @@ describe('production worker capacity admission', () => {
     } finally { h.close() }
   })
 
+  // Finding 14.7: after a hard kill a worker of the earlier start may live a moment longer, in the worktree the
+  // task is about to be resumed in. No session starts while one is alive, and the wait is bounded.
+  it('no session starts while a worker of the earlier start is alive, and the wait for it is bounded', async () => {
+    const h = await harness()
+    const routings: WorkerCapacityRouting[] = []
+    try {
+      let alive = true
+      routings.push(new WorkerCapacityRouting({ repos: h.h.repos, providers: h.providers, usage: h.usage, dataDir: 'worker-fixture', bootId: 'next-boot', maxAgents: () => 1, earlierStart: { pids: [4242], isProcessStopped: () => !alive, graceMs: 60_000 } }))
+      const session = collect(h.providers.router.startSession(h.spec()))
+      await new Promise((resolve) => setTimeout(resolve, 350))
+      expect(h.start).not.toHaveBeenCalled()
+      alive = false
+      expect((await session).some((e) => e.type === 'session.started')).toBe(true)
+      expect(h.start).toHaveBeenCalledTimes(1)
+      // A process id that never goes away (it was given to something else) holds a session for the grace only.
+      routings.push(new WorkerCapacityRouting({ repos: h.h.repos, providers: h.providers, usage: h.usage, dataDir: 'worker-fixture', bootId: 'third-boot', maxAgents: () => 1, earlierStart: { pids: [4242], isProcessStopped: () => false, graceMs: 300 } }))
+      expect((await collect(h.providers.router.startSession(h.spec()))).some((e) => e.type === 'session.started')).toBe(true)
+      expect(h.start).toHaveBeenCalledTimes(2)
+    } finally { for (const r of routings) await r.dispose(); await h.close() }
+  })
+
   it('after a crash the slots of its sessions stay taken until their processes are proven gone, and are then free again', async () => {
     const waiters: (() => void)[] = []
     const h = await harness(async (_spec, ctx) => { await new Promise<void>((resolve) => { waiters.push(resolve) }); await ctx.completeTurn({ text: 'done' }) })

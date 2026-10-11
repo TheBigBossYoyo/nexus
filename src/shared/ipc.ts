@@ -8,7 +8,7 @@ import type {
   DirectorRecord,
   StrategicEscalation,
 } from './intelligence'
-import type { CapacityRoutingRecord } from './capacity'
+import type { AdvisoryUsageSummary, CapacityRoutingRecord } from './capacity'
 import { COMPILATION_MODES, UserIntentMetadataSchema } from './intelligence'
 import {
   ContractKindSchema,
@@ -270,6 +270,7 @@ export const ipcInputs = {
     .strict(),
   'director.dismissEscalation': z.object({ projectId: Id, escalationId: Id }).strict(),
   'director.routing': z.object({ projectId: Id, operationId: Id.optional() }).strict(),
+  'director.advisoryUsage': z.object({ days: z.number().int().min(1).max(90) }).strict(),
   'chatgpt.connect': z.object({ profileId: Id.optional() }).strict(),
   'chatgpt.select': z.object({ profileId: Id }).strict(),
   'chatgpt.models': Empty,
@@ -1037,6 +1038,7 @@ export interface IpcOutputs {
   'director.records': DirectorRecord[]
   'director.dismissEscalation': StrategicEscalation
   'director.routing': CapacityRoutingRecord[]
+  'director.advisoryUsage': AdvisoryUsageSummary
   'chatgpt.connect': ChatGPTStatus
   'chatgpt.select': ChatGPTStatus
   'chatgpt.models': ChatGPTStatus

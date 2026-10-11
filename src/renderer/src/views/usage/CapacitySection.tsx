@@ -20,6 +20,7 @@ export function CapacitySection() {
     queryFn: () => api.invoke('chatgpt.status', {}),
     refetchInterval: 5000,
   })
+  const advisory = useQuery({ queryKey: ['usage-advisory'], queryFn: () => api.invoke('director.advisoryUsage', { days: 7 }), refetchInterval: 15000 })
   const connection = query.data,
     pool = connection?.capacity
   return (
@@ -97,6 +98,27 @@ export function CapacitySection() {
             </Button>
           </section>
         </div>
+        <section className="space-y-2" data-testid="advisory-usage">
+          <h3 className="font-medium">Used for advice and specifications, last 7 days</h3>
+          {advisory.error ? <ErrorNote error={advisory.error} /> : null}
+          {advisory.data && advisory.data.providers.length === 0 ? (
+            <p className="text-small text-text-muted">No request was sent to a Director or for a specification in this period.</p>
+          ) : null}
+          {advisory.data?.providers.map((p) => (
+            <KeyValue
+              key={p.provider}
+              rows={[
+                { label: p.provider === 'openai' ? 'ChatGPT' : p.provider === 'claude' ? 'Claude' : 'Codex', value: `${p.requests} request${p.requests === 1 ? '' : 's'}` },
+                { label: 'Tokens the provider reported', value: p.reported > 0 ? `${p.inputTokens.toLocaleString()} in · ${p.outputTokens.toLocaleString()} out, over ${p.reported} request${p.reported === 1 ? '' : 's'}` : 'None reported' },
+                ...(p.unreported > 0 ? [{ label: 'Sent, use not reported', value: String(p.unreported) }] : []),
+                ...(p.notSent > 0 ? [{ label: 'Admitted but not sent', value: String(p.notSent) }] : []),
+              ]}
+            />
+          ))}
+          <p className="text-small text-text-muted">
+            Counted from the receipt kept with each request of the compiler and the Directors. These are measurements of the work, not a share of a plan&apos;s allowance, which stays unknown. Agent sessions are counted below.
+          </p>
+        </section>
         {pool?.nextProbeAt ? (
           <Notice tone="warning" title="Backoff is saved">
             The retry time is a local recovery policy, not a provider reset promise. A request after

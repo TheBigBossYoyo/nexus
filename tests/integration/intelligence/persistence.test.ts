@@ -114,3 +114,33 @@ describe('intelligence persistence', () => {
     }
   })
 })
+
+describe('what the advisory roles used', () => {
+  // Finding 9.5: what the compiler and the Directors used was kept as receipts on routing records and shown nowhere.
+  it('is summed per provider from the receipts, and says what was sent without a report', async () => {
+    const { graphHarness } = await import('../../helpers/context-graph')
+    const h = graphHarness()
+    try {
+      const store = h.repos.intelligenceArtifacts
+      const base = { projectId: h.project.id, operationId: 'op', stage: 'STRATEGIC', poolIds: [], policyVersion: 'p', reasons: [], qualityEvidence: [], action: 'ROUTE' as const, model: 'm', endedAt: null, failure: null }
+      const receipt = (inputTokens: number, outputTokens: number) => ({ models: ['m'], inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null })
+      store.saveRouting({ ...base, id: 'r1', provider: 'openai', role: 'compiler', state: 'COMPLETED', createdAt: '2026-10-10T10:00:00.000Z', consumption: 'PROVIDER_REPORTED', usage: receipt(800, 200) })
+      store.saveRouting({ ...base, id: 'r2', provider: 'openai', role: 'strategic', state: 'COMPLETED', createdAt: '2026-10-10T11:00:00.000Z', consumption: 'PROVIDER_REPORTED', usage: receipt(1000, 500) })
+      store.saveRouting({ ...base, id: 'r3', provider: 'openai', role: 'compiler', state: 'FAILED', createdAt: '2026-10-10T12:00:00.000Z', consumption: 'UNKNOWN', usage: null })
+      store.saveRouting({ ...base, id: 'r4', provider: 'claude', role: 'technical', state: 'FAILED', createdAt: '2026-10-10T12:30:00.000Z', consumption: 'NOT_SENT', usage: null })
+      // Not advisory, not routed, or before the period: none of these is counted.
+      store.saveRouting({ ...base, id: 'r5', provider: 'claude', role: 'worker', state: 'COMPLETED', createdAt: '2026-10-10T13:00:00.000Z', usage: receipt(9, 9) })
+      store.saveRouting({ ...base, id: 'r6', provider: null, model: null, action: 'WAIT', role: 'compiler', state: 'WAITING_FOR_CAPACITY', createdAt: '2026-10-10T13:00:00.000Z' })
+      store.saveRouting({ ...base, id: 'r7', provider: 'openai', role: 'compiler', state: 'COMPLETED', createdAt: '2026-10-01T00:00:00.000Z', usage: receipt(7, 7) })
+      expect(store.advisoryUsage('2026-10-09T00:00:00.000Z')).toEqual({
+        since: '2026-10-09T00:00:00.000Z',
+        providers: [
+          { provider: 'claude', requests: 1, reported: 0, unreported: 0, notSent: 1, inputTokens: 0, outputTokens: 0 },
+          { provider: 'openai', requests: 3, reported: 2, unreported: 1, notSent: 0, inputTokens: 1800, outputTokens: 700 },
+        ],
+      })
+    } finally {
+      h.close()
+    }
+  })
+})

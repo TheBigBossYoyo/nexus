@@ -10,7 +10,7 @@ import type {
   UserIntentMetadata,
 } from '@shared/intelligence'
 import type { AdmissionKind } from '@main/modules/intelligence/admission'
-import type { CapacityRoutingRecord } from '@shared/capacity'
+import type { AdvisoryUsageSummary, CapacityRoutingRecord } from '@shared/capacity'
 
 export class IntelligenceStore {
   constructor(private readonly db: Database) {}
@@ -87,6 +87,26 @@ export class IntelligenceStore {
         'INSERT INTO capacity_routing_records(id,project_id,operation_id,body,created_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE project_id=excluded.project_id AND operation_id=excluded.operation_id',
       )
       .run(record.id, record.projectId, record.operationId, body, record.createdAt)
+  }
+  /** What the advisory roles used since `since`, over every project, from the receipts on the routing records. */
+  advisoryUsage(since: string): AdvisoryUsageSummary {
+    const rows = this.db.prepare('SELECT body FROM capacity_routing_records WHERE created_at >= ?').all(since) as { body: string }[]
+    const by = new Map<string, AdvisoryUsageSummary['providers'][number]>()
+    for (const row of rows) {
+      const r = JSON.parse(row.body) as CapacityRoutingRecord
+      // Worker and reviewer sessions are counted by the usage service, from the sessions themselves.
+      if (r.action !== 'ROUTE' || r.provider === null || r.role === 'worker' || r.role === 'reviewer') continue
+      const p = by.get(r.provider) ?? { provider: r.provider, requests: 0, reported: 0, unreported: 0, notSent: 0, inputTokens: 0, outputTokens: 0 }
+      p.requests += 1
+      if (r.usage && (r.usage.inputTokens !== null || r.usage.outputTokens !== null)) {
+        p.reported += 1
+        p.inputTokens += r.usage.inputTokens ?? 0
+        p.outputTokens += r.usage.outputTokens ?? 0
+      } else if (r.consumption === 'NOT_SENT') p.notSent += 1
+      else p.unreported += 1
+      by.set(r.provider, p)
+    }
+    return { since, providers: [...by.values()].sort((a, b) => a.provider.localeCompare(b.provider)) }
   }
   routingHistory(projectId: string, operationId?: string): CapacityRoutingRecord[] {
     const rows = operationId

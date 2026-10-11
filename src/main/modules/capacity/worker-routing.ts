@@ -33,6 +33,14 @@ const PAUSED_STATES: ReadonlySet<string> = new Set(['QUOTA_PAUSED', 'WAITING_FOR
 /** How long a pause with no known reset time holds before the provider is tried again. */
 export const PAUSE_RETRY_MS = 15 * 60_000
 export const AUTH_RETRY_MS = 2 * 60_000
+/**
+ * How long after a start a new session waits for the worker processes of the earlier start to be gone. A worker
+ * ends itself when its runtime disappears, and without its runtime none of its tool calls is authorized; a
+ * command it had already started may still run for a moment in a worktree the task is about to be resumed in.
+ * The wait ends as soon as they are gone, and after this long whatever a process id says: an id may by now
+ * belong to anything.
+ */
+export const EARLIER_START_GRACE_MS = 20_000
 /** A run resumed from a capacity wait that waits again is tried with a growing delay, not every pass. */
 export const RESUME_BACKOFF_MS = 2_000
 export const RESUME_BACKOFF_MAX_MS = 60_000
@@ -59,6 +67,8 @@ export class WorkerCapacityRouting {
   constructor(private readonly o: {
     repos: Repositories; providers: ProviderService; usage: UsageIntelligenceService;
     bootId: string; dataDir: string; maxAgents: () => number;
+    /** Worker processes the earlier start left on record, and how to tell that one has exited. */
+    earlierStart?: { pids: readonly number[]; isProcessStopped: (pid: number) => boolean; graceMs?: number }
   }) {
     const store = o.repos.intelligenceArtifacts
     this.kernel = new CapacityAwareProviderRouter(store, o.bootId)
@@ -73,7 +83,20 @@ export class WorkerCapacityRouting {
   }
   private changed(): void { for (const listener of this.listeners) listener() }
 
+  private readonly startedAt = Date.now()
+  private earlierGone = false
+  /** Resolves when no worker of the earlier start is alive any more, or when the grace has passed. */
+  private async earlierStartSettled(): Promise<void> {
+    const earlier = this.o.earlierStart
+    if (!earlier || this.earlierGone) return
+    const grace = earlier.graceMs ?? EARLIER_START_GRACE_MS
+    while (!this.disposed && Date.now() - this.startedAt < grace && earlier.pids.some((pid) => !earlier.isProcessStopped(pid)))
+      await new Promise<void>((resolve) => { setTimeout(resolve, 100).unref() })
+    this.earlierGone = true
+  }
+
   private async snapshot(spec: Pick<SessionSpec, 'role' | 'label' | 'model' | 'resumeSessionId'>) {
+    await this.earlierStartSettled()
     // A session asked for before the providers were detected waits for that detection, not for capacity.
     if (!this.disposed && this.o.providers.list().length === 0) await this.o.providers.refresh().catch(() => undefined)
     const policy = this.o.providers.policy()
