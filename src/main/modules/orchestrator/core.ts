@@ -199,7 +199,7 @@ export class Core {
   async setupWorktree(run: Run, taskId: string | null, cwd: string): Promise<void> {
     const command = setupCommand(this.project(run))
     if (!command) return
-    const result = await this.runOne('setup', command, cwd)
+    const result = await this.runOne('setup', command, cwd, run, taskId)
     this.deps.repos.artifacts.insert({
       id: newId(),
       runId: run.id,
@@ -223,7 +223,7 @@ export class Core {
 
     const results: CommandResult[] = []
     for (const { name, command } of commands) {
-      results.push(await this.runOne(name, command, cwd))
+      results.push(await this.runOne(name, command, cwd, run, taskId))
     }
     const failed = results.filter((r) => r.exitCode !== 0 || r.timedOut)
     const passed = failed.length === 0
@@ -302,10 +302,14 @@ export class Core {
     }
   }
 
-  private async runOne(name: string, command: string, cwd: string): Promise<CommandResult> {
+  private async runOne(name: string, command: string, cwd: string, run: Run, taskId: string | null): Promise<CommandResult> {
     const timeoutMs = this.deps.repos.settings.get().execution.checkTimeoutMinutes * 60_000
     const started = Date.now()
     try {
+      // 0.8: in an enrolled project these commands run inside its containment. They are project code: an install
+      // hook, a test. A containment that cannot be made is a failed command, never an uncontained run.
+      const contained = await this.deps.execution?.runProjectCommand({ projectId: run.projectId, sessionKey: `${run.id}:${taskId ?? 'run'}`, worktree: cwd, commandLine: command }, { timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES })
+      if (contained) return { name, command, cwd, exitCode: contained.exitCode, timedOut: contained.timedOut, durationMs: contained.durationMs, output: contained.output }
       // Setup and check commands run code the agents wrote: they get no Claude credentials.
       const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, env: projectCommandEnv() })
       return { name, command, cwd, exitCode: r.exitCode, timedOut: r.timedOut, durationMs: r.durationMs, output: r.output }

@@ -379,11 +379,11 @@ static class Program {
         return (int)code;
     }
 
-    /** Sets or clears the mandatory label of a directory tree: `low` makes it writable from the containment, `protect` unreadable from it, `clear` removes the label. */
+    /** Sets or clears the mandatory label of a directory tree: `low` makes it writable from the containment, `medium` readable and not writable (the default, said explicitly so that a protected parent does not apply), `protect` unreadable from it, `clear` removes the label. */
     static int Label(string mode, string path) {
         if (!Directory.Exists(path) && !File.Exists(path)) throw new Fail(EXIT_SPEC, "no such path");
-        string sddl = mode == "low" ? "S:(ML;OICI;NW;;;LW)" : mode == "protect" ? "S:(ML;OICI;NWNRNX;;;ME)" : mode == "clear" ? "S:" : null;
-        if (sddl == null) throw new Fail(EXIT_USAGE, "label mode must be low, protect or clear");
+        string sddl = mode == "low" ? "S:(ML;OICI;NW;;;LW)" : mode == "protect" ? "S:(ML;OICI;NWNRNX;;;ME)" : mode == "medium" ? "S:(ML;OICI;NW;;;ME)" : mode == "clear" ? "S:" : null;
+        if (sddl == null) throw new Fail(EXIT_USAGE, "label mode must be low, medium, protect or clear");
         IntPtr sd; uint size;
         if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the label could not be built: " + Marshal.GetLastWin32Error());
         bool present, defaulted; IntPtr sacl;
@@ -434,7 +434,7 @@ static class Program {
             if (args.Length == 3 && args[0] == "credential" && args[1] == "write") return CredentialWrite(args[2]);
             if (args.Length == 3 && args[0] == "credential" && args[1] == "check") { Console.Out.WriteLine(CredentialRead(args[2])[0]); return 0; }
             if (args.Length == 1 && args[0] == "--version") { Console.Out.WriteLine("nexus-launch 1"); return 0; }
-            Err("usage: nexus-launch --spec <file> | label low|protect|clear <path> | --version");
+            Err("usage: nexus-launch --spec <file> | label low|medium|protect|clear <path> | --version");
             return EXIT_USAGE;
         } catch (Fail f) {
             Err(f.Message);

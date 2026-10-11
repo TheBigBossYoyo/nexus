@@ -297,7 +297,7 @@ class PolicyGate {
     const input = isRecord(hookInput.tool_input) ? hookInput.tool_input : {}
     const d = await this.decide(hookInput.tool_name, input, toolUseId)
     if (d.behavior === 'allow') {
-      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', ...(d.updatedInput ? { updatedInput: d.updatedInput } : {}) } }
     }
     if (d.behavior === 'deny') {
       this.denied(toolUseId, hookInput.tool_name, d.reason)
@@ -319,7 +319,7 @@ class PolicyGate {
     this.pendingAsk.delete(toolUseId)
     const d = pending ?? (await this.decide(toolName, input, toolUseId))
 
-    if (d.behavior === 'allow') return { behavior: 'allow', updatedInput: input }
+    if (d.behavior === 'allow') return { behavior: 'allow', updatedInput: d.updatedInput ?? input }
     if (d.behavior === 'deny') {
       this.denied(toolUseId, toolName, d.reason)
       return { behavior: 'deny', message: d.reason }

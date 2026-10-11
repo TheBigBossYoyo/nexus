@@ -17,6 +17,12 @@ files:
 extraResources:
   - from: arena/cases
     to: arena/cases
+  # 0.8: the launcher that makes the containment of project code (native/nexus-launch), and the one-time
+  # setup of the sandbox account. Real files on disk: one is started as a process, the others run elevated.
+  - from: out/native/nexus-launch.exe
+    to: bin/nexus-launch.exe
+  - from: native/sandbox-setup
+    to: sandbox-setup
 asar: true
 # claude.exe must be a real file on disk to be spawned, and the SQLite binding must be loadable.
 asarUnpack:

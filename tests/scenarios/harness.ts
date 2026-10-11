@@ -19,6 +19,9 @@ import type { EventType, PushMessage, RunEvent } from '@shared/events'
 import type { AutonomyProfile } from '@shared/autonomy'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { AutonomyService } from '@main/modules/autonomy/service'
+import { ExecutionBroker } from '@main/modules/isolation/execution-broker'
+import { Launcher } from '@main/modules/isolation/launcher'
+import { IsolationService } from '@main/modules/isolation/service'
 import type { Resolver } from '@main/modules/network/guard'
 import { policyForPurpose } from '@main/modules/network/policy'
 import { WebResearchProvider } from '@main/modules/research/provider'
@@ -135,6 +138,14 @@ export interface HarnessOptions {
    * `resolver`, and a connection to an address that passed the policy goes where `dial` says.
    */
   research?: { resolver: Resolver; dial: (address: string, port: number) => { host: string; port: number }; searchUrl?: string }
+  /**
+   * 0.8: run the project's commands through the real launcher under this profile (the launcher is built when
+   * it is missing). Without it, `autonomy.contained` only says that commands count as contained, and nothing
+   * is launched. `baseDir` puts the scenario's directory inside the checkout instead of the system's temporary
+   * directory.
+   */
+  containment?: { profile: 'RESTRICTED'; launcher: string }
+  baseDir?: string
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -145,7 +156,8 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
 
 export async function createHarness(options: HarnessOptions): Promise<Harness> {
   const fresh = !options.existing
-  const dir = options.existing?.dir ?? (await mkdtemp(join(tmpdir(), 'nexus-scn-')))
+  if (options.baseDir) await mkdir(options.baseDir, { recursive: true })
+  const dir = options.existing?.dir ?? (await mkdtemp(join(options.baseDir ?? tmpdir(), 'nexus-scn-')))
   const repoDir = join(dir, 'repo')
   const dbPath = join(dir, 'nexus.db')
   const worktreesDir = join(dir, 'worktrees')
@@ -205,13 +217,22 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       usage.dispose()
     }
   }
+  const containmentOptions = options.containment
+  let isolation: IsolationService | null = null
+  if (containmentOptions) {
+    const launcher = new Launcher({ executable: containmentOptions.launcher, specDir: join(dir, 'sandbox', 'specs') })
+    const broker = new ExecutionBroker({ launcher, sandboxDir: join(dir, 'sandbox'), account: () => null, baseEnv: () => process.env, gitIdentity: () => ({ name: 'NEXUS Agent', email: 'nexus-agent@localhost' }) })
+    isolation = new IsolationService({ broker, launcher, containment: () => containmentOptions.profile, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, gitWritable: async (worktree) => (await gitService.ownedGitLayout(worktree))?.writable ?? [], dataDir: dir })
+    await isolation.start()
+  }
+  const isolationService = isolation
   const autonomy = new AutonomyService({
     repos,
     runActive: (runId) => {
       const run = repos.runs.get(runId)
       return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
     },
-    contained: () => options.autonomy?.contained === true,
+    contained: (projectId) => (isolationService ? isolationService.contained(projectId) : options.autonomy?.contained === true),
     onChange: () => void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }),
   })
   autonomy.watch(bus)
@@ -231,6 +252,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     bus,
     runtime: admitted,
     autonomy,
+    ...(isolationService ? { execution: isolationService } : {}),
     ...(research
       ? {
           extensions: createResearchTools({
@@ -358,7 +380,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}), ...(options.research ? { research: options.research } : {}) })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}), ...(options.research ? { research: options.research } : {}), ...(options.containment ? { containment: options.containment } : {}), ...(options.baseDir ? { baseDir: options.baseDir } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)

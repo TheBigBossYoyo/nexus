@@ -375,6 +375,25 @@ export class GitService {
     return false
   }
 
+  /**
+   * 0.8: where the git data of a worktree NEXUS created is, from NEXUS's own record and the repository's entry
+   * for it, never from the `.git` file in the worktree (which an agent can rewrite). Null when the directory
+   * is not such a worktree. `writable` lists what a contained git must be able to write to commit on the
+   * worktree's own branch and nothing else: the worktree's entry, the object store, and the directory of its
+   * branch among the refs and their logs.
+   */
+  async ownedGitLayout(worktree: string): Promise<{ gitDir: string; commonDir: string; branch: string | null; writable: string[] } | null> {
+    const own = await this.trustedFor(worktree).catch(() => null)
+    if (own === null) return null
+    const commonDir = dirname(dirname(own.gitDir))
+    const writable = [own.gitDir, join(commonDir, 'objects')]
+    if (own.branch !== null && own.branch.includes('/')) {
+      const namespace = own.branch.split('/').slice(0, -1)
+      writable.push(join(commonDir, 'refs', 'heads', ...namespace), join(commonDir, 'logs', 'refs', 'heads', ...namespace))
+    }
+    return { gitDir: own.gitDir, commonDir, branch: own.branch, writable }
+  }
+
   /** The record for `cwd` when it is, or lies inside, a worktree NEXUS created. */
   private async trustedFor(cwd: string): Promise<TrustedWorktree | null> {
     const key = pathKeyOf(cwd)

@@ -147,11 +147,12 @@ export class Launcher {
   }
 
   /**
-   * Sets the integrity label of a tree. `low`: contained code may write there. `protect`: contained code may
+   * Sets the integrity label of a tree. `low`: contained code may write there. `medium`: it may read and not
+   * write there, said explicitly so that a protected parent directory does not apply. `protect`: contained code may
    * neither read nor write there. `clear`: back to no label of its own. Only the label changes; the owner and
    * the access list are not touched.
    */
-  async label(mode: 'low' | 'protect' | 'clear', path: string): Promise<void> {
+  async label(mode: 'low' | 'medium' | 'protect' | 'clear', path: string): Promise<void> {
     const result = await runProcess(this.options.executable, ['label', mode, path], { cwd: dirname(this.options.executable), timeoutMs: 10 * 60_000, env: minimalEnv() })
     if (result.exitCode !== 0) throw new Error(`The integrity label of ${path} could not be set: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
   }

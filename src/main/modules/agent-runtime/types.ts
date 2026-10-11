@@ -15,7 +15,8 @@ export interface ToolRequest {
 }
 
 export type ToolDecision =
-  | { behavior: 'allow' }
+  /** `updatedInput`: 0.8, the input the tool runs with in place of the agent's own (a shell command wrapped for the containment). */
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown> }
   /** `boundaryRequests`: 0.8, the call was refused because it waits for the user's decision on these requests. */
   | { behavior: 'deny'; reason: string; boundaryRequests?: string[] }
   /** Requires a human decision. The runtime calls `SessionSpec.requestApproval` and waits. */

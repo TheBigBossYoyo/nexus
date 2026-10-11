@@ -225,7 +225,11 @@ export class ExecutionBroker {
     if (gitRoot === null) return null
     if (!this.msys.has(profile)) {
       const toolsRoot = profile === 'ISOLATED' ? join((this.sandbox() as { account: SandboxAccount }).account.root, 'tools') : join(this.deps.sandboxDir, 'tools')
-      this.msys.set(profile, mirrorMsys({ toolsRoot, gitRoot }))
+      const copy = mirrorMsys({ toolsRoot, gitRoot })
+      // Readable and not writable for contained code, whatever the directory above it is labeled: the tools are
+      // shared by sessions, and one session must not be able to change what the next one runs.
+      if (copy !== null) await this.deps.launcher.label('medium', toolsRoot)
+      this.msys.set(profile, copy)
     }
     const copy = this.msys.get(profile) ?? null
     return copy === null ? null : { ...copy, gitRoot }
@@ -294,14 +298,28 @@ export class ExecutionBroker {
    * directory and the launcher runs the shell on that script, so nothing of the command is ever spliced into a
    * command line. Returns what to run instead of the command, or the reason nothing will run.
    */
-  async containShell(input: ContainSession & { cwd: string; shell: ShellKind; command: string; timeoutMs?: number }): Promise<ContainResult> {
+  async containShell(
+    input: ContainSession & {
+      cwd: string
+      shell: ShellKind
+      command: string
+      timeoutMs?: number
+      /** The profile of the session the command belongs to, when the command itself runs under another (git under RESTRICTED in an ISOLATED session). Its directories are the session's. */
+      sessionProfile?: ExecutionProfileName
+      /** The command is git and nothing else: it gets git's own hardening and may write the worktree's own git data. */
+      gitOnly?: boolean
+      /** For a git-only command: the directories of the repository a contained git must write to commit on its own branch. From NEXUS's record. */
+      gitWritable?: readonly string[]
+    },
+  ): Promise<ContainResult> {
     const state = this.usable(input.profile)
     if (!state.usable) return this.fail(input.projectId, input.profile, `The ${input.profile} execution profile is not available, so the command was not run: ${state.detail}`)
     try {
-      const roots = await this.roots(input)
+      const roots = await this.roots({ ...input, profile: input.sessionProfile === 'ISOLATED' ? 'ISOLATED' : input.profile })
+      if (input.gitOnly === true) for (const dir of input.gitWritable ?? []) if (existsSync(dir)) await this.ensureLow(dir)
       const shells = await this.findShells()
       const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
-      const { env, withheld } = this.environment(input, roots)
+      const { env, withheld } = this.environment(input, roots, input.gitOnly === true ? this.gitHardening(roots) : {})
       if (bash !== null) {
         // The copy's own tools first, then Git itself, so that `git`, `ls` and `grep` are what a Git Bash user expects.
         const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
@@ -397,6 +415,31 @@ export class ExecutionBroker {
     } finally {
       this.deps.launcher.removeSpec(specPath)
     }
+  }
+
+  /**
+   * What a contained git gets so that the repository cannot make it run a program: no hooks, no file-system
+   * monitor, no pager, no editor, no external transport. Given in the environment, which outranks the
+   * repository's and the worktree's own configuration.
+   */
+  private gitHardening(roots: SessionRoots): Record<string, string> {
+    const emptyHooks = join(roots.temp, 'no-hooks')
+    mkdirSync(emptyHooks, { recursive: true })
+    const config: [string, string][] = [
+      ['core.hooksPath', emptyHooks],
+      ['core.fsmonitor', 'false'],
+      ['core.pager', 'cat'],
+      ['protocol.ext.allow', 'never'],
+      ['core.sshCommand', 'false'],
+      ['credential.helper', ''],
+      ['diff.external', ''],
+    ]
+    const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length), GIT_EDITOR: 'true', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
+    config.forEach(([key, value], i) => {
+      env[`GIT_CONFIG_KEY_${i}`] = key
+      env[`GIT_CONFIG_VALUE_${i}`] = value
+    })
+    return env
   }
 
   /** The launcher itself needs almost nothing; what the command gets is in its spec. */

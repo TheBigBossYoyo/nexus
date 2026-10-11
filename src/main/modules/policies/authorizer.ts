@@ -4,6 +4,7 @@ import { newId, nowIso } from '@shared/ids'
 import { SECURITY_POLICY_VERSION, type ExecutionDecision, type ExecutionProfile, type ProvenanceKind, type TrustClass } from '@shared/security'
 import type { ToolDecision, ToolRequest } from '@main/modules/agent-runtime/types'
 import type { AutonomyGate } from '@main/modules/autonomy/gate'
+import type { ShellContainment } from '@main/modules/isolation/session-containment'
 import { needForExecutionReason, needsForFindings, type CapabilityNeed } from '@main/modules/autonomy/tool-capabilities'
 import { capabilitiesForRole } from './capabilities'
 import { classifyCommand } from './command-classifier'
@@ -37,6 +38,12 @@ export interface PolicyContext {
    * user as an approval. Absent, the approvals of 0.7 apply unchanged.
    */
   autonomy?: AutonomyGate
+  /**
+   * 0.8: how this session's shell commands run. With a profile other than STANDARD, a command that was allowed
+   * is handed to the shell tool as its launch inside the containment; when the containment cannot be made the
+   * command is refused. Absent: commands run as written, as before 0.8.
+   */
+  containment?: ShellContainment
 }
 
 export interface ExecutionContext {
@@ -64,6 +71,8 @@ interface Outcome {
   audit?: AuditInfo
   /** 0.8: what the call needs of the capability broker. Read only when the project is enrolled. */
   needs?: CapabilityNeed[]
+  /** 0.8: set for a shell call: whether the command is git and nothing else, with no finding. */
+  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean }
 }
 
 /** A decision of the file tools with the capability a grant would have to cover, when there is one. */
@@ -308,6 +317,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
 
     const contained = ctx.autonomy?.contained === true
     const baseNeed = shellBaseNeed(cls)
+    const shellInfo = { kind: shell, command, gitOnly: cls.findings.length === 0 && cls.segments.length > 0 && cls.segments.every((s) => s.command === 'git') } as const
     if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
       const findings = [
         ...cls.findings,
@@ -325,12 +335,12 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       const risk: Risk = baseRisk === 'high' || (verdict.decision === 'REQUIRE_APPROVAL' && verdict.trust === 'SYSTEM_SENSITIVE') ? 'high' : verdict.decision === 'REQUIRE_APPROVAL' ? 'medium' : baseRisk
       const classification: TrustClass =
         verdict.decision === 'REQUIRE_APPROVAL' ? verdict.trust : cls.commandClass === 'SYSTEM_CHANGE' || cls.commandClass === 'DESTRUCTIVE' ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED'
-      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs }
+      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs, shell: { ...shellInfo, gitOnly: false } }
     }
     if (verdict.decision === 'ALLOW_WITH_AUDIT') {
-      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') }, needs: [baseNeed] }
+      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') }, needs: [baseNeed], shell: { ...shellInfo, gitOnly: false } }
     }
-    return { tool: base, needs: [baseNeed] }
+    return { tool: base, needs: [baseNeed], shell: shellInfo }
   }
 
   /** The profile capability a shell command is an exercise of, from what its parts are. */
@@ -535,7 +545,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       // is kept as an audited allow, so the decision log still shows what was looked at.
       const audit: AuditInfo | undefined =
         outcome.audit?.decision === 'REQUIRE_APPROVAL' ? { ...outcome.audit, decision: 'ALLOW_WITH_AUDIT' } : outcome.audit?.decision === 'ALLOW_WITH_AUDIT' ? outcome.audit : undefined
-      return { tool: ALLOW, ...(audit !== undefined ? { audit } : {}) }
+      return { tool: ALLOW, ...(audit !== undefined ? { audit } : {}), ...(outcome.shell ? { shell: outcome.shell } : {}) }
     }
     const reason = decided.behavior === 'deny' ? decided.reason : 'Denied.'
     // A call that waits for the user's decision is logged as that, not as a refusal of the policy.
@@ -543,9 +553,29 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     return { tool: decided.behavior === 'deny' ? decided : deny(reason), audit: { classification: outcome.audit?.classification ?? 'UNTRUSTED_AGENT_AUTHORED', provenance: outcome.audit?.provenance ?? 'not_applicable', decision: waits ? 'REQUIRE_APPROVAL' : 'DENY', reason } }
   }
 
+  /**
+   * 0.8. A shell command that may run does not run as written when the session is contained: the shell tool
+   * is given the launch of that command inside the containment instead. No containment, no run: a profile
+   * that cannot be made refuses the command, it does not fall back to running it bare.
+   */
+  async function containShell(req: ToolRequest, outcome: Outcome): Promise<Outcome> {
+    const containment = ctx.containment
+    if (containment === undefined || containment.profile === 'STANDARD' || outcome.tool.behavior !== 'allow' || outcome.shell === undefined) return outcome
+    const refuse = (detail: string): Outcome => {
+      const reason = `Not run: ${detail} Nothing is run outside the containment in this project.`
+      return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }
+    }
+    if (containment.unavailable !== null) return refuse(`the ${containment.profile} execution profile is not available (${containment.unavailable}).`)
+    const wrapped = await containment.wrap(outcome.shell.kind, outcome.shell.command, { gitOnly: outcome.shell.gitOnly })
+    if (!wrapped.ok) return refuse(wrapped.reason)
+    // The tool's other inputs (its time limit, running in the background) stay the agent's; a request to leave the tool's own sandbox is dropped.
+    const { dangerouslyDisableSandbox: _dropped, ...rest } = req.input
+    return { ...outcome, tool: { behavior: 'allow', updatedInput: { ...rest, command: wrapped.command } } }
+  }
+
   return async (req: ToolRequest): Promise<ToolDecision> => {
     try {
-      const outcome = throughBroker(req, await decide(req))
+      const outcome = await containShell(req, throughBroker(req, await decide(req)))
       log(req, outcome)
       return outcome.tool
     } catch (e) {

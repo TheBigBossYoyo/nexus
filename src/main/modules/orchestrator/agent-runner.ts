@@ -430,6 +430,8 @@ export class AgentRunner {
       },
       // 0.8: in an enrolled project the capability broker decides where this policy would ask the user.
       autonomy: this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }),
+      // 0.8: and its shell commands run inside the project's containment, or not at all.
+      containment: this.deps.execution?.shellFor({ projectId: run.projectId, sessionKey: `${run.id}:${task?.id ?? input.purpose}`, worktree: input.worktreeRoot, cwd: input.cwd }),
     })
 
     const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null
