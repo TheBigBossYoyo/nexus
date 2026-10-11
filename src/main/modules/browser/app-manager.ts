@@ -1,13 +1,14 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as netConnect } from 'node:net'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import type { ExecutionBroker, ExecutionProfileName } from '@main/modules/isolation/execution-broker'
 import type { ContainmentProfile } from '@main/modules/isolation/launcher'
 import type { NetworkEvent } from '@main/modules/network/guard'
 import { policyForPurpose, type LocalEndpoint } from '@main/modules/network/policy'
 import { startPolicyProxy, type PolicyProxy } from '@main/modules/network/proxy'
+import { runProcess } from '@main/modules/process/run-process'
 import { spawnLong, type LongProcess } from '@main/modules/process/spawn-process'
 import { discoverManifest, localEndpointIn, type AppManifest } from './manifest'
 import type { BrowserAutomationProvider, BrowserSession } from './provider'
@@ -82,6 +83,8 @@ export interface AppManagerDeps {
   /** Ports of NEXUS's own loopback services: never reachable by a session's browser. */
   forbiddenLocalPorts?: () => number[]
   onNetwork?: (owner: AppOwner, event: NetworkEvent) => void
+  /** Who holds a listening port, relative to a process. Default: asked of Windows. For tests of the refusal. */
+  portOwner?: (port: number, rootPid: number) => Promise<'own' | 'foreign' | 'none' | 'unknown'>
   /** Where the Electron binary of a project is, when it is not in the project's own node_modules. For tests. */
   electronBinary?: (cwd: string) => string | undefined
   onChange?: (owner: AppOwner) => void
@@ -121,6 +124,31 @@ function httpAnswers(url: string, timeoutMs = 1500): Promise<boolean> {
 }
 
 const delay = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
+
+/**
+ * Whether the process that listens on a local port was started by the process `rootPid` (at any depth).
+ * What an application prints is the repository's text: an address in it is taken for the application's own
+ * only when Windows says a process below its launcher holds that port. 'unknown' when Windows could not be asked.
+ */
+export async function portOwner(port: number, rootPid: number, env: NodeJS.ProcessEnv = process.env): Promise<'own' | 'foreign' | 'none' | 'unknown'> {
+  const system32 = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+  const script = [
+    `$l = Get-NetTCPConnection -State Listen -LocalPort ${Math.floor(port)} -ErrorAction SilentlyContinue | Select-Object -First 1`,
+    "if (-not $l) { 'none'; exit }",
+    '$parents = @{}',
+    'Get-CimInstance Win32_Process | ForEach-Object { $parents[[int]$_.ProcessId] = [int]$_.ParentProcessId }',
+    '$c = [int]$l.OwningProcess; $ok = $false',
+    `for ($i = 0; $i -lt 64 -and $c -gt 0; $i++) { if ($c -eq ${Math.floor(rootPid)}) { $ok = $true; break }; if (-not $parents.ContainsKey($c)) { break }; $c = $parents[$c] }`,
+    "if ($ok) { 'own' } else { 'foreign' }",
+  ].join('; ')
+  try {
+    const result = await runProcess(join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', script], { cwd: system32, timeoutMs: 20_000, maxOutputBytes: 4096 })
+    const answer = result.stdout.trim().split(/\s+/).pop()
+    return answer === 'own' || answer === 'foreign' || answer === 'none' ? answer : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
 
 export class AppLaunchError extends Error {
   constructor(
@@ -276,9 +304,23 @@ export class ApplicationUnderTestManager {
   }
 
   private cwdOf(app: Running): string {
-    const cwd = join(app.owner.worktree, app.manifest.cwd)
-    if (!cwd.toLowerCase().startsWith(app.owner.worktree.toLowerCase()) || !existsSync(cwd)) throw new AppLaunchError('The directory of the application is not inside the worktree.')
+    const cwd = resolve(app.owner.worktree, app.manifest.cwd)
+    const root = resolve(app.owner.worktree).toLowerCase()
+    // Inside the worktree, links resolved: a sibling directory whose name begins the same way is not inside it.
+    const inside = (p: string): boolean => p.toLowerCase() === root || p.toLowerCase().startsWith(`${root}${sep}`)
+    if (!inside(cwd) || !existsSync(cwd) || !inside(realpathSync(cwd).toLowerCase().replace(realpathSync(app.owner.worktree).toLowerCase(), root))) throw new AppLaunchError('The directory of the application is not inside the worktree.')
     return cwd
+  }
+
+  /**
+   * The port the application named must be one a process of its own holds: not another session's application,
+   * not a service of the user's, not one of NEXUS's. If Windows cannot say, the application is not opened.
+   */
+  private async assertOwnPort(app: Running, port: number, child: LongProcess): Promise<void> {
+    const taken = this.endpoints.find((e) => e.port === port && e.appId !== app.id)
+    if (taken !== undefined || (this.deps.forbiddenLocalPorts?.() ?? []).includes(port)) throw new AppLaunchError(`The application named port ${port}, which is not its own. It was not opened.`, child.output(40))
+    const owner = child.pid === null ? 'unknown' : await (this.deps.portOwner ?? portOwner)(port, child.pid)
+    if (owner !== 'own') throw new AppLaunchError(owner === 'unknown' ? `Windows could not say which process listens on port ${port}, so the application was not opened.` : `The application named port ${port}, and no process it started listens there. It was not opened.`, child.output(40))
   }
 
   private async openProxy(app: Running, endpoints: LocalEndpoint[]): Promise<PolicyProxy> {
@@ -329,6 +371,7 @@ export class ApplicationUnderTestManager {
       await delay(250)
     }
     if (endpoint === null) throw new AppLaunchError(`The application was not ready after ${manifest.startTimeoutSeconds} seconds.`, child.output(60))
+    await this.assertOwnPort(app, endpoint.port, child)
     app.endpoint = { ...endpoint, projectId: owner.projectId, runId: owner.runId, taskId: owner.taskId, appId: app.id, registeredAt: new Date().toISOString() }
     this.endpoints.push(app.endpoint)
     app.proxy = await this.openProxy(app, [{ host: endpoint.host, port: endpoint.port }])
@@ -352,6 +395,12 @@ export class ApplicationUnderTestManager {
     // A profile directory of the session: the application never opens the data of an installed copy of itself.
     const userData = join(roots.home, 'electron-user-data', app.id)
     mkdirSync(userData, { recursive: true })
+    // The manifest is the repository's. Its arguments are the application's own; the switches that decide where
+    // the debugging endpoint listens, where the profile is and how the engine is contained are NEXUS's, and an
+    // argument that names one of them is refused.
+    const appArgs = manifest.electron?.args ?? []
+    const reserved = appArgs.find((a) => /^--?(remote-debugging|remote-allow-origins|inspect|user-data-dir|no-sandbox|proxy-|host-rules|host-resolver-rules|load-extension|disable-web-security|js-flags|renderer-cmd-prefix|gpu-launcher|utility-cmd-prefix|browser-subprocess-path)/i.test(a))
+    if (reserved !== undefined) throw new AppLaunchError(`The manifest gives the application an argument that is NEXUS's to set: ${reserved.slice(0, 60)}`)
     const seen: { endpoint: string | null } = { endpoint: null }
     const onLine = (line: string): void => {
       const m = /DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9/_-]+)/.exec(line)
@@ -364,7 +413,7 @@ export class ApplicationUnderTestManager {
       // Chromium's own sandbox cannot be set up from a process that is already at low integrity in a job (it ends
       // at once, measured on Electron 44). The application runs without it: every process of it, renderers
       // included, is inside the containment NEXUS made, which is the boundary that matters for what it can reach.
-      args: [manifest.electron?.entry ?? '.', '--no-sandbox', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${userData}`, ...(manifest.electron?.args ?? [])],
+      args: [manifest.electron?.entry ?? '.', '--no-sandbox', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${userData}`, ...appArgs],
       window: { desktop: `nexus-app-${app.id}` },
       set: { ...manifest.env, NODE_ENV: manifest.env['NODE_ENV'] ?? 'development', ELECTRON_ENABLE_LOGGING: '1', ELECTRON_NO_ATTACH_CONSOLE: '1' },
     })
@@ -378,6 +427,7 @@ export class ApplicationUnderTestManager {
       await delay(200)
     }
     if (seen.endpoint === null) throw new AppLaunchError(`The application did not open its debugging endpoint within ${manifest.startTimeoutSeconds} seconds.`, child.output(60))
+    await this.assertOwnPort(app, Number(new URL(seen.endpoint).port), child)
     app.session = await this.deps.browser.open({ purpose: 'LOCAL_APP_TEST', artifactsDir: app.artifactsDir, attach: { endpoint: seen.endpoint, timeoutMs: Math.max(5000, deadline - Date.now()) } })
   }
 

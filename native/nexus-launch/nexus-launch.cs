@@ -339,12 +339,13 @@ static class Program {
 
     /**
      * A desktop of the command's own on this window station: what the command shows is on no screen and takes no
-     * input of the user's. Labeled low so that the low-integrity command can use it. If it cannot be made, nothing
+     * input of the user's. Labeled low so that the low-integrity command can use it, and open to its owner only
+     * (the account that runs the command): no other account and no other session's application reaches it. If it cannot be made, nothing
      * is started: there is no falling back to the user's desktop.
      */
     static IntPtr MakeDesktop(string name) {
         IntPtr sd; uint size;
-        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;WD)S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;OW)(A;;GA;;;SY)S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
         SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
         sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)); sa.lpSecurityDescriptor = sd; sa.bInheritHandle = false;
         IntPtr desktop = N.CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000 /* GENERIC_ALL */, ref sa);

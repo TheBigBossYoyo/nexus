@@ -86,6 +86,16 @@ export interface ContainSession {
 }
 
 const DEFAULT_MAX_PROCESSES = 512
+/**
+ * The job's UI limits for a program with a window. Everything but the limit on handles of other processes'
+ * windows and objects, which a browser engine needs for its own processes: the clipboard is not read or
+ * written, no system parameter or display setting is changed, no global atom is used, no desktop is made or
+ * switched to, the session is not ended. Under ISOLATED the limit on desktops is left off: the launcher's own
+ * second step runs in the job and is what makes the application's desktop.
+ */
+const UI_LIMIT_HANDLES = 0x1
+const UI_LIMIT_DESKTOP = 0x40
+const WINDOW_UI_LIMITS = 0xff & ~UI_LIMIT_HANDLES
 const GIT_HINT =
   'nexus: in the isolated profile this git command runs only as a command of its own (git alone, optionally piped through head, tail, grep, wc, sort, uniq, cut, cat, ls). Run it separately; nothing was changed.'
 /** git subcommands that change a ref, and so need to run where the directories above the repository can be seen. */
@@ -597,7 +607,7 @@ export class ExecutionBroker {
         commandLine = `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`
       } else commandLine = this.commandLineFor(input.file, input.args, env)
       const cwd = input.cwd !== undefined && within(roots.worktree, input.cwd) && existsSync(input.cwd) ? input.cwd : roots.worktree
-      const specPath = this.deps.launcher.writeSpec({ ...this.spec(input, roots, commandLine, env, input.window ? { window: true, desktop: input.window.desktop, uiLimits: 0 } : {}), cwd })
+      const specPath = this.deps.launcher.writeSpec({ ...this.spec(input, roots, commandLine, env, input.window ? { window: true, desktop: input.window.desktop, uiLimits: input.profile === 'ISOLATED' ? WINDOW_UI_LIMITS & ~UI_LIMIT_DESKTOP : WINDOW_UI_LIMITS } : {}), cwd })
       const { file, args } = this.deps.launcher.invocation(specPath)
       this.counts.programs += 1
       return { ok: true, profile: input.profile, file, args, specPath, roots, launcherEnv: this.launcherEnv() }

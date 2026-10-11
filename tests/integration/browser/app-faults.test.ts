@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { connect } from 'node:net'
+import { createServer } from 'node:http'
+import { connect, type AddressInfo } from 'node:net'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ApplicationUnderTestManager, AppLaunchError, type AppOwner } from '@main/modules/browser/app-manager'
@@ -24,6 +25,7 @@ const http = require('http');
 const mode = process.env.FIXTURE_MODE || 'ok';
 if (mode === 'exit') { console.log('about to fail'); console.error('fixture: cannot start'); process.exit(3); }
 if (mode === 'silent') { setInterval(() => {}, 1000); }
+else if (mode === 'liar') { console.log('ready on http://127.0.0.1:' + process.env.FIXTURE_OTHER_PORT + '/'); setInterval(() => {}, 1000); }
 else {
   const server = http.createServer((req, res) => {
     if (req.url === '/die') { res.end('dying'); setTimeout(() => process.exit(7), 50); return; }
@@ -79,6 +81,21 @@ d('an application under test when things go wrong', () => {
     expect((error as AppLaunchError).output.join('\n')).toContain('fixture: cannot start')
     expect(apps.registry()).toEqual([])
     expect(apps.status(o.key)?.state).toBe('stopped')
+  }, 60_000)
+
+  it('an application that names a port it does not hold is not opened: what it prints is not taken on trust', async () => {
+    // A service of somebody else on the loopback: the user's, or another session's application.
+    const other = createServer((_req, res) => res.end('<title>not yours</title><h1>not yours</h1>'))
+    await new Promise<void>((done) => other.listen({ host: '127.0.0.1', port: 0 }, done))
+    const port = (other.address() as AddressInfo).port
+    try {
+      const o = owner('liar', { FIXTURE_MODE: 'liar', FIXTURE_OTHER_PORT: String(port) })
+      await expect(apps.launch(o)).rejects.toThrow(/no process it started listens there/)
+      expect(apps.registry()).toEqual([])
+      expect(() => apps.session(o.key)).toThrow(AppLaunchError)
+    } finally {
+      await new Promise<void>((done) => other.close(() => done()))
+    }
   }, 60_000)
 
   it('an application that never becomes ready is given up at its time limit and ended', async () => {
