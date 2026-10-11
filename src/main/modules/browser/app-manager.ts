@@ -181,6 +181,8 @@ export class ApplicationUnderTestManager {
   session(key: string): BrowserSession {
     const app = this.byOwner(key)
     if (!app || app.session === null) throw new AppLaunchError('No application is running for this task. Launch it first.')
+    const code = app.process?.exitCode()
+    if (app.process !== null && code !== undefined) throw new AppLaunchError(`The application has ended (exit ${code ?? 'unknown'}). Read its output, then launch it again.`, app.process.output(40))
     if (!app.session.alive()) throw new AppLaunchError('The application is no longer running. Read its output, then launch it again.', app.process?.output(40) ?? [])
     return app.session
   }
@@ -376,6 +378,11 @@ export class ApplicationUnderTestManager {
     await proxy?.close().catch(() => undefined)
     if (app.specPath !== null) this.deps.broker.releaseSpec(app.specPath)
     app.specPath = null
+  }
+
+  /** Closes the proxy of the owner's session and nothing else. For tests of what a browser does without it. */
+  async closeProxyForTest(key: string): Promise<void> {
+    await this.byOwner(key)?.proxy?.close()
   }
 
   /** Stops the owner's application, its browser, its proxy, and takes its endpoint off the registry. */
