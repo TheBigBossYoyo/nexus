@@ -111,6 +111,7 @@ function requestOf(row: Row): BoundaryRequest {
     capability: String(row['capability']) as AutonomyCapability,
     resource: { kind: String(row['resource_kind']) as ResourceKind, value: String(row['resource_value']) },
     action: String(row['action']),
+    actionHash: text(row['action_hash']),
     reason: String(row['reason']),
     dedupeKey: String(row['dedupe_key']),
     state: String(row['state']) as BoundaryRequestState,
@@ -131,9 +132,9 @@ export class BoundaryRequestRepository {
     guard(() =>
       prepare(
         this.db,
-        `INSERT INTO boundary_requests (id, project_id, run_id, task_id, agent_id, capability, resource_kind, resource_value, action, reason, dedupe_key, state, occurrences, created_at, last_seen_at, decided_at, decided_scope, grant_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(r.id, r.projectId, r.runId, r.taskId, r.agentId, r.capability, r.resource.kind, r.resource.value, r.action, r.reason, r.dedupeKey, r.state, r.occurrences, r.createdAt, r.lastSeenAt, r.decidedAt, r.decidedScope, r.grantId),
+        `INSERT INTO boundary_requests (id, project_id, run_id, task_id, agent_id, capability, resource_kind, resource_value, action, reason, dedupe_key, state, occurrences, created_at, last_seen_at, decided_at, decided_scope, grant_id, action_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(r.id, r.projectId, r.runId, r.taskId, r.agentId, r.capability, r.resource.kind, r.resource.value, r.action, r.reason, r.dedupeKey, r.state, r.occurrences, r.createdAt, r.lastSeenAt, r.decidedAt, r.decidedScope, r.grantId, r.actionHash),
     )
   }
 
@@ -146,6 +147,19 @@ export class BoundaryRequestRepository {
   findByKey(dedupeKey: string): BoundaryRequest | null {
     const row = prepare(this.db, "SELECT * FROM boundary_requests WHERE dedupe_key = ? ORDER BY (state = 'PENDING') DESC, created_at DESC, rowid DESC LIMIT 1").get(dedupeKey) as Row | undefined
     return row ? requestOf(row) : null
+  }
+
+  /** Every request with this key, pending first and then newest first: one per distinct action of the same need. */
+  listByKey(dedupeKey: string): BoundaryRequest[] {
+    return (prepare(this.db, "SELECT * FROM boundary_requests WHERE dedupe_key = ? ORDER BY (state = 'PENDING') DESC, created_at DESC, rowid DESC LIMIT 200").all(dedupeKey) as Row[]).map(requestOf)
+  }
+
+  /** How many requests, in any state, a mission (or the project, for work that belongs to none) put to the user for one capability. */
+  countForCapability(projectId: string, runId: string | null, capability: AutonomyCapability): number {
+    const row = (runId === null
+      ? prepare(this.db, 'SELECT COUNT(*) AS n FROM boundary_requests WHERE project_id = ? AND run_id IS NULL AND capability = ?').get(projectId, capability)
+      : prepare(this.db, 'SELECT COUNT(*) AS n FROM boundary_requests WHERE run_id = ? AND capability = ?').get(runId, capability)) as { n: number }
+    return row.n
   }
 
   touch(id: string, at: string): void {

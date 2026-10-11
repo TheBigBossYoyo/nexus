@@ -21,8 +21,14 @@ export interface PolicyProxyOptions extends GuardOptions {
    * the browser driver refuses it there.
    */
   readOnly?: boolean
-  /** The most tunnels and requests at once. */
+  /** The most tunnels and requests at once. Plain http requests count as well as tunnels. */
   maxConnections?: number
+  /** The most requests (plain requests and tunnels) this proxy carries in all; the next ones are refused and reported. */
+  maxRequests?: number
+  /** The most bytes this proxy relays in all, both directions together; at the limit the open connections are cut and later requests are refused. */
+  maxBytes?: number
+  /** Time without a byte after which a connection, client side or upstream, is dropped. Default 30 s. */
+  idleMs?: number
 }
 
 export interface PolicyProxy {
@@ -67,11 +73,44 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
     },
   }
   const sockets = new Set<Duplex>()
+  const idleMs = options.idleMs ?? 30_000
+  /** Client connections with a request in flight: they are quiet because the proxy is waiting for the upstream, whose own idle limit applies. */
+  const waiting = new WeakSet<Duplex>()
   const track = (socket: Duplex): void => {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
+    // A peer that stops talking holds a slot for ever otherwise.
+    const timed = socket as Partial<Socket>
+    if (typeof timed.setTimeout === 'function') {
+      timed.setTimeout(idleMs)
+      socket.on('timeout', () => {
+        if (!waiting.has(socket)) socket.destroy()
+      })
+    }
   }
   const maxConnections = options.maxConnections ?? 256
+  let requestCount = 0
+  let relayed = 0
+  let exhausted = false
+  const refuseEvent = (via: string, method: string, host: string, port: number): void => {
+    guard.onEvent?.({ at: new Date().toISOString(), via, method, host, port, allowed: false, denial: 'HOST_NOT_ALLOWED', address: null })
+  }
+  /** Whether this request may go on: the byte limit not reached, the request limit not reached. A request that may is counted. */
+  const admit = (via: string, method: string, host: string, port: number): boolean => {
+    if (exhausted || (options.maxRequests !== undefined && requestCount >= options.maxRequests)) {
+      refuseEvent(via, method, host, port)
+      return false
+    }
+    requestCount += 1
+    return true
+  }
+  const relay = (bytes: number): void => {
+    relayed += bytes
+    if (options.maxBytes === undefined || relayed <= options.maxBytes || exhausted) return
+    exhausted = true
+    refuseEvent('proxy-limit', 'BYTES', '', 0)
+    for (const socket of sockets) socket.destroy()
+  }
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
@@ -83,10 +122,20 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
       const method = (req.method ?? 'GET').toUpperCase()
       // A proxy request names an absolute URL. Anything else is a request to the proxy itself, which serves nothing.
       if (!/^http:\/\//i.test(req.url ?? '')) return fail(400, 'Not a proxy request.')
+      if (sockets.size > maxConnections) return fail(503, 'Busy.')
+      waiting.add(req.socket)
+      res.once('close', () => waiting.delete(req.socket))
       if (options.readOnly && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
         guard.onEvent?.({ at: new Date().toISOString(), via: 'proxy-http', method, host: '', port: 0, allowed: false, denial: 'HOST_NOT_ALLOWED', address: null })
         return fail(403, 'Refused by the NEXUS network policy: this session reads and does not send.')
       }
+      let asked: URL | null = null
+      try {
+        asked = new URL(req.url as string)
+      } catch {
+        // pinUrl refuses it below
+      }
+      if (!admit('proxy-http', method, asked?.hostname ?? '', Number(asked?.port) || 80)) return fail(403, 'Refused by the NEXUS network policy: this session has used its share of requests or bytes.')
       try {
         const { url, target } = await pinUrl(guard, 'proxy-http', method, req.url as string)
         const headers: Record<string, string | string[]> = {}
@@ -101,12 +150,19 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
           for (const [name, value] of Object.entries(response.headers)) if (value !== undefined && !HOP_HEADERS.has(name.toLowerCase())) out[name] = value
           res.writeHead(response.statusCode ?? 502, out)
           response.pipe(res)
+          response.on('data', (chunk: Buffer) => relay(chunk.length))
+          // An upstream that goes away in the middle of a body leaves the client with a body that never ends, unless it is told.
+          response.on('close', () => {
+            if (!response.complete) res.destroy()
+          })
         })
+        upstream.on('socket', track)
         upstream.on('error', () => {
           if (!res.headersSent) fail(502, 'The destination could not be reached.')
           else res.destroy()
         })
         req.pipe(upstream)
+        req.on('data', (chunk: Buffer) => relay(chunk.length))
       } catch (e) {
         const r = refusal(e)
         fail(r.status, r.text)
@@ -127,6 +183,7 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
       if (m === null) return reply(400, 'Bad Request')
       const host = (m[1] as string).replace(/^\[|\]$/g, '')
       const port = Number(m[2])
+      if (!admit('proxy-connect', 'CONNECT', host, port)) return reply(403, 'Forbidden', 'X-Nexus-Refusal: this session has used its share of requests or bytes.\r\n')
       try {
         // The tunnel is judged as the https URL it will carry: scheme, host, port, then the resolved address.
         const { target } = await pinUrl(guard, 'proxy-connect', 'CONNECT', `https://${host.includes(':') ? `[${host}]` : host}:${port}/`)
@@ -141,6 +198,8 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
           if (head.length > 0) upstream.write(head)
           upstream.pipe(client)
           client.pipe(upstream)
+          upstream.on('data', (chunk: Buffer) => relay(chunk.length))
+          client.on('data', (chunk: Buffer) => relay(chunk.length))
         })
         upstream.on('error', () => {
           if (!client.destroyed) reply(502, 'Bad Gateway')
@@ -154,6 +213,8 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
     })()
   })
   server.on('connection', track)
+  // Node's own idle handling of a connection would end it even while a request waits for its upstream; `track` decides instead.
+  server.on('timeout', () => undefined)
   server.on('clientError', (_e, socket) => socket.destroy())
 
   await new Promise<void>((resolve, reject) => {

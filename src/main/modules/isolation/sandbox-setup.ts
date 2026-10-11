@@ -49,9 +49,11 @@ export async function setupSandboxAccount(input: SandboxSetupInput): Promise<San
   const system32 = join(input.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
   const powershell = join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const minimal: NodeJS.ProcessEnv = {}
-  for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'ProgramData', 'PSModulePath']) {
+  for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'ProgramData']) {
     if (input.env[name] !== undefined) minimal[name] = input.env[name]
   }
+  // Windows' own modules only: the user's module path begins in the user's documents.
+  minimal['PSModulePath'] = join(system32, 'WindowsPowerShell', 'v1.0', 'Modules')
   minimal['PATH'] = `${system32};${join(system32, 'WindowsPowerShell', 'v1.0')}`
 
   const who = await runProcess(join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { cwd: system32, env: minimal, timeoutMs: 15_000 })
@@ -119,7 +121,7 @@ export async function verifySandboxSetup(account: { account: string; sid: string
   if (!/^[A-Za-z][A-Za-z0-9]{2,19}$/.test(account.account) || !/^S-1-5-21-[0-9-]+$/.test(account.sid)) return { ok: false, problems: ['the record of the sandbox account is not a name and an identifier'], notes: [] }
   const system32 = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32')
   const minimal: NodeJS.ProcessEnv = {}
-  for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'ProgramData', 'ProgramFiles', 'PSModulePath']) {
+  for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'ProgramData', 'ProgramFiles']) {
     if (env[name] !== undefined) minimal[name] = env[name]
   }
   minimal['PATH'] = `${system32};${join(system32, 'WindowsPowerShell', 'v1.0')}`

@@ -79,6 +79,37 @@ export function boundaryDedupeKey(input: { projectId: string; runId: string | nu
   return createHash('sha256').update(JSON.stringify([input.projectId, input.runId ?? '', input.capability, r.kind, r.value])).digest('hex').slice(0, 40)
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v === undefined ? null : v)).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+/** Fields of a tool's input that say how to run or describe the call, not what it does. An agent words them anew on every attempt. */
+const INCIDENTAL_INPUT = new Set(['description', 'timeout', 'timeout_ms', 'run_in_background', 'dangerouslyDisableSandbox'])
+
+/**
+ * SHA-256 over the exact action a boundary request was raised for: the tool and what it was asked to do. For a
+ * shell tool that is the command, character for character; for any other tool its input with keys in a fixed
+ * order. Nothing is redacted, collapsed or cut first: two commands that differ in one character have two
+ * hashes, which is what a one-time approval is bound to. What only accompanies the call (the agent's own
+ * description of it, a time limit) is left out: the same command tried again after the user allowed it once is
+ * the same action, however the agent describes it the second time.
+ */
+export function actionHashOf(toolName: string, input: unknown, action: string): string {
+  let what: unknown = input ?? null
+  if (what !== null && typeof what === 'object' && !Array.isArray(what)) {
+    const record = what as Record<string, unknown>
+    what = typeof record['command'] === 'string' ? { command: record['command'] } : Object.fromEntries(Object.entries(record).filter(([key]) => !INCIDENTAL_INPUT.has(key)))
+  }
+  // Without an input to speak of (a call NEXUS describes itself), the text of the action is what there is.
+  const empty = what === null || (typeof what === 'object' && !Array.isArray(what) && Object.keys(what as object).length === 0)
+  return createHash('sha256').update(canonicalJson(empty ? [toolName, action] : [toolName, what])).digest('hex')
+}
+
 export function describeResource(resource: CapabilityResource): string {
   return resource.kind === 'ANY' ? 'any' : `${resource.kind.toLowerCase().replace('_', ' ')}: ${resource.value}`
 }

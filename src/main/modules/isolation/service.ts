@@ -117,13 +117,18 @@ export class IsolationService {
     const wanted = [...own, ...(options.userStores ? credentialPaths() : [])].filter((p) => existsSync(p))
     const done = new Set(known.map((p) => p.toLowerCase()))
     let changed = false
+    // NEXUS's own two directories are marked every time, whatever the record says: a directory that was removed
+    // and made again (a new setup of the sandbox account) has no label, and the record would call it done.
+    const always = new Set(own.map((p) => p.toLowerCase()))
     for (const path of wanted) {
-      if (done.has(path.toLowerCase())) continue
+      if (done.has(path.toLowerCase()) && !always.has(path.toLowerCase())) continue
       try {
         await this.deps.launcher.label('protect', path)
-        known.push(path)
-        done.add(path.toLowerCase())
-        changed = true
+        if (!done.has(path.toLowerCase())) {
+          known.push(path)
+          done.add(path.toLowerCase())
+          changed = true
+        }
       } catch (e) {
         this.deps.logger?.(`isolation: ${path} could not be protected: ${e instanceof Error ? e.message : String(e)}`)
       }

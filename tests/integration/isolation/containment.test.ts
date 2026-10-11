@@ -251,6 +251,41 @@ attempt('mklink-j', () => cp.execSync('cmd /c mklink /J j-cmd "' + user + '"', {
         expect(result.timedOut || result.exitCode === LAUNCH_EXIT.timeout, JSON.stringify({ exit: result.exitCode, timedOut: result.timedOut })).toBe(true)
       })
 
+      it('runs on a desktop of its own, cannot open the one the user sees, makes no desktop, and inherits its three standard handles only', async () => {
+        // Compiled with the compiler that ships with Windows, as the launcher is; run from the worktree, where the profile's account can read it.
+        const s = session(profile, 'ui-probe')
+        const exe = join(s.worktree, 'ui-probe.exe')
+        const csc = join(process.env['SystemRoot'] ?? 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
+        execFileSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:exe', `/out:${exe}`, resolve('tests', 'integration', 'isolation', 'ui-probe.cs')], { windowsHide: true, stdio: 'pipe' })
+        // The same program outside any containment, as the control: it is on the user's desktop and holds what this process let it inherit.
+        const bare = execFileSync(exe, [], { encoding: 'utf8', windowsHide: true })
+        console.info(`uncontained: ${bare.trim().split(/\r?\n/).join(' ')}`)
+        const result = await broker.run({ ...s, file: exe, args: [] }, { timeoutMs: 60_000 })
+        const lines: Record<string, string> = {}
+        for (const line of result.stdout.split(/\r?\n/)) {
+          const m = /^([a-z-]+)=(.*)$/.exec(line.trim())
+          if (m) lines[m[1] as string] = m[2] as string
+        }
+        console.info(`${profile}: ${JSON.stringify(lines)}`)
+        expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0)
+        expect(lines['desktop'], 'a desktop the launcher made').toMatch(/^nx-[0-9a-f]{16}$/)
+        expect(lines['create-desktop'], 'no desktop is made from inside (and so none is switched to)').toBe('False')
+        // The sandbox account has no entry on the desktop the user sees: it cannot open it, so it cannot read the
+        // screen. RESTRICTED runs as the user, to whom that desktop belongs: it can, and the profile says so.
+        if (profile === 'ISOLATED') {
+          expect(lines['open-input-desktop'], "the desktop the user sees is not opened: its screen is not the command's to read").toBe('False')
+          expect(lines['open-default-desktop']).toBe('False')
+        } else console.info(`RESTRICTED can open the user's desktop: ${lines['open-default-desktop']} (stated limit of the profile)`)
+        // What it inherited: its standard handles, and what Windows gives every process (its window station and
+        // desktop). No file, and fewer handles than the same program started bare by this process.
+        const kinds = (lines['inherited-kinds'] ?? '').split(',').filter((k) => k !== '')
+        const bareCount = Number(/inherited-handles=(\d+)/.exec(bare)?.[1] ?? '0')
+        expect(kinds.filter((k) => k === '1'), 'no file handle of the runtime').toEqual([])
+        expect(kinds.filter((k) => k === '3').length, 'pipes: the three standard ones, and at most one of its own making').toBeLessThanOrEqual(4)
+        expect(kinds.length).toBeLessThanOrEqual(6)
+        expect(kinds.length, `bare: ${bareCount}`).toBeLessThan(bareCount)
+      }, 120_000)
+
       it("gives the agent's shell a wrapped command that runs the text as written, bash and PowerShell", async () => {
         const s = session(profile, 'shell')
         for (const [shell, command, expected] of [
@@ -314,19 +349,24 @@ attempt('user-dir', () => fs.readFileSync(path.join(process.env.PROBE_USER_DIR, 
     it('has no route to the Internet: TCP, HTTP, DNS', async () => {
       const r = await probe('ISOLATED', 'network', `
 const net = require('net'); const dns = require('dns'); const http = require('http');
-const results = {}; let pending = 4;
+const results = {}; let pending = 5;
 function done(name, value) { if (results[name]) return; results[name] = value; console.log(name + '=' + value); if (--pending === 0) process.exit(0); }
 const s = net.connect({ host: '1.1.1.1', port: 443, timeout: 5000 }); s.on('connect', () => done('tcp', 'REACHED')); s.on('error', (e) => done('tcp', 'DENIED:' + e.code)); s.on('timeout', () => { s.destroy(); done('tcp', 'DENIED:timeout'); });
 const h = http.get({ host: '93.184.216.34', port: 80, path: '/', timeout: 5000 }, () => done('http', 'REACHED')); h.on('error', (e) => done('http', 'DENIED:' + e.code)); h.on('timeout', () => { h.destroy(); done('http', 'DENIED:timeout'); });
 dns.resolve4('example.com', (e, a) => done('dns', e ? 'DENIED:' + e.code : 'REACHED'));
+// The same name through Windows' own resolver: the question is then asked by the DNS Client service, not by this process.
+dns.lookup('example.com', (e, a) => done('lookup', e ? 'DENIED:' + e.code : 'ANSWERED'));
 // A real DNS question over UDP: sending always succeeds locally, so what counts is whether an answer comes back.
 const q = Buffer.from('abcd01000001000000000000076578616d706c6503636f6d0000010001', 'hex'); const u = require('dgram').createSocket('udp4'); u.on('message', () => done('udp', 'REACHED')); u.on('error', (e) => done('udp', 'DENIED:' + e.code)); u.send(q, 53, '8.8.8.8', (e) => { if (e) done('udp', 'DENIED:' + e.code); });
-setTimeout(() => { for (const n of ['tcp', 'http', 'dns', 'udp']) done(n, 'DENIED:timeout'); }, 12000);
+setTimeout(() => { for (const n of ['tcp', 'http', 'dns', 'udp', 'lookup']) done(n, 'DENIED:timeout'); }, 12000);
 `)
       expect(r.lines['tcp'], r.raw).toMatch(/^DENIED:/)
       expect(r.lines['http']).toMatch(/^DENIED:/)
       expect(r.lines['dns']).toMatch(/^DENIED:/)
       expect(r.lines['udp']).toMatch(/^DENIED:/)
+      // Recorded, not asserted: a name looked up through Windows is asked on the network by the DNS Client service,
+      // which the account's firewall rule does not cover. What can leave that way is the name asked for.
+      console.info(`ISOLATED, a name looked up through Windows' resolver: ${r.lines['lookup']}`)
     }, 60_000)
 
     it('reaches the loopback, which is where its proxy is', async () => {

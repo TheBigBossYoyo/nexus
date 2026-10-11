@@ -11,6 +11,7 @@ import { shortId } from '../../lib/format'
 import { Badge, Button, Drawer, EmptyState, ErrorNote, Loading, TimeAgo } from '../../components/ui'
 import {
   REQUEST_STATE_TONE,
+  actionShown,
   decidedWords,
   decisionButtons,
   groupRequests,
@@ -28,6 +29,7 @@ function RequestCard({ request }: { request: BoundaryRequestView }) {
   const errorId = useId()
   const buttons = decisionButtons(request.scopes)
   const times = occurrencesLabel(request.occurrences)
+  const shown = actionShown(request)
   const answer = (decision: BoundaryDecision['decision']) => {
     if (resolve.isPending) return
     resolve.mutate({ requestId: request.id, decision })
@@ -52,8 +54,9 @@ function RequestCard({ request }: { request: BoundaryRequestView }) {
         className="m-0 whitespace-pre-wrap break-words rounded-md border bg-surface-muted px-2.5 py-1.5 font-mono text-code"
         data-testid="boundary-action"
       >
-        <code>{request.action}</code>
+        <code className="[unicode-bidi:isolate]">{shown.text}</code>
       </pre>
+      {shown.note ? <div className="text-small text-text-muted" data-testid="boundary-action-note">{shown.note}</div> : null}
       <div className="text-text-secondary">{request.reason}</div>
       <div
         className="flex flex-wrap items-center gap-2"

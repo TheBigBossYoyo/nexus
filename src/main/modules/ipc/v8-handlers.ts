@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { AUTONOMY_CAPABILITIES, profileSummary, type AutonomyProfile } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, cleanAgentText, profileSummary, type AutonomyProfile } from '@shared/autonomy'
 import type { AppSessionView, IsolationStatusView } from '@shared/isolation'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { NexusError } from '@shared/result'
@@ -106,7 +106,8 @@ export function createAutonomyHandlers(ctx: AutonomyHandlerContext): AutonomyHan
       const current = autonomy.enrollment(projectId)
       // Narrowing needs no confirmation; the same profile again is not a change.
       const widening = current === null || (current.profile !== profile && (profile === 'AUTONOMOUS_PROJECT' || current.profile === 'LOCKED_DOWN'))
-      if (widening && ctx.confirm && !(await ctx.confirm('Enable autonomous work', `Let NEXUS work in "${name}" under the profile "${PROFILE_NAMES[profile]}"?`, enrollmentDetail(profile), 'Enable'))) {
+      // No way to ask is a no: a widening that cannot be confirmed is not made.
+      if (widening && (!ctx.confirm || !(await ctx.confirm('Enable autonomous work', `Let NEXUS work in "${name}" under the profile "${PROFILE_NAMES[profile]}"?`, enrollmentDetail(profile), 'Enable')))) {
         throw new NexusError('invalid_state', 'The profile was not changed: the confirmation was declined.')
       }
       return autonomy.enroll(projectId, profile)
@@ -115,11 +116,15 @@ export function createAutonomyHandlers(ctx: AutonomyHandlerContext): AutonomyHan
     'autonomy.pending': ({ projectId }) => autonomy.pending(projectId),
     'autonomy.recent': ({ projectId, limit }) => autonomy.recent(limit ?? 50, projectId),
     'autonomy.resolve': async (decision) => {
-      if (decision.decision === 'ALLOW_PROJECT' && ctx.confirm) {
+      if (decision.decision === 'ALLOW_PROJECT') {
         const request = autonomy.pending().find((r) => r.id === decision.requestId)
         if (request === undefined) throw new NexusError('not_found', 'There is no such pending boundary request.')
-        const detail = `${AUTONOMY_CAPABILITIES[request.capability].label}\n${describeResource(request.resource)}\n\nThis holds for every later mission in the project until you take it back in Settings, Autonomy.`
-        if (!(await ctx.confirm('Always allow for this project', `Always allow this in "${request.projectName}"?`, detail, 'Always allow'))) {
+        const label = AUTONOMY_CAPABILITIES[request.capability].label
+        // When the resource is not narrowed to one thing, the grant covers every action of this kind, not only the one shown.
+        const covers = request.resource.kind === 'ANY' ? `This covers EVERY such action in the project, not only the one shown here: any "${label}", to any place, now and in every later mission.` : `This covers ${describeResource(request.resource)} in the project.`
+        const detail = `${label}\n${describeResource(request.resource)}\n\nThe action shown to you:\n${cleanAgentText(request.action).slice(0, 400)}\n\n${covers}\nIt holds for every later mission in the project until you take it back in Settings, Autonomy.`
+        // No way to ask is a no: a project-wide grant that cannot be confirmed is not made.
+        if (!ctx.confirm || !(await ctx.confirm('Always allow for this project', `Always allow this in "${request.projectName}"?`, detail, 'Always allow'))) {
           throw new NexusError('invalid_state', 'Nothing was allowed: the confirmation was declined. The request is still pending.')
         }
       }

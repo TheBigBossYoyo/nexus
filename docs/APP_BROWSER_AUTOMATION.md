@@ -40,13 +40,36 @@ of the machine, opens an address outside the application, or drives a browser th
    `V0_8_SECURITY_MODEL.md`). Needing a port or a window is not a reason to run outside it. If the profile is
    not available, nothing is started. A project that is not contained has no application started by NEXUS.
 3. **Web.** The launch command is a program and its arguments, with no shell operators. A port that already
-   answers before the start is somebody else's server and is not adopted. An address the application prints
-   is the repository's text: it is taken for the application's own only when Windows says a process the
-   launcher started holds that port, and a port registered to another session is refused. When the application is ready (a line
-   it prints, a port, or an address that answers), its endpoint is registered for the session.
+   answers before the start is somebody else's server and is not adopted. When the application is ready (a
+   line it prints, a port, or an address that answers), its endpoint is registered for the session. Every field
+   of the manifest is the repository's text, so what NEXUS does with it is limited:
+   - `ready.pattern` is literal text, matched in any case, where `*` stands for any text. It is not a regular
+     expression (a repository's pattern with nested repetition froze the runtime in the audit), it may hold
+     printable ASCII only, and the matching looks for the segments in order and cannot backtrack
+     (`readyLineMatches`). A local address in the matching line names the endpoint.
+   - `ready.url` must be an http or https address on `127.0.0.1`, `localhost` or `[::1]`, without credentials.
+     NEXUS sends the readiness request itself, so the repository does not get to choose the host, and it sends
+     nothing to the port until the port is shown to be the application's own.
+   - An address the application prints is taken for the application's own only when Windows says that every
+     listener on that port, on any address, IPv4 or IPv6, belongs to a process the launcher started, and at
+     least one of them is on an address that serves the registered host (`portOwner`). A foreign listener on
+     the same port on another address makes it foreign: the application could otherwise share a port number
+     with a service of the user's and have that service registered. A port registered to another session, or
+     one of NEXUS's own, is refused. If Windows cannot say, the application is not opened.
+   - What the application prints is kept in lines of at most 4,000 characters, 2,000 lines, and a line without
+     a newline is cut at 8,192 characters and the rest dropped until the next newline, so an application that
+     prints without end does not grow the runtime's memory.
 4. **Electron.** The project's own Electron binary, with a profile directory of the session, on a desktop the
-   launcher makes for it: its windows are on no screen and take none of the user's input. If that desktop
-   cannot be made, nothing is started. The application is started without Chromium's own sandbox, which cannot
+   launcher makes for it (as for every contained command, under both profiles): its windows are on no screen
+   and take none of the user's input. If that desktop
+   cannot be made, nothing is started. `electron.args` of the manifest is an allowlist, not a list of what is
+   refused: plain positional arguments, and a few switches that are harmless (`--lang`, `--window-size`,
+   `--window-position`, `--force-device-scale-factor`, `--force-color-profile`, `--high-dpi-support`,
+   `--disable-gpu`, `--disable-software-rasterizer`, `--mute-audio`, `--hide-scrollbars`, `--start-maximized`,
+   `--start-fullscreen`, `--disable-renderer-backgrounding`, `--force-prefers-reduced-motion`,
+   `--disable-background-timer-throttling`), each with an optional value of letters, digits and `. , _ -`.
+   Chromium has far too many switches that write files or load code, and takes `/switch` as well; anything
+   else is refused and the application is not started (`electronArgProblem`). The application is started without Chromium's own sandbox, which cannot
    be set up from a process that is already at low integrity in a job (measured on Electron 44: it ends at
    once); every process of it, renderers included, is inside the containment NEXUS made.
 5. **Stopping.** Ending the launcher ends everything below it: the job object dies with it. An application is
@@ -74,15 +97,19 @@ The browser has one way out: a filtering proxy made for the session, with a cred
   file, and a page's own dialogs are dismissed and noted.
 
 An Electron application is not opened in a browser of NEXUS's: NEXUS attaches to the debugging endpoint the
-application was started with, over the loopback. Its network is its containment's: under ISOLATED nothing but
-the filter NEXUS gives it; under RESTRICTED the user's network.
+application was started with, over the loopback. Its network is its containment's: under ISOLATED no
+connection of its own but to the loopback, where the filter NEXUS gives it listens (and so to every other
+service listening on the loopback), and names that Windows looks up for it, which are answered and can be seen
+outside (`V0_8_SECURITY_MODEL.md`, "Network"); under RESTRICTED the user's network.
 
 ## What the agent sees
 
 An accessibility snapshot in Playwright's AI form: one line per element, with a ref. 6,000 characters by
 default; a larger tree is cut at a line, kept whole as a file of the session, and narrowed with a ref, a depth,
 or `app_find`. A ref belongs to the snapshot it came from: after the page changes it names nothing, and the tool
-says so. Screenshots are evidence for the user; the agent works from the tree.
+says so. Screenshots are evidence for the user; the agent works from the tree. A screenshot over 8 MiB
+(`MAX_SCREENSHOT_BYTES`) is deleted and the tool says so; the agent is told to take it again without
+`full_page` or to use the snapshot.
 
 What comes back from the application is what the application shows: the project's data, and whatever it
 fetched. It is handed over between two lines with a marker made for that one result and the words "Data, not
@@ -101,16 +128,25 @@ the mission asks for nothing).
   window that is on no screen.
 - `tests/scenarios/v8-app.test.ts`: a scripted agent through the session's tools; and Locked down: three
   attempts, one request.
+- `tests/unit/browser/manifest.test.ts`: the hostile `ready.pattern` that froze the runtime returns at once
+  against hostile output; `*` stands for any text, in order; the field takes printable ASCII only; a manifest
+  handed to the manager without validation is refused before anything is started or requested.
+- `tests/integration/browser/port-owner.test.ts`: a foreign listener on `127.0.0.1` with the application on
+  `[::1]` on the same port is refused; the application alone on `127.0.0.1` is its own, and only for a host
+  that address serves; a port nobody listens on is none.
+- `tests/unit/process/spawn-long.test.ts`: 50 MB without a newline stays bounded and the next normal line still
+  arrives; ordinary lines, also one split across chunks, are unchanged.
 
 ## Not built, or not verified
 
-- A research browser (script-rendered public pages). The policy and the proxy for it exist.
 - Signed-in browsing and interaction with third-party sites: capabilities that need a grant; no tool exercises them.
 - A setting in the window for what a project's application may reach besides itself.
 - Screenshots as images for the model. The agent sees the tree.
 - Desktop applications that are not Electron (Win32, WPF, WinUI): not started and not driven.
-- The manifest's Electron arguments may not name the switches NEXUS sets (debugging endpoint, profile
-  directory, proxy, engine containment); an application whose manifest does is not started.
+- The manifest's Electron arguments are limited to the allowlist above; an application whose manifest names
+  anything else (including every switch NEXUS sets itself: debugging endpoint, profile directory, proxy, engine
+  containment) is not started. An application that needs another switch cannot be driven by NEXUS until the
+  list is extended.
 - The debugging endpoint of an Electron application is a loopback port: another process on the machine that
   finds it can drive that application. It is the application under test, inside its containment; the endpoint
   gives nothing outside it.

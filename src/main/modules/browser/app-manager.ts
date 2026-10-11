@@ -10,7 +10,7 @@ import { policyForPurpose, type LocalEndpoint } from '@main/modules/network/poli
 import { startPolicyProxy, type PolicyProxy } from '@main/modules/network/proxy'
 import { runProcess } from '@main/modules/process/run-process'
 import { spawnLong, type LongProcess } from '@main/modules/process/spawn-process'
-import { discoverManifest, localEndpointIn, type AppManifest } from './manifest'
+import { discoverManifest, electronArgProblem, localEndpointIn, loopbackReadyUrl, readyLineMatches, type AppManifest } from './manifest'
 import type { BrowserAutomationProvider, BrowserSession } from './provider'
 
 /**
@@ -84,7 +84,7 @@ export interface AppManagerDeps {
   forbiddenLocalPorts?: () => number[]
   onNetwork?: (owner: AppOwner, event: NetworkEvent) => void
   /** Who holds a listening port, relative to a process. Default: asked of Windows. For tests of the refusal. */
-  portOwner?: (port: number, rootPid: number) => Promise<'own' | 'foreign' | 'none' | 'unknown'>
+  portOwner?: (port: number, rootPid: number, host?: LocalEndpoint['host']) => Promise<'own' | 'foreign' | 'none' | 'unknown'>
   /** Where the Electron binary of a project is, when it is not in the project's own node_modules. For tests. */
   electronBinary?: (cwd: string) => string | undefined
   onChange?: (owner: AppOwner) => void
@@ -125,21 +125,32 @@ function httpAnswers(url: string, timeoutMs = 1500): Promise<boolean> {
 
 const delay = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
 
+/** The local addresses a listener may have to serve the host that is registered: its own loopback, or every address. */
+const LISTENER_ADDRESSES: Record<LocalEndpoint['host'], string[]> = {
+  '127.0.0.1': ['127.0.0.1', '0.0.0.0', '::'],
+  '::1': ['::1', '::'],
+  localhost: ['127.0.0.1', '::1', '0.0.0.0', '::'],
+}
+
 /**
- * Whether the process that listens on a local port was started by the process `rootPid` (at any depth).
- * What an application prints is the repository's text: an address in it is taken for the application's own
- * only when Windows says a process below its launcher holds that port. 'unknown' when Windows could not be asked.
+ * Whether the listeners on a local port are the application's: every listener row on the port (any address, IPv4
+ * and IPv6) must belong to a process started by `rootPid` (at any depth), and at least one of them must be on an
+ * address that serves the host being registered. A foreign listener on the same port, on another address, makes
+ * the answer 'foreign': the application could otherwise share a port number with the user's own service and have
+ * that service registered as its endpoint. What an application prints is the repository's text. 'unknown' when
+ * Windows could not be asked.
  */
-export async function portOwner(port: number, rootPid: number, env: NodeJS.ProcessEnv = process.env): Promise<'own' | 'foreign' | 'none' | 'unknown'> {
+export async function portOwner(port: number, rootPid: number, host: LocalEndpoint['host'] = '127.0.0.1', env: NodeJS.ProcessEnv = process.env): Promise<'own' | 'foreign' | 'none' | 'unknown'> {
   const system32 = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+  const addresses = LISTENER_ADDRESSES[host].map((a) => `'${a}'`).join(',')
   const script = [
-    `$l = Get-NetTCPConnection -State Listen -LocalPort ${Math.floor(port)} -ErrorAction SilentlyContinue | Select-Object -First 1`,
-    "if (-not $l) { 'none'; exit }",
+    `$rows = @(Get-NetTCPConnection -State Listen -LocalPort ${Math.floor(port)} -ErrorAction SilentlyContinue)`,
+    "if ($rows.Count -eq 0) { 'none'; exit }",
     '$parents = @{}',
     'Get-CimInstance Win32_Process | ForEach-Object { $parents[[int]$_.ProcessId] = [int]$_.ParentProcessId }',
-    '$c = [int]$l.OwningProcess; $ok = $false',
-    `for ($i = 0; $i -lt 64 -and $c -gt 0; $i++) { if ($c -eq ${Math.floor(rootPid)}) { $ok = $true; break }; if (-not $parents.ContainsKey($c)) { break }; $c = $parents[$c] }`,
-    "if ($ok) { 'own' } else { 'foreign' }",
+    `$serves = @(${addresses}); $mine = $false; $foreign = $false`,
+    `foreach ($l in $rows) { $c = [int]$l.OwningProcess; $ok = $false; for ($i = 0; $i -lt 64 -and $c -gt 0; $i++) { if ($c -eq ${Math.floor(rootPid)}) { $ok = $true; break }; if (-not $parents.ContainsKey($c)) { break }; $c = $parents[$c] }; if (-not $ok) { $foreign = $true } elseif ($serves -contains ([string]$l.LocalAddress -replace '%.*$','')) { $mine = $true } }`,
+    "if ($mine -and -not $foreign) { 'own' } else { 'foreign' }",
   ].join('; ')
   try {
     const result = await runProcess(join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', script], { cwd: system32, timeoutMs: 20_000, maxOutputBytes: 4096 })
@@ -316,11 +327,11 @@ export class ApplicationUnderTestManager {
    * The port the application named must be one a process of its own holds: not another session's application,
    * not a service of the user's, not one of NEXUS's. If Windows cannot say, the application is not opened.
    */
-  private async assertOwnPort(app: Running, port: number, child: LongProcess): Promise<void> {
+  private async assertOwnPort(app: Running, port: number, child: LongProcess, host: LocalEndpoint['host'] = '127.0.0.1'): Promise<void> {
     const taken = this.endpoints.find((e) => e.port === port && e.appId !== app.id)
     if (taken !== undefined || (this.deps.forbiddenLocalPorts?.() ?? []).includes(port)) throw new AppLaunchError(`The application named port ${port}, which is not its own. It was not opened.`, child.output(40))
-    const owner = child.pid === null ? 'unknown' : await (this.deps.portOwner ?? portOwner)(port, child.pid)
-    if (owner !== 'own') throw new AppLaunchError(owner === 'unknown' ? `Windows could not say which process listens on port ${port}, so the application was not opened.` : `The application named port ${port}, and no process it started listens there. It was not opened.`, child.output(40))
+    const owner = child.pid === null ? 'unknown' : await (this.deps.portOwner ?? portOwner)(port, child.pid, host)
+    if (owner !== 'own') throw new AppLaunchError(owner === 'unknown' ? `Windows could not say which process listens on port ${port}, so the application was not opened.` : `The application named port ${port}, and no process it started listens there (a process that is not its own listens on that port, or none of its own listens on an address that serves ${host}). It was not opened.`, child.output(40))
   }
 
   private async openProxy(app: Running, endpoints: LocalEndpoint[]): Promise<PolicyProxy> {
@@ -333,13 +344,18 @@ export class ApplicationUnderTestManager {
     const { manifest, owner } = app
     if (!manifest.launchCommand) throw new AppLaunchError('The manifest of a web application needs a launch command.')
     const cwd = this.cwdOf(app)
-    const known = manifest.ready?.kind === 'port' ? manifest.ready.port : manifest.ready?.kind === 'http' ? Number(new URL(manifest.ready.url).port || 80) : null
+    // The readiness address is the repository's text: only the machine's own loopback, and only a port the application proves to be its own, is ever asked.
+    const readyUrl = manifest.ready?.kind === 'http' ? loopbackReadyUrl(manifest.ready.url) : null
+    if (manifest.ready?.kind === 'http' && readyUrl === null) throw new AppLaunchError('The ready address of the manifest is not an http or https address on 127.0.0.1, localhost or [::1]. The application was not started.')
+    const readyHost: LocalEndpoint['host'] = readyUrl === null ? '127.0.0.1' : readyUrl.hostname === 'localhost' ? 'localhost' : readyUrl.hostname === '[::1]' ? '::1' : '127.0.0.1'
+    const known = manifest.ready?.kind === 'port' ? manifest.ready.port : readyUrl !== null ? Number(readyUrl.port || (readyUrl.protocol === 'https:' ? 443 : 80)) : null
     // A port that already answers before the application starts is somebody else's server: it is not adopted.
     if (known !== null && (await portListening(known))) throw new AppLaunchError(`Something already listens on port ${known}. NEXUS does not take a server it did not start for the application under test.`)
     const seen: { endpoint: ReturnType<typeof localEndpointIn> } = { endpoint: null }
-    const pattern = manifest.ready?.kind === 'log' ? new RegExp(manifest.ready.pattern, 'i') : null
+    // Literal text with "*" wildcards, never a regular expression: the manifest is the repository's.
+    const pattern = manifest.ready?.kind === 'log' ? manifest.ready.pattern : null
     const onLine = (line: string): void => {
-      if (seen.endpoint === null && (pattern === null || pattern.test(line))) seen.endpoint = localEndpointIn(line)
+      if (seen.endpoint === null && (pattern === null || readyLineMatches(pattern, line))) seen.endpoint = localEndpointIn(line)
     }
     if (contain === null) throw new AppLaunchError('The project is not contained; its application is not started by NEXUS.')
     const wrapped = await this.deps.broker.containProgram({
@@ -358,12 +374,18 @@ export class ApplicationUnderTestManager {
 
     const deadline = Date.now() + manifest.startTimeoutSeconds * 1000
     let endpoint: { host: LocalEndpoint['host']; port: number; url: string } | null = null
+    let httpChecked = false
     while (Date.now() < deadline) {
       if (child.exitCode() !== undefined) throw new AppLaunchError(`The application ended while starting (exit ${child.exitCode() ?? 'unknown'}).`, child.output(60))
       const candidate: { host: LocalEndpoint['host']; port: number; url: string } | null =
-        manifest.ready?.kind === 'port' ? { host: '127.0.0.1', port: manifest.ready.port, url: `http://127.0.0.1:${manifest.ready.port}/` } : manifest.ready?.kind === 'http' ? { host: '127.0.0.1', port: known as number, url: manifest.ready.url } : seen.endpoint
+        manifest.ready?.kind === 'port' ? { host: '127.0.0.1', port: manifest.ready.port, url: `http://127.0.0.1:${manifest.ready.port}/` } : readyUrl !== null ? { host: readyHost, port: known as number, url: readyUrl.toString() } : seen.endpoint
       if (candidate !== null && (await portListening(candidate.port, candidate.host === '::1' ? '::1' : '127.0.0.1'))) {
-        if (manifest.ready?.kind !== 'http' || (await httpAnswers(manifest.ready.url))) {
+        // Before anything is sent to it, the port must be the application's own (the same check as for the endpoint).
+        if (readyUrl !== null && !httpChecked) {
+          await this.assertOwnPort(app, candidate.port, child, candidate.host)
+          httpChecked = true
+        }
+        if (readyUrl === null || (await httpAnswers(readyUrl.toString()))) {
           endpoint = candidate
           break
         }
@@ -371,7 +393,7 @@ export class ApplicationUnderTestManager {
       await delay(250)
     }
     if (endpoint === null) throw new AppLaunchError(`The application was not ready after ${manifest.startTimeoutSeconds} seconds.`, child.output(60))
-    await this.assertOwnPort(app, endpoint.port, child)
+    await this.assertOwnPort(app, endpoint.port, child, endpoint.host)
     app.endpoint = { ...endpoint, projectId: owner.projectId, runId: owner.runId, taskId: owner.taskId, appId: app.id, registeredAt: new Date().toISOString() }
     this.endpoints.push(app.endpoint)
     app.proxy = await this.openProxy(app, [{ host: endpoint.host, port: endpoint.port }])
@@ -399,8 +421,10 @@ export class ApplicationUnderTestManager {
     // the debugging endpoint listens, where the profile is and how the engine is contained are NEXUS's, and an
     // argument that names one of them is refused.
     const appArgs = manifest.electron?.args ?? []
-    const reserved = appArgs.find((a) => /^--?(remote-debugging|remote-allow-origins|inspect|user-data-dir|no-sandbox|proxy-|host-rules|host-resolver-rules|load-extension|disable-web-security|js-flags|renderer-cmd-prefix|gpu-launcher|utility-cmd-prefix|browser-subprocess-path)/i.test(a))
-    if (reserved !== undefined) throw new AppLaunchError(`The manifest gives the application an argument that is NEXUS's to set: ${reserved.slice(0, 60)}`)
+    // An allowlist (plain positional arguments and a few harmless switches), not a list of what is refused: Chromium
+    // has too many switches that write files or load code, and takes the Windows form "/switch" as well.
+    const reserved = appArgs.map((a) => ({ a, why: electronArgProblem(a) })).find((x) => x.why !== null)
+    if (reserved !== undefined) throw new AppLaunchError(`The manifest gives the application an argument that NEXUS does not pass on: ${reserved.why}`)
     const seen: { endpoint: string | null } = { endpoint: null }
     const onLine = (line: string): void => {
       const m = /DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9/_-]+)/.exec(line)

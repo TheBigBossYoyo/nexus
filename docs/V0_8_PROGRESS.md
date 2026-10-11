@@ -251,52 +251,78 @@ Four focused independent audits ran on the code of this session. Each finding is
 - [x] A2-4 HIGH drivers of the machine's git configuration selected by `.gitattributes` (Git LFS download from
   an address in `.lfsconfig`; `astextplain`): `GIT_LFS_SKIP_SMUDGE=1` everywhere, `--no-textconv` and
   `--no-ext-diff` on every comparison. Limit: LFS files stay pointers in NEXUS worktrees.
-- [ ] A2-5 HIGH NEXUS's own `reset --hard`/`merge` wrote through a junction: links on tracked directories are
-  removed first (`unlinkTrackedDirectories`). Regression test still to add in `hostile-index.test.ts`.
+- [x] A2-5 HIGH NEXUS's own `reset --hard`/`merge` wrote through a junction: links on tracked directories are
+  removed first (`unlinkTrackedDirectories`); `tests/integration/git/hostile-index.test.ts`.
 - [x] A2-6 MEDIUM `add`/`rm`/`stash` entered a nested repository named in the index: exclude pathspecs
   computed in the script before each; `stash` refused while such an entry exists.
 - [x] A2-7 MEDIUM the Codex worker ran its own git on a `.git` pointer it had to believe: the fingerprint is
   now taken by the runtime (`workingState` call).
 - [x] A2-8 MEDIUM a git-only command without a recorded Git directory ran unpinned: it no longer qualifies.
-- [ ] A2 follow-up: third-round confirmation by an independent reviewer; `add -A` of NEXUS's own `commitAll`
-  with a gitlink in the branch tip (exclude pathspecs there too).
+- [x] NEXUS's own `add -A` leaves out nested repositories the index names (`leavingOutNestedRepositories`).
+- [ ] A2 follow-up: third-round confirmation by an independent reviewer.
 
 ### B/C. Windows containment, setup, pipe (no CRITICAL or HIGH)
 
-- [ ] W1 MEDIUM a contained non-window command runs on the user's desktop and can read the screen (BitBlt).
-- [ ] W2 MEDIUM windowed ISOLATED apps: the job has no desktop limit; they can create desktops.
-- [ ] W3 MEDIUM the launcher passes every inheritable handle of its parent: use a handle list (std only).
-- [ ] W4 MEDIUM the DPAPI credential folder is labeled late (not after setup) and "done" is a record, not
-  the label read back.
-- [ ] W5 MEDIUM DNS lookups by the sandbox account leave through the DNS Client service (document; test).
-- [ ] W6 MEDIUM-LOW the egress check has no positive control.
-- [ ] W7 LOW-MEDIUM the account is verified once and re-read on each use: snapshot it; stage 2 checks its SID.
-- [ ] W8 LOW `sweep()` runs on a root that failed verification.
-- [ ] W9 LOW stage-2 launcher trusted by existence (re-hash before use).
-- [ ] W10 LOW elevated scripts: `PSModulePath` of the user; scripts in a user-writable folder.
-- [ ] W11 LOW setup root check-then-create race (availability only).
-- [ ] W12 LOW `Get-LocalGroupMember` errors read as "no members".
-- [ ] W13 LOW a machine without the HKLM record passes with notes.
-- [ ] W14 LOW `pipe-protect` fails on `ERROR_PIPE_BUSY` (fails closed): retry.
+- [x] W1 MEDIUM a contained command ran on the user's desktop and could read the screen: every contained command
+  now runs on a desktop the launcher makes for it. Under ISOLATED the sandbox account is refused the user's
+  desktop by name (measured: it could open it through the session's logon identifier, which Windows gives every
+  "run as" process). Limit, stated in the UI: RESTRICTED runs as the user and can still open the user's desktop.
+  `tests/integration/isolation/containment.test.ts` ("runs on a desktop of its own"), `ui-probe.cs`.
+- [x] W2 MEDIUM windowed ISOLATED apps could make desktops: the desktop is made by the launcher's first step
+  (the user), and the job keeps its limit on desktops under both profiles.
+- [x] W3 MEDIUM handle inheritance: the command inherits its three standard handles only
+  (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`). Same test.
+- [x] W4 MEDIUM the credential folder is labeled before the setup writes the credential, again after it, and
+  at every start whatever the record says.
+- [d] W5 MEDIUM, now MEASURED: a name looked up through Windows' resolver is answered for the sandbox account
+  (the DNS Client service asks, and the account's firewall rule does not cover a service). Its own traffic,
+  including its own DNS packets, is blocked (same test). Not closable with an account and a firewall rule: it
+  needs a different containment (AppContainer or a filtering driver). Stated in the UI, the verification text
+  and the security model. To decide for the release report.
+- [x] W6 the egress check has a positive control (a listener of NEXUS on the loopback must be reached).
+- [x] W7 the account that was verified is the one used (no re-reading of the record); the launcher refuses to
+  start a process as any other SID, and its second step checks who it is.
+- [x] W8 `sweep()` leaves a root that failed verification alone.
+- [x] W9 the second-step launcher is re-hashed before use, by NEXUS and by the launcher.
+- [x] W10 (first half) the scripts use Windows' own module folder only. Open: scripts in a user-writable folder
+  of a per-user install (a same-user process at medium integrity can already do everything the user can).
+- [d] W11 LOW setup root check-then-create race: availability only (measured by the audit: the access list is
+  not written through a junction).
+- [x] W12 a group whose members cannot be listed is a problem, not "no members".
+- [d] W13 LOW a machine set up by the first version passes with notes until the setup is run again.
+- [x] W14 `pipe-protect` waits for a free instance.
+- Residual, found while fixing W1 and stated in the security model: a process started "as another user" carries
+  the session's logon identifier, by which it can open named objects of the session that the user's programs
+  made with default access. Naming a desktop to Windows removes the identifier, and then the account cannot
+  create any named object in the session (Git Bash does not start); measured both ways.
 - Checked and correct: the pipe's security descriptor applies to every instance (measured), handshake,
   token file, verification gating of ISOLATED, job and token construction, removal's handling of junctions.
 
 ### D/E/F. Network, research browser, application under test, grants
 
-- [ ] D1 HIGH `extractHtml` is quadratic on hostile HTML (minutes of a frozen runtime).
-- [ ] D2 HIGH a page that blocks its main thread hangs `renderPublicPage` (no deadline on `content()`).
-- [ ] F1 HIGH `ready.pattern` of the manifest is an arbitrary regex run in the runtime (ReDoS).
-- [ ] D3 MEDIUM no cap on requests or bytes per render; no proxy timeouts.
-- [ ] D4 MEDIUM WebSockets and https URL length are not covered by the read-only rule of the research browser.
-- [ ] D6 MEDIUM citation quotes and the title are outside the DATA markers of the envelope.
-- [ ] F2 MEDIUM `portOwner` looks at the first listener only (IPv4/IPv6 split on one port).
-- [ ] F3 MEDIUM `ready.kind: 'http'` fetches any URL from the runtime.
-- [ ] F4 MEDIUM unbounded line buffer in `spawnLong`.
-- [ ] E1 MEDIUM a ONCE grant is bound to a 300-character summary of the action, not the action.
-- [ ] E2 MEDIUM boundary resources are mostly `ANY`: different needs merge into one request.
-- [ ] E3 MEDIUM auto-resume resets the retry budget; a denial restarts the task without a bound.
-- [ ] E5 MEDIUM agent text in NEXUS's own records (boundary artifacts) is not marked as data.
-- [ ] D5 LOW Edge's own background requests reach the proxy. D7 LOW rendered path should read visible text.
-  D8 LOW loopback v4/v6 equivalence. D9 LOW profile left after a hard kill. F5 LOW Electron argument filter.
-  F6 LOW screenshot size on write. E4 LOW `waitingOn` matches by label text. E6 LOW absent `confirm` allows.
-  E7 LOW bidi and control characters in the shown action.
+- [x] D1 HIGH `extractHtml` was quadratic on hostile HTML: linear scan, 1 MiB input, tag and depth limits.
+  `tests/unit/research/extract-limits.test.ts` (the audit's inputs: 1 to 37 ms, were 6 s to minutes).
+- [x] D2 HIGH a page that blocks its thread hung the research browser: 10 s on every read, 30 s on a render,
+  the browser killed if it will not close. `tests/integration/research/browser.test.ts`.
+- [x] F1 HIGH `ready.pattern` was a regular expression run in the runtime: now literal text with `*`.
+  `tests/unit/browser/manifest.test.ts`.
+- [x] D3 per render: 300 requests, 50 MB, idle timeouts. `tests/integration/network/proxy-limits.test.ts`.
+- [x] D4 WebSockets closed, addresses over 2048 characters refused in the research browser, QUIC off.
+- [x] D5 Edge's own background connections are gone (asserted: no connection but the page's).
+- [x] D6 title, text and citations are inside the DATA block. `tests/unit/research/envelope.test.ts`.
+- [x] D7 the rendered path reads what the page shows (`innerText`).
+- [x] F2 every listener on the endpoint's port must be the app's. `tests/integration/browser/port-owner.test.ts`.
+- [x] F3 `ready.url` is a loopback address whose port the app owns.
+- [x] F4 the pending output line is capped. `tests/unit/process/spawn-long.test.ts`.
+- [x] F5 `electron.args` is an allowlist. [x] F6 a screenshot over 8 MiB is deleted and refused.
+- [x] E1 "allow once" is bound to a hash of the command itself (not the shortened text; not the agent's own
+  description of the call, which changes on a retry). `tests/unit/autonomy/broker.test.ts`.
+- [x] E2 (b, c, d) one request per distinct action for capabilities outside every profile, at most 12 per
+  capability per mission, a denial final for any action, the project-wide confirmation says "every such action".
+  [d] E2 (a): push, network and publish requests still carry the resource "any": the classifier gives no remote
+  or host. Stated in `AUTONOMY_MODEL.md`.
+- [x] E3 at most 3 restarts of a task by boundary decisions. [x] E4 waiting tasks are found by request id.
+- [x] E5 agent text in NEXUS's records is quoted as data. [x] E6 no confirmation channel: project-wide grant
+  refused. [x] E7 bidi and control characters stripped.
+- [d] D8 LOW loopback v4/v6 equivalence in the policy (the port-ownership check now covers the case).
+  [d] D9 LOW a browser profile folder can be left in the temp folder after a hard kill of the runtime.

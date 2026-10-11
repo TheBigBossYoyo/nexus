@@ -2,8 +2,10 @@ import {
   AUTONOMY_CAPABILITIES,
   AUTONOMY_POLICY_VERSION,
   BOUNDARY_RESUME_ACTION,
+  actionWasShortened,
   allowedScopes,
   boundaryResumeResource,
+  cleanAgentText,
   profileSummary,
   unattendedPolicy,
   type AutonomyAuditEvent,
@@ -108,6 +110,8 @@ export class AutonomyService {
     const run = request.runId !== null ? repos.runs.get(request.runId) : null
     return {
       ...request,
+      action: cleanAgentText(request.action),
+      actionTruncated: actionWasShortened(request.action),
       capabilityLabel: AUTONOMY_CAPABILITIES[request.capability].label,
       resourceLabel: describeResource(request.resource),
       projectName: repos.projects.get(request.projectId)?.name ?? 'project',

@@ -16,6 +16,7 @@ import { capacityDirectorSchema } from './015-capacity-director'
 import { adviceOutcomesSchema } from './016-advice-outcomes'
 import { autonomySchema } from './017-autonomy'
 import { researchSchema } from './018-research'
+import { boundaryActionHashSchema } from './019-boundary-action-hash'
 
 export interface Migration {
   version: number
@@ -43,4 +44,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 16, name: 'advice-outcomes', sql: adviceOutcomesSchema },
   { version: 17, name: 'autonomy', sql: autonomySchema },
   { version: 18, name: 'research', sql: researchSchema },
+  { version: 19, name: 'boundary-action-hash', sql: boundaryActionHashSchema },
 ]

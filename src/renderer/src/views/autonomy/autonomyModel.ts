@@ -7,6 +7,7 @@ import type {
   GrantScope,
   SecurityEventSeverity,
 } from '@shared/autonomy'
+import { actionWasShortened, cleanAgentText } from '@shared/autonomy'
 import type { Tone } from '../../lib/status'
 
 /** Wording and grouping for the 0.8 boundary inbox and the Autonomy settings. Pure; unit-tested. No enum name is shown raw. */
@@ -114,6 +115,15 @@ export const REQUEST_STATE_TONE: Record<BoundaryRequestState, Tone> = {
   GRANTED: 'success',
   DENIED: 'danger',
   EXPIRED: 'neutral',
+}
+
+/**
+ * The action as it is shown: what an agent wrote, without the characters that reorder or hide text (the runtime
+ * removes them too; this is the second line of defence), and the sentence that goes with a shortened one.
+ */
+export function actionShown(request: Pick<BoundaryRequestView, 'action'> & { actionTruncated?: boolean }): { text: string; note: string | null } {
+  const shortened = request.actionTruncated ?? actionWasShortened(request.action)
+  return { text: cleanAgentText(request.action), note: shortened ? 'Shortened; allow once covers exactly the command that was attempted.' : null }
 }
 
 /** What a decided request ended as, in words: "Allowed once", "Allowed for this mission", "Denied". */

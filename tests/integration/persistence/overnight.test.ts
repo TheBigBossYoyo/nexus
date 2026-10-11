@@ -94,6 +94,7 @@ describe('migration 003 (overnight) on a 0.2.0 database', () => {
       { version: 16, name: 'advice-outcomes' },
       { version: 17, name: 'autonomy' },
       { version: 18, name: 'research' },
+      { version: 19, name: 'boundary-action-hash' },
     ])
     const repos = createRepositories(db)
     expect(repos.runs.require(run.id)).toMatchObject({ prompt: 'A 0.2.0 mission', state: 'completed' })
@@ -113,7 +114,7 @@ describe('migration 003 (overnight) on a 0.2.0 database', () => {
     // Reopening changes nothing.
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 18 })
+    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 19 })
     expect(createRepositories(again).overnight.getByRun(run.id)?.state).toBe('RUNNING')
   })
 
@@ -222,7 +223,7 @@ describe('migration 005 (overnight workloads) on a 0.3-development database', ()
 
     const db = openDatabase(path)
     open.push(db)
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 18 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 19 })
     const repos = createRepositories(db)
     expect(repos.overnight.listAll()).toHaveLength(1)
     expect(repos.overnight.require(run.id)).toMatchObject({ runId: run.id, workloadType: 'mission', state: 'DONE', terminalReason: 'SUCCESS', finalReport: '# report', policy: record.policy, authorization: record.authorization })

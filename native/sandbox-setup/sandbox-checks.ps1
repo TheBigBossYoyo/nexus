@@ -12,6 +12,11 @@ $script:NexusSandboxMarker = 'NEXUS sandbox account v1'
 # The description the first version of the setup gave the account. Only an administrator can set it.
 $script:NexusSandboxMarkerLegacy = 'NEXUS: contained project code runs here'
 $script:NexusSandboxKey = 'HKLM:\SOFTWARE\NexusSandbox'
+# The cmdlets used here and by the scripts that load this file (local accounts, firewall, access lists) are
+# taken from Windows' own module folder and from nowhere else: the module path a user's environment names
+# begins with a folder in the user's documents, and the setup runs elevated.
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
+
 $script:UsersSid = 'S-1-5-32-545'
 $script:AdminsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
@@ -26,12 +31,16 @@ function Get-NexusAccountState([string]$AccountName) {
   $user = Get-LocalUser -Name $AccountName -ErrorAction SilentlyContinue
   if ($null -eq $user) { return $null }
   $sid = $user.SID.Value
-  $groups = @()
+  $groups = @(); $unread = @()
   foreach ($group in Get-LocalGroup) {
-    $members = @(Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { $_.SID.Value -eq $sid })
+    # A group whose members cannot be listed (Windows PowerShell fails on a group that holds an account that no
+    # longer exists) is not a group the account is known to be out of: it is reported, not passed over.
+    $failed = $null
+    $members = @(Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue -ErrorVariable failed | Where-Object { $_.SID.Value -eq $sid })
+    if ($failed -and $failed.Count -gt 0) { $unread += $group.SID.Value }
     if ($members.Count -gt 0) { $groups += $group.SID.Value }
   }
-  return [pscustomobject]@{ Name = $user.Name; Sid = $sid; Enabled = [bool]$user.Enabled; Description = [string]$user.Description; PrincipalSource = [string]$user.PrincipalSource; Groups = $groups }
+  return [pscustomobject]@{ Name = $user.Name; Sid = $sid; Enabled = [bool]$user.Enabled; Description = [string]$user.Description; PrincipalSource = [string]$user.PrincipalSource; Groups = $groups; UnreadGroups = $unread }
 }
 
 # Is this account one that NEXUS's setup made, and is it only what that setup makes it?
@@ -43,6 +52,9 @@ function Test-NexusAccountState($State) {
   if (-not $ours) { $problems += "an account named $($State.Name) exists and does not carry the mark of NEXUS's setup (its description is '$($State.Description)')" }
   if ($State.PrincipalSource -ne 'Local') { $problems += "the account is not a local account ($($State.PrincipalSource))" }
   if ($State.Sid -notmatch '^S-1-5-21-[0-9-]+-[0-9]{4,}$') { $problems += 'the account is not an ordinary local user (its identifier is not one)' }
+  foreach ($group in @($State.UnreadGroups)) {
+    if ($null -ne $group) { $problems += "the members of the group $group could not be listed, so it is not known whether the account is in it" }
+  }
   foreach ($group in $State.Groups) {
     if ($group -ne $script:UsersSid) {
       if ($ours) { $repairable += "member of the group $group" } else { $problems += "member of the group $group" }

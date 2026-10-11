@@ -33,7 +33,7 @@ import type { GuardOptions } from '../modules/network/guard'
 import { renderPublicPage } from '../modules/research/browser'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
-import { readSandboxAccount, sandboxStateDir } from '../modules/isolation/sandbox-account'
+import { readSandboxAccount, sandboxStateDir, type SandboxAccount } from '../modules/isolation/sandbox-account'
 import { BoundaryResumer } from '../modules/autonomy/resume'
 import { setupSandboxAccount, verifySandboxSetup } from '../modules/isolation/sandbox-setup'
 import { IsolationService } from '../modules/isolation/service'
@@ -73,7 +73,7 @@ import {
   WorkspaceMissionWorkload,
 } from '../modules/overnight'
 import { buildTrayModel, type TrayAction } from '../modules/overnight/tray-model'
-import { AUTONOMY_CAPABILITIES, boundaryResumeResource } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, boundaryResumeResource, cleanAgentText, quotedAction } from '@shared/autonomy'
 import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
 import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
@@ -197,7 +197,7 @@ export function recordBoundaryEvidence(repos: ReturnType<typeof createRepositori
         agentId: null,
         kind: 'boundary-request',
         title: `Boundary request: ${label} (not done; waits for the user)`,
-        content: `NEXUS refused this action and put it to the user as boundary request ${request.id}: ${label}.\nThe action: ${request.action.slice(0, 600)}\nIt was not carried out. Recorded at ${new Date().toISOString()}. A later attempt of the same action in this mission is the same request and is refused the same way.`,
+        content: `NEXUS refused this action and put it to the user as boundary request ${request.id}: ${label}.\n${quotedAction(request.action)}\nIt was not carried out. Recorded at ${new Date().toISOString()}. A later attempt of the same action in this mission is the same request and is refused the same way.`,
         createdAt: new Date().toISOString(),
       })
     } catch {
@@ -274,22 +274,29 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // user's with the access the setup gives and nothing of anybody else's in it. When that does not hold, the
   // isolated profile is not available, and says why.
   let sandboxProblem: string | null = null
-  {
+  // The account that was looked at, and no other: the record is not read again when the account is used, so a
+  // record that changes while NEXUS runs changes nothing until it has been verified in its turn.
+  let sandboxAccount: SandboxAccount | null = null
+  const checkSandboxAccount = async (): Promise<void> => {
     const recorded = readSandboxAccount(env)
+    let problem: string | null = null
     if (recorded !== null) {
-      if (host.sandboxSetupDir === undefined) sandboxProblem = 'this build cannot verify it (the verification script is not part of it)'
+      if (host.sandboxSetupDir === undefined) problem = 'this build cannot verify it (the verification script is not part of it)'
       else {
         const verdict = await verifySandboxSetup(recorded, host.sandboxSetupDir, env)
-        if (!verdict.ok) sandboxProblem = verdict.problems.join('; ').slice(0, 600)
+        if (!verdict.ok) problem = verdict.problems.join('; ').slice(0, 600)
         for (const note of verdict.notes) logger(`isolation: ${note}`)
-        logger(`isolation: sandbox account ${verdict.ok ? 'verified' : `NOT usable: ${sandboxProblem}`}`)
+        logger(`isolation: sandbox account ${verdict.ok ? 'verified' : `NOT usable: ${problem}`}`)
       }
     }
+    sandboxAccount = recorded
+    sandboxProblem = problem
   }
+  await checkSandboxAccount()
   const executionBroker = new ExecutionBroker({
     launcher,
     sandboxDir: join(dataDir, 'sandbox'),
-    account: () => readSandboxAccount(env),
+    account: () => sandboxAccount,
     accountProblem: () => sandboxProblem,
     baseEnv: () => env,
     gitIdentity: () => {
@@ -298,7 +305,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     },
     toolPath: (profile, path) => {
       if (profile !== 'ISOLATED') return path
-      const account = readSandboxAccount(env)
+      const account = sandboxAccount
       if (account === null) return path
       // The copies are made the first time a contained command needs them, and reused.
       toolState ??= mirrorTools({ sandboxRoot: account.root, userProfile: env['USERPROFILE'] ?? homedir(), path })
@@ -729,7 +736,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     apps,
     recordEvidence: (session, title, content) => {
       const taskIds = session.task ? [session.task.id, ...(session.task.parentTaskId ? [session.task.parentTaskId] : [])] : [null]
-      for (const taskId of taskIds) repos.artifacts.insert({ id: randomUUID(), runId: session.run.id, taskId, agentId: session.agentId, kind: 'app-evidence', title, content, createdAt: new Date().toISOString() })
+      for (const taskId of taskIds) repos.artifacts.insert({ id: randomUUID(), runId: session.run.id, taskId, agentId: session.agentId, kind: 'app-evidence', title: cleanAgentText(title), content: cleanAgentText(content), createdAt: new Date().toISOString() })
     },
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
   })
@@ -1448,8 +1455,22 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
       setup: async () => {
         if (host.sandboxSetupDir === undefined || host.launcherPath === undefined) return { ok: false, detail: 'This build cannot set up the sandbox account.' }
+        // The folder the account's credential is written to is closed to code at low integrity before the
+        // credential exists, not at some later start.
+        const stateDir = sandboxStateDir(env)
+        if (stateDir !== null) {
+          mkdirSync(stateDir, { recursive: true })
+          await launcher.label('protect', stateDir).catch((e: unknown) => logger(`isolation: the sandbox state folder could not be protected before the setup: ${errorMessage(e)}`))
+        }
         const outcome = await setupSandboxAccount({ launcher: host.launcherPath, scriptsDir: host.sandboxSetupDir, workDir: join(dataDir, 'sandbox', 'setup'), env })
         logger(`isolation: sandbox setup ${outcome.ok ? 'completed' : 'not completed'}`)
+        if (outcome.ok) {
+          // What the setup left is looked at as at a start, and the isolated profile is tried for real, now: the
+          // window is told what is so, not what will be so after a restart.
+          await checkSandboxAccount()
+          await executionBroker.verify('ISOLATED', true).catch(() => undefined)
+          await isolation.protect({ userStores: host.protectUserStores === true && repos.enrollments.count() > 0 }).catch((e: unknown) => logger(`isolation: protection failed: ${errorMessage(e)}`))
+        }
         autonomy.record({ projectId: null, runId: null, taskId: null, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action: 'sandbox setup', resource: 'machine', reason: outcome.detail.slice(0, 400) })
         return outcome
       },

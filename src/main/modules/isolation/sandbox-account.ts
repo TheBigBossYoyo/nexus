@@ -57,6 +57,9 @@ export function prepareSandboxLauncher(account: SandboxAccount, launcherExecutab
   const digest = sha(launcherExecutable).slice(0, 16)
   const stage2Path = join(bin, `nexus-launch-${digest}.exe`)
   mkdirSync(bin, { recursive: true })
+  // A copy that is there is used only if it still is what its name says; the launcher checks the same again
+  // every time it starts it.
+  if (existsSync(stage2Path) && sha(stage2Path).slice(0, 16) !== digest) rmSync(stage2Path, { force: true })
   if (!existsSync(stage2Path)) {
     const temp = join(bin, `.${digest}-${process.pid}-${Date.now()}.tmp`)
     copyFileSync(launcherExecutable, temp)
@@ -80,5 +83,5 @@ export function prepareSandboxLauncher(account: SandboxAccount, launcherExecutab
   }
   const stage2Dir = join(account.root, 'specs')
   mkdirSync(stage2Dir, { recursive: true })
-  return { credentialPath: account.credentialPath, stage2Path, stage2Dir }
+  return { credentialPath: account.credentialPath, stage2Path, stage2Dir, sid: account.sid }
 }

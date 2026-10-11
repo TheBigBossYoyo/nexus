@@ -1,8 +1,9 @@
-import { AUTONOMY_CAPABILITIES, type ActorKind, type BrokerDecision, type CapabilityRequest } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, cleanAgentText, type ActorKind, type BrokerDecision, type CapabilityRequest } from '@shared/autonomy'
 import type { AgentRole } from '@shared/domain'
 import type { TrustClass } from '@shared/security'
 import type { ToolDecision, ToolRequest } from '@main/modules/agent-runtime/types'
 import type { CapabilityBroker } from './broker'
+import { actionHashOf } from './resource'
 import type { CapabilityNeed } from './tool-capabilities'
 
 /**
@@ -58,6 +59,8 @@ export function createAutonomyGate(ctx: AutonomyGateContext): AutonomyGate {
     confined: ctx.confined === true || ctx.contained,
     resolve(request, action, needs, trust = 'UNTRUSTED_AGENT_AUTHORED') {
       const decisions: BrokerDecision[] = []
+      // Computed from the whole call, before the text for the user is cleaned and cut.
+      const actionHash = actionHashOf(request.toolName, request.input, action)
       for (const need of needs) {
         const capabilityRequest: CapabilityRequest = {
           capability: need.capability,
@@ -72,7 +75,8 @@ export function createAutonomyGate(ctx: AutonomyGateContext): AutonomyGate {
           args: [],
           cwd: ctx.cwd,
           networkTarget: need.resource.kind === 'HOST' ? need.resource.value : null,
-          action: action.slice(0, 400),
+          action: cleanAgentText(action).slice(0, 400),
+          actionHash,
           reason: need.why.slice(0, 400),
         }
         const decision = ctx.broker.decide(capabilityRequest, need.inBoundary)

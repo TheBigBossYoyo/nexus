@@ -25,6 +25,9 @@ export interface SpawnLongOptions {
   maxLines?: number
 }
 
+/** The most of an unfinished line that is kept while waiting for its newline. */
+const PENDING_LINE_LIMIT = 8192
+
 export function spawnLong(file: string, args: readonly string[], options: SpawnLongOptions): LongProcess {
   const maxLines = options.maxLines ?? 2000
   const lines: string[] = []
@@ -32,10 +35,27 @@ export function spawnLong(file: string, args: readonly string[], options: SpawnL
   const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
   const take = (stream: 'stdout' | 'stderr') => {
     let rest = ''
+    // The unfinished line is kept to a bounded size: an application that prints without a newline must not grow
+    // the runtime's memory. Lines are cut to 4000 characters below, so what is kept here is more than enough.
+    let dropping = false
     return (chunk: Buffer): void => {
-      const text = rest + chunk.toString('utf8')
+      let text = chunk.toString('utf8')
+      if (dropping) {
+        // Everything up to the next newline belongs to a line that was already cut and emitted.
+        const nl = text.indexOf('\n')
+        if (nl < 0) return
+        dropping = false
+        text = text.slice(nl + 1)
+      }
+      text = rest + text
       const parts = text.split(/\r?\n/)
       rest = parts.pop() ?? ''
+      if (rest.length > PENDING_LINE_LIMIT) {
+        // Emitted once as the (cut) line it is, then dropped until the next newline.
+        parts.push(rest.slice(0, PENDING_LINE_LIMIT))
+        rest = ''
+        dropping = true
+      }
       for (const part of parts) {
         const line = part.slice(0, 4000)
         lines.push(line)

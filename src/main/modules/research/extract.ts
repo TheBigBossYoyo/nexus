@@ -62,14 +62,31 @@ function hiddenByMarkup(attrs: Record<string, string>): boolean {
 
 const collapse = (text: string): string => text.replace(/[ \t\f\v\u00a0]+/g, ' ')
 
+/** The most of a document that is read: more than this is not a page, and the rest is left unread. */
+export const MAX_HTML_INPUT = 1024 * 1024
+/** Tags read in one document; a document with more is read up to there. */
+const MAX_TAGS = 250_000
+/** Open elements that hide their content, nested; deeper than this is not a page. */
+const MAX_DEPTH = 512
+const MAX_TAG_LENGTH = 20_000
+/** Characters looked at for a tag that turned out not to be one, over the whole document: what keeps a document made of broken tags linear. */
+const MAX_FAILED_SCAN = 4_000_000
+
+const isNameStart = (c: number): boolean => (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+const isNameChar = (c: number): boolean => isNameStart(c) || (c >= 48 && c <= 58) || c === 45
+
 /**
  * Extracts the visible text, the title and the links of an HTML document. `baseUrl` resolves relative links.
- * Never throws on malformed input: what cannot be read as a tag is text.
+ * Never throws on malformed input: what cannot be read as a tag is text. The work is linear in the document and
+ * bounded: a document over `MAX_HTML_INPUT`, with too many tags, nested too deep or made of broken tags is read
+ * as far as those limits allow and the result says `truncated`.
  */
-export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): ExtractedPage {
+export function extractHtml(input: string, baseUrl: string, maxChars = 100_000): ExtractedPage {
+  const html = input.length > MAX_HTML_INPUT ? input.slice(0, MAX_HTML_INPUT) : input
   const out: string[] = []
   let size = 0
-  let truncated = false
+  let full = false
+  let clipped = input.length > MAX_HTML_INPUT
   let hiddenChars = 0
   let commentChars = 0
   let title: string | null = null
@@ -77,16 +94,39 @@ export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): 
   const seenLinks = new Set<string>()
   /** Open elements that hide their content: the tag name and whether it was skipped as a kind or hidden by markup. */
   const hiding: { tag: string; counted: boolean }[] = []
+  /** Where each tag name sits in `hiding`, innermost last, so that a closing tag finds its element without a scan. */
+  const hidingAt = new Map<string, number[]>()
+  let countedOpen = 0
   let anchor: { url: string; text: string[] } | null = null
   let inTitle = false
   let titleText = ''
 
+  const pushHiding = (tag: string, counted: boolean): boolean => {
+    if (hiding.length >= MAX_DEPTH) return false
+    hiding.push({ tag, counted })
+    const at = hidingAt.get(tag)
+    if (at === undefined) hidingAt.set(tag, [hiding.length - 1])
+    else at.push(hiding.length - 1)
+    if (counted) countedOpen += 1
+    return true
+  }
+  /** Closes the innermost hiding element of this name and everything inside it. */
+  const closeHiding = (tag: string): void => {
+    const at = hidingAt.get(tag)
+    const idx = at?.[at.length - 1]
+    if (idx === undefined) return
+    while (hiding.length > idx) {
+      const h = hiding.pop() as { tag: string; counted: boolean }
+      hidingAt.get(h.tag)?.pop()
+      if (h.counted) countedOpen -= 1
+    }
+  }
   const emit = (text: string): void => {
-    if (text === '' || truncated) return
+    if (text === '' || full) return
     if (size + text.length > maxChars) {
       out.push(text.slice(0, Math.max(0, maxChars - size)))
       size = maxChars
-      truncated = true
+      full = true
       return
     }
     out.push(text)
@@ -99,13 +139,17 @@ export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): 
       return
     }
     if (hiding.length > 0) {
-      if (hiding.some((h) => h.counted)) hiddenChars += decoded.trim().length
+      if (countedOpen > 0) hiddenChars += decoded.trim().length
       return
     }
     if (anchor !== null) anchor.text.push(decoded)
     emit(decoded)
   }
 
+  const rawEnds: Record<string, RegExp> = { script: /<\/script/gi, style: /<\/style/gi }
+  let failedScan = 0
+  let tags = 0
+  let nextGt = -1
   let i = 0
   const n = html.length
   while (i < n) {
@@ -122,26 +166,79 @@ export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): 
       i = end === -1 ? n : end + 3
       continue
     }
-    const m = /^<(\/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/.exec(html.slice(lt, lt + 20_000))
-    if (m === null) {
+    // Without a `>` further on nothing below can be a tag, and looking for one at every `<` is what made this quadratic.
+    if (nextGt < lt) nextGt = html.indexOf('>', lt)
+    if (nextGt === -1) {
+      text(html.slice(lt))
+      break
+    }
+    if (failedScan > MAX_FAILED_SCAN) {
+      clipped = true
+      break
+    }
+    // A tag by hand: `<`, `/`?, a name, then anything up to the first `>` that is not inside quotes, all within MAX_TAG_LENGTH.
+    let p = lt + 1
+    const closing = html.charCodeAt(p) === 47
+    if (closing) p += 1
+    let end = -1
+    let nameEnd = p
+    if (isNameStart(html.charCodeAt(p))) {
+      p += 1
+      while (p < n && isNameChar(html.charCodeAt(p))) p += 1
+      nameEnd = p
+      const limit = Math.min(n, lt + MAX_TAG_LENGTH)
+      while (p < limit) {
+        const c = html.charCodeAt(p)
+        if (c === 62) {
+          end = p + 1
+          break
+        }
+        if (c === 34 || c === 39) {
+          p += 1
+          while (p < limit && html.charCodeAt(p) !== c) p += 1
+          if (p >= limit) break
+        }
+        p += 1
+      }
+      if (end === -1) failedScan += p - lt
+    }
+    if (end === -1) {
       // `<!doctype`, `<?xml`, a stray `<`: skip a declaration, keep a lone bracket as text.
-      const decl = /^<[!?][^>]*>/.exec(html.slice(lt, lt + 2000))
-      if (decl !== null) i = lt + decl[0].length
+      const next = html.charCodeAt(lt + 1)
+      let declEnd = -1
+      if (next === 33 || next === 63) {
+        const limit = Math.min(n, lt + 2000)
+        for (let q = lt + 2; q < limit; q += 1) {
+          if (html.charCodeAt(q) === 62) {
+            declEnd = q + 1
+            break
+          }
+        }
+        failedScan += (declEnd === -1 ? limit : declEnd) - lt
+      }
+      if (declEnd !== -1) i = declEnd
       else {
         text('<')
         i = lt + 1
       }
       continue
     }
-    i = lt + m[0].length
-    const closing = m[1] === '/'
-    const tag = (m[2] as string).toLowerCase()
-    const selfClosed = (m[3] as string).trimEnd().endsWith('/') || VOID.has(tag)
+    tags += 1
+    if (tags > MAX_TAGS) {
+      clipped = true
+      break
+    }
+    i = end
+    const tag = html.slice(closing ? lt + 2 : lt + 1, nameEnd).toLowerCase()
+    const rawAttrs = html.slice(nameEnd, end - 1)
+    const selfClosed = rawAttrs.trimEnd().endsWith('/') || VOID.has(tag)
 
     if (!closing && (tag === 'script' || tag === 'style')) {
       // Raw text elements end at their own closing tag and nowhere else.
-      const end = html.toLowerCase().indexOf(`</${tag}`, i)
-      i = end === -1 ? n : html.indexOf('>', end) + 1 || n
+      const re = rawEnds[tag] as RegExp
+      re.lastIndex = i
+      const found = re.exec(html)
+      i = found === null ? n : html.indexOf('>', found.index) + 1 || n
       continue
     }
     if (closing) {
@@ -149,11 +246,9 @@ export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): 
         inTitle = false
         if (title === null) title = titleText.replace(/\s+/g, ' ').trim().slice(0, 300) || null
       }
-      const top = hiding[hiding.length - 1]
-      if (top !== undefined) {
+      if (hiding.length > 0) {
         // Close the innermost hiding element of this name; tags inside a hidden region are otherwise ignored.
-        const idx = hiding.map((h) => h.tag).lastIndexOf(tag)
-        if (idx !== -1) hiding.length = idx
+        closeHiding(tag)
         continue
       }
       if (tag === 'a' && anchor !== null) {
@@ -167,22 +262,31 @@ export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): 
       if (BLOCK.has(tag)) emit('\n')
       continue
     }
-    const attrs = attributes(m[3] as string)
     if (hiding.length > 0) {
-      if (!selfClosed) hiding.push({ tag, counted: false })
+      if (!selfClosed && !pushHiding(tag, false)) {
+        clipped = true
+        break
+      }
       continue
     }
+    const attrs = attributes(rawAttrs)
     if (tag === 'title' && title === null) {
       inTitle = true
       titleText = ''
       continue
     }
     if (SKIPPED.has(tag)) {
-      if (!selfClosed) hiding.push({ tag, counted: false })
+      if (!selfClosed && !pushHiding(tag, false)) {
+        clipped = true
+        break
+      }
       continue
     }
     if (hiddenByMarkup(attrs)) {
-      if (!selfClosed) hiding.push({ tag, counted: true })
+      if (!selfClosed && !pushHiding(tag, true)) {
+        clipped = true
+        break
+      }
       continue
     }
     if (BLOCK.has(tag)) emit('\n')
@@ -210,7 +314,7 @@ export function extractHtml(html: string, baseUrl: string, maxChars = 100_000): 
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-  return { title, text: joined, truncated, links, hiddenChars, commentChars }
+  return { title, text: joined, truncated: full || clipped, links, hiddenChars, commentChars }
 }
 
 /** Text of a document that is not HTML: plain text, Markdown, JSON. Control characters other than line ends are dropped. */

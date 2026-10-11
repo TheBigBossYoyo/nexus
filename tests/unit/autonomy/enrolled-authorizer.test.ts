@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { AUTONOMY_POLICY_VERSION, capabilityKind, type AutonomyAuditEvent, type AutonomyProfile, type BoundaryRequest, type CapabilityGrant } from '@shared/autonomy'
+import { AUTONOMY_POLICY_VERSION, MAX_BOUNDARY_REQUESTS_PER_CAPABILITY, capabilityKind, type AutonomyAuditEvent, type AutonomyProfile, type BoundaryRequest, type CapabilityGrant } from '@shared/autonomy'
 import type { AgentRole } from '@shared/domain'
 import { CapabilityBroker } from '@main/modules/autonomy/broker'
 import { createAutonomyGate } from '@main/modules/autonomy/gate'
@@ -50,6 +50,8 @@ function enrolled(profile: AutonomyProfile, contained: boolean) {
     requests: {
       insert: (r) => void requests.push({ ...r }),
       findByKey: (key) => [...requests].reverse().find((r) => r.dedupeKey === key) ?? null,
+      listByKey: (key) => [...requests].reverse().filter((r) => r.dedupeKey === key).sort((a, b) => Number(b.state === 'PENDING') - Number(a.state === 'PENDING')),
+      countForCapability: (projectId, runId, capability) => requests.filter((r) => r.projectId === projectId && r.runId === runId && r.capability === capability).length,
       touch: (id) => {
         const r = requests.find((x) => x.id === id)
         if (r) r.occurrences += 1
@@ -108,10 +110,15 @@ describe('the 0.7 corpus in an enrolled project', () => {
         expect(asks.length).toBeGreaterThan(20)
         if (!contained) {
           // Outside the containment, what the policy could only ask about is refused and becomes a question:
-          // many commands, few questions, because a question is per capability and resource, not per command.
+          // many commands, fewer questions: the same command is one question, and no capability puts more than
+          // MAX_BOUNDARY_REQUESTS_PER_CAPABILITY distinct ones to the user in a mission (a different command is a
+          // question of its own, so that what the user allows is what the user was shown).
           for (const r of asks) expect(r.behavior, r.detail).toBe('deny')
           expect(h.requests.length).toBeGreaterThan(0)
-          expect(h.requests.length).toBeLessThan(asks.length / 2)
+          expect(h.requests.length).toBeLessThan(asks.length * 0.75)
+          const perCapability = new Map<string, number>()
+          for (const r of h.requests) perCapability.set(r.capability, (perCapability.get(r.capability) ?? 0) + 1)
+          for (const n of perCapability.values()) expect(n).toBeLessThanOrEqual(MAX_BOUNDARY_REQUESTS_PER_CAPABILITY)
         }
       },
       480_000,

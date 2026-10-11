@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { AUTONOMY_CAPABILITIES, BOUNDARY_RESUME_ACTION, type BoundaryRequest } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, BOUNDARY_RESUME_ACTION, quotedAction, type BoundaryRequest } from '@shared/autonomy'
 import { TERMINAL_RUN_STATES, type Run, type Task } from '@shared/domain'
 import { newId } from '@shared/ids'
 import type { Repositories } from '@main/modules/persistence'
@@ -41,12 +41,14 @@ export interface BoundaryResumeOutcome {
 
 const WAITING: readonly Task['state'][] = ['blocked', 'failed']
 
-/** The tasks of the mission that stopped at this request: the one that asked (or the task it repairs), and any that names the request in what it reported. */
+/** How many times boundary decisions may restart one task. A task that went on asking is the user's to start again, not NEXUS's. */
+export const MAX_BOUNDARY_RESTARTS_PER_TASK = 3
+
+/** The tasks of the mission that stopped at this request: the one that asked (or the task it repairs), and any that names this request's id in what it reported. The label of a capability is not an id: a task that mentions it is not thereby waiting on this question. */
 function waitingOn(repos: Repositories, request: BoundaryRequest): Task[] {
   if (request.runId === null) return []
   const tasks = repos.tasks.listByRun(request.runId)
   const byId = new Map(tasks.map((t) => [t.id, t]))
-  const label = AUTONOMY_CAPABILITIES[request.capability].label
   const picked = new Map<string, Task>()
   const take = (task: Task | undefined): void => {
     if (task === undefined) return
@@ -58,7 +60,7 @@ function waitingOn(repos: Repositories, request: BoundaryRequest): Task[] {
   for (const task of tasks) {
     if (!WAITING.includes(task.state)) continue
     const said = `${task.blockedReason ?? ''}\n${task.error ? JSON.stringify(task.error) : ''}`
-    if (said.includes(request.id) || said.toLowerCase().includes(label.toLowerCase())) take(task)
+    if (said.includes(request.id)) take(task)
   }
   return [...picked.values()]
 }
@@ -90,6 +92,11 @@ export class BoundaryResumer {
     const label = AUTONOMY_CAPABILITIES[request.capability].label
     const granted = request.state === 'GRANTED'
     for (const task of tasks) {
+      const restarts = repos.artifacts.listByTask(task.id).filter((a) => a.kind === 'boundary-decision').length
+      if (restarts >= MAX_BOUNDARY_RESTARTS_PER_TASK) {
+        outcome.notes.push(`${task.key} was restarted ${MAX_BOUNDARY_RESTARTS_PER_TASK} times by boundary decisions already; start it yourself if it should go on.`)
+        continue
+      }
       // On the task's record, where its next session and whoever checks it find it.
       try {
         repos.artifacts.insert({
@@ -100,8 +107,8 @@ export class BoundaryResumer {
           kind: 'boundary-decision',
           title: granted ? `The user allowed: ${label}` : `The user denied: ${label}`,
           content: granted
-            ? `Boundary request ${request.id} was answered: allowed (${request.decidedScope === 'ONCE' ? 'once, for exactly this action' : request.decidedScope === 'MISSION' ? 'for this mission' : 'for this project'}).\nThe action: ${request.action.slice(0, 600)}\nIt may now be carried out. NEXUS started this task again by itself; carry on from the worktree as it is.`
-            : `Boundary request ${request.id} was answered: denied.\nThe action: ${request.action.slice(0, 600)}\nIt will not be done in this mission and is not to be attempted again or reached another way. Finish what does not depend on it, and say plainly in the result that this part was not done because the user declined it.`,
+            ? `Boundary request ${request.id} was answered: allowed (${request.decidedScope === 'ONCE' ? 'once, for exactly this action' : request.decidedScope === 'MISSION' ? 'for this mission' : 'for this project'}).\n${quotedAction(request.action)}\nIt may now be carried out. NEXUS started this task again by itself; carry on from the worktree as it is.`
+            : `Boundary request ${request.id} was answered: denied.\n${quotedAction(request.action)}\nIt will not be done in this mission and is not to be attempted again or reached another way. Finish what does not depend on it, and say plainly in the result that this part was not done because the user declined it.`,
           createdAt: new Date().toISOString(),
         })
       } catch {

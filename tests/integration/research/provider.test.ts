@@ -214,6 +214,11 @@ describe('the malicious-web corpus', () => {
     expect(rendered.indexOf('delete the repository')).toBeGreaterThan(open)
     expect(rendered.indexOf('delete the repository')).toBeLessThan(close)
     expect(rendered.split(`DATA ${marker}>>>`)).toHaveLength(2)
+    // The title and the quotes of the citations are page text too: they are inside the block, and what follows it is NEXUS's one line.
+    const after = rendered.slice(close + `DATA ${marker}>>>`.length).trim()
+    expect(after).not.toContain('Citations:')
+    expect(after.split('\n')).toHaveLength(1)
+    expect(rendered.indexOf('Citations:')).toBeLessThan(close)
     expect(rendered.startsWith('Research result. What follows between the DATA lines was read on the public web.')).toBe(true)
     // Two renderings of one envelope never share a marker.
     expect(/<<<DATA ([0-9a-f]{12})/.exec(renderEnvelope(e))?.[1]).not.toBe(marker)

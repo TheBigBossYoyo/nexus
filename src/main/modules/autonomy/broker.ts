@@ -1,7 +1,9 @@
 import {
   AUTONOMY_CAPABILITIES,
+  MAX_BOUNDARY_REQUESTS_PER_CAPABILITY,
   allowedScopes,
   capabilityKind,
+  cleanAgentText,
   profileCapabilities,
   type AutonomyAuditEvent,
   type AutonomyCapability,
@@ -34,6 +36,10 @@ export interface BoundaryRequestStorePort {
   insert(request: BoundaryRequest): void
   /** The request with this key in any state, newest first. */
   findByKey(dedupeKey: string): BoundaryRequest | null
+  /** Every request with this key, pending ones first and then newest first. */
+  listByKey(dedupeKey: string): BoundaryRequest[]
+  /** How many requests, in any state, the mission (or the project, when runId is null) put for this capability. */
+  countForCapability(projectId: string, runId: string | null, capability: AutonomyCapability): number
   touch(id: string, at: string): void
   decide(id: string, state: 'GRANTED' | 'DENIED' | 'EXPIRED', at: string, scope: GrantScope | null, grantId: string | null): boolean
   get(id: string): BoundaryRequest | null
@@ -120,9 +126,11 @@ export class CapabilityBroker {
     for (const grant of candidates) {
       if (grant.scope !== 'ONCE') return grant
       // "Once" is for the action the user was shown, and for no other that happens to need the same capability:
-      // a push to another remote, a request to another host. A different action is a new question.
+      // a push to another remote, a request to another host. A different action is a new question. The action is
+      // compared by the hash of the whole call, not by the text shown (redacted, shortened, whitespace collapsed),
+      // and a grant whose request is gone, or was made before the hash existed, covers nothing: it fails closed.
       const shown = grant.requestId !== null ? this.deps.requests.get(grant.requestId) : null
-      if (shown !== null && shown.action !== request.action) continue
+      if (shown === null || !shown.actionHash || !request.actionHash || shown.actionHash !== request.actionHash) continue
       if (this.deps.grants.consume(grant.id, this.iso())) return grant
     }
     return null
@@ -134,7 +142,8 @@ export class CapabilityBroker {
    * facts it owns, never from the actor's description of itself.
    */
   decide(raw: CapabilityRequest, inBoundary: boolean): BrokerDecision {
-    const request: CapabilityRequest = { ...raw, resource: normalizeResource(raw.resource) }
+    // What an agent wrote is stored and shown without the characters that reorder or hide text.
+    const request: CapabilityRequest = { ...raw, resource: normalizeResource(raw.resource), action: cleanAgentText(raw.action) }
     const capability = request.capability
     const kind = capabilityKind(capability)
     const deny = (reason: string, severity: SecurityEventSeverity = 'POLICY_DENIAL'): BrokerDecision => {
@@ -175,16 +184,24 @@ export class CapabilityBroker {
       if (allowedScopes(capability).length === 0) return deny('No grant exists for this.')
 
       const key = boundaryDedupeKey({ projectId: request.projectId, runId: request.runId, capability, resource: request.resource })
-      const existing = this.deps.requests.findByKey(key)
+      const known = this.deps.requests.listByKey(key)
       const at = this.iso()
-      if (existing !== null && existing.state === 'DENIED') {
-        return deny(`The user denied this for the mission (boundary request ${existing.id}). It is not asked again.`)
+      // A denial is final for the mission, for any action of this capability and resource: the agent does not get to ask again in other words.
+      const denied = known.find((r) => r.state === 'DENIED')
+      if (denied !== undefined) {
+        return deny(`The user denied this for the mission (boundary request ${denied.id}). It is not asked again.`)
       }
-      if (existing !== null && existing.state === 'PENDING') {
+      // The same action tried again is one question. A different action of the same need is another question: the user sees each of them.
+      // A capability the profile merely withholds (installing dependencies) is one question for the project whatever the command: its answer covers them all.
+      const existing = known.find((r) => r.state === 'PENDING' && (kind === 'PROFILE' || (r.actionHash ?? null) === (request.actionHash ?? null)))
+      if (existing !== undefined) {
         this.deps.requests.touch(existing.id, at)
         const decision: BrokerDecision = { outcome: 'BOUNDARY_GRANT_REQUIRED', capability, requestId: existing.id, deduplicated: true, reason: existing.reason }
         // The same need met again is not a second event for the user; it is counted on the request.
         return decision
+      }
+      if (this.deps.requests.countForCapability(request.projectId, request.runId, capability) >= MAX_BOUNDARY_REQUESTS_PER_CAPABILITY) {
+        return deny(`${MAX_BOUNDARY_REQUESTS_PER_CAPABILITY} different boundary requests for "${AUTONOMY_CAPABILITIES[capability].label}" have been put to the user in this mission; the limit was reached and no further question is asked. Finish what does not depend on it.`)
       }
       // GRANTED with nothing usable left (a ONCE grant that was used, a revoked one) or EXPIRED: a new question.
       const reason = `${AUTONOMY_CAPABILITIES[capability].label} is outside what the ${enrollment.profile} profile of this project allows.`
@@ -197,6 +214,7 @@ export class CapabilityBroker {
         capability,
         resource: request.resource,
         action: request.action,
+        actionHash: request.actionHash ?? null,
         reason,
         dedupeKey: key,
         state: 'PENDING',

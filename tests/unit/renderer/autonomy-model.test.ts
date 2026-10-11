@@ -5,6 +5,7 @@ import {
   PROFILE_LABEL,
   PROFILE_SENTENCE,
   SEVERITY_WORDS,
+  actionShown,
   boundaryCountLabel,
   boundaryCountShort,
   decidedWords,
@@ -28,6 +29,8 @@ function req(id: string, extra: Partial<BoundaryRequestView> = {}): BoundaryRequ
     capability: 'GIT_PUSH',
     resource: { kind: 'GIT_REMOTE', value: 'origin' },
     action: 'git push origin main',
+    actionHash: null,
+    actionTruncated: false,
     reason: 'Pushing changes a shared remote.',
     dedupeKey: id,
     state: 'PENDING',
@@ -142,5 +145,18 @@ describe('profile wording', () => {
   it('words the enrollment line for the project page', () => {
     expect(enrollmentLine(null)).toBe('Not enrolled: NEXUS asks before sensitive actions.')
     expect(enrollmentLine('BALANCED')).toMatch(/^Balanced profile/)
+  })
+})
+
+describe('actionShown', () => {
+  it('removes bidirectional overrides and control characters other than tab and newline', () => {
+    const hostile = `git push ${String.fromCharCode(0x202e, 0x2066, 0x2069)}origin${String.fromCharCode(7, 0)}\tmain\nnext`
+    expect(actionShown(req('a', { action: hostile })).text).toBe('git push origin\tmain\nnext')
+  })
+
+  it('says that allow once covers exactly the command that was attempted when the text is shortened, and not otherwise', () => {
+    expect(actionShown(req('a', { action: 'git push origin main' })).note).toBeNull()
+    expect(actionShown(req('a', { action: 'git push origin ...…', actionTruncated: true })).note).toBe('Shortened; allow once covers exactly the command that was attempted.')
+    expect(actionShown(req('a', { action: 'curl -H x [redacted]', actionTruncated: true })).note).toContain('allow once covers exactly')
   })
 })

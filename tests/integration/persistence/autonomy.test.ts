@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { AUTONOMY_POLICY_VERSION, type CapabilityRequest } from '@shared/autonomy'
 import { CapabilityBroker } from '@main/modules/autonomy/broker'
@@ -32,6 +33,7 @@ function setup(profile: 'AUTONOMOUS_PROJECT' | 'BALANCED' | 'LOCKED_DOWN' = 'AUT
     networkTarget: null,
     action: 'Bash: git push origin main',
     reason: 'publishes the branch',
+    actionHash: createHash('sha256').update(over.action ?? 'Bash: git push origin main').digest('hex'),
     ...over,
   })
   return { repos, db, project, broker, req, ended }
@@ -102,6 +104,8 @@ describe('autonomy persistence (migration 017)', () => {
       requests: {
         insert: (r) => repos.boundaryRequests.insert(r),
         findByKey: (k) => repos.boundaryRequests.findByKey(k),
+        listByKey: (k) => repos.boundaryRequests.listByKey(k),
+        countForCapability: (...args) => repos.boundaryRequests.countForCapability(...args),
         touch: (id, at) => repos.boundaryRequests.touch(id, at),
         get: (id) => repos.boundaryRequests.get(id),
         listPending: (p) => repos.boundaryRequests.listPending(p),

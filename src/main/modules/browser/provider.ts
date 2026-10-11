@@ -2,7 +2,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, type Browser, type BrowserContext, type ConsoleMessage, type Page, type Request } from 'playwright-core'
-import type { BrowserSessionPurpose } from '@main/modules/network/policy'
+import { MAX_URL_CHARS, type BrowserSessionPurpose } from '@main/modules/network/policy'
+import { runProcess } from '@main/modules/process/run-process'
 
 /**
  * 0.8: browser and application automation. One interface (`BrowserAutomationProvider`), one backend in this
@@ -29,6 +30,8 @@ export interface BrowserSessionSpec {
   proxy?: BrowserProxy
   /** Where snapshots, screenshots, traces and logs of the session are written. */
   artifactsDir: string
+  /** The most requests a research session lets its page make in all; the next ones are aborted. Absent: no limit. */
+  maxRequests?: number
   viewport?: { width: number; height: number }
   /**
    * An application that is already running (an Electron application inside a containment) to look at through
@@ -76,8 +79,8 @@ export interface BrowserSession {
   navigate(url: string): Promise<PageState>
   reload(): Promise<PageState>
   state(): Promise<PageState>
-  /** The document as its script left it, once the page has been quiet for `settleMs` (or `timeoutMs` passed). */
-  rendered(options?: { settleMs?: number; timeoutMs?: number }): Promise<PageState & { html: string }>
+  /** The document as its script left it, once the page has been quiet for `settleMs` (or `timeoutMs` passed). `text` is what the page shows (`innerText` of the body), which leaves out what a stylesheet hides; null when it could not be read. */
+  rendered(options?: { settleMs?: number; timeoutMs?: number }): Promise<PageState & { html: string; text: string | null }>
   snapshot(options?: { depth?: number; maxChars?: number; ref?: string }): Promise<SnapshotResult>
   /** Lines of the snapshot that contain the text, each with its ref: the cheap way to find a control. */
   find(text: string, limit?: number): Promise<{ matches: string[]; total: number }>
@@ -109,14 +112,54 @@ const MAX_LOG = 2000
 const DEFAULT_SNAPSHOT_CHARS = 6000
 const ACTION_TIMEOUT_MS = 10_000
 const NAVIGATION_TIMEOUT_MS = 30_000
+/** Reads of the page that Playwright gives no timeout of its own (content, title, evaluate, snapshot): a page whose script holds its main thread answers none of them. */
+const READ_DEADLINE_MS = 10_000
+/** The longest the browser gets to close before it is killed. */
+const CLOSE_DEADLINE_MS = 8000
+
+export class DeadlineExceeded extends Error {
+  constructor(what: string, ms: number) {
+    super(`${what} did not finish within ${Math.round(ms / 100) / 10} s.`)
+    this.name = 'DeadlineExceeded'
+  }
+}
+
+/** The promise, or a rejection after `ms`. The work is not stopped by this; whoever times out closes what it ran on. */
+export function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new DeadlineExceeded(what, ms)), ms)
+  })
+  // The work may still fail after the deadline; that is no longer anyone's business.
+  work.catch(() => undefined)
+  return Promise.race([work, late]).finally(() => clearTimeout(timer))
+}
+
+/** Ends the browser process tree that was started with this marker among its arguments. Last resort, for a browser that does not close. */
+function killByMarker(marker: string): Promise<void> {
+  if (process.platform !== 'win32') return Promise.resolve()
+  const script = `Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe' OR Name='chromium.exe'" | Where-Object { $_.CommandLine -like '*${marker}*' } | ForEach-Object { taskkill /F /T /PID $_.ProcessId | Out-Null }`
+  // Through the process runner, as every child process of NEXUS is started.
+  return runProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { cwd: process.cwd(), timeoutMs: 15_000 }).then(
+    () => undefined,
+    () => undefined,
+  )
+}
 
 /** Chromium switches of every session: nothing leaves but through the proxy, and nothing asks the user anything. */
-function chromiumArgs(): string[] {
+function chromiumArgs(purpose: BrowserSessionPurpose, marker: string): string[] {
   return [
+    // Not read by the browser: it names this one process tree, so that it can be found and ended if it hangs.
+    `--nexus-session=${marker}`,
+    // A page that reads the public web gets no QUIC: it would go round a proxy that speaks http.
+    ...(purpose === 'PUBLIC_RESEARCH' ? ['--disable-quic'] : []),
     // Loopback goes through the proxy too: the default bypass would let a page reach local services directly.
     '--proxy-bypass-list=<-loopback>',
     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
-    '--disable-features=NetworkPrediction,Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CalculateNativeWinOcclusion',
+    '--disable-features=NetworkPrediction,Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CalculateNativeWinOcclusion,HttpsUpgrades,HttpsFirstBalancedModeAutoEnable,HttpsFirstModeV2ForTypicallySecureUsers,msEdgeShoppingAssistant,EdgeShoppingAssistant,msEdgeOnRamp,msEdgeEntityExtraction,EdgeEntityExtraction,msEdgeSearchBoxSuggestions,SearchSuggest,msUndoRollbackToggle,msEdgeCollections,PreconnectToSearch,PreconnectToSearchWithPrefetch,SpeculativePreconnect,SearchPrefetchServicePrefetching,Prewarm,OmniboxWarmup,PrefetchProxy,NoStatePrefetch,msEdgeSearchPrewarm,SearchEnginePrewarm',
+    '--disable-search-engine-choice-screen',
+    '--disable-breakpad',
+    '--no-service-autorun',
     '--dns-prefetch-disable',
     '--disable-background-networking',
     '--disable-component-update',
@@ -147,6 +190,7 @@ class PlaywrightSession implements BrowserSession {
     private readonly browser: Browser,
     private readonly context: BrowserContext,
     private page: Page,
+    private readonly marker: string | null = null,
   ) {
     mkdirSync(artifactsDir, { recursive: true })
     this.context.setDefaultTimeout(ACTION_TIMEOUT_MS)
@@ -211,29 +255,53 @@ class PlaywrightSession implements BrowserSession {
     return this.page
   }
 
-  async state(): Promise<PageState> {
-    const page = this.ensure()
-    return { url: page.url(), title: (await page.title().catch(() => '')).slice(0, 200) }
+  /**
+   * A read of the page under a deadline. A page whose script never lets go of its main thread answers nothing;
+   * when the deadline passes, a browser session is closed (and killed if it will not close) and the call
+   * rejects. An application is not this session's to end: there the call only rejects.
+   */
+  private async within<T>(work: Promise<T>, what: string, ms = READ_DEADLINE_MS): Promise<T> {
+    try {
+      return await withDeadline(work, ms, what)
+    } catch (e) {
+      if (e instanceof DeadlineExceeded && this.kind === 'browser') await this.close()
+      throw e
+    }
   }
 
-  async rendered(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageState & { html: string }> {
+  async state(): Promise<PageState> {
+    const page = this.ensure()
+    const title = await this.within(page.title(), 'Reading the page title').catch((e: unknown) => {
+      if (e instanceof DeadlineExceeded) throw e
+      return ''
+    })
+    return { url: page.url(), title: title.slice(0, 200) }
+  }
+
+  async rendered(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageState & { html: string; text: string | null }> {
     const page = this.ensure()
     const timeout = Math.min(Math.max(options.timeoutMs ?? 20_000, 1000), 60_000)
+    const settle = Math.min(Math.max(options.settleMs ?? 500, 0), 10_000)
     // Quiet on the network, or the time is up: a page that never stops asking is read as it is then.
-    await page.waitForLoadState('networkidle', { timeout }).catch(() => undefined)
-    await page.waitForTimeout(Math.min(Math.max(options.settleMs ?? 500, 0), 10_000))
-    const html = await page.content()
-    return { ...(await this.state()), html }
+    await this.within(page.waitForLoadState('networkidle', { timeout }).catch(() => undefined), 'Waiting for the page to settle', timeout + 5000)
+    await this.within(page.waitForTimeout(settle), 'Waiting for the page to settle', settle + 5000)
+    const html = await this.within(page.content(), 'Reading the document')
+    // What a reader sees: text that a stylesheet hides is in the document but not in `innerText`.
+    const text = await this.within(page.evaluate(() => (document.body ? document.body.innerText : '')), 'Reading the visible text').catch((e: unknown) => {
+      if (e instanceof DeadlineExceeded) throw e
+      return null
+    })
+    return { ...(await this.state()), html, text }
   }
 
   async navigate(url: string): Promise<PageState> {
     const page = this.ensure()
-    await page.goto(url, { waitUntil: 'domcontentloaded' })
+    await this.within(page.goto(url, { waitUntil: 'domcontentloaded' }), 'Opening the page', NAVIGATION_TIMEOUT_MS + READ_DEADLINE_MS)
     return this.state()
   }
 
   async reload(): Promise<PageState> {
-    await this.ensure().reload({ waitUntil: 'domcontentloaded' })
+    await this.within(this.ensure().reload({ waitUntil: 'domcontentloaded' }), 'Reloading the page', NAVIGATION_TIMEOUT_MS + READ_DEADLINE_MS)
     return this.state()
   }
 
@@ -289,7 +357,7 @@ class PlaywrightSession implements BrowserSession {
     const page = this.ensure()
     const snapshotOptions = { mode: 'ai' as const, ...(options.depth !== undefined ? { depth: options.depth } : {}) }
     const target = options.ref !== undefined ? this.locator(options.ref) : page.locator('body')
-    return (target as unknown as { ariaSnapshot(o: object): Promise<string> }).ariaSnapshot(snapshotOptions)
+    return this.within((target as unknown as { ariaSnapshot(o: object): Promise<string> }).ariaSnapshot(snapshotOptions), 'Reading the page snapshot')
   }
 
   async snapshot(options: { depth?: number; maxChars?: number; ref?: string } = {}): Promise<SnapshotResult> {
@@ -315,7 +383,7 @@ class PlaywrightSession implements BrowserSession {
     const page = this.ensure()
     this.shots += 1
     const path = join(this.artifactsDir, `screenshot-${String(this.shots).padStart(3, '0')}.png`)
-    const buffer = await page.screenshot({ path, fullPage: options.fullPage === true, type: 'png', animations: 'disabled' })
+    const buffer = await this.within(page.screenshot({ path, fullPage: options.fullPage === true, type: 'png', animations: 'disabled' }), 'Taking the screenshot', 3 * READ_DEADLINE_MS)
     const size = page.viewportSize() ?? { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) }
     return { path, bytes: buffer.length, width: buffer.readUInt32BE(16) || size.width, height: buffer.readUInt32BE(20) || size.height }
   }
@@ -335,7 +403,7 @@ class PlaywrightSession implements BrowserSession {
 
   async windows(): Promise<{ index: number; title: string; url: string }[]> {
     const pages = this.context.pages().filter((p) => !p.isClosed())
-    return Promise.all(pages.map(async (p, index) => ({ index, title: (await p.title().catch(() => '')).slice(0, 200), url: p.url() })))
+    return Promise.all(pages.map(async (p, index) => ({ index, title: (await this.within(p.title(), 'Reading the window title').catch(() => '')).slice(0, 200), url: p.url() })))
   }
 
   async useWindow(index: number): Promise<PageState> {
@@ -349,10 +417,15 @@ class PlaywrightSession implements BrowserSession {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    const bounded = <T>(p: Promise<T>): Promise<unknown> => Promise.race([p.catch(() => undefined), new Promise((done) => setTimeout(done, 8000))])
+    const bounded = <T>(p: Promise<T>): Promise<unknown> => {
+      let timer: NodeJS.Timeout | undefined
+      return Promise.race([p.catch(() => undefined), new Promise((done) => (timer = setTimeout(done, CLOSE_DEADLINE_MS)))]).finally(() => clearTimeout(timer))
+    }
     // An attached application is not this session's to end: whoever started it stops it. The connection is dropped.
     if (this.kind === 'browser') await bounded(this.context.close())
     await bounded(this.browser.close())
+    // A browser that is still connected after that is stuck: it is ended, not waited for.
+    if (this.kind === 'browser' && this.marker !== null && this.browser.isConnected()) await killByMarker(this.marker)
   }
 }
 
@@ -410,10 +483,11 @@ export class PlaywrightDirectProvider implements BrowserAutomationProvider {
       : available.browser === 'msedge' || this.options.channel
         ? { channel: this.options.channel ?? 'msedge' }
         : { executablePath: available.browser }
+    const marker = randomBytes(8).toString('hex')
     const browser = await chromium.launch({
       ...launch,
       headless: true,
-      args: chromiumArgs(),
+      args: chromiumArgs(spec.purpose, marker),
       proxy: { server: spec.proxy.server, username: spec.proxy.username, password: spec.proxy.password, bypass: '<-loopback>' },
     })
     try {
@@ -427,14 +501,22 @@ export class PlaywrightDirectProvider implements BrowserAutomationProvider {
         // A research session reads; it does not send. What the proxy cannot see inside a tunnel is refused here.
       })
       if (spec.purpose === 'PUBLIC_RESEARCH') {
+        let made = 0
         await context.route('**/*', (route) => {
-          const method = route.request().method()
+          const request = route.request()
+          const method = request.method()
           if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') return route.abort('blockedbyclient')
+          // Over https the proxy sees only the tunnel, never the address: the length limit of the policy is applied here.
+          if (request.url().length > MAX_URL_CHARS) return route.abort('blockedbyclient')
+          made += 1
+          if (spec.maxRequests !== undefined && made > spec.maxRequests) return route.abort('blockedbyclient')
           return route.continue()
         })
+        // A WebSocket is a request the route above does not see; a page that reads has no use for one.
+        await context.routeWebSocket(/.*/, (ws) => void ws.close().catch(() => undefined))
       }
       const page = await context.newPage()
-      return new PlaywrightSession(spec.purpose, 'browser', spec.artifactsDir, browser, context, page)
+      return new PlaywrightSession(spec.purpose, 'browser', spec.artifactsDir, browser, context, page, marker)
     } catch (e) {
       await browser.close().catch(() => undefined)
       throw e

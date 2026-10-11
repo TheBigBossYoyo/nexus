@@ -27,8 +27,8 @@ function ps<T>(expression: string): T {
 }
 const list = (value: unknown): string[] => (value === null || value === undefined ? [] : Array.isArray(value) ? (value as string[]) : [String(value)])
 const account = (over: Record<string, unknown>): string => {
-  const state = { Name: 'NexusSandbox', Sid: SANDBOX, Enabled: true, Description: MARK, PrincipalSource: 'Local', Groups: ['S-1-5-32-545'], ...over }
-  return `(Test-NexusAccountState ([pscustomobject]@{ Name='${state.Name}'; Sid='${state.Sid}'; Enabled=$${state.Enabled}; Description='${state.Description}'; PrincipalSource='${state.PrincipalSource}'; Groups=@(${(state.Groups as string[]).map((g) => `'${g}'`).join(',')}) }))`
+  const state = { Name: 'NexusSandbox', Sid: SANDBOX, Enabled: true, Description: MARK, PrincipalSource: 'Local', Groups: ['S-1-5-32-545'], UnreadGroups: [] as string[], ...over }
+  return `(Test-NexusAccountState ([pscustomobject]@{ Name='${state.Name}'; Sid='${state.Sid}'; Enabled=$${state.Enabled}; Description='${state.Description}'; PrincipalSource='${state.PrincipalSource}'; Groups=@(${(state.Groups as string[]).map((g) => `'${g}'`).join(',')}); UnreadGroups=@(${(state.UnreadGroups as string[]).map((g) => `'${g}'`).join(',')}) }))`
 }
 const judgeAccount = (over: Record<string, unknown>): { Ours: boolean; Problems: string[]; Repairable: string[] } => {
   const r = ps<{ Ours: boolean; Problems: unknown; Repairable: unknown }>(account(over))
@@ -73,6 +73,11 @@ d('the sandbox setup trusts no name', () => {
       const r = judgeAccount({ Groups: ['S-1-5-32-545', 'S-1-5-32-544', 'S-1-5-32-555'], Enabled: false })
       expect(r.Problems).toEqual([])
       expect(r.Repairable.sort()).toEqual(['disabled', 'member of the group S-1-5-32-544', 'member of the group S-1-5-32-555'])
+    })
+    it('a group whose members could not be listed: not taken for a group the account is out of', () => {
+      const r = judgeAccount({ UnreadGroups: ['S-1-5-32-544'] })
+      expect(r.Problems.join(' ')).toContain('the members of the group S-1-5-32-544 could not be listed')
+      expect(r.Repairable).toEqual([])
     })
     it('not a local account, or not an ordinary user: refused', () => {
       expect(judgeAccount({ PrincipalSource: 'MicrosoftAccount' }).Problems.join(' ')).toContain('not a local account')

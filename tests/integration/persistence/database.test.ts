@@ -51,12 +51,13 @@ describe('openDatabase', () => {
       { version: 16, name: 'advice-outcomes' },
       { version: 17, name: 'autonomy' },
       { version: 18, name: 'research' },
+      { version: 19, name: 'boundary-action-hash' },
     ])
     first.close()
 
     const second = openDatabase(path)
     open.push(second)
-    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 18 })
+    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 19 })
   })
 
   it('rolls the whole migration back when one fails', () => {
@@ -86,12 +87,13 @@ describe('openDatabase', () => {
         { version: 16, name: 'advice-outcomes', sql: '' },
         { version: 17, name: 'autonomy', sql: '' },
         { version: 18, name: 'research', sql: '' },
+        { version: 19, name: 'boundary-action-hash', sql: '' },
         ...bad,
       ]),
     ).toThrow()
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'extra_%'").all()
     expect(tables).toEqual([])
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 18 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 19 })
   })
 
   it('refuses a database written by a newer schema', () => {

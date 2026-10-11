@@ -29,6 +29,12 @@ using System.Text;
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 struct STARTUPINFO { public uint cb; public string lpReserved; public string lpDesktop; public string lpTitle; public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags; public ushort wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError; }
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+struct STARTUPINFOEX { public STARTUPINFO StartupInfo; public IntPtr lpAttributeList; }
+[StructLayout(LayoutKind.Sequential)]
+struct TRUSTEE { public IntPtr pMultipleTrustee; public int MultipleTrusteeOperation; public int TrusteeForm; public int TrusteeType; public IntPtr ptstrName; }
+[StructLayout(LayoutKind.Sequential)]
+struct EXPLICIT_ACCESS { public uint grfAccessPermissions; public int grfAccessMode; public uint grfInheritance; public TRUSTEE Trustee; }
 [StructLayout(LayoutKind.Sequential)]
 struct SECURITY_ATTRIBUTES { public int nLength; public IntPtr lpSecurityDescriptor; public bool bInheritHandle; }
 [StructLayout(LayoutKind.Sequential)]
@@ -82,6 +88,16 @@ static class N {
     [DllImport(A, SetLastError = true)] public static extern bool GetSecurityDescriptorDacl(IntPtr sd, out bool present, out IntPtr acl, out bool defaulted);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr CreateDesktopW(string name, IntPtr device, IntPtr devmode, uint flags, uint access, ref SECURITY_ATTRIBUTES sa);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool CloseDesktop(IntPtr h);
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr GetProcessWindowStation();
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetThreadDesktop(IntPtr desktop);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr OpenDesktopW(string name, uint flags, bool inherit, uint access);
+    [DllImport(A, SetLastError = true)] public static extern uint GetSecurityInfo(IntPtr handle, int type, uint info, IntPtr owner, IntPtr group, out IntPtr dacl, IntPtr sacl, out IntPtr sd);
+    [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern uint SetEntriesInAclW(uint count, ref EXPLICIT_ACCESS entries, IntPtr oldAcl, out IntPtr newAcl);
+    [DllImport(K, SetLastError = true)] public static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
+    [DllImport(K, SetLastError = true)] public static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returnSize);
+    [DllImport(K)] public static extern void DeleteProcThreadAttributeList(IntPtr list);
+    [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessAsUserW")] public static extern bool CreateProcessAsUserExW(IntPtr tok, string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inh, uint flags, IntPtr env, string cwd, ref STARTUPINFOEX si, out PROCESS_INFORMATION pi);
+    [DllImport(K, SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool WaitNamedPipeW(string name, uint ms);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool CreateProcessWithLogonW(string user, string domain, string password, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
 }
 
@@ -108,10 +124,13 @@ class Spec {
     public string Credential = null;
     public string Stage2 = null;
     public string Stage2Dir = null;
+    // ISOLATED: the SID of the sandbox account NEXUS verified. STAGE2: the SID this process must be running as.
+    public string AccountSid = null;
+    public string ExpectSid = null;
 }
 
 static class Program {
-    const uint CREATE_SUSPENDED = 0x4, CREATE_NO_WINDOW = 0x08000000, CREATE_UNICODE_ENVIRONMENT = 0x400;
+    const uint CREATE_SUSPENDED = 0x4, CREATE_NO_WINDOW = 0x08000000, CREATE_UNICODE_ENVIRONMENT = 0x400, EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     const uint STARTF_USESTDHANDLES = 0x100;
     const uint JOB_KILL_ON_CLOSE = 0x2000, JOB_ACTIVE_PROCESS = 0x8, JOB_MEMORY = 0x200, JOB_DIE_ON_UNHANDLED = 0x400;
     const int EXIT_USAGE = 120, EXIT_SPEC = 121, EXIT_CONTAINMENT = 125, EXIT_START = 126, EXIT_TIMEOUT = 124;
@@ -149,6 +168,8 @@ static class Program {
                 else if (key == "credential") spec.Credential = B64(value);
                 else if (key == "stage2") spec.Stage2 = B64(value);
                 else if (key == "stage2-dir") spec.Stage2Dir = B64(value);
+                else if (key == "account-sid") spec.AccountSid = value;
+                else if (key == "expect-sid") spec.ExpectSid = value;
                 // An unknown key is refused: a spec this launcher does not fully understand is not run.
                 else throw new Fail(EXIT_SPEC, "unknown spec key: " + key);
             } catch (Fail) { throw; } catch (Exception) { throw new Fail(EXIT_SPEC, "bad value for " + key); }
@@ -159,6 +180,11 @@ static class Program {
         if (string.IsNullOrEmpty(spec.Command)) throw new Fail(EXIT_SPEC, "the spec has no command");
         if (string.IsNullOrEmpty(spec.Cwd) || !Directory.Exists(spec.Cwd)) throw new Fail(EXIT_SPEC, "the working directory does not exist");
         if (spec.MaxProcesses < 1 || spec.MaxProcesses > 4096) throw new Fail(EXIT_SPEC, "max-processes out of range");
+        foreach (string sid in new string[] { spec.AccountSid, spec.ExpectSid }) {
+            if (sid == null) continue;
+            if (sid.Length < 8 || sid.Length > 120 || !sid.StartsWith("S-1-")) throw new Fail(EXIT_SPEC, "bad SID");
+            foreach (char c in sid.Substring(4)) if (!((c >= '0' && c <= '9') || c == '-')) throw new Fail(EXIT_SPEC, "bad SID");
+        }
         if (spec.Desktop != null) {
             if (spec.Desktop.Length < 1 || spec.Desktop.Length > 40) throw new Fail(EXIT_SPEC, "bad desktop name");
             foreach (char c in spec.Desktop) if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) throw new Fail(EXIT_SPEC, "bad desktop name");
@@ -273,8 +299,33 @@ static class Program {
      */
     static int RunAsSandboxAccount(Spec spec) {
         if (!File.Exists(spec.Stage2)) throw new Fail(EXIT_CONTAINMENT, "the launcher for the sandbox account is missing: " + spec.Stage2);
+        // The copy is named after its content. The account can write where it lies (at medium integrity only, which
+        // contained code never has); a copy that is no longer what its name says is not started.
+        string digest; using (SHA256 sha = SHA256.Create()) digest = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(spec.Stage2))).Replace("-", "").ToLowerInvariant();
+        if (Path.GetFileName(spec.Stage2).ToLowerInvariant().IndexOf(digest.Substring(0, 16)) < 0) throw new Fail(EXIT_CONTAINMENT, "the launcher for the sandbox account is not the file it is named after: " + spec.Stage2);
         string[] credential = CredentialRead(spec.Credential);
+        // Who the stored name is on this machine now, and that it is the account NEXUS verified.
+        string accountSid;
+        try { accountSid = ((System.Security.Principal.SecurityIdentifier)new System.Security.Principal.NTAccount(Environment.MachineName, credential[0]).Translate(typeof(System.Security.Principal.SecurityIdentifier))).Value; }
+        catch (Exception) { throw new Fail(EXIT_CONTAINMENT, "the sandbox account on record does not exist on this machine"); }
+        if (spec.AccountSid != null && !string.Equals(spec.AccountSid, accountSid, StringComparison.OrdinalIgnoreCase)) throw new Fail(EXIT_CONTAINMENT, "the sandbox account on record is not the account that was verified");
         IntPtr job = BuildJob(spec);
+        // The desktop of the command is made here, by the user: the job then keeps its limit on desktops, so nothing
+        // inside makes one or switches to one. Kept open while this launcher lives.
+        //
+        // How the account's process gets onto it. Windows starts a process "as another user" on the desktop of the
+        // thread that asks, and gives its token the asking session's logon identifier, by which it may use that
+        // desktop, the window station and the session's named objects. Naming a desktop to Windows instead leaves
+        // that identifier out, and a process without it cannot create a named object in the session at all
+        // (measured: Git Bash dies at start). So no desktop is named: this thread moves to the new desktop first,
+        // and the account's process is started from there. It never is on the desktop the user sees.
+        string desktopName = spec.Desktop != null ? spec.Desktop : RandomDesktopName();
+        IntPtr desktop = MakeDesktop(desktopName, accountSid);
+        // The identifier would let the account open the user's own desktop too, and read the screen from it
+        // (measured). The account itself is refused there, and refused the screen and the clipboard of the window
+        // station: a refusal by name outranks what the identifier allows.
+        RefuseUsersDesktop(accountSid);
+        if (!N.SetThreadDesktop(desktop)) throw new Fail(EXIT_CONTAINMENT, "this launcher could not move to the command's desktop: " + Marshal.GetLastWin32Error());
 
         StringBuilder inner = new StringBuilder();
         inner.Append("version=1\nprofile=STAGE2\n");
@@ -284,7 +335,8 @@ static class Program {
         if (spec.MaxJobMemory > 0) inner.Append("max-job-memory=" + spec.MaxJobMemory + "\n");
         inner.Append("ui-limits=" + spec.UiLimits + "\n");
         if (spec.Window) inner.Append("window=1\n");
-        if (spec.Desktop != null) inner.Append("desktop=" + spec.Desktop + "\n");
+        inner.Append("expect-sid=" + accountSid + "\n");
+        inner.Append("desktop=" + desktopName + "\n");
         byte[] name = new byte[12]; using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(name);
         string innerPath = Path.Combine(spec.Stage2Dir, BitConverter.ToString(name).Replace("-", "").ToLowerInvariant() + ".spec");
         try { Directory.CreateDirectory(spec.Stage2Dir); File.WriteAllText(innerPath, inner.ToString(), new UTF8Encoding(false)); }
@@ -336,7 +388,45 @@ static class Program {
         WriteReport(spec, job, pi.dwProcessId, code.ToString());
         N.TerminateJobObject(job, 0);
         N.CloseHandle(job);
+        N.CloseDesktop(desktop);
         return (int)code;
+    }
+
+    static string RandomDesktopName() {
+        byte[] name = new byte[8]; using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(name);
+        return "nx-" + BitConverter.ToString(name).Replace("-", "").ToLowerInvariant();
+    }
+
+    /** Adds or replaces the entry of one account in the access list of a window station or desktop: `mode` 3 refuses the rights, 2 allows exactly them. */
+    static void SetWindowObjectAccess(IntPtr handle, string sid, int mode, uint rights, string what) {
+        IntPtr dacl, sd;
+        uint r = N.GetSecurityInfo(handle, 7 /* SE_WINDOW_OBJECT */, 0x4, IntPtr.Zero, IntPtr.Zero, out dacl, IntPtr.Zero, out sd);
+        if (r != 0) throw new Fail(EXIT_CONTAINMENT, "the access list of " + what + " could not be read: " + r);
+        EXPLICIT_ACCESS ea = new EXPLICIT_ACCESS();
+        ea.grfAccessPermissions = rights; ea.grfAccessMode = mode; ea.grfInheritance = 0;
+        ea.Trustee.TrusteeForm = 0 /* TRUSTEE_IS_SID */; ea.Trustee.TrusteeType = 1 /* user */; ea.Trustee.ptstrName = Sid(sid);
+        IntPtr merged;
+        r = N.SetEntriesInAclW(1, ref ea, dacl, out merged);
+        if (r != 0) { N.LocalFree(sd); throw new Fail(EXIT_CONTAINMENT, "the access list of " + what + " could not be extended: " + r); }
+        r = N.SetSecurityInfo(handle, 7, 0x4, IntPtr.Zero, IntPtr.Zero, merged, IntPtr.Zero);
+        N.LocalFree(merged); N.LocalFree(sd);
+        if (r != 0) throw new Fail(EXIT_CONTAINMENT, "the access list of " + what + " could not be set: " + r);
+    }
+
+    /**
+     * Refuses the sandbox account the desktop the user works on (every right), and on the window station the
+     * screen, the clipboard, making desktops and changing attributes. Both lists are the user's to change, and the
+     * entries stay for the session: they name an account that has no business there. If it cannot be done,
+     * nothing is started.
+     */
+    static void RefuseUsersDesktop(string sid) {
+        IntPtr users = N.OpenDesktopW("Default", 0, false, 0x00020000 | 0x00040000 /* READ_CONTROL | WRITE_DAC */);
+        if (users == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "the user's desktop could not be opened to close it to the sandbox account: " + Marshal.GetLastWin32Error());
+        try { SetWindowObjectAccess(users, sid, 3 /* DENY_ACCESS */, 0x000F01FF, "the user's desktop"); } finally { N.CloseDesktop(users); }
+        IntPtr station = N.GetProcessWindowStation();
+        if (station == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "this process has no window station");
+        // WINSTA_ACCESSCLIPBOARD | WINSTA_CREATEDESKTOP | WINSTA_WRITEATTRIBUTES | WINSTA_READSCREEN
+        SetWindowObjectAccess(station, sid, 3, 0x4 | 0x8 | 0x10 | 0x200, "the window station");
     }
 
     /**
@@ -345,9 +435,9 @@ static class Program {
      * (the account that runs the command): no other account and no other session's application reaches it. If it cannot be made, nothing
      * is started: there is no falling back to the user's desktop.
      */
-    static IntPtr MakeDesktop(string name) {
+    static IntPtr MakeDesktop(string name, string alsoFor) {
         IntPtr sd; uint size;
-        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;OW)(A;;GA;;;SY)S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;OW)(A;;GA;;;SY)" + (alsoFor != null ? "(A;;GA;;;" + alsoFor + ")" : "") + "S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
         SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
         sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)); sa.lpSecurityDescriptor = sd; sa.bInheritHandle = false;
         IntPtr desktop = N.CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000 /* GENERIC_ALL */, ref sa);
@@ -362,26 +452,53 @@ static class Program {
         // The second step of ISOLATED already runs inside the job the first step made, and Windows does not nest a
         // job under one that sets UI limits. The command inherits that job; none is made here.
         bool inner = spec.Profile == "STAGE2";
+        if (inner) {
+            // The second step is the account's own process: it says who it is, and that must be who was meant.
+            string self = System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
+            if (spec.ExpectSid == null || !string.Equals(spec.ExpectSid, self, StringComparison.OrdinalIgnoreCase)) throw new Fail(EXIT_CONTAINMENT, "the inner step does not run as the sandbox account it was started for");
+        }
         IntPtr job = inner ? IntPtr.Zero : BuildJob(spec);
         IntPtr token = BuildToken(spec);
         IntPtr env = BuildEnvironment(spec);
 
-        STARTUPINFO si = new STARTUPINFO();
-        si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdInput = StdOrNul(-10, 0x80000000);
-        si.hStdOutput = StdOrNul(-11, 0x40000000);
-        si.hStdError = StdOrNul(-12, 0x40000000);
-        // Kept open for as long as this launcher lives, which is as long as the command does.
+        STARTUPINFOEX six = new STARTUPINFOEX();
+        six.StartupInfo.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFOEX));
+        six.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        six.StartupInfo.hStdInput = StdOrNul(-10, 0x80000000);
+        six.StartupInfo.hStdOutput = StdOrNul(-11, 0x40000000);
+        six.StartupInfo.hStdError = StdOrNul(-12, 0x40000000);
+        // Every command has a desktop of its own, whether it shows a window or not: on the user's desktop a process
+        // can read the screen, whatever its integrity (measured by the audit of 0.8). Kept open for as long as this
+        // launcher lives, which is as long as the command does. The second step of ISOLATED is on the desktop the
+        // first step made for it, and the command inherits that.
         IntPtr desktop = IntPtr.Zero;
-        if (spec.Desktop != null) { desktop = MakeDesktop(spec.Desktop); si.lpDesktop = "WinSta0\\" + spec.Desktop; }
+        if (!inner) {
+            string desktopName = spec.Desktop != null ? spec.Desktop : RandomDesktopName();
+            desktop = MakeDesktop(desktopName, null);
+            six.StartupInfo.lpDesktop = "WinSta0\\" + desktopName;
+        } else if (spec.Desktop != null) six.StartupInfo.lpDesktop = "WinSta0\\" + spec.Desktop;
+        // The command inherits its three standard handles and no other. This launcher holds whatever its parent
+        // let it inherit (pipes and files of the runtime and of whatever started that), and without a list every
+        // one of them would be the command's too, with the access it was opened with.
+        List<IntPtr> handles = new List<IntPtr>();
+        foreach (IntPtr h in new IntPtr[] { six.StartupInfo.hStdInput, six.StartupInfo.hStdOutput, six.StartupInfo.hStdError }) if (!handles.Contains(h)) handles.Add(h);
+        IntPtr listSize = IntPtr.Zero;
+        N.InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref listSize);
+        six.lpAttributeList = Marshal.AllocHGlobal(listSize);
+        IntPtr handleArray = Marshal.AllocHGlobal(IntPtr.Size * handles.Count);
+        for (int i = 0; i < handles.Count; i++) Marshal.WriteIntPtr(handleArray, i * IntPtr.Size, handles[i]);
+        if (!N.InitializeProcThreadAttributeList(six.lpAttributeList, 1, 0, ref listSize) || !N.UpdateProcThreadAttribute(six.lpAttributeList, 0, new IntPtr(0x00020002) /* PROC_THREAD_ATTRIBUTE_HANDLE_LIST */, handleArray, new IntPtr(IntPtr.Size * handles.Count), IntPtr.Zero, IntPtr.Zero))
+            throw new Fail(EXIT_CONTAINMENT, "the list of handles the command may inherit could not be made: " + Marshal.GetLastWin32Error());
 
-        uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | (spec.Window ? 0 : CREATE_NO_WINDOW);
+        uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | (spec.Window ? 0 : CREATE_NO_WINDOW);
         PROCESS_INFORMATION pi;
         StringBuilder commandLine = new StringBuilder(spec.Command);
         // Suspended: the process exists and has run nothing when it is put in the job.
-        if (!N.CreateProcessAsUserW(token, null, commandLine, IntPtr.Zero, IntPtr.Zero, true, flags, env, spec.Cwd, ref si, out pi)) {
-            int e = Marshal.GetLastWin32Error();
+        bool created = N.CreateProcessAsUserExW(token, null, commandLine, IntPtr.Zero, IntPtr.Zero, true, flags, env, spec.Cwd, ref six, out pi);
+        int createError = Marshal.GetLastWin32Error();
+        N.DeleteProcThreadAttributeList(six.lpAttributeList);
+        if (!created) {
+            int e = createError;
             throw new Fail(EXIT_START, "the command could not be started: " + new Win32Exception(e).Message + " (" + e + ")");
         }
         bool inJob = false;
@@ -445,7 +562,14 @@ static class Program {
         bool present, defaulted; IntPtr dacl, sacl;
         if (!N.GetSecurityDescriptorDacl(sd, out present, out dacl, out defaulted) || !N.GetSecurityDescriptorSacl(sd, out present, out sacl, out defaulted)) throw new Fail(EXIT_CONTAINMENT, "the pipe's protection could not be read back: " + Marshal.GetLastWin32Error());
         // READ_CONTROL | WRITE_DAC | WRITE_OWNER: enough to set the list and the label, not to read or write the pipe.
-        IntPtr h = N.CreateFileW(pipe, 0x00020000 | 0x00040000 | 0x00080000, 0, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        IntPtr h = IntPtr.Zero;
+        // Every instance of the pipe may be taken at this moment (ERROR_PIPE_BUSY): wait for one, a few times.
+        for (int attempt = 0; attempt < 40; attempt++) {
+            h = N.CreateFileW(pipe, 0x00020000 | 0x00040000 | 0x00080000, 0, IntPtr.Zero, 3, 0, IntPtr.Zero);
+            if (h != IntPtr.Zero && h != new IntPtr(-1)) break;
+            if (Marshal.GetLastWin32Error() != 231) break;
+            N.WaitNamedPipeW(pipe, 250);
+        }
         if (h == IntPtr.Zero || h == new IntPtr(-1)) throw new Fail(EXIT_CONTAINMENT, "the pipe could not be opened to protect it: " + Marshal.GetLastWin32Error());
         // DACL | PROTECTED_DACL (nothing inherited) | LABEL.
         uint result = N.SetSecurityInfo(h, 6 /* SE_KERNEL_OBJECT */, 0x4 | 0x80000000 | 0x10, IntPtr.Zero, IntPtr.Zero, dacl, sacl);

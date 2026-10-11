@@ -1,3 +1,5 @@
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -25,6 +27,8 @@ export interface SandboxAccountRef {
   stage2Path: string
   /** A directory the account can read, for the inner spec. */
   stage2Dir: string
+  /** The SID of the account NEXUS verified. The launcher starts nothing as any other account. */
+  sid?: string
 }
 
 export interface LaunchSpec {
@@ -42,8 +46,10 @@ export interface LaunchSpec {
   /** JOB_OBJECT_UILIMIT_* bits. Default: all of them. An application with a window needs fewer. */
   uiLimits?: number
   /**
-   * A desktop made for the command, by name (letters, digits, '-'). What it shows is on no screen and takes none
-   * of the user's input. For an application with a window that NEXUS looks at through its debugging port.
+   * The name of the command's desktop (letters, digits, '-'). Every contained command runs on a desktop of its
+   * own, which the launcher makes: what it shows is on no screen, it takes none of the user's input and it cannot
+   * read the user's screen. Without a name the launcher picks one. An application with a window that NEXUS looks
+   * at through its debugging port is given one.
    */
   desktop?: string
   /** Where the launcher writes what the job did (process count, peak memory, exit). */
@@ -76,6 +82,10 @@ export function renderSpec(spec: LaunchSpec): string {
   if (spec.profile === 'ISOLATED') {
     if (spec.sandbox === undefined) throw new Error('The ISOLATED profile needs the sandbox account.')
     lines.push(`credential=${b64(spec.sandbox.credentialPath)}`, `stage2=${b64(spec.sandbox.stage2Path)}`, `stage2-dir=${b64(spec.sandbox.stage2Dir)}`)
+    if (spec.sandbox.sid !== undefined) {
+      if (!/^S-1-5-21-[0-9-]{5,100}$/.test(spec.sandbox.sid)) throw new Error('The sandbox account has no usable SID.')
+      lines.push(`account-sid=${spec.sandbox.sid}`)
+    }
   }
   return `${lines.join('\n')}\n`
 }
@@ -203,7 +213,14 @@ export class Launcher {
     const beside = join(root, 'beside')
     const secret = join(root, 'secret')
     const userOnly = profile === 'ISOLATED' && place.userOnlyRoot !== undefined ? join(place.userOnlyRoot, `verify-${id}`) : null
+    // What the account's request is checked against: a listener here that answers anything.
+    const control = profile === 'ISOLATED' ? createServer((_req, res) => res.end('ok')) : null
+    let controlPort = 0
     try {
+      if (control !== null) {
+        await new Promise<void>((resolve, reject) => control.once('error', reject).listen(0, '127.0.0.1', resolve))
+        controlPort = (control.address() as AddressInfo).port
+      }
       for (const dir of [inside, beside, secret]) mkdirSync(dir, { recursive: true })
       writeFileSync(join(secret, 'sentinel.txt'), 'nexus-verify-sentinel')
       if (userOnly !== null) {
@@ -221,8 +238,13 @@ export class Launcher {
         `"${join(systemRoot, 'System32', 'whoami.exe')}" > "${join(inside, 'who.txt')}" 2>nul`,
       ]
       if (userOnly !== null) lines.push(`(type "${join(userOnly, 'sentinel.txt')}" > "${join(inside, 'u.txt')}") 2>nul`)
-      // A public resolver's address on the DNS port: reached means the account has a route out.
-      if (profile === 'ISOLATED') lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://1.1.1.1/ && echo reached> "${join(inside, 'net.txt')}"`)
+      // A public address over HTTP: reached means the account has a route out. That the same request fails could
+      // also mean that the request cannot be made at all here (no curl, no network), so its counterpart is made
+      // first, to an address the account must reach: a listener of this process on the loopback.
+      if (profile === 'ISOLATED') {
+        lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://127.0.0.1:${controlPort}/ && echo reached> "${join(inside, 'loop.txt')}"`)
+        lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://1.1.1.1/ && echo reached> "${join(inside, 'net.txt')}"`)
+      }
       lines.push('exit /b 0')
       const comspec = process.env['ComSpec'] ?? 'C:\\Windows\\System32\\cmd.exe'
       const specPath = this.writeSpec({ profile, cwd: inside, commandLine: `${quoteArg(comspec)} /d /s /c "${lines.join(' & ')}"`, env: minimalEnv(inside), timeoutMs: 30_000, maxProcesses: 16, ...(place.sandbox ? { sandbox: place.sandbox } : {}) })
@@ -234,16 +256,19 @@ export class Launcher {
       if (!existsSync(join(inside, 'w.txt'))) return done(false, 'A contained process could not write in its own directory.')
       if (existsSync(join(beside, 'w.txt'))) return done(false, 'A contained process wrote outside its directory: the containment does not hold on this machine.')
       if (read('r.txt').includes('nexus-verify-sentinel')) return done(false, 'A contained process read a protected file: the containment does not hold on this machine.')
-      if (profile === 'RESTRICTED') return done(true, 'Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault and unprotected files are within its reach.')
+      if (profile === 'RESTRICTED') return done(true, 'Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.')
       const who = read('who.txt').trim().toLowerCase()
       const self = `${(process.env['USERDOMAIN'] ?? '').toLowerCase()}\\${(process.env['USERNAME'] ?? '').toLowerCase()}`
       if (who === '' || who === self) return done(false, 'The contained process did not run as the sandbox account.')
       if (read('u.txt').includes('nexus-verify-user-sentinel')) return done(false, "The sandbox account read a file in the user's profile: the containment does not hold on this machine.")
       if (read('net.txt').includes('reached')) return done(false, 'The sandbox account reached the Internet directly: its firewall rule is missing or not effective.')
-      return done(true, `Verified at this start: a contained process ran as ${who}, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, and had no direct route to the Internet.`)
+      // Without the counterpart the failed request proves nothing: said as it is.
+      if (!read('loop.txt').includes('reached')) return done(false, 'Whether the sandbox account has a route to the Internet could not be established: its test request did not even reach NEXUS on this machine.')
+      return done(true, `Verified at this start: a contained process ran as ${who}, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.`)
     } catch (e) {
       return done(false, `The containment could not be verified: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
+      control?.close()
       try {
         await this.label('clear', secret).catch(() => undefined)
         rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })

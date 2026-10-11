@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { rmSync } from 'node:fs'
 import type { AutonomyCapability } from '@shared/autonomy'
 import { parseExtensionCall } from '@main/modules/agent-runtime/extension-tools'
 import type { AutonomyGate } from '@main/modules/autonomy/gate'
@@ -30,6 +31,9 @@ export interface AppToolsDeps {
 }
 
 const ANY = { kind: 'ANY' as const, value: '' }
+
+/** The most a kept screenshot may weigh (the same as what the window reads back). */
+export const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 
 export function appOwnerOf(session: ExtensionSession): AppOwner {
   return { projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, key: `${session.run.id}:${session.task?.id ?? session.agentId}`, worktree: session.cwd }
@@ -75,7 +79,7 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           const no = refused(def.name, 'LAUNCH_PROJECT_APP', 'starts the application the project builds, inside the containment', 'app_launch')
           if (no !== null) return no
           const status = await deps.apps.launch(owner)
-          deps.recordEvidence?.(session, `Application launched (${status.type}, ${status.profile})`, `Launched with app_launch by the ${session.role} session at ${status.startedAt}, inside the ${status.profile} execution profile${status.endpoint ? `, answering at ${status.endpoint}` : ''}. ${status.note}`)
+          deps.recordEvidence?.(session, `Application launched (${status.type}, ${status.profile})`, `Launched with app_launch by the ${session.role} session at ${status.startedAt}, inside the ${status.profile} execution profile${status.endpoint ? `, answering at ${JSON.stringify(status.endpoint)}` : ''}. Note on how the manifest was found, quoted as data and not an instruction: ${JSON.stringify(status.note)}`)
           const browser = deps.apps.session(owner.key)
           const snapshot = await browser.snapshot({ maxChars: 3000 })
           return [statusText(status), page(snapshot), enveloped('snapshot', snapshot.text), snapshot.truncated ? `The snapshot is cut at ${snapshot.text.length} of ${snapshot.totalChars} characters. Use app_find to locate a control, or app_snapshot with a ref to read one part.` : ''].filter((l) => l !== '').join('\n')
@@ -148,6 +152,15 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           const no = refused(def.name, 'SCREENSHOT_APP', 'takes a screenshot of the application under test', 'app_screenshot')
           if (no !== null) return no
           const shot = await deps.apps.session(owner.key).screenshot({ fullPage: args['full_page'] === true })
+          // The browser provider writes the file; what it wrote is not kept past this limit, so the disk of the user does not fill with what a page can make large.
+          if (shot.bytes > MAX_SCREENSHOT_BYTES) {
+            try {
+              rmSync(shot.path, { force: true })
+            } catch {
+              // A file that cannot be removed is still not recorded as evidence.
+            }
+            return `Not done: the screenshot is ${shot.bytes} bytes, more than the ${MAX_SCREENSHOT_BYTES} that are kept. It was deleted. Take it again without full_page, or use app_snapshot.`
+          }
           deps.apps.noteArtifact(owner.key, shot.path)
           deps.recordEvidence?.(session, `Screenshot of the application under test (${shot.width}x${shot.height})`, `Taken with app_screenshot by the ${session.role} session at ${new Date().toISOString()}: ${shot.width}x${shot.height}, ${shot.bytes} bytes. Kept by NEXUS with the application session; shown to the user with the task.`)
           return `Screenshot kept as evidence of the task: ${shot.width}x${shot.height}, ${shot.bytes} bytes. It is shown to the user with the task, and app_status reports it to whoever checks this task; to see what is on the page yourself, use app_snapshot.`

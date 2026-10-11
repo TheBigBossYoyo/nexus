@@ -1,3 +1,5 @@
+import { actionHashOf } from '@main/modules/autonomy/resource'
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { AUTONOMY_CAPABILITIES, AUTONOMY_CAPABILITY_NAMES, AUTONOMY_POLICY_VERSION, allowedScopes, profileCapabilities, profileSummary, type AutonomyAuditEvent, type AutonomyCapability, type AutonomyProfile, type BoundaryRequest, type CapabilityGrant, type CapabilityRequest } from '@shared/autonomy'
 import { CapabilityBroker, type BoundaryRequestStorePort, type GrantStorePort } from '@main/modules/autonomy/broker'
@@ -31,6 +33,8 @@ function harness(profile: AutonomyProfile | null = 'AUTONOMOUS_PROJECT') {
   const requestStore: BoundaryRequestStorePort = {
     insert: (r) => void requests.push({ ...r }),
     findByKey: (key) => [...requests].reverse().find((r) => r.dedupeKey === key) ?? null,
+    listByKey: (key) => [...requests].reverse().filter((r) => r.dedupeKey === key).sort((a, b) => Number(b.state === 'PENDING') - Number(a.state === 'PENDING')),
+    countForCapability: (projectId, runId, capability) => requests.filter((r) => r.projectId === projectId && r.runId === runId && r.capability === capability).length,
     touch: (id, at) => {
       const r = requests.find((x) => x.id === id)
       if (r) {
@@ -77,8 +81,12 @@ function req(capability: AutonomyCapability, over: Partial<CapabilityRequest> = 
     action: 'Bash: pnpm test',
     reason: 'runs the project tests',
     ...over,
+    // The gate computes it from the whole call; here the exact text stands in for the call, unless a test says otherwise.
+    actionHash: over.actionHash !== undefined ? over.actionHash : hashOf(over.action ?? 'Bash: pnpm test'),
   }
 }
+
+const hashOf = (text: string): string => createHash('sha256').update(text).digest('hex')
 
 describe('the capability table', () => {
   it('gives every capability a kind and a sentence, and no profile holds a boundary or a forbidden one', () => {
@@ -367,7 +375,7 @@ describe('the capability broker', () => {
     const broker = new CapabilityBroker({
       enrollment: (projectId) => ({ projectId, profile: 'AUTONOMOUS_PROJECT', enrolledAt: '', policyVersion: AUTONOMY_POLICY_VERSION }),
       grants: { insert: () => undefined, listUsable: () => [], consume: () => false, revoke: () => false, get: () => null },
-      requests: { insert: () => undefined, findByKey: () => null, touch: () => undefined, decide: () => false, get: () => null, listPending: () => [] },
+      requests: { insert: () => undefined, findByKey: () => null, listByKey: () => [], countForCapability: () => 0, touch: () => undefined, decide: () => false, get: () => null, listPending: () => [] },
       runActive: () => true,
       audit: () => {
         throw new Error('disk full')
@@ -377,5 +385,101 @@ describe('the capability broker', () => {
     expect(broker.decide(req('RUN_TESTS'), true).outcome).toBe('AUTHORIZED')
     expect(broker.decide(req('HOST_POWER'), false).outcome).toBe('DENIED')
     expect(h.requests).toHaveLength(0)
+  })
+})
+
+describe('allow once is bound to the exact call', () => {
+  const prefix = 'git push origin '.padEnd(299, 'x')
+
+  it('another command with the same first 299 characters is not covered; the identical command is', () => {
+    const h = harness()
+    const asked = h.broker.decide(req('GIT_PUSH', { action: `${prefix}A`, actionHash: hashOf('full command A') }), false)
+    if (asked.outcome !== 'BOUNDARY_GRANT_REQUIRED') throw new Error('expected a request')
+    h.broker.resolve({ requestId: asked.requestId, decision: 'ALLOW_ONCE' })
+    // The text shown is equal; the call is not.
+    const other = h.broker.decide(req('GIT_PUSH', { action: `${prefix}A`, actionHash: hashOf('full command B, --force') }), false)
+    expect(other.outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+    expect(h.grants[0]?.consumedAt).toBeNull()
+    expect(h.broker.decide(req('GIT_PUSH', { action: `${prefix}A`, actionHash: hashOf('full command A') }), false)).toMatchObject({ outcome: 'AUTHORIZED', by: 'GRANT' })
+    expect(h.broker.decide(req('GIT_PUSH', { action: `${prefix}A`, actionHash: hashOf('full command A') }), false).outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+  })
+
+  it('a once grant whose request is missing is not usable', () => {
+    const h = harness()
+    h.grants.push({ id: 'g', projectId: 'p1', capability: 'GIT_PUSH', scope: 'ONCE', runId: 'run-1', resource: { kind: 'ANY', value: '' }, createdBy: 'USER', createdAt: '', expiresAt: null, reason: '', requestId: null, consumedAt: null, revokedAt: null })
+    h.grants.push({ id: 'g2', projectId: 'p1', capability: 'GIT_PUSH', scope: 'ONCE', runId: 'run-1', resource: { kind: 'ANY', value: '' }, createdBy: 'USER', createdAt: '', expiresAt: null, reason: '', requestId: 'no-such-request', consumedAt: null, revokedAt: null })
+    expect(h.broker.decide(req('GIT_PUSH'), false).outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+    expect(h.grants.every((g) => g.consumedAt === null)).toBe(true)
+  })
+
+  it('a once grant of a request made before the hash existed is not usable, and neither is a call without one', () => {
+    const h = harness()
+    const asked = h.broker.decide(req('GIT_PUSH', { actionHash: null }), false)
+    if (asked.outcome !== 'BOUNDARY_GRANT_REQUIRED') throw new Error('expected a request')
+    expect(h.requests[0]?.actionHash).toBeNull()
+    h.broker.resolve({ requestId: asked.requestId, decision: 'ALLOW_ONCE' })
+    expect(h.broker.decide(req('GIT_PUSH', { actionHash: null }), false).outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+    expect(h.broker.decide(req('GIT_PUSH'), false).outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+  })
+
+  it('strips the characters that reorder or hide text from what is stored', () => {
+    const h = harness()
+    h.broker.decide(req('GIT_PUSH', { action: `git push ${String.fromCharCode(0x202e)}orig\u0007in` }), false)
+    expect(h.requests[0]?.action).toBe('git push origin')
+  })
+})
+
+describe('different actions of one need', () => {
+  const push = (h: ReturnType<typeof harness>, text: string, runId = 'run-1') => h.broker.decide(req('GIT_PUSH', { runId, action: text, actionHash: hashOf(text) }), false)
+
+  it('the same action is one request, a different action under the same capability and resource is its own', () => {
+    const h = harness()
+    const a = push(h, 'git push origin main')
+    const b = push(h, 'git push --force https://other.example/repo')
+    expect(a).toMatchObject({ deduplicated: false })
+    expect(b).toMatchObject({ deduplicated: false })
+    expect(push(h, 'git push origin main')).toMatchObject({ deduplicated: true })
+    expect(push(h, 'git push origin main')).toMatchObject({ deduplicated: true })
+    expect(h.requests).toHaveLength(2)
+    expect(h.requests.map((r) => r.occurrences)).toEqual([3, 1])
+  })
+
+  it('refuses at once after 12 distinct requests for a capability in a mission, creates none, and audits it', () => {
+    const h = harness()
+    for (let i = 0; i < 12; i += 1) expect(push(h, `git push remote-${i}`).outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+    const over = push(h, 'git push remote-13')
+    expect(over.outcome).toBe('DENIED')
+    if (over.outcome === 'DENIED') expect(over.reason).toContain('limit was reached')
+    expect(h.requests).toHaveLength(12)
+    expect(h.audit.some((e) => e.outcome === 'DENIED' && e.reason.includes('limit was reached'))).toBe(true)
+    // The same action as one that exists is still the same request; another mission has its own count.
+    expect(push(h, 'git push remote-3')).toMatchObject({ outcome: 'BOUNDARY_GRANT_REQUIRED', deduplicated: true })
+    expect(push(h, 'git push remote-13', 'run-2').outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+  })
+
+  it('a denial is final for the capability and resource in the mission, for any action', () => {
+    const h = harness()
+    const first = push(h, 'git push origin main')
+    if (first.outcome !== 'BOUNDARY_GRANT_REQUIRED') throw new Error('expected a request')
+    h.broker.resolve({ requestId: first.requestId, decision: 'DENY' })
+    for (const text of ['git push origin main', 'git push origin other', 'git push --force origin main']) expect(push(h, text).outcome).toBe('DENIED')
+    expect(h.requests).toHaveLength(1)
+    expect(push(h, 'git push origin main', 'run-2').outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+  })
+})
+
+describe('what a one-time approval is bound to', () => {
+  it('is the command itself: the same command described anew or given another time limit is the same action', () => {
+    const first = actionHashOf('Bash', { command: 'git push origin HEAD', description: 'Push the branch', timeout: 60000 }, 'git push origin HEAD')
+    expect(actionHashOf('Bash', { command: 'git push origin HEAD', description: 'Retry the push now that it is allowed', timeout: 120000, run_in_background: false }, 'git push origin HEAD')).toBe(first)
+    expect(actionHashOf('Bash', { command: 'git push origin HEAD --force', description: 'Push the branch' }, 'git push origin HEAD')).not.toBe(first)
+    expect(actionHashOf('Bash', { command: 'git push  origin HEAD' }, 'git push origin HEAD')).not.toBe(first)
+    expect(actionHashOf('PowerShell', { command: 'git push origin HEAD' }, 'git push origin HEAD')).not.toBe(first)
+  })
+  it('for a tool without a command, its input, whatever the order of the keys; and the text of the action when there is no input', () => {
+    expect(actionHashOf('WebFetch', { url: 'https://a.example/x', prompt: 'p' }, 'x')).toBe(actionHashOf('WebFetch', { prompt: 'p', url: 'https://a.example/x', description: 'again' }, 'y'))
+    expect(actionHashOf('WebFetch', { url: 'https://a.example/y', prompt: 'p' }, 'x')).not.toBe(actionHashOf('WebFetch', { url: 'https://a.example/x', prompt: 'p' }, 'x'))
+    expect(actionHashOf('Bash', {}, 'git push origin main')).toBe(actionHashOf('Bash', {}, 'git push origin main'))
+    expect(actionHashOf('Bash', {}, 'git push origin main')).not.toBe(actionHashOf('Bash', {}, 'git push origin other'))
   })
 })
