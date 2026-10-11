@@ -322,9 +322,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     stateChanged()
   })
 
-  // UI tests answer confirmations through the window they drive. Only with the scripted runtime, never in a package.
+  // UI tests answer confirmations through the window they drive: with the scripted runtime, or in an acceptance
+  // run of a development build that says so. Never in a package: there the question is always the runtime's own.
   const confirmThroughWindow =
-    !host.isPackaged && env['NEXUS_FAKE_RUNTIME'] === '1' && env['NEXUS_FAKE_CONFIRM'] === 'window'
+    !host.isPackaged && ((env['NEXUS_FAKE_RUNTIME'] === '1' && env['NEXUS_FAKE_CONFIRM'] === 'window') || env['NEXUS_ACCEPT_CONFIRM'] === 'window')
   /**
    * A question to the user. A confirmation (power control, trusting a case, a settings change that starts a
    * program, stopping while work runs) is shown by the runtime process itself and never travels over the pipe:

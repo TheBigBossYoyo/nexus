@@ -92,7 +92,9 @@ const BOUNDARY = [
 ].join('\n')
 
 const evidence = { kind: 'v0.8-acceptance', startedAt: new Date().toISOString(), executable: exe ?? 'dev build', baseCommit, missions: {} }
-const env = { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_WINDOW_OFFSCREEN: '1' }
+// In a development build the confirmation is put to the off-screen window, where this script answers it; no
+// dialog is shown. A packaged build shows its own dialog whatever this says: there the answer is the user's.
+const env = { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_WINDOW_OFFSCREEN: '1', NEXUS_ACCEPT_CONFIRM: 'window' }
 for (const name of ['NEXUS_FAKE_RUNTIME', 'NEXUS_FAKE_POWER', 'NEXUS_FAKE_WORKERS', 'NEXUS_CONTAINMENT']) delete env[name]
 if (process.env.NEXUS_V08_CONTAINMENT && !exe) env.NEXUS_CONTAINMENT = process.env.NEXUS_V08_CONTAINMENT
 
@@ -133,7 +135,7 @@ try {
     log(`mission "${name}"…`)
     const dialogsBefore = (await dialogs()).length
     const launchesBefore = (await call('isolation.status')).launches
-    const run = await call('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt, maxParallelAgents: 1, requirePlanApproval: false, planningMode: 'single', reviewMode: 'standard' })
+    const run = await call('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt, compilationMode: 'EXACT', maxParallelAgents: 1, requirePlanApproval: false, planningMode: 'single', reviewMode: 'standard' })
     const seenPending = new Set()
     const { detail, approvals } = await driveRun(call, run.id, {
       timeoutMs: TIMEOUT_MS,
