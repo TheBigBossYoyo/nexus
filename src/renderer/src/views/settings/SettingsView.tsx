@@ -34,7 +34,12 @@ const SECTIONS: { id: SectionId; label: string; description?: string; render: (p
   { id: 'tokens', label: 'Tokens', prefix: 'tokens', render: (p) => <TokensSection {...p} /> },
   { id: 'mcp', label: 'MCP', prefix: 'mcp', render: (p) => <McpSection {...p} /> },
   { id: 'appearance', label: 'Appearance', prefix: 'appearance', render: (p) => <AppearanceSection {...p} /> },
-  { id: 'advanced', label: 'Advanced', prefix: 'advanced', render: (p) => <AdvancedSection {...p} /> },
+  {
+    id: 'advanced',
+    label: 'About & advanced',
+    prefix: 'advanced',
+    render: (p) => <AdvancedSection {...p} />,
+  },
 ]
 
 export function SettingsView() {

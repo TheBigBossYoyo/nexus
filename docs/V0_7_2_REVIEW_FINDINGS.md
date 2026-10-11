@@ -1,0 +1,453 @@
+# NEXUS 0.7.2: findings of the independent reviews
+
+Started 2026-10-10 on the reconciled branch (`3fcd1e0`, the released 0.7.1 merged in). Each review was done
+by a separate reviewer that was given the code and the question, read-only, and no conclusion. A finding is
+listed as the reviewer reported it; "checked" says whether its decisive claim was verified against the code
+before acting on it. State: OPEN, FIXED (with the commit), ACCEPTED (with the reason), or REJECTED (with the
+evidence).
+
+Severity is the reviewer's unless a note says it was changed and why.
+
+## 1. OpenAI / Sign in with ChatGPT: correctness
+
+Nothing CRITICAL. The paid-credit rule holds on every path the reviewer found: the confirmation is stored
+per profile in the encrypted credential file, defaults to false, is reset on connect, disconnect and by the
+saved schema, and every inference call site goes through one provider factory that requires it.
+
+| # | Sev | Finding | Checked | State |
+| --- | --- | --- | --- | --- |
+| 1.1 | HIGH | One 401 latches the capacity pool in AUTH_REQUIRED until a full browser sign-in; no token refresh or retry is tried, and the card still says "Connected" | | FIXED `7d2af7d`: one refresh and one more send after a 401; if either is refused the pool is held and the card reads as needing a sign-in. Four tests |
+| 1.2 | MEDIUM | Local or deterministic failures (output that is not JSON, a schema error on a usage field, an oversize request, a refresh network error, a shutdown abort) are recorded as provider capacity failures with a 5 minute to 6 hour backoff | | FIXED `a172e63`: a request that ended without an answer about capacity changes no state and plans no wait; a probe that ended so may be tried again at once. Tests at the registry and through the connection |
+| 1.3 | MEDIUM | A pending sign-in cannot be cancelled: every button is disabled for up to 600 s after the browser tab is closed | | FIXED `86f5f80`: a sign-in waiting for the browser can be cancelled (`chatgpt.cancelConnect`, a button on the card); the listener is closed and the connection is free at once. Test |
+| 1.4 | MEDIUM | A storage fault or an undecryptable credential file cannot be recovered inside the app; one transient write failure makes it stick until restart | | FIXED `86f5f80`: a storage fault is left without a restart (`chatgpt.recoverStorage`): the protected file is read again; a file that cannot be read is discarded only when the user chose that, asked twice. Tests |
+| 1.5 | MEDIUM | Error classification is coarse: 403, 404 / model not on this plan, 400, 5xx and insufficient quota are all RUNTIME_UNAVAILABLE, and a stream-level rate limit is not THROTTLED; a permanent error reads as retryable | | FIXED `86f5f80`: a refused request (400, 403, 404, 413, 422, a model the plan does not offer) is not a capacity state, plans no wait and says it will be refused again; `insufficient_quota` is a quota pause and a rate limit named in the stream is a throttle. Tests |
+| 1.6 | MEDIUM | The saved model is never reconciled with the catalog; a removed model is sent and fails as "runtime unavailable" | | FIXED `86f5f80`: each time the catalog is read the saved model is held against it; one no longer offered is dropped with its confirmation, and nothing is sent until the user has chosen again. Test |
+| 1.7 | LOW | A completed response whose usage fails the strict parse throws after the generation was produced; the receipt is lost (reported UNKNOWN, not invented) | | OPEN |
+| 1.8 | LOW | Connecting the same account twice creates duplicate profiles with separate capacity pools | | OPEN |
+| 1.9 | LOW | The loopback listener closes all connections right after answering; the browser can show a reset on a successful sign-in | | OPEN |
+| 1.10 | LOW | A refresh response without a refresh token wipes the credentials (right only if the server always rotates) | | OPEN |
+
+Not reviewed by this reviewer: the tests; the wire protocol against OpenAI's own documentation (no network).
+
+## 2. OAuth and credential security
+
+Verified sound by the reviewer, with the enforcing lines: PKCE S256, state and nonce; an exact loopback
+redirect bound to 127.0.0.1 on an ephemeral port, single use; the ID token (RS256, key by `kid`, issuer,
+audience, nonce, times); fixed hosts with `redirect: 'error'` on every request; no plaintext fallback; no
+token in SQLite, events, the graph, IPC results, logs or error text; the runtime endpoint.
+
+| # | Sev | Finding | Checked | State |
+| --- | --- | --- | --- | --- |
+| 2.1 | MEDIUM-HIGH | The credential file is not on the agents' denylist, and agents inherit `NEXUS_DATA_DIR`, so code an agent writes can locate it through the environment without spelling a denied path; the file is protected by the user's own DPAPI key, which code running as the user can use | yes: `power-patterns.ts:63`, `claude-sdk-runtime.ts:122`, `desktop.ts:118` | FIXED `abbcc69`: the variable is withheld from every agent environment, and the denylist names the file and the variable. Residual: code that already knows the absolute path by other means is stopped by the path rules only |
+| 2.2 | LOW | The `0o600` mode does nothing on Windows; the file relies on DPAPI and the profile ACL (the endpoint file is narrowed with `icacls`, this one is not); failed commits can leave `*.tmp` ciphertext | | OPEN |
+| 2.3 | LOW | On reconnect the previous ID token goes into the authorize URL (`id_token_hint`), so into browser history | | OPEN |
+| 2.4 | LOW | Revocation is best effort; disconnect clears local credentials even when revocation failed (the UI says so) | | OPEN |
+| 2.5 | LOW | The ID token of a refresh response is not validated (it is not used) | | OPEN |
+
+Not verified by this reviewer: whether the shell classifier denies a read through an unresolved variable
+path; whether a support bundle omits the credential file; the content of the test fixtures.
+
+## 3. Provider capacity accounting
+
+Verified sound by the reviewer: there is no await between the decision, the claim and the dispatch, so a
+double admission by interleaving is impossible; a routing decision can be claimed once; a claim that fails on
+its second pool releases the first in one transaction; lease history is pruned on the next claim, so the
+record limits cannot be reached; changing the agent limit does not strand admitted work.
+
+| # | Sev | Finding | Checked | State |
+| --- | --- | --- | --- | --- |
+| 3.1 | HIGH | A Codex pool that is once marked QUOTA_PAUSED or AUTH_REQUIRED never becomes admissible again: only Claude pools are refreshed from observations, and only OpenAI pools are probed | | FIXED `fix: a paused pool of a provider with no probe` : a pause holds until its reset time, or 15 minutes with none (2 for authentication), then the pool is unknown again, labelled as local reckoning |
+| 3.2 | HIGH | When the dispatch itself throws (a missing CLI), the leases are quarantined with no handle to confirm the stop, and stay held for the life of the process; the same shape exists in the advisory lane when the adapter cannot be created | | FIXED `edc5577`: no handle means nothing was started; the leases are released. The same in the advisory lane |
+| 3.3 | MEDIUM | An exception while releasing in the `finally` block leaves the leases HELD, skips the outcome record and ends the event stream without `session.ended` | | FIXED `edc5577`: a failed release no longer takes the terminal event and the outcome with it; the leases are settled on the next pass |
+| 3.4 | MEDIUM | Claude observations are applied to whatever account profile is current: after an account switch, the limits of account A can be written into the pool of account B | | FIXED `d8046c2`: whoever routes names the account profile to the usage service; what was observed before a change of profile is not written to the new profile's pool. Test. Not covered: a change of account while the application was closed |
+| 3.5 | MEDIUM | Truthfulness of facts: a reset time and a utilization are stamped as observed now when the observation is older; a percentage kept across later events is shown as fresh; a retry time from local policy is stored as provider-reported; a concurrent observation can be overwritten by a stale copy | | PARTLY FIXED `ca43de4`: a reset time and a utilization keep the time they were observed, through the usage service, the pools and the routing; a value kept across later events keeps its first time. The retry time from local policy and the overwrite by a stale copy: OPEN. Then FIXED `d8046c2` for the overwrite: an observation is applied to the pool as saved, and an older one does not replace a newer one (test). The retry time from local policy: NOT REPRODUCIBLE in the current code: every writer of a reset time takes it from a provider signal, report or probe; a time NEXUS reckons itself is written by `expire` and labelled LOCAL, ESTIMATED |
+| 3.6 | MEDIUM | HTTP leases of an earlier start are reclaimed only at boot; with a reused process id the single OpenAI slot stays quarantined until the next restart | | FIXED `d8046c2`: a ChatGPT request of an earlier start is looked at on every pass and released when its process is gone or its process id is this process's; the evidence is saved with the lease. Test |
+| 3.7 | MEDIUM | Recovery assesses every waiting session against the same free slot and resumes them all; all but one wait again, every 2 s | | FIXED `1403123`: one run is resumed per pass |
+| 3.8 | LOW | After a quota or authentication refusal the routing record stays WAITING with no outcome, although a request was sent | | OPEN |
+| 3.9 | LOW | Advisory leases are not capped at the advisory reserve; a clock jump can stall or shorten the settle interval of lease reclamation (the processes must still be gone) | | OPEN |
+
+## 4. Routing and failover
+
+Verified sound by the reviewer: only the requested provider gets the primary-role evidence; a stand-in needs
+a registry entry keyed by provider, model, role, profile, policy version and runtime version; nothing in
+production can write quality evidence (so no substitution ever happens today); a writing role never goes to
+a provider without writes; a resumed session only considers its owner; `recover` cannot resume a user pause
+and cannot resume twice.
+
+| # | Sev | Finding | Checked | State |
+| --- | --- | --- | --- | --- |
+| 4.1 | HIGH | A Program is blocked when its current run pauses for capacity: `limited()` knows only the quota pause | yes: `program/engine.ts:533`, `:1289` | FIXED `edc5577`, with a test on the Program engine |
+| 4.2 | HIGH | A Workspace mission is blocked the same way | yes: `workspace/engine.ts:846`, `:958`, `:1136` | FIXED `edc5577`, with a test on the Workspace engine |
+| 4.3 | MEDIUM | Overnight treats a capacity pause as an unknown pause: no wait row, phase "paused", and the stall watchdog may finalize it blocked (the reviewer did not read the watchdog) | yes for the quota-only branches: `overnight/supervisor.ts:588`, `:672`, `:1012` | FIXED `edc5577` for the stall watchdog: a capacity wait is not a stall. The workload phase still reads "paused", not a wait of its own: OPEN as a display matter. DISPOSITION: VALID_DEFERRED (0.7.3). A label on the Overnight page; the mission's own page shows the wait and what it waits for, and nothing is finalized wrongly |
+| 4.4 | MEDIUM | Waiting is run-wide, not provider-scoped: one session's wait pauses the whole run. Recovery runs every 2 s with no backoff, and a resume that waits again creates an agent row, a routing record and a checkpoint each time | | FIXED: `1403123` (growing delay per run, one run per pass), then per task in the commit after `8198028`: a task whose session finds no provider is held alone and the rest of its run is dispatched; the run waits as a whole only when the held work is all that is left. Before a held task is given a session again the admission is asked, so a long wait writes no agent row, routing record or checkpoint. Tests: `v72-capacity.test.ts` (two more), `v72-capacity-kernel.test.ts` (one more). See the note below |
+| 4.5 | MEDIUM | Some waits can never resume: a capacity pause raised where no wait checkpoint was written (planning, verification, consensus), and a resumed session whose owner is unknown or uninstalled | | FIXED `1403123`: a capacity-paused run with no wait on record is tried like the others; a session whose provider is not on record fails instead of waiting |
+| 4.6 | MEDIUM | The durable wait record has no provider, reason or reset time; the run-level text names no provider | | FIXED in the same commit: the record carries the provider decided (when one was), the role, the reasons, and per candidate provider its state, its reset time where the provider gave one and whether that time is exact or unknown. The run view shows them since `d8bc227`. The run-level pause text still names no provider: the detail is in the panel below it |
+| 4.7 | LOW | A repair or a rotated session is routed by role policy and nothing links its provider to the work it repairs | | OPEN |
+
+Note on 4.4. Waiting was run-wide: one session that found no provider paused its whole run, so work of the
+same run that another provider could take stopped with it. It is now per task. The scheduler holds the task
+(in memory, with a delay that grows from 2 s to 60 s), keeps dispatching the others, and asks the admission
+before it gives the held task a session again. When nothing else of the run is at work the run pauses for
+capacity as before, where the recovery resumes it; Programs, Workspaces and Overnight read that state as they
+did. What stays run-wide: a wait raised by the run's own sessions (planning, consensus, mission verification),
+which have no other work beside them, and a speculative candidate. A held task still reads "running" in the
+task list while the activity feed says what it waits on: a display matter, OPEN, LOW.
+
+## 6. Task Compiler: intent preservation
+
+Verified sound by the reviewer: the raw text is stored and compared byte for byte, with a database trigger
+that aborts an update; EXACT makes no model call; AUTO is a pure function of the text and its metadata, so
+it cannot change between preview and start; malformed or out-of-scope model output is never saved; a spec
+that waits for a provider or a decision can neither be bound nor started; stale context fails validation;
+internal work (planner tasks, repairs, graph proposals, milestones, per-repository tasks, background jobs)
+never compiles; the owner of an engineering entity cannot be set through IPC.
+
+Entry points. Admitted: `runs.create` (not for mode ask, which is read-only), `overnight.start`,
+`runs.replan`, `tasks.add`, `tasks.instruct`, `tasks.resolveBlocker`, `criteria.update`, `program.create`,
+`program.start`, `program.replan`, the workspace mission and program channels, and the queue, schedules and
+overnight starters (they reference existing drafts and validate at start). Admitted only when a selection is
+passed: `runs.resume`, `recover(resume)`, `program.resume`, the workspace resumes. Not admitted: `memory.add`,
+`knowledge.writeNote`, `workspace.addMemory`, the note of `approvals.resolve`.
+
+| # | Sev | Finding | Checked | State |
+| --- | --- | --- | --- | --- |
+| 6.1 | CRITICAL | A rotated worker loses the earlier instructions: the prompt that resumes from a handoff holds the task, its criteria and the model-written handoff, and not the admitted history, the original request or the mission criteria. "Never touch the public API" survives a rotation only if the handoff happens to restate it | | FIXED `dc8e0a8`: `orchestrator/instructions.ts`; the resume from a handoff carries the request, every amendment and the mission criteria |
+| 6.2 | HIGH | A repair worker is a new child task whose prompt gets only the instructions not yet delivered to its parent; the history is keyed on the parent and never read. Reviewer and verifier prompts have no admitted-request input, so no reviewer can flag a violated instruction | | FIXED `dc8e0a8`: a repair, the reviewer, the verifier and the mission verifier are given the instructions in force; a child task's pack carries its parent's |
+| 6.3 | HIGH | Snapshot: the mission planner runs in the live checkout while the spec, the base commit and the workers' worktrees are at the admitted commit. If the checkout moves during planning, a pause or a wait, the plan is written against the new state and executed on the old. The workspace planner's read-only run has no base reference either | | FIXED: the mission planner reads the run's integration worktree at the base commit (`ad9c5db`); the workspace planner reads a worktree of its own at the admitted commit, removed when it ends (`8639827`). Tests for both |
+| 6.4 | HIGH | A program replan note is one slot: a second note before the replanner starts overwrites the first, the note is deleted when the replan budget is exhausted, and only the latest reaches the replanner; milestone missions never see it | | FIXED `8339119`: notes are a list; all pending ones reach the reassessment, all of them the following missions; a note is refused at once when the budget is used. Two tests |
+| 6.5 | MEDIUM | The instruction history is an unbounded transcript, not a current state: every amendment is concatenated with no cap, each carries the raw text twice, and order is first-seen when a cached spec is reused | | PARTLY FIXED `dc8e0a8`: the new section is bounded, each instruction once, what is cut is counted. The older "Admitted user task requests" section of a worker's first pack is unchanged: OPEN. DISPOSITION: VALID_DEFERRED (0.7.3). A cost, not a loss: no instruction is dropped, each is at most 10,000 characters, and the bounded section is what the later sessions read |
+| 6.6 | MEDIUM | Accepted text is cut silently later: replan feedback accepted to 10,000 characters and cut to 6,000 in the planner prompt; the request accepted to 20,000 and cut to 8,000 for the critic, the synthesizer and the audit; a task description accepted to 20,000 and cut to 8,000 | | FIXED `477fcef`: the request, a task description and feedback on a plan reach the planner, the critic, the synthesizer, the audit and the task's sessions at the length the application accepted them (20,000, 20,000 and 10,000 characters); what is longer is marked as cut. Test |
+| 6.7 | MEDIUM | An amendment is bound before the action takes effect: if the orchestrator then refuses, the history keeps an instruction that never applied | | FIXED `477fcef`: a task instruction is recorded and delivered in one transaction; a replan instruction is recorded only if the plan still awaits approval after the compilation. Test |
+| 6.8 | MEDIUM | Free text that changes worker prompts with no admission or provenance: memory, knowledge notes, workspace memory, an approval's note; the suggested files of an added task | | VALID_DEFERRED (0.7.3) for memory, knowledge notes and workspace memory: they are stores the user curates, each entry carries its source and is shown to agents as labelled context, not as an instruction; routing them through the compiler is an extension, not a repair. REJECTED WITH EVIDENCE for the approval note: it reaches no worker prompt; its only reader is the text of a refused graph change (`graph-service.ts:214`). The suggested files of an added task are a hint the pack labels as such |
+| 6.9 | MEDIUM | Drift detection is five patterns plus a self-check by the same provider; nothing sets or reads USER_CONFIRMED, so "the user confirms" can only mean a block | | DUPLICATE of 7.2 for the patterns (fixed there). SUPERSEDED for the confirmation: since `6404450` the user decides in the preview which additions to keep, and the decision is recorded with the specification |
+| 6.10 | LOW | An EXACT spec carries no repository dependency; a resume without a selection re-checks neither provider configuration nor context | | OPEN |
+| 6.11 | LOW | Every preview inserts a raw-intent row, cache hits included; a lone surrogate would be stored as U+FFFD and then fail validation | | OPEN |
+| 6.12 | LOW | A program's later milestone runs on the branch tip while the spec's repository version is the base commit of the start | | OPEN |
+
+Not verified by this reviewer: the workspace program resume; the program planner's base reference; the
+consensus and speculation prompts; the renderer flows; the tests (none covers rotation or repair with instructions).
+
+## 14. Scheduler and recovery consistency
+
+Verified consistent by the reviewer: an admitted routing record is marked interrupted at boot; a held lease
+is quarantined at boot and freed only after its owner and worker processes have been gone for 30 s, with the
+first pass before the worker records are closed; a run paused for capacity survives a restart and is resumed
+when capacity returns; lease release never meets a closed database at shutdown. No assertion of the
+scenario, runtime or stress tests was relaxed in this branch (the only change is the EXACT compilation mode
+on four calls, which means those kill-and-restart scenarios do not exercise the Task Compiler path).
+
+| # | Sev | Finding | Checked | State |
+| --- | --- | --- | --- | --- |
+| 14.1 | HIGH | A slot leaks for the life of the runtime after an unexpected worker exit: `onExit` ends the session as crashed and never sets the stop as confirmed (only `failWorker` does), so the lease is quarantined and nothing can confirm it. Also when no worker could start or the grant failed. After a few such exits every session waits | | FIXED `edc5577`: a worker's exit confirms the stop of its session, as does a session that never reached a worker |
+| 14.2 | HIGH | A capacity wait consumes a task attempt: the end reason `capacity` is not resumable, so every resume counts as a new attempt (a quota wait does not). After a few waits the first real failure gives up, and the model tier is escalated from the second attempt | | FIXED `edc5577`: a session that only waited keeps the task's attempt; scenario test with three waits |
+| 14.3 | HIGH | Programs and workspace missions block on a capacity pause (as 4.1 and 4.2). Related race: the engines resume a capacity-paused run themselves while the recovery timer does too, and `resumeRun` checks the state once, awaits, then sets it; two resumes of a planning run can start planning twice | partly: see 4.1, 4.2 | FIXED `edc5577`: see 4.1 and 4.2; the engines no longer resume a capacity-paused run themselves |
+| 14.4 | HIGH/MEDIUM | Shutdown: admission is closed first, then up to 30 s of other waits pass before the orchestrator sets a stop reason. A session started in that window ends stopped with no reason, which is read as crashed: the task fails and an attempt is consumed | | FIXED `a42bec2` by the order of the stop: admission closes after the orchestrator has given its sessions a stop reason. No test: the stop sequence of the runtime core has no harness below the runtime process |
+| 14.5 | MEDIUM | Wait checkpoints go stale: the ENDED state is declared and never written; a crash or a failed write after a resume leaves a WAITING record that a later pause of the run re-reads; the loop has no per-run try, so one run whose resume throws starves the others every 2 s | | FIXED `1403123`: per-run try, leftover waits closed (ENDED is now written), a wait is marked before the resume and put back if it fails |
+| 14.6 | MEDIUM | During an outage the recovery asks the runtime for the account every 2 s for every wait (a child process each time, no cache), and with fewer free slots than waiting runs it resumes them all | | FIXED `1403123`: the account answer is kept for 30 s; one run per pass |
+| 14.7 | MEDIUM | After a hard kill of the runtime the old worker can still be alive for some seconds; the next start may resume the task on the same worktree while it runs (not reproduced) | | FIXED `509a997`: no session starts while a worker process the earlier start left on record is alive; the wait ends when they are gone and after twenty seconds at most. (A worker also ends itself when its runtime disappears, and without its runtime none of its tool calls is authorized.) Test |
+| 14.8 | MEDIUM | Seen once in three full runs of the suite, never in eleven runs alone: with a limit of 3 agents the control overview counted 4 active while a Program and an Arena campaign ran together. The kernel bounds engineering sessions at the limit (every session role maps to worker or reviewer), so the fourth is an agent row that waits for admission or is ending; if it waits, its run pauses for capacity and is resumed (see 4.4). The test now reports the breakdown when it fails | | OPEN, with a likely cause removed: a session asked for before the providers were detected waited for capacity and was counted while it waited (R.5, fixed `883d114`). Not seen in the full runs since; not reproduced on purpose. DISPOSITION: NOT_REPRODUCIBLE. Not seen in any of the full runs of the suite since `883d114` (six on record, 2026-10-10 and 2026-10-11), nor in eleven runs of the test alone |
+| 14.8 | LOW | A handoff session that waits for capacity yields an empty handoff; with two advisory leases the workers have fewer slots than the scheduler assumes; a resume landing after the orchestrator shut down can start a planner that ends crashed | | OPEN |
+
+## 5. Director architecture
+
+Read-only review on 2026-10-10. Sound, from the code: `executionAuthorized` is only ever written false and the
+repository refuses anything else; nothing consumes a Director's output but storage and the Director view; the
+PENDING record and each validated stage are saved before the next call; a restart marks an interrupted request
+FAILED with its completed stages and never replays it; a missing technical capability waits before any call and
+does not lower the level; failure text is fixed text with no provider body; the technical session has no tools,
+no MCP servers, no settings and denies every authorization.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 5.1 | MEDIUM | An escalation that waited or failed is stuck: its state becomes WAITING_FOR_PROVIDER or FAILED, and both the invoke and the dismissal require REQUESTED. The message says "retry explicitly" and the retry is refused | | FIXED `01ebf97`: an escalation that waited or failed can be invoked again or dismissed. Test |
+| 5.2 | MEDIUM | The PENDING record of a level 1 (Claude only) request carries provider `openai` and the ChatGPT model whenever ChatGPT is connected; after a crash the view shows a provider that was never called | | FIXED `01ebf97`: a level 1 request records no strategic provider |
+| 5.3 | MEDIUM | The technical challenge is given the whole strategic memo: it challenges the proposal, it is not an independent assessment. The wording of the claim must say so | | FIXED `9ab6a2e`: the view and the report say what it is: a challenge of the memo, written by the other provider after reading it, and not an assessment formed without it |
+| 5.4 | MEDIUM | A stage whose answer cites one evidence id outside the context is dropped whole, with its disagreements, although the call was paid for | | SUPERSEDED: fixed with R.3 in `aa1809a` (the reference is removed, the stage is kept). A test of the Director path added in `9ab6a2e` |
+| 5.5 | MEDIUM | A Claude candidate is built for every advisory role, strategic included, and is admitted when quality evidence exists for it; the record has no field that says it was a fallback and why | | VALID_DEFERRED (0.7.3). Not reachable in this version: a Claude stand-in for the strategic role is admitted only on recorded quality evidence, and nothing in production records any. The field belongs with the code that will write that evidence |
+| 5.6 | LOW | The "quality evidence" of a primary provider is the policy label `PRIMARY_ROLE_POLICY`, not a measurement, and is written in two formats in two files | | OPEN |
+| 5.7 | LOW | The technical session runs in the NEXUS data directory with the full coding system prompt; whether its transcript is persisted by the runtime is not established | | OPEN |
+| 5.8 | LOW | A wait at the first stage reports consumption UNKNOWN where nothing was sent | | OPEN |
+| 5.9 | LOW | The outcome record has no requested role, no fallback flag, no verification result and no later repairs: Director outcome learning has nothing to learn from yet | | FIXED `d7cb326`: outcome learning. What became of a mission is written once when it ends (migration 16), with the advice it was admitted with: verified or not, failed tasks, repair cycles. Shown in the Director view; the counts are evidence of the next Director request. Scenario test |
+| 5.10 | LOW | Account profile, pool overlay and model choice are computed separately in `production-routing.ts` and `worker-routing.ts` | | OPEN |
+| 5.11 | HIGH | Found while preparing the real acceptance: the Claude candidate of the technical role was admitted only on recorded quality evidence, and nothing in production records any. The Technical Director could never run: every level 1 and level 3 request and every TECHNICAL or COUNCIL compilation waited for ever. The tests recorded the evidence themselves | Real run | FIXED `4d2a494`: the technical role is Claude's own and needs none; real acceptance PASS `70a2464` (docs/acceptance/technical-director-2026-10-10T19-02-28-138Z.json) |
+| 5.12 | LOW | Seen in the real run: a level 1 request asks the routing for both roles and leaves a WAIT record for the strategic one, which it does not need | Real run | OPEN |
+
+## 7. Task Compiler: prompt injection
+
+Read-only review on 2026-10-10. Sound, from the code: the level, the scope and the criteria come from the user's
+text only; a model cannot produce the provenance USER_EXPLICIT or USER_CONFIRMED (closed enumeration, strict
+schema); evidence references must lie in what was retrieved; graph text and the instructions in force are
+rendered through `oneLine` or `quoteBlock`; the instruction history is written by IPC handlers only; an agent
+note stays AGENT_NOTE and is left out of high-risk retrieval; a compilation is at most four calls with bounded
+input; the inspector renders text, the Markdown renderer is sanitized. What a talked-into worker can do is
+bounded by the authorizer, the command classifier and the content inspector, not by prompt wording.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 7.1 | MEDIUM | The compiler is given graph notes as title and summary without their trust word: an unverified agent note stands beside a verified fact, and can come back as a recommendation of provenance CONTEXT_DERIVED that needs no decision, in every planner and worker prompt of the run | | FIXED `8253cb5`: agent notes are not given to the compiler; what is given carries its type and trust word. Test |
+| 7.2 | MEDIUM | READY rests on what the model reports (scope changed, ambiguities, decision needed); the drift check is asked of the same provider, and its code half is five patterns that know nothing of a new dependency, a secret file, disabled tests or a network call | | FIXED `9ab6a2e`: a new dependency, a secret or credential touched, verification weakened, data sent outside and published history rewritten are flagged by code and stop for the user's decision whatever the model reports; an item that forbids the thing is not a proposal to do it. Tests, one of them on the real specifications of the campaign. The meaning check is still asked of the same provider: stated, and the user's decision in the preview is the gate |
+| 7.3 | LOW | In TECHNICAL and COUNCIL the synthesis replaces the output: a constraint or non-goal of the technical pass can be dropped. Decision flags and blockers accumulate and are not lost | | OPEN |
+| 7.4 | LOW | `renderCompiledAdvice` serializes with no replacement of `<`, format characters or U+2028/2029, unlike `withAdmittedIntent` | | OPEN |
+| 7.5 | LOW | The original request is rendered raw and unquoted when a specification exists; pasted third-party text reads as the user's own words (by design it is the user's authority) | | OPEN |
+| 7.6 | LOW | Program memory enters reasoning prompts with no trust label; a heading line can appear inside the data block | | OPEN |
+| 7.7 | LOW | Words such as "security" or "migration" in pasted text raise the level to COUNCIL (four calls); long evidence can push the output past the size that forces a decision | | OPEN |
+
+## 8. Context Graph integration
+
+Read-only review on 2026-10-10. Sound, from the code: the compiler's evidence comes from the graph only, so the
+graph and the older stores cannot disagree for it; a referenced node that becomes stale, superseded or archived
+makes the specification stale; nodes of another program are hidden from the compiler, the Director and the
+tools; the inspector shows what was bound, not a fresh query.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 8.1 | HIGH | An unverified agent note reaches a compiled specification unlabelled: the compiler's retrieval keeps every CURRENT node, a note of a mission outside a program is one, and the text sent on carries no trust word. The rule that keeps agent notes out of high-risk retrieval is not applied by the compiler (the same defect as 7.1, seen by a second reviewer) | | FIXED `8253cb5`, see 7.1 |
+| 8.2 | HIGH | The planner's graph section is always retrieved at medium risk, with the widening to every current hazard and decision: agent notes and stale statements can steer the plan of a critical mission, where a task pack of the same mission would leave them out | | ACCEPTED as designed: in the planner's section an agent note is listed as `agent note` with the line "UNVERIFIED: an agent wrote this note; it is a lead to check, not a fact", and the saving measured in 0.7.1 came from the planner seeing the note of the mission before. A stricter rule for missions the user marks critical is not in 0.7.2 |
+| 8.3 | MEDIUM | The compiler reads the graph whether or not the Context Graph technique is on, and with its own rules (CURRENT only) where task packs allow conflicted and stale statements | | FIXED `9ab6a2e`: with the Context Graph switched off, no project knowledge is gathered for the compiler. Test. Its stricter rules (current entries only, no agent notes, credentials removed) are deliberate: this text leaves the machine |
+| 8.4 | MEDIUM | A Program mission's planner prompt holds the goal, the milestones and the program memory in its body and again as graph nodes: only project memory is removed from the graph section | | VALID_DEFERRED (0.7.3). Duplicated text in one prompt: a cost, with no effect on what is planned |
+| 8.5 | MEDIUM | A Program run is created before its mission row: graph reads in between see no program. Workspace runs read every workspace the project is enrolled in, not the mission's own. Neither was reproduced | | NOT_REPRODUCIBLE for the program row (the run and its mission row are written in one synchronous pass; no read can fall between). VALID_DEFERRED (0.7.3) for the workspaces: every space read is one the project belongs to, each entry labelled with its space; narrowing to the mission's own workspace is a matter of relevance |
+| 8.6 | LOW | The identity of a compilation covers the twelve best-ranked nodes: a note written by an agent can move the ranking and make a draft compiled earlier ask for a new preview | | OPEN |
+| 8.7 | LOW | A context reference is a node id and a version, shown as such: the inspector cannot say which reference is superseded or gone, nor show what the model read | | OPEN |
+| 8.8 | LOW | No test writes an agent note and reads the compiled context, makes a referenced node stale, or runs the compiler with the graph switched off | | OPEN |
+
+## 9. Token Intelligence regression
+
+Read-only review on 2026-10-10; nothing was measured on a provider. Unchanged from 0.7.1: role system prompts,
+the tool list and descriptions, the token engine and the prefix registry; every addition is in the first user
+message, after the cached prefix. A compilation is cached by identity.
+
+Estimate for a mission of four tasks with a compiled specification: about 11,000 more input tokens for a request
+of 2,000 characters, about 50,000 for one of 20,000.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 9.1 | HIGH | With a compiled specification the request is rendered without the 8,000 character limit, and is added to every worker's first pack, which never carried it: a 20,000 character request is in the planner, every worker session and the mission verifier (32,000 is the only bound) | | FIXED `b66f758` for workers: their copy keeps the 8,000 character limit and says so. The planner and the mission verifier read the request whole, on purpose: they answer for all of it. Tests on size and on copies |
+| 9.2 | HIGH | The compiled advice (up to 8,000 characters) is added to every worker pack, the planner and the mission verifier, although the planner has already turned it into tasks | | FIXED `01ebf97`: a worker reads the constraints, non-goals, risks and assumptions; the rest stays with the planner and the mission verifier. Asserted in the default-path scenario |
+| 9.3 | HIGH | The default AUTO path costs two ChatGPT calls before planning, three for TECHNICAL and four for COUNCIL (chosen by common words), the last two with a Claude session on the strongest model; without ChatGPT a mission in AUTO cannot start | | FIXED `26c77c8` for the cause, measured before it and not after: AUTO now gives a request the least depth that is enough for it, from the deterministic task profile (docs/PROVIDERS.md, "The depth AUTO chooses"); a word no longer decides, and a localized request that says exactly what is wanted asks no provider. What was measured, under the policy before: in the real campaign a mission admitted in the default depth used 18% more turns and 18% more input than on 0.7.1 over six categories (twelve runs, every hidden evaluation passed); admitted in EXACT it used 5% more turns and 3% more input over twenty-two runs, within the noise. Compiling took 19 to 24 s for STANDARD, 53 s for TECHNICAL, 106 s for COUNCIL. The release claims no saving; the report states the cost. Whether AUTO stays the default is the user's decision |
+| 9.4 | MEDIUM | A session that only waited for capacity writes a session-efficiency row with no turns, and the campaign runner counts it as a session | | VALID_DEFERRED (0.7.3). A count of sessions one too high where a session only waited; it has no turns and no tokens, so no total is wrong. No capacity wait occurred in the campaign |
+| 9.5 | MEDIUM | Compiler and Director spend is kept only as receipts on routing records, with no run or mission, and appears nowhere in the Usage page | | FIXED `509a997`: the Usage page shows, per provider and for the last seven days, the requests of the compiler and the Directors and the tokens the provider reported with them, from the receipts; requests sent without a report are counted as such. Test |
+| 9.6 | MEDIUM | `withAdmittedIntent` carries the raw text twice (as intent and as the first goal); Program and Workspace runs embed that blob in the run's prompt, which every later prompt repeats; the new sections are not itemized as pack entries | | VALID_DEFERRED (0.7.3). A cost in the prompts of Program and Workspace runs; nothing is lost or changed by it |
+| 9.7 | LOW | No test bounds the size of a prompt or the number of copies of the request in it | | FIXED `b66f758` for the worker pack and the planner prompt |
+
+## 10. Privacy
+
+Read-only review on 2026-10-10. Sound, from the code: EXACT and LIGHT send nothing to OpenAI; no file content, no
+author name or address and no machine path is sent unless it is in a note or in the request; requests are sent
+with `store: false` and at most 128 KB; no timer, analytics or update check was added; these modules log
+nothing; removing a project removes its intelligence data through the foreign keys.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 10.1 | HIGH | Consent: the only confirmation before project data goes to OpenAI is about billing. After the sign-in the next mission in the default AUTO mode sends the request, program and task text and graph notes, and no screen names OpenAI as their destination. There is no switch, per project or global, that keeps data away from OpenAI while signed in | | FIXED `59c92f3` and `4e7770a`: what is sent is stated where the user connects; the connection's switch is what allows any sending; a project can be kept away from OpenAI on its own (no call, no slot asked for, EXACT by default, strategic Director levels refused). Scenario test |
+| 10.2 | HIGH | No redaction: notes and workload text are sent unscanned. The filter on the classification `normal` filters nothing, because the graph writes `normal` on every node. A secret in a request, a note or an agent's summary goes to OpenAI, or to Claude through a council | | FIXED `59c92f3` for stored knowledge: entries sent as context go through the security log's redaction; agent notes are not sent (7.1). The user's own request is sent as written, which the card says. Test |
+| 10.3 | MEDIUM | In COUNCIL and TECHNICAL, OpenAI's output goes to Claude and Claude's back to OpenAI, with no notice | | FIXED `59c92f3`: stated on the card and in docs/PROVIDERS.md |
+| 10.4 | MEDIUM | The inspector shows the ids and versions of what was sent, not the text; nothing can be deleted short of removing the project | | VALID_DEFERRED (0.7.3). What is sent is stated where the user connects and in docs/PROVIDERS.md, a project can be kept from sending, and credentials are removed first: no claim of this release is that the text sent can be reread or deleted afterwards. To add: the text as sent, and deletion of stored specifications |
+| 10.5 | MEDIUM | README and docs/PROVIDERS.md do not name OpenAI as a destination; "Nothing is sent to a provider you have not enabled" does not cover it | | FIXED `59c92f3` in docs/PROVIDERS.md; the README gets its 0.7.2 section with the release report |
+| 10.6 | LOW | The Claude and Codex account profile is a plain SHA-256 of address, organization and mode, kept in pool ids in SQLite: an address can be confirmed by guessing, locally | | OPEN |
+| 10.7 | LOW | Routing records and checkpoints are never pruned | | OPEN |
+
+## 13. Test quality
+
+Read-only review on 2026-10-10. The verdict: each 0.7.2 subsystem is tested on its own, and the seams are faked
+by hand. The capacity kernel and the real orchestrator meet nowhere below the built app; the scenario harness
+has no admission layer (the new `v72-capacity` scenarios make the runtime emit the wait themselves); every test
+that goes on to execute work passes EXACT, so the default AUTO path followed by a run is tested nowhere; the
+fixtures grant what they then assert (an account that always has an address, quality evidence the test
+recorded, capabilities the test set). Every defect found on 2026-10-10 sat at a boundary between two modules
+each tested alone. No skip, only, fixme or added retry in the branch.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 13.1 | HIGH | No scenario runs the real capacity kernel under the real orchestrator: an unexpected worker exit, a throw from the dispatch, a wait followed by a resume are tested with a hand-made stand-in on one side or the other | | FIXED: `tests/scenarios/v72-capacity-kernel.test.ts`, the scenario harness with the production admission in front of the scripted runtime: a mission to its end, a worker that dies, a wait while another consumer holds the slot and its recovery |
+| 13.2 | HIGH | The default path (AUTO, then a run) is exercised nowhere end to end: with no ChatGPT one e2e asserts the form is blocked; with ChatGPT connected, nothing | | FIXED `01ebf97` below the built app: `tests/scenarios/v72-default-path.test.ts` creates a mission through IPC in the default depth with a scripted strategic provider and the real orchestrator carries it out; with no connection nothing is created. With the real provider it is part of the real acceptance, not done |
+| 13.3 | MEDIUM | No contract test holds the real provider adapters' capability flags against what admission requires (the Codex defect) | | FIXED `e48c949`: the admission rule is one function, and the capability declarations of the real Claude and Codex adapters are held against it in `tests/unit/routing/capability-contract.test.ts` |
+| 13.4 | MEDIUM | The paid-credit rule and the admission rule are tested as refusals on the main path only; lease accounting has no test with a forced unexpected exit | | PARTLY FIXED: the forced unexpected exit is covered by the scenario of 13.1. The refusals on secondary paths are OPEN. Then FIXED `e48c949`: with the paid-credit confirmation off, every entry point in every depth that would ask ChatGPT, and both Director levels that use it, are refused and the transport is never called (`consent-refusal.test.ts`) |
+| 13.5 | MEDIUM | Untested pairs most likely to hide a defect: capacity wait with the queue; with crash recovery; AUTO with plan approval and a stale specification; a ChatGPT 401 or quota with an overnight run; a resumed run with the Context Graph | | VALID_DEFERRED (0.7.3) as test extension: no defect is known in these pairs. Covered since: a wait with a resume, a worker that dies and a restart under the real kernel (13.1), a wait that holds one task (4.4), and the seeded stress of the kernel, the registry, the compiler and the Director (`ab6924b`) |
+| 13.6 | LOW | Assertions that confirm a stub (`status` READY after a stubbed answer), existence only (`toBeTruthy` on ids) or a call count (fifteen in workload-admission) | | OPEN |
+
+## 11. UI/UX, round 1
+
+Read-only review of the source on 2026-10-10 (no rendered page was seen). Coverage: no view folder uses a raw
+palette colour or a hex value; 20 of 22 folders follow UI 2.0; the two that hold the 0.7.2 screens
+(intelligence, projects) are mixed: right tokens, but bare paragraphs and disclosure elements where the design
+system has primitives.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 11.1 | HIGH | A mission that waits for capacity names no provider, no reason and no time; the header shows the raw word `capacity` | | FIXED `d8bc227`: the panel says which provider, why, and the reset time when the provider gave one |
+| 11.2 | HIGH | A compilation that waits for a provider names none and offers no next action | | FIXED `aefd772`: it says what is needed and opens Providers |
+| 11.3 | HIGH | The Director view shows states as codes, has no loading state for its records, and after an unknown outcome does not say how to go on | | FIXED `aefd772` |
+| 11.4 | HIGH | Internal names shown raw: compilation depths, statuses, provenance and kinds, consumption | | FIXED `aefd772`, `aa1809a`: depths, states, provenance and kinds are in words; reason codes are a detail for support. Identifiers stay, in small type |
+| 11.5 | MEDIUM | One concept, several names: capacity (three forms), the preview and the inspector, the advice buttons; the capacity section is in Usage while the connection is in Providers | | FIXED `e6d1361`: one name each: specification (preview, of this mission, history), provider capacity, ChatGPT for the connection. The capacity section stays on the Usage page: OPEN as a matter of placement. DISPOSITION: VALID_DEFERRED (0.7.3), placement |
+| 11.6 | MEDIUM | Text that says the Technical Director is pending or deferred | | FIXED `aefd772` |
+| 11.7 | MEDIUM | "No work has been lost" stated flatly in the quota panel and banner | | FIXED `86f5f80` and `d8046c2`: every place says what is true: finished tasks are kept, and unfinished work resumes from its last checkpoint |
+| 11.8 | MEDIUM | The statement of what goes to OpenAI is two dense paragraphs below the buttons | | VALID_DEFERRED (0.7.3). Layout of a statement that is present and complete on the card |
+| 11.9 | MEDIUM | The 0.7.2 screens use bare paragraphs, disclosure elements and their own paging where EmptyState, Card and DataTable exist; the preview's views are pressed buttons, not tabs | | FIXED `e6d1361` for what the review named: the preview's views are tabs, empty and loading states use the shared components, the history heading is on the type scale. The records themselves are still disclosure elements, not a table: OPEN, LOW. DISPOSITION: VALID_DEFERRED (0.7.3), polish |
+| 11.10 | LOW | Two selectors that read as "mode" in the composer; a heading outside the type scale; long routing reasons wrap unbounded | | OPEN |
+
+## 12. Accessibility, round 1
+
+Read-only review of the source on 2026-10-10, WCAG 2.2 AA; contrast computed from the tokens; no screen reader
+and no rendered page. No blocker: every task can be completed with a keyboard and a screen reader. Sound:
+language, landmarks and a skip link; the dialog (role, trap, Escape, focus restored); tabs with arrow keys; a
+visible focus ring everywhere; reduced motion respected; no positive tab index; the switch (role, state, label,
+description); icon buttons need a label; tables with headers; text and badge contrast between 5.0 and 8.3 in
+both themes. There is no automated accessibility check in the tests: OPEN as 12.12.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| 12.1 | HIGH | 4.1.3: the result of a preview (ready, needs a decision, waiting) is never announced | | FIXED `aefd772` |
+| 12.2 | HIGH | 4.1.3: a run paused for capacity or for quota is silent | | FIXED `aefd772` |
+| 12.3 | HIGH | 4.1.3: the quota banner is a status region with a countdown that changes every second | | FIXED `aefd772`: the countdown is hidden from assistive technology |
+| 12.4 | MEDIUM | 2.4.3: a button that disables itself while it works drops the focus | | FIXED `aefd772` for the Button primitive. Controls a view disables itself while a request runs (Director, ChatGPT card): OPEN. Then FIXED `86f5f80`: the controls the Director view and the ChatGPT card disable during their own request keep the focus (aria-disabled, activation ignored) |
+| 12.5 | MEDIUM | 2.4.3: the composer disables its form while compiling and the focus is lost | | FIXED `aefd772`: the blocker is focused once the form is back |
+| 12.6 | MEDIUM | 1.3.1, 3.3.1: a Field's hint and error are not tied to its control | | FIXED `aefd772` |
+| 12.7 | MEDIUM | 4.1.3: status regions that are mounted only when they have text are often not announced | | FIXED `aefd772` for the preview and the Director request. The inspector: OPEN. Then FIXED `86f5f80`: the inspector's status lines are live regions that stay mounted |
+| 12.8 | MEDIUM | 1.4.11: the edge of inputs, selects and the off switch is 1.5:1 (1.2:1 for the switch track) | | FIXED `aefd772`: 3.3:1 in the light theme, 3.8:1 in the dark one, computed |
+| 12.9 | MEDIUM | 2.4.2: the window title never changes; the focus does not move on navigation | | PARTLY FIXED `aefd772`: the title names the view. The focus on navigation: OPEN. Then FIXED `86f5f80`: on navigation the focus moves to the main region of the new view; not on first load and not while a dialog is open |
+| 12.10 | MEDIUM | 2.2.1: toasts expire with no history, and some errors exist only as a toast | | FIXED `86f5f80` for the part that matters on a critical path: an error toast stays until it is dismissed, with a keyboard-reachable control. A history of past toasts: VALID_DEFERRED (0.7.3) |
+| 12.11 | LOW | A disabled control with no stated reason (the confirmation switch, resume with a specification); heading levels in the Director view; stale facts at reduced opacity fall to 3.5:1; a tooltip cannot be dismissed with Escape | | OPEN |
+| 12.12 | MEDIUM | No automated accessibility assertion in the end-to-end tests | | FIXED `6ccd469`: `tests/e2e/a11y.spec.ts`, every page in both themes; names, states, references, tab order, title, language, text contrast and control edges computed from the rendered page; it proves on each run that it sees a planted violation of each kind. No finding in the application |
+
+## Real acceptance on 2026-10-10
+
+Not a review: what the real providers showed. ChatGPT inference was used only after the application itself
+reported the connection signed in, a model chosen and the paid-credit confirmation switched on by the user.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| R.1 | HIGH | The Technical Director could never be admitted (5.11) | Real run | FIXED `4d2a494`; PASS, docs/acceptance/technical-director-2026-10-10T19-02-28-138Z.json |
+| R.2 | HIGH | The first real answer of the strategic provider was valid JSON of the wrong shape (objects where sentences were asked for): every STANDARD compilation with an ambiguity would have failed as "invalid structured output" | Real run | FIXED `aa1809a`: the shape is enforced by the provider (strict JSON schema) and validated here; a refusal says where the answer departs, as positions and kinds |
+| R.3 | HIGH | A TECHNICAL compilation was thrown away whole, paid for, because one recommendation cited evidence that had not been supplied | Real run | FIXED `aa1809a`: the allowed ids are in the enforced shape; a reference outside them is removed and the specification says so |
+| R.4 | MEDIUM | The Council's technical stage failed when the Claude session was given the runtime's output schema (the cause was not established further; the session has no tool and ends at the first tool event) | Real run | FIXED `aa1809a`: the schema is given in the prompt; the next two real Councils completed |
+| R.5 | LOW | In the first seconds after a start the Claude provider is not yet discovered: a TECHNICAL compilation or a Council sent then waits, and has to be asked for again. A worker session asked for then waited for capacity, and its run paused in its first second | Real run | FIXED `883d114`: both wait for the detection already running; the test fails without the change |
+| R.6 | LOW | Previewing the same request again after a restart sent the provider calls again: the cache of compilations by identity does not outlive the runtime, or does not hold a specification that needs a decision (not established which) | Real run | EXPLAINED, not a defect: the acceptance script rebuilt its repository for each run, so the request met a new project and a new commit each time. A compilation is reused by identity within a project (`reusableCompilation`) |
+| R.7 | LOW | A level 1 or 2 Director request leaves an admission record for the role it does not use (5.12) | Real run | OPEN |
+| R.8 | HIGH | The default depth stopped every real request. Six campaign requests of six (four STANDARD, one TECHNICAL, one COUNCIL as AUTO chose) came back needing a decision, and the only way to decide was to rewrite the request. The compiler, which cannot read the repository, asked what the agents read for themselves; the drift check listed the compiler's own precision as unjustified; and there was nowhere to accept or drop an addition | Real campaign, `docs/acceptance/campaign/specs-072-before-refinement` | FIXED `6404450`: the user decides in the specification preview (keep some, all or none of the additions; questions recorded as left open); both instructions say what a question is for. Scenario test; measured again on the same six requests, see the release report |
+
+Passed, with evidence in docs/acceptance: the Technical Director alone (level 1); a STANDARD and a TECHNICAL
+compilation (`v72-live-2026-10-10T19-47-04-306Z.json`); the Strategic Director (level 2) and a Council (level 3)
+with its three stages, 14 disagreements kept and no execution authorized
+(`v72-live-2026-10-10T19-48-40-838Z.json`). The other `v72-live` files of the day are the failed runs that showed
+R.2 to R.5.
+
+## 11 and 12, round 2: on rendered pages
+
+2026-10-10. The reviewer read 27 screenshots of the current build (the 0.7.2 screens and a sample of the others,
+light and dark, 1440x900 and 1024x700) from the capture tests. Nothing is clipped, overlapping or broken at
+either size; no element kept a light colour in the dark theme; the fixes of round 1 landed; the darker edge of
+controls reads as defined, not heavy; the focus ring is clear. Not in the set, so not judged: the capacity-wait
+panel of a paused mission, the signed-in ChatGPT card and its switch, the loading state of a preview.
+
+| # | Sev | Finding | Checked | State |
+|---|---|---|---|---|
+| U2.1 | HIGH | The signed-out ChatGPT card says "only while the switch above is on" and shows no switch; it does not say what connecting does | Screenshot | FIXED: the card says that connecting sends nothing and that the switch appears after |
+| U2.2 | MEDIUM | The Director's two buttons are disabled with no stated reason, neither is the main one, and nothing says what a request sends | Screenshot | FIXED |
+| U2.3 | MEDIUM | Walls of text: the capacity section's three paragraphs, the introduction of the preview | Screenshot | PARTLY FIXED: the preview's introduction is two lines. The capacity section: OPEN. DISPOSITION: VALID_DEFERRED (0.7.3), density of secondary text |
+| U2.4 | MEDIUM | Recorded reason codes shown in the notice; two titles for a wait; the waiting notice and the quota banner are two patterns | Screenshot | PARTLY FIXED: the codes are a detail for support, one title. Two patterns: OPEN. DISPOSITION: VALID_DEFERRED (0.7.3), two visual patterns for two kinds of wait |
+| U2.5 | LOW | The preview button is not the main button of its panel; at 1024 the header drops the approvals count; three sidebar entries share an icon; "Adaptive (recommended)" is cut in its select at 1024 | Screenshot | OPEN |
+| U2.6 | LOW | "Not connected" on Providers, "signed out" on Usage | Screenshot | FIXED |
+
+| R.9 | HIGH | The program cell of the real campaign paused three runs of three on 0.7.2. The mission planner asked its verifier task for a `node -e` probe, which the verifier role may not run; the verifier reported a blocker, the mission paused for intervention and the program with it until its budget ended. Not a change of 0.7.2: the planner and the verifier are told the same as in 0.7.1 | Real campaign; the run's database, read while it ran | FIXED `be766d7`: the planner is told what a read-only task can run and that behaviour to exercise belongs in a test a worker writes. On that commit the cell completed five of five with the hidden evaluation passed |
+| R.10 | MEDIUM | A control run of the same cell on the 0.7.1 sources paused too: a task's verifier failed a finished task on mission criteria that only a later task could meet, and its repair had nothing to fix | Real campaign, `program__071-graph__control-observed-2026-10-11T04-28-10Z.json` | FIXED `be766d7`: mission criteria shown with a task say that the task answers for them as far as its own scope goes. Test |
+| R.11 | LOW | A repair session that made a scratch directory in its worktree could not delete it and reported the task failed for that alone. EXPLAINED 2026-10-11, not a fault of the file system: no handle, watcher or scanner held the directory. The three deletions (two in bash, one in PowerShell) were classified high risk and asked for approval, and the campaign refuses every approval by design (`"permissions": "… every approval request refused"`); the run's record shows three approval requests and three "Denied by the user". The session had made the directory because the plan asked for the output of the tests failing before the fix, which it could only get by building the old code somewhere. With a user present the deletion is approved; unattended, it is the same class as R.9: a plan that asks for evidence its sessions cannot produce within their permissions (see "Hardening deferred"). Once in seven runs of the localized-bug cell on 0.7.2. The same cell failed once in six on 0.7.1 with the same two tasks failed; why was not recorded then | Real campaign | OPEN |
+| R.12 | LOW | The security cell ends paused in every arm of every version, with its hidden evaluation passed: the planner adds a review task whose reviewer reports a finding nobody is there to answer | Real campaign | OPEN, as in 0.7.1 |
+| R.13 | LOW | The orchestrator stress gives a mission a fixed time to settle, short enough to be missed on a starved machine: on the release commit single seeds (894, 967, and 752 to 765 while the machine ran on battery) reported "did not settle: timed out" when the suite or the end-to-end tests ran beside them, and passed alone (967 three times of three; seeds 751 to 1,000 as a batch). The suite and the end-to-end tests showed the same sensitivity under the same load | Final validation, `test-results/stress-failures` | OPEN (0.7.3): a property of the tests under load, not excused; no assertion or timeout was changed to pass. The final runs were made with nothing beside them |
+
+## MEDIUM triage, 2026-10-11
+
+Every MEDIUM finding that was open or partly open on `be766d7`, with one final disposition each. A finding is
+release-material when it bears on a boundary this release claims: security, sign-in and credentials, privacy,
+provider capacity and quota truth, scheduling, routing, leases and slots, recovery, loss or duplication of work,
+the database, intent and provenance in the Task Compiler, snapshots, Director persistence, context trust,
+approvals, keyboard and focus on critical paths, live state that misleads, the package. Deferred findings go to
+the 0.7.3 backlog; each row above says why it may wait.
+
+| ID | Area | Description | Impact | Reproducible | Release-material | Disposition | Fix commit | Verification | Deferred to |
+|---|---|---|---|---|---|---|---|---|---|
+| 1.2 | ChatGPT capacity | A local failure recorded as the provider being unavailable, with a backoff | Up to six hours of refused requests after an answer that was not JSON | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `a172e63` | Registry and connection tests |  |
+| 1.3 | ChatGPT sign-in | A pending sign-in cannot be cancelled | Every control dead for up to ten minutes | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | Connection test |  |
+| 1.4 | Credential storage | A storage fault needs a restart; an unreadable file has no way out | The connection is unusable until restart | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | Connection tests |  |
+| 1.5 | ChatGPT errors | Refusals, quota and stream rate limits all read as "runtime unavailable" | A permanent refusal waits and probes; a limit is misnamed | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | Connection test |  |
+| 1.6 | ChatGPT model | A model no longer offered is still sent | Every request fails until the user notices | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | Connection test |  |
+| 3.4 | Quota truth | Limits observed for one Claude account written to another | A wrong limit shown and routed on | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `d8046c2` | `fact-times.test.ts` |  |
+| 3.5 | Quota truth | A stale copy of a pool written over a newer observation | A newer fact lost | By test (overwrite); not in code (local retry time) | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed; the retry-time part NOT_REPRODUCIBLE | `ca43de4`, `d8046c2` | `fact-times.test.ts` |  |
+| 3.6 | Leases | A ChatGPT request's slot of an earlier start held until the next restart | The provider's only slot unusable | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `d8046c2` | `worker-routing.test.ts` |  |
+| 4.3 | Overnight display | A capacity wait reads "paused" on the Overnight page | A label; the mission page is right | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 6.5 | Prompt size | The older instruction section of a first pack has no cap | Cost | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 6.6 | Intent | Accepted text cut later where it is read | The end of a long request never read | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `477fcef` | `prompts.test.ts` |  |
+| 6.7 | Intent history | An instruction recorded although its action was refused | A later session obeys an instruction that never applied | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `477fcef` | `workload-admission.test.ts` |  |
+| 6.8 | Context provenance | Memory, notes and an approval note reach prompts without admission | None found: the stores carry source labels; the note reaches no worker | Read in code | no | VALID_DEFERRED; the approval note REJECTED_WITH_EVIDENCE |  |  | 0.7.3 |
+| 6.9 | Drift check | Five patterns; nothing records a user confirmation | See 7.2 | n/a | yes, as 7.2 | DUPLICATE of 7.2; the confirmation SUPERSEDED | `9ab6a2e`, `6404450` | As 7.2 |  |
+| 14.7 | Recovery | A worker of a killed runtime alive while its task is resumed | Two processes in one worktree for a moment | Not reproduced; closed by construction | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `509a997` | `worker-routing.test.ts` |  |
+| 14.8 | Scheduler | Four agents counted active with a limit of three, once | None observed since | No: 0 of 6 full runs, 0 of 11 alone | would be | NOT_REPRODUCIBLE | `883d114` removed a likely cause | Full runs since |  |
+| 5.3 | Director wording | The challenge is called independent | A claim stronger than the fact | Yes | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `9ab6a2e` | Read |  |
+| 5.4 | Director | A stage dropped whole over one reference | A paid answer lost | No longer | yes | SUPERSEDED | `aa1809a` | `director.test.ts` (`9ab6a2e`) |  |
+| 5.5 | Routing record | No field says a Claude stand-in was a fallback | None: not reachable without recorded evidence | Not reachable | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 7.2 | Task Compiler | READY rests on what the model reports | An addition of consequence starts unseen | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `9ab6a2e` | `drift.test.ts`, stress |  |
+| 8.3 | Privacy | The compiler reads the graph when the graph is switched off | Project knowledge sent against the setting | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `9ab6a2e` | `admission.test.ts` |  |
+| 8.4 | Prompt size | Program text twice in the planner prompt | Cost | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 8.5 | Context | A read between a run and its mission row; all workspaces of a project read | None found | No (row); by design (spaces) | no | NOT_REPRODUCIBLE; the workspaces VALID_DEFERRED |  |  | 0.7.3 |
+| 9.4 | Telemetry | A session that only waited is counted as a session | A count one too high; no total wrong | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 9.5 | Usage truth | Compiler and Director use shown nowhere | Use on the ChatGPT plan invisible | By test | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `509a997` | `persistence.test.ts` |  |
+| 9.6 | Prompt size | The admitted intent carried twice in Program and Workspace prompts | Cost | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 10.4 | Privacy | The inspector shows ids, not the text sent; nothing can be deleted | Less to inspect; no claim broken | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 13.3 | Tests | No contract test of the real adapters against admission | The Codex defect could recur unseen | n/a | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `e48c949` | `capability-contract.test.ts` |  |
+| 13.4 | Tests | The paid-credit refusal tested on one path | Sending without the confirmation could go unseen | n/a | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `e48c949` | `consent-refusal.test.ts` |  |
+| 13.5 | Tests | Untested pairs of features | None known | n/a | no | VALID_DEFERRED | `ab6924b` covers part | Stress | 0.7.3 |
+| 11.5 | UI | The capacity section is on Usage, the connection on Providers | Placement | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 11.7 | UI wording | "No work has been lost" stated flatly | A guarantee the application cannot give | Yes | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80`, `d8046c2` | Model test, e2e |  |
+| 11.8 | UI | The statement of what is sent is dense | Layout | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 11.9 | UI | Records are disclosure elements, not a table | Polish | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| 12.4 | Accessibility | Focus dropped by controls a view disables | Keyboard user thrown to the page on the Director and the ChatGPT card | Yes | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | e2e accessibility check |  |
+| 12.7 | Accessibility | The inspector's status not announced | Screen reader hears nothing | Yes | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | e2e accessibility check |  |
+| 12.9 | Accessibility | Focus does not move on navigation | Keyboard and screen-reader users stay in the old view | Yes | yes | RELEASE_MATERIAL_FIX_REQUIRED: fixed | `86f5f80` | Unit test of the rule; e2e |  |
+| 12.10 | Accessibility | Errors only as toasts that expire | An error missed | Yes | yes (errors); no (history) | RELEASE_MATERIAL_FIX_REQUIRED: fixed; a toast history VALID_DEFERRED | `86f5f80` | Unit test | 0.7.3 (history) |
+| U2.3 | UI | Three paragraphs in the capacity section | Density | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+| U2.4 | UI | Two patterns for two kinds of wait | Consistency | Yes | no | VALID_DEFERRED |  |  | 0.7.3 |
+
+Total 40. Fixed in this pass: 22. Superseded or duplicate (fixed earlier or elsewhere): 2. Not reproducible: 2.
+Deferred with rationale: 14. **Release-material and still open: 0.**
+
+## Hardening deferred
+
+- **VerifierCapabilityContract.** R.9 and R.11 are one class: a plan asked a session for evidence that the
+  session's role, or the approvals it can count on, did not let it produce. `be766d7` tells the planner what a
+  read-only task can run, and the program cell completed five of five afterwards; that is an instruction to a
+  model, not a guarantee. The structural form, for 0.7.3: the capabilities of each role (commands it may run,
+  whether it writes, what needs approval and whether anyone is there to give it) as data that planning reads
+  and that a plan is checked against before it is accepted, so that a criterion no session can meet is refused
+  at planning time and not discovered as a blocker. Not built in 0.7.2: the evidence does not show the
+  instruction to be insufficient.
+- **The depth policy measured.** AUTO's depth policy (`26c77c8`) is deterministic and tested; its effect on
+  agent usage needs a campaign arm of its own, and Program and Workspace need the harness to admit them in a
+  depth other than EXACT.
+
+## Count on 2026-10-11
+
+1 CRITICAL, 33 HIGH, 59 MEDIUM and 40 LOW rows. The CRITICAL is fixed. Every HIGH is fixed; for 9.3 the cause is
+fixed and its effect measured only before the fix, which its row says. Of the 59 MEDIUM, 41 are fixed, 2 are
+superseded or duplicates of a fixed one, 2 are not reproducible and 14 are deferred to 0.7.3 with the reason in
+their row and in the triage above; none that is release-material is open. Thirty-five LOW are open.
+
+## Count on 2026-10-10, after fourteen reviews (the two of the UI in their first round)
+
+First six reviews: 1 CRITICAL, 10 HIGH (two of them one defect seen twice), about 25 MEDIUM, the rest LOW.
+Second six reviews: no CRITICAL; HIGH 8.1 (with 7.1), 8.2, 9.1, 9.2, 9.3, 10.1, 10.2, 13.1, 13.2.
+
+Found after the reviews, by the real Technical Director acceptance: 5.11 (HIGH, fixed).
+
+Fixed, each with a test unless its row says otherwise: the CRITICAL (6.1); the HIGH findings 1.1, 3.1, 3.2,
+4.1, 4.2, 6.2, 6.4, 8.1, 9.1 (workers), 10.2, 13.1, 14.1, 14.2, 14.3, 14.4; 6.3 for the mission planner; and
+the MEDIUM findings 3.3, 3.7, 4.5, 7.1, 10.3, 10.5, 14.5, 14.6. 8.2 is accepted as designed.
+
+Open and HIGH:
+
+- 6.3, the workspace half: the workspace planner's read-only run reads the checkout.
+- 9.3: the default AUTO depth costs two to four provider calls before planning. This is what the feature is;
+  what is open is that nothing measured says the 0.7.1 saving survives it. The release report may not claim it.
+- 10.1: no switch per project.
+
+Since then: the workspace half of 6.3 and 10.1 are fixed (their rows say where), and 9.3 is measured.
+
+0.7.2 cannot pass its gate while a CRITICAL or a HIGH that contradicts a release claim is open.

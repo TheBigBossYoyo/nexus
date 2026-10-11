@@ -18,7 +18,14 @@ import {
 } from '@shared/provider'
 import { NexusError } from '@shared/result'
 import { AsyncQueue } from '@main/modules/agent-runtime/async-queue'
-import type { AgentEvent, AgentRuntime, AgentSessionHandle, RuntimeCapabilities, RuntimeUsageReport, SessionSpec } from '@main/modules/agent-runtime'
+import type {
+  AgentEvent,
+  AgentRuntime,
+  AgentSessionHandle,
+  RuntimeCapabilities,
+  RuntimeUsageReport,
+  SessionSpec,
+} from '@main/modules/agent-runtime'
 import type { AgentRuntimeProvider } from './types'
 
 const POLICY_KEY = 'provider-policy'
@@ -45,12 +52,32 @@ export interface ProviderServiceDeps {
   now?: () => number
 }
 
+export interface AdmittedSessionProvider {
+  provider: ProviderId
+  requested: ProviderId
+  model: string
+  reason: string
+  fallbackReason: string | null
+}
+export type SessionAdmission = (
+  spec: SessionSpec,
+  dispatch: (selection: AdmittedSessionProvider) => AgentSessionHandle,
+) => AgentSessionHandle
+
 /** A session the policy refused: it ends at once with the reason, like a runtime that could not start. */
 function refusedHandle(agentId: string, reason: string): AgentSessionHandle {
   const queue = new AsyncQueue<AgentEvent>()
   queue.push({ type: 'session.ended', reason: 'crashed', error: reason })
   queue.close()
-  return { agentId, sessionId: () => null, events: queue, send: () => undefined, interrupt: async () => undefined, end: () => undefined, stop: async () => undefined }
+  return {
+    agentId,
+    sessionId: () => null,
+    events: queue,
+    send: () => undefined,
+    interrupt: async () => undefined,
+    end: () => undefined,
+    stop: async () => undefined,
+  }
 }
 
 /**
@@ -63,9 +90,27 @@ export class ProviderService {
   private statuses = new Map<ProviderId, ProviderStatus>()
   private readonly failures = new Map<ProviderId, { count: number; last: string }>()
   private refreshing: Promise<ProviderStatus[]> | null = null
-  private readonly probing = new Map<ProviderId, Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }>>()
-  private readonly probedAt = new Map<ProviderId, { at: number; result: { ok: boolean; detail: string } }>()
+  private readonly probing = new Map<
+    ProviderId,
+    Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }>
+  >()
+  private readonly probedAt = new Map<
+    ProviderId,
+    { at: number; result: { ok: boolean; detail: string } }
+  >()
   readonly router: AgentRuntime
+  private capacityAdmission: SessionAdmission | null = null
+
+  /** The production host installs its durable capacity admission before any engineering dispatch. */
+  setSessionAdmission(admit: SessionAdmission | null): void {
+    this.capacityAdmission = admit
+  }
+  sessionProvider(sessionId: string): ProviderId | null {
+    return this.deps.sessions.providerOfSession(sessionId)
+  }
+  defaultModel(id: ProviderId): string | null {
+    return this.byId.get(id)?.defaultModel() ?? null
+  }
 
   constructor(private readonly deps: ProviderServiceDeps) {
     for (const p of deps.providers) this.byId.set(p.id, p)
@@ -85,14 +130,34 @@ export class ProviderService {
       try {
         const found = await Promise.all(
           [...this.byId.values()].map((p) =>
-            p.discover().catch(
-              (e: unknown): ProviderStatus => ({
-                ...(this.statuses.get(p.id) ?? { id: p.id, displayName: PROVIDER_NAMES[p.id], required: p.id === PRIMARY_PROVIDER, installed: 'unknown', version: null, auth: 'unknown', authDetail: null, supported: false, supportDetail: null, models: [], capabilities: { sessions: false, resume: false, structuredOutput: 'none', toolAuthorization: false, nexusTools: false, mcp: false, usageReport: false, confinement: 'none', writes: false } }),
-                health: 'unknown',
-                healthDetail: `Detection failed: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`,
-                checkedAt: this.iso(),
+            p.discover().catch((e: unknown): ProviderStatus => ({
+              ...(this.statuses.get(p.id) ?? {
+                id: p.id,
+                displayName: PROVIDER_NAMES[p.id],
+                required: p.id === PRIMARY_PROVIDER,
+                installed: 'unknown',
+                version: null,
+                auth: 'unknown',
+                authDetail: null,
+                supported: false,
+                supportDetail: null,
+                models: [],
+                capabilities: {
+                  sessions: false,
+                  resume: false,
+                  structuredOutput: 'none',
+                  toolAuthorization: false,
+                  nexusTools: false,
+                  mcp: false,
+                  usageReport: false,
+                  confinement: 'none',
+                  writes: false,
+                },
               }),
-            ),
+              health: 'unknown',
+              healthDetail: `Detection failed: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`,
+              checkedAt: this.iso(),
+            })),
           ),
         )
         this.statuses = new Map(found.map((s) => [s.id, s]))
@@ -114,7 +179,13 @@ export class ProviderService {
       if (!status) return []
       const failing = this.failures.get(id)
       if (!failing || id === PRIMARY_PROVIDER) return [status]
-      return [{ ...status, health: failing.count >= FAILURES_UNTIL_UNAVAILABLE ? 'unavailable' : 'degraded', healthDetail: `${failing.count} failed session${failing.count === 1 ? '' : 's'} in a row. Last: ${failing.last}` } satisfies ProviderStatus]
+      return [
+        {
+          ...status,
+          health: failing.count >= FAILURES_UNTIL_UNAVAILABLE ? 'unavailable' : 'degraded',
+          healthDetail: `${failing.count} failed session${failing.count === 1 ? '' : 's'} in a row. Last: ${failing.last}`,
+        } satisfies ProviderStatus,
+      ]
     })
   }
 
@@ -128,7 +199,11 @@ export class ProviderService {
   /** Nothing is enabled that cannot work, and no use is switched on for a provider that is off. */
   setPolicy(input: unknown): ProviderPolicy {
     const parsed = ProviderPolicySchema.safeParse(input)
-    if (!parsed.success) throw new NexusError('invalid_input', `Invalid provider policy: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
+    if (!parsed.success)
+      throw new NexusError(
+        'invalid_input',
+        `Invalid provider policy: ${parsed.error.issues[0]?.message ?? 'unknown'}`,
+      )
     const next = parsed.data
     const current = this.policy()
     for (const id of PROVIDER_IDS) {
@@ -139,16 +214,28 @@ export class ProviderService {
     }
     const uses: [boolean, ProviderId, string][] = [
       [next.crossModelReview.enabled, next.crossModelReview.reviewer, 'Cross-model review'],
-      [next.heterogeneousSpeculation.enabled, next.heterogeneousSpeculation.secondCandidate, 'Heterogeneous speculation'],
+      [
+        next.heterogeneousSpeculation.enabled,
+        next.heterogeneousSpeculation.secondCandidate,
+        'Heterogeneous speculation',
+      ],
     ]
     for (const [on, id, what] of uses) {
       if (!on) continue
-      if (id === PRIMARY_PROVIDER) throw new NexusError('invalid_input', `${what} needs a provider other than Claude.`)
-      if (!next.enabled[id]) throw new NexusError('invalid_state', `${what} uses ${PROVIDER_NAMES[id]}, which is not enabled.`)
+      if (id === PRIMARY_PROVIDER)
+        throw new NexusError('invalid_input', `${what} needs a provider other than Claude.`)
+      if (!next.enabled[id])
+        throw new NexusError(
+          'invalid_state',
+          `${what} uses ${PROVIDER_NAMES[id]}, which is not enabled.`,
+        )
     }
     const second = next.heterogeneousSpeculation
     if (second.enabled && !this.statuses.get(second.secondCandidate)?.capabilities.writes) {
-      throw new NexusError('invalid_state', `${PROVIDER_NAMES[second.secondCandidate]} is read-only in NEXUS and cannot write a speculative candidate.`)
+      throw new NexusError(
+        'invalid_state',
+        `${PROVIDER_NAMES[second.secondCandidate]} is read-only in NEXUS and cannot write a speculative candidate.`,
+      )
     }
     this.deps.settings.setValue(POLICY_KEY, next)
     this.deps.onChange?.()
@@ -164,23 +251,47 @@ export class ProviderService {
     if (running) return running
     const last = this.probedAt.get(id)
     const now = this.deps.now?.() ?? Date.now()
-    if (last && now - last.at < PROBE_COOLDOWN_MS) return Promise.resolve({ ...last.result, detail: `${last.result.detail} (tested a moment ago; not repeated)`, status: this.list().find((s) => s.id === id) ?? null })
+    if (last && now - last.at < PROBE_COOLDOWN_MS)
+      return Promise.resolve({
+        ...last.result,
+        detail: `${last.result.detail} (tested a moment ago; not repeated)`,
+        status: this.list().find((s) => s.id === id) ?? null,
+      })
     const next = this.runProbe(id).finally(() => this.probing.delete(id))
     this.probing.set(id, next)
     return next
   }
 
-  private async runProbe(id: ProviderId): Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }> {
+  private async runProbe(
+    id: ProviderId,
+  ): Promise<{ ok: boolean; detail: string; status: ProviderStatus | null }> {
     const provider = this.byId.get(id)
     if (!provider) throw new NexusError('not_found', `Unknown provider ${id}`)
     const status = this.statuses.get(id)
-    if (!status || status.installed !== 'installed' || !status.supported) return { ok: false, detail: status?.supportDetail ?? `${PROVIDER_NAMES[id]} is not installed.`, status: status ?? null }
-    const result = await provider.probe().catch((e: unknown) => ({ ok: false, detail: e instanceof Error ? e.message : String(e) }))
+    if (!status || status.installed !== 'installed' || !status.supported)
+      return {
+        ok: false,
+        detail: status?.supportDetail ?? `${PROVIDER_NAMES[id]} is not installed.`,
+        status: status ?? null,
+      }
+    const result = await provider
+      .probe()
+      .catch((e: unknown) => ({ ok: false, detail: e instanceof Error ? e.message : String(e) }))
     this.probedAt.set(id, { at: this.deps.now?.() ?? Date.now(), result })
     if (result.ok) this.failures.delete(id)
-    else if (id !== PRIMARY_PROVIDER) this.failures.set(id, { count: FAILURES_UNTIL_UNAVAILABLE, last: result.detail.slice(0, 300) })
+    else if (id !== PRIMARY_PROVIDER)
+      this.failures.set(id, {
+        count: FAILURES_UNTIL_UNAVAILABLE,
+        last: result.detail.slice(0, 300),
+      })
     const current = this.statuses.get(id)
-    if (current && result.ok) this.statuses.set(id, { ...current, health: 'healthy', healthDetail: result.detail, checkedAt: this.iso() })
+    if (current && result.ok)
+      this.statuses.set(id, {
+        ...current,
+        health: 'healthy',
+        healthDetail: result.detail,
+        checkedAt: this.iso(),
+      })
     this.deps.onChange?.()
     return { ...result, status: this.list().find((s) => s.id === id) ?? null }
   }
@@ -190,9 +301,13 @@ export class ProviderService {
     if (ok) {
       this.failures.delete(id)
       const current = this.statuses.get(id)
-      if (current && current.health !== 'healthy') this.statuses.set(id, { ...current, health: 'healthy', healthDetail: null })
+      if (current && current.health !== 'healthy')
+        this.statuses.set(id, { ...current, health: 'healthy', healthDetail: null })
     } else {
-      this.failures.set(id, { count: (this.failures.get(id)?.count ?? 0) + 1, last: detail.slice(0, 300) })
+      this.failures.set(id, {
+        count: (this.failures.get(id)?.count ?? 0) + 1,
+        last: detail.slice(0, 300),
+      })
     }
     this.deps.onChange?.()
   }
@@ -205,20 +320,39 @@ export class ProviderService {
     const usage: ProviderUsage[] = await Promise.all(
       PROVIDER_IDS.map(async (id): Promise<ProviderUsage> => {
         const mine = recent.filter((s) => s.provider === id)
-        const report: RuntimeUsageReport | null = this.statuses.get(id)?.capabilities.usageReport ? await (this.byId.get(id)?.usageReport().catch(() => null) ?? null) : null
+        const report: RuntimeUsageReport | null = this.statuses.get(id)?.capabilities.usageReport
+          ? await (this.byId
+              .get(id)
+              ?.usageReport()
+              .catch(() => null) ?? null)
+          : null
         return {
           provider: id,
-          observed: { sessions: mine.length, inputTokens: mine.reduce((n, s) => n + s.inputTokens, 0), outputTokens: mine.reduce((n, s) => n + s.outputTokens, 0) },
+          observed: {
+            sessions: mine.length,
+            inputTokens: mine.reduce((n, s) => n + s.inputTokens, 0),
+            outputTokens: mine.reduce((n, s) => n + s.outputTokens, 0),
+          },
           windows: report?.windows ?? [],
           windowsSource: report ? 'runtime' : 'not_exposed',
         }
       }),
     )
-    return { statuses: this.list(), policy: this.policy(), performance: summarizePerformance(recent), usage, recent: recent.slice(0, 50) }
+    return {
+      statuses: this.list(),
+      policy: this.policy(),
+      performance: summarizePerformance(recent),
+      usage,
+      recent: recent.slice(0, 50),
+    }
   }
 
   sessionsOfRun(runId: string): ProviderSession[] {
     return this.deps.sessions.listByRun(runId)
+  }
+  /** Advisory roles must not be redirected by worker/reviewer policy (for example cross-model review). */
+  pinnedRuntime(id: ProviderId): AgentRuntime | null {
+    return this.byId.get(id)?.runtime() ?? null
   }
 
   // ───────────────────────────── the router ─────────────────────────────
@@ -229,16 +363,35 @@ export class ProviderService {
       if (!runtime) throw new Error('The Claude runtime is missing')
       return runtime
     }
-    const start = (spec: SessionSpec): AgentSessionHandle => {
+    const start = (spec: SessionSpec, admitted?: AdmittedSessionProvider): AgentSessionHandle => {
+      if (this.capacityAdmission && !admitted)
+        return this.capacityAdmission(spec, (selection) => start(spec, selection))
       const policy = this.policy()
-      const resumeProvider = spec.resumeSessionId ? this.deps.sessions.providerOfSession(spec.resumeSessionId) : null
-      const decision = routeSession({ role: spec.role, label: spec.label ?? null, resumeProvider }, policy, this.list())
+      const resumeProvider = spec.resumeSessionId
+        ? this.deps.sessions.providerOfSession(spec.resumeSessionId)
+        : null
+      const decision = admitted ?? routeSession(
+        { role: spec.role, label: spec.label ?? null, resumeProvider },
+        policy,
+        this.list(),
+      )
       const chosen = decision.provider
       const provider = chosen ? this.byId.get(chosen) : undefined
       const runtime = provider?.runtime() ?? null
       const status = chosen ? this.statuses.get(chosen) : undefined
-      const model = chosen === PRIMARY_PROVIDER ? (spec.model ?? null) : chosen ? ((chosen === 'codex' ? policy.models.codex : chosen === 'gemini' ? policy.models.gemini : null) ?? provider?.defaultModel() ?? null) : null
-      const record = this.safeInsert({
+      const model = admitted?.model ?? (
+        chosen === PRIMARY_PROVIDER
+          ? (spec.model ?? null)
+          : chosen
+            ? ((chosen === 'codex'
+                ? policy.models.codex
+                : chosen === 'gemini'
+                  ? policy.models.gemini
+                  : null) ??
+              provider?.defaultModel() ??
+              null)
+            : null)
+      const sessionRecord: ProviderSession = {
         id: newId(),
         runId: this.deps.runOfAgent(spec.agentId),
         agentId: spec.agentId,
@@ -253,23 +406,35 @@ export class ProviderService {
         fallbackReason: decision.fallbackReason,
         sessionId: spec.resumeSessionId ?? null,
         outcome: chosen && runtime ? 'running' : 'refused',
-        error: chosen && runtime ? null : (decision.fallbackReason ?? 'No runtime for the chosen provider.'),
+        error:
+          chosen && runtime
+            ? null
+            : (decision.fallbackReason ?? 'No runtime for the chosen provider.'),
         inputTokens: 0,
         outputTokens: 0,
         createdAt: this.iso(),
         endedAt: chosen && runtime ? null : this.iso(),
-      })
-      if (decision.fallbackReason) this.deps.logger?.(`provider: ${spec.role} ${spec.agentId}: ${decision.fallbackReason}`)
-      if (!chosen || !runtime) return refusedHandle(spec.agentId, `Provider policy: ${record.error ?? 'refused'}`)
+      }
+      // A production dispatch cannot proceed when its durable provider binding was not written.
+      const record = admitted ? this.deps.sessions.insert(sessionRecord) : this.safeInsert(sessionRecord)
+      if (decision.fallbackReason)
+        this.deps.logger?.(`provider: ${spec.role} ${spec.agentId}: ${decision.fallbackReason}`)
+      if (!chosen || !runtime)
+        return refusedHandle(spec.agentId, `Provider policy: ${record.error ?? 'refused'}`)
       // A Claude model name means nothing to another provider, and the reverse.
       const { model: _claudeModel, ...rest } = spec
-      const routed: SessionSpec = chosen === PRIMARY_PROVIDER ? spec : { ...rest, ...(model ? { model } : {}) }
+      const routed: SessionSpec =
+        chosen === PRIMARY_PROVIDER ? { ...spec, ...(model ? { model } : {}) } : { ...rest, ...(model ? { model } : {}) }
       let inner: AgentSessionHandle
       try {
         inner = runtime.startSession(routed)
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
-        this.safeUpdate(record.id, { outcome: 'failed', error: message.slice(0, 600), endedAt: this.iso() })
+        this.safeUpdate(record.id, {
+          outcome: 'failed',
+          error: message.slice(0, 600),
+          endedAt: this.iso(),
+        })
         this.noteOutcome(chosen, false, message)
         return refusedHandle(spec.agentId, message)
       }
@@ -295,7 +460,9 @@ export class ProviderService {
     try {
       return this.deps.sessions.insert(session)
     } catch (e) {
-      this.deps.logger?.(`provider: the session record could not be written: ${e instanceof Error ? e.message : String(e)}`)
+      this.deps.logger?.(
+        `provider: the session record could not be written: ${e instanceof Error ? e.message : String(e)}`,
+      )
       return session
     }
   }
@@ -304,13 +471,21 @@ export class ProviderService {
     try {
       this.deps.sessions.update(id, patch)
     } catch (e) {
-      this.deps.logger?.(`provider: the session record could not be updated: ${e instanceof Error ? e.message : String(e)}`)
+      this.deps.logger?.(
+        `provider: the session record could not be updated: ${e instanceof Error ? e.message : String(e)}`,
+      )
     }
   }
 
   /** Passes a session's events through and keeps its record: session id, tokens, how it ended. */
-  private observe(inner: AgentSessionHandle, record: ProviderSession, provider: ProviderId): AgentSessionHandle {
-    const sessions = { update: (id: string, patch: Partial<ProviderSession>): void => this.safeUpdate(id, patch) }
+  private observe(
+    inner: AgentSessionHandle,
+    record: ProviderSession,
+    provider: ProviderId,
+  ): AgentSessionHandle {
+    const sessions = {
+      update: (id: string, patch: Partial<ProviderSession>): void => this.safeUpdate(id, patch),
+    }
     const note = (ok: boolean, detail: string): void => this.noteOutcome(provider, ok, detail)
     const iso = (): string => this.iso()
     let input = 0
@@ -320,7 +495,10 @@ export class ProviderService {
     async function* tap(): AsyncGenerator<AgentEvent> {
       for await (const event of inner.events) {
         if (event.type === 'session.started') {
-          sessions.update(record.id, { sessionId: event.sessionId, ...(provider === PRIMARY_PROVIDER ? { model: event.model } : {}) })
+          sessions.update(record.id, {
+            sessionId: event.sessionId,
+            ...(provider === PRIMARY_PROVIDER ? { model: event.model } : {}),
+          })
         } else if (event.type === 'turn.completed') {
           for (const u of event.result.usage) {
             input += u.inputTokens
@@ -328,11 +506,19 @@ export class ProviderService {
           }
           sessions.update(record.id, { inputTokens: input, outputTokens: output })
           if (event.result.outcome === 'success') succeeded = true
-          else if (event.result.outcome === 'error' || event.result.outcome === 'structured_output_failed') failed = event.result.errors[0] ?? event.result.outcome
+          else if (
+            event.result.outcome === 'error' ||
+            event.result.outcome === 'structured_output_failed'
+          )
+            failed = event.result.errors[0] ?? event.result.outcome
         } else if (event.type === 'session.ended') {
           const crashed = event.reason === 'crashed'
           const error = crashed ? (event.error ?? 'The session crashed.') : failed
-          sessions.update(record.id, { outcome: error && !succeeded ? 'failed' : crashed ? 'failed' : 'completed', error: error ? error.slice(0, 600) : null, endedAt: iso() })
+          sessions.update(record.id, {
+            outcome: error && !succeeded ? 'failed' : crashed ? 'failed' : 'completed',
+            error: error ? error.slice(0, 600) : null,
+            endedAt: iso(),
+          })
           // A stopped session says nothing about the provider.
           if (event.reason !== 'stopped') note(!error || (succeeded && !crashed), error ?? '')
         }
@@ -348,6 +534,7 @@ export class ProviderService {
       interrupt: () => inner.interrupt(),
       end: () => inner.end(),
       stop: () => inner.stop(),
+      ...(inner.stopConfirmed ? { stopConfirmed: () => inner.stopConfirmed!() } : {}),
     }
   }
 }

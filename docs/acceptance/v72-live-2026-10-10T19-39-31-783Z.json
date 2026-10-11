@@ -1,0 +1,320 @@
+{
+  "kind": "v72-live-acceptance",
+  "startedAt": "2026-10-10T19:39:31.783Z",
+  "verdict": "FAIL",
+  "steps": {
+    "technical": {
+      "ms": 51,
+      "request": "Refactor the retry of the uploader so that the delay policy can be replaced without touching the upload code. Keep five attempts and the current behaviour by default.",
+      "spec": {
+        "id": "874d19f2-d66d-4252-98b8-c66255782710",
+        "requestedMode": "TECHNICAL",
+        "mode": "TECHNICAL",
+        "status": "WAITING_FOR_PROVIDER",
+        "reasons": [
+          "USER_SELECTED_MODE",
+          "REQUIRED_PROVIDER_UNAVAILABLE_NO_DOWNGRADE"
+        ],
+        "rawIntentPreserved": "Refactor the retry of the uploader so that the delay policy can be replaced without touching the upload code. Keep five attempts and the current behaviour by default.",
+        "recommendations": [],
+        "ambiguities": [],
+        "dependencies": 1,
+        "waitUntil": null
+      },
+      "routing": [],
+      "intentUnchanged": true
+    },
+    "strategic": {
+      "ms": 13296,
+      "level": 2,
+      "state": "COMPLETED",
+      "message": "Advisory material only. Execution requires the normal task and policy gates.",
+      "provider": null,
+      "model": null,
+      "executionAuthorized": false,
+      "memo": {
+        "objective": "Decide whether to replace the uploader’s fixed retry delay with exponential backoff and jitter now or first add missing tests.",
+        "recommendation": "First add tests that establish the current retry contract, then implement exponential backoff with jitter behind existing release gates. Do not recommend immediate rollout without evidence that retry safety and timing limits are preserved.",
+        "rationale": [
+          "No implementation details or test results were supplied, so readiness for a behavior change cannot be established.",
+          "Exponential backoff with jitter can reduce synchronized retries and load during outages, but changes upload latency and retry timing.",
+          "Tests should protect correctness before changing timing behavior, particularly around duplicate uploads, cancellation, and terminal failures."
+        ],
+        "alternatives": [
+          "Implement tests and backoff in the same change, provided baseline behavior is established first and the new behavior passes all existing gates before rollout.",
+          "Retain the fixed delay temporarily if retry safety or latency requirements remain unresolved."
+        ],
+        "risks": [
+          "Longer retry waits could violate upload deadlines or delay recovery.",
+          "Incorrect retry classification could repeatedly attempt permanent failures.",
+          "Retries after ambiguous server responses could duplicate uploads unless idempotency or deduplication is guaranteed.",
+          "Unbounded delays, attempts, or concurrent retries could exhaust resources."
+        ],
+        "unknowns": [
+          "Current test coverage, retryable error classification, attempt limits, delay limits, and overall deadlines.",
+          "Whether uploads are idempotent and partial uploads can be resumed safely.",
+          "How cancellation, shutdown, server retry guidance, and concurrent upload retries are handled.",
+          "Existing latency requirements and evidence of synchronized retries or overload."
+        ],
+        "requestedExperiments": [
+          "Add baseline tests for transient versus permanent failures, attempt exhaustion, ambiguous responses, duplicate prevention, and partial-upload handling.",
+          "Use an injectable clock and random source to test delay growth, caps, jitter bounds, deadline enforcement, and cancellation without real sleeps.",
+          "Verify handling of server retry guidance where applicable, including conflicts with local deadlines.",
+          "Compare fixed delay and backoff under simulated outages and recovery; measure completion latency, retry volume, concurrency, and recovery time.",
+          "Verify compatibility with existing security, policy, and release gates; any rollout requires the normal authorization process."
+        ],
+        "evidenceRefs": [],
+        "confidence": "MEDIUM"
+      },
+      "challenge": null,
+      "synthesis": null,
+      "unresolvedDisagreements": [],
+      "routing": [
+        {
+          "stage": "DIRECTOR:strategic:ADMISSION",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:technical:ADMISSION",
+          "role": "technical",
+          "provider": null,
+          "model": null,
+          "action": "WAIT",
+          "state": "WAITING_FOR_CAPACITY",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "NO_QUALITY_SAFE_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:strategic:1",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 267,
+            "outputTokens": 502,
+            "totalTokens": 769,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        }
+      ],
+      "records": [
+        {
+          "id": "97de3cb2-3985-4dd7-af0c-eeef3a1971b9",
+          "invocationId": "524dd708-dbdf-4a11-aea0-05b59cc427d9",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "OUTCOME",
+          "state": "COMPLETED",
+          "completedStages": [
+            "MEMO"
+          ],
+          "routingIds": [
+            "82a7cd64-1810-4fcb-99b7-3e9854721496",
+            "cfe83633-adb6-4d6d-8b66-2e771a06fc30",
+            "1f42a17b-2d46-4a74-bd86-ecf69f6f9f82"
+          ],
+          "consumption": "RECORDED_BY_PROVIDER_ADAPTER",
+          "replayAllowed": false,
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:39:46.866Z"
+        },
+        {
+          "id": "bb63979b-8483-4cfb-9402-0ef01c9d6ebe",
+          "invocationId": "524dd708-dbdf-4a11-aea0-05b59cc427d9",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "DECISION",
+          "recommendation": "First add tests that establish the current retry contract, then implement exponential backoff with jitter behind existing release gates. Do not recommend immediate rollout without evidence that retry safety and timing limits are preserved.",
+          "unresolvedDisagreements": [],
+          "evidenceRefs": [],
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:39:46.866Z"
+        }
+      ]
+    },
+    "council": {
+      "ms": 43326,
+      "level": 3,
+      "state": "FAILED",
+      "message": "Director request failed. Original intent is saved. Inspect the provider connection and retry explicitly; no automatic duplicate request was sent.",
+      "provider": null,
+      "model": null,
+      "executionAuthorized": false,
+      "memo": {
+        "objective": "Determine whether to replace the uploader's fixed retry delay with exponential backoff and jitter now or first add missing tests.",
+        "recommendation": "Add retry-behavior tests first, then evaluate exponential backoff with jitter behind a controlled rollout. With no supplied evidence about the implementation or failure patterns, an immediate behavior change is not justified. Existing security, policy, and release gates remain unchanged.",
+        "rationale": [
+          "Tests should establish current retry semantics and protect against data loss, duplicate uploads, and unbounded retries before timing behavior changes.",
+          "Exponential backoff with jitter can reduce synchronized retries during transient outages, but it may increase completion latency and is not a substitute for correct error classification.",
+          "A tested, bounded retry policy provides a safer basis for comparing the proposed behavior with the fixed-delay baseline."
+        ],
+        "alternatives": [
+          "Retain fixed delay while adding tests and collecting retry metrics.",
+          "Develop backoff and its tests together, but defer activation until verification and existing release gates are satisfied."
+        ],
+        "risks": [
+          "Retries may duplicate uploads if operations are not idempotent or ambiguous outcomes are handled incorrectly.",
+          "Excessive backoff may violate upload deadlines; insufficient caps or retry limits may prolong resource consumption.",
+          "Incorrect error classification may retry permanent failures or abandon recoverable ones."
+        ],
+        "unknowns": [
+          "Current retry limits, timeout budgets, error classification, and test coverage.",
+          "Upload idempotency, partial-upload recovery, and behavior after a timeout with an unknown server outcome.",
+          "Observed failure rates, synchronized retry patterns, server rate-limit guidance, and latency requirements."
+        ],
+        "requestedExperiments": [
+          "Using fake time and controllable randomness, test retryable versus permanent failures, attempt limits, cancellation, deadlines, and cleanup.",
+          "Verify the proposed delay progression, maximum delay, jitter bounds, and server-directed retry delays where applicable.",
+          "Inject timeouts, connection failures, rate limits, and partial successes; verify that uploads are neither lost nor duplicated.",
+          "Compare fixed delay against backoff with jitter under concurrent transient failures, measuring retry concentration, success rate, completion latency, and resource use.",
+          "Define rollout acceptance and rollback criteria, then verify them through existing release gates before activation."
+        ],
+        "evidenceRefs": [],
+        "confidence": "MEDIUM"
+      },
+      "challenge": null,
+      "synthesis": null,
+      "unresolvedDisagreements": [],
+      "routing": [
+        {
+          "stage": "DIRECTOR:strategic:ADMISSION",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "claude:opus: QUALITY_EVIDENCE_REQUIRED",
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:technical:ADMISSION",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:strategic:1",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 267,
+            "outputTokens": 504,
+            "totalTokens": 771,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        },
+        {
+          "stage": "DIRECTOR:technical:1",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "FAILED",
+          "consumption": "UNKNOWN",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": "PROVIDER",
+          "usage": null
+        }
+      ],
+      "records": [
+        {
+          "id": "22347f45-d46f-48f4-9365-4f00199e27c0",
+          "invocationId": "8b84705a-293b-43b8-b68a-9e07ee960d9b",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "OUTCOME",
+          "state": "FAILED",
+          "completedStages": [
+            "MEMO"
+          ],
+          "routingIds": [
+            "782f4181-54c4-453c-b9d7-a5ae1594506c",
+            "8c68cfd8-3c87-418c-9a58-7895554d3958",
+            "02be8e15-0d62-487a-80db-3ed47aca9c94",
+            "15008f25-1f68-485f-ba30-8f19e15a1efe"
+          ],
+          "consumption": "UNKNOWN",
+          "replayAllowed": false,
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:40:30.201Z"
+        }
+      ]
+    }
+  },
+  "connectionBefore": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "connectionAfter": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "failures": [
+    "technical: status WAITING_FOR_PROVIDER",
+    "technical: no completed Claude stage on record",
+    "council: state FAILED"
+  ]
+}

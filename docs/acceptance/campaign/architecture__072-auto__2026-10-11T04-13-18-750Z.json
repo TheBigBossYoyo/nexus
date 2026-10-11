@@ -1,0 +1,304 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "072-auto",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection",
+  "compilation": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 24007,
+    "recommendations": 11,
+    "recommendationChars": 3136,
+    "byKind": {
+      "REQUIREMENT": 3,
+      "ACCEPTANCE": 3,
+      "CONSTRAINT": 1,
+      "UNKNOWN": 1,
+      "VERIFICATION": 2,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 986,
+          "outputTokens": 877,
+          "totalTokens": 1863,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 1249,
+          "outputTokens": 69,
+          "totalTokens": 1318,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 35
+        }
+      }
+    ]
+  },
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T04:13:18.750Z",
+  "finishedAt": "2026-10-11T04:18:45.080Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/1e731cd4/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (0.9128ms)\n✔ an unknown format names itself and the known formats (0.2711ms)\n✔ a format is added from outside, without touching the module (0.3148ms)\n✔ registering a name twice throws and keeps the first exporter (0.1816ms)\n✔ the decision is recorded with its three sections (10.4442ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 105.9901\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 8,
+          "fail": 0,
+          "output": "✔ json output (0.6811ms)\n✔ csv output (0.153ms)\n✔ default formats (1.8141ms)\n✔ csv edge cases (0.1237ms)\n✔ custom exporter dispatch (0.7582ms)\n✔ duplicate registration throws and keeps the original (0.8663ms)\n✔ listFormats is sorted and returns a copy (0.5866ms)\n✔ unknown format error names the format and known formats (0.6447ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 113.1422\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "exporter-registry-fix1",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 2,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"945da35d-cf2b-41d0-b8e5-f04b7b05c740\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"e9a80dbe-2c06-45ec-a4d2-7a1899a28210\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd, (redirection), base64, node, for, do, tr, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (node, for, do, tr, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [
+        "{\"id\":\"3c830d42-d1fe-44dc-8221-c5dfe3a9d726\",\"runId\":\"1e731cd4-9c20-429f-823f-035cc33a849b\",\"taskId\":\"0131b803-a267-4b53-9891-52102c456ee1\",\"agentId\":\"326d96eb-331f-4705-8b2b-c3a74e112e81\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"The code and tests meet every code criterion, but the mission is not complete: docs/adr/0001-exporter-registry.md does not exist. docs/ contains only docs/adr/README.md. The task description did not ask for the ADR, so this is a gap in the plan rather than a defect in the change; I have told the planner.\\n\\n`npm test` exits 0 with 8 of 8 passing, and the working tree is clean at d55ae4e.\\n\\nTwo limits on my verification:\\n- **Byte-identical output:** I could not run a script comparing old and new output, because the verifier role is not allowed to run ad-hoc node. I confirmed it by comparing the old source (`git show 36a3ebe:src/export/index.js`) "
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: ` and `csv` are registered in the same file with their old case bodies unchanged, and I updated the doc comment. `json` still returns `JSON.stringify(rows, null, 2) + '\\n'`, and `csv` still returns `''` for empty rows. I checked this by reading the code and through the tests, not by diffing output against the old implementation.\n- **Tests:** the two existing tests are untouched. The new tests cover the default formats, the csv edge cases, custom dispatch, duplicate registration, sorting, and the unknown-format error. Each registering test imports its own module instance with a unique query string, so order doesn't matter, and I added no reset or unregister export.\n\nNo temporary files remain.",
+        "reviewer: ",
+        "verifier: ",
+        "debugger: rt` files, so the first implementation left it out. `docs/` held only `docs/adr/README.md`.\n\n**Fix:** the ADR follows the README convention (`NNNN-short-title.md`, those three sections) and describes the registry as it is in `src/export/index.js`. No code changed.\n\n**Test:** I did not add a regression test, because the fix is a document and there is no behaviour to pin.\n\nThe Consequences section records two things that callers will notice:\n- A format is only known once the module that registers it has been imported.\n- The unknown-format error message changed from `Unknown format` to one that includes the format and the known formats, so code matching the old text exactly would need updating.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: xt, Decision and Consequences. I wrote the Decision section from `src/export/index.js` as it is now:\n- **Functions:** it names `registerExporter`, `exportData` and `listFormats`.\n- **Behaviour:** it states the duplicate-name and unknown-format behaviour, and that `listFormats` returns a new sorted array.\n- **Defaults:** it says `json` and `csv` are registered by default with unchanged output.\n\nThe Consequences section covers both sides. Adding a format no longer touches existing files, and duplicates fail loudly. A format only exists once its module has been imported, and the registry is process-wide with no unregister, replace or plugin discovery.\n\nI did not read `src/export/index.test.js`.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Planner [high] Run shell command (bash): git ls-files; echo ---; cat package.json; echo ---; cat -A src/export/index.js; echo ---; cat src/export/index.test.js; echo ---; cat README.md; ls docs 2>&1; grep -rn \"export\" --include=*.js --include=*.json --include=*.md . --exclude-dir=node_modules --exclude-dir=.git -l | touching Git's own files: .git",
+        "Reviewer/exporter-registry [high] Run shell command (bash): cat src/export/index.js; echo ----; cat src/export/index.test.js | head -15; echo ----; git status --short; git ls-files; echo ----; git diff 36a3ebe HEAD --stat; npm test 2>&1 | tail -12; git status --short; grep -rn \"exportData\\|Unknown format\" --include=*.js --include=*.md --include=*.json . --ex | touching Git's own files: .git"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 11,
+    "turns": 88,
+    "inputTokensUncached": 42376,
+    "outputTokens": 31083,
+    "cacheCreationTokens": 112202,
+    "cacheReadTokens": 708877,
+    "costUsdReported": 1.6049,
+    "toolCalls": 77,
+    "toolCallsRecorded": 77,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 33,
+      "Glob": 3,
+      "Read": 27,
+      "StructuredOutput": 8,
+      "Write": 3,
+      "mcp__nexus__context_search": 1,
+      "mcp__nexus__send_message": 1,
+      "Grep": 1
+    },
+    "contextToolCalls": [
+      "verifier: context_search {\"query\":\"ADR 0001-exporter-registry\"}"
+    ],
+    "deniedToolCalls": 5,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 12,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 3,
+        "turns": 19,
+        "toolCalls": 16,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 4,
+        "turns": 42,
+        "toolCalls": 38,
+        "contextToolCalls": 1
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 324703,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 18
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 18
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

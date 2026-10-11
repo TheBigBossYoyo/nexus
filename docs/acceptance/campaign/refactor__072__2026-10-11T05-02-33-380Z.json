@@ -1,0 +1,213 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "be766d78ae319c469406a7891f96acc6cb4523e7",
+  "startedAt": "2026-10-11T05:02:33.380Z",
+  "finishedAt": "2026-10-11T05:05:54.099Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/31b5d1c3/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (1.1102ms)\n✔ updateUser gives the same results as before, the id checked last (0.3751ms)\n✔ inviteUser gives the same results as before, the role checked last (0.4036ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.1257ms)\n✔ the handlers use the shared module and no longer carry their own copy (0.8159ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 86.5417\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 20,
+          "fail": 0,
+          "output": "✔ a valid user is created with a normalised email (1.1179ms)\n✔ an invalid email is reported (0.1614ms)\n✔ an invitation needs a known role (0.106ms)\n✔ createUser reports each validation message (0.137ms)\n✔ createUser reports the email before the name (0.0948ms)\n✔ updateUser reports each validation message (0.1072ms)\n✔ updateUser reports the email before the name (0.0627ms)\n✔ inviteUser reports each validation message (0.082ms)\n✔ inviteUser reports the email before the name (0.0605ms)\n✔ updateUser reports the name before the id (0.1421ms)\n✔ inviteUser reports the name before the role (0.0799ms)\n✔ handlers return trimmed, lower-cased values on success (0.1249ms)\n✔ valid emails return null (0.7457ms)\n✔ non-string emails are not valid addresses (0.1138ms)\n✔ malformed emails are not valid addresses (0.7931ms)\n✔ emails over 254 characters are rejected (0.2161ms)\n✔ valid names return null (0.1882ms)\n✔ non-string names are required (0.1684ms)\n✔ empty and whitespace-only names are required (0.1917ms)\n✔ names over 80 characters are rejected (0.1289ms)\nℹ tests 20\nℹ suites 0\nℹ pass 20\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 134.7419\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "add-validation-module",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "refactor-handlers",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: es, malformed emails, and both length limits just over the boundary. It also covers empty and whitespace-only names.\n- **`src/handlers/handlers.test.js`**: the three original tests are untouched. For `createUser`, `updateUser` and `inviteUser` I added tests for all four messages and for email being reported before name. For `updateUser` and `inviteUser` there are tests that name comes before `id: required` and `role: must be member or admin`. One test checks the trimmed, lower-cased success value for each of the three handlers.\n\nThe three handler files are unchanged. Git printed LF-to-CRLF warnings for the new and edited files on commit; they're only line-ending warnings, and nothing failed.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: and name checks, with the email regex and the 254 and 80 limits, are gone from all three. Each handler returns `{ ok: false, error }` with the validator's message when the result is not null.\n- **What stayed the same:** The `id: required` and `role: must be member or admin` checks still come after the name check. The success return statements, with their `trim()` and `toLowerCase()` normalisation, are unchanged. I added no new guards.\n- **Scope:** I changed only those three files. `src/validation.js` and the test files are untouched, and the work is committed on the current branch.\n- **Git warnings:** Git printed LF-to-CRLF warnings on commit, as it did for the previous task. Nothing failed.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 48,
+    "inputTokensUncached": 26720,
+    "outputTokens": 19108,
+    "cacheCreationTokens": 64108,
+    "cacheReadTokens": 370043,
+    "costUsdReported": 0.8819,
+    "toolCalls": 40,
+    "toolCallsRecorded": 40,
+    "filesChangedRecorded": 3,
+    "toolCallsByName": {
+      "Bash": 15,
+      "StructuredOutput": 6,
+      "Read": 16,
+      "Write": 3
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 3,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 14,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 11,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 18,
+        "toolCalls": 15,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 199066,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 21
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

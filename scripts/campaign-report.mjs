@@ -5,7 +5,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const dir = resolve(process.argv[2] ?? 'docs/acceptance/campaign')
-const ARMS = ['070', '071', '071-graph']
+// The arms to show, the first one the baseline: NEXUS_CAMPAIGN_ARMS=071-graph,072,072-auto compares 0.7.2 with 0.7.1.
+const ARMS = (process.env.NEXUS_CAMPAIGN_ARMS ?? '070,071,071-graph').split(',')
+const BASE = ARMS[0]
 const TASKS = ['localized-bug', 'cross-module-bug', 'feature', 'refactor', 'architecture', 'security', 'program', 'workspace']
 
 const cells = new Map()
@@ -45,12 +47,12 @@ for (const [title, set] of [['the six mission categories', TASKS.slice(0, 6)], [
   const shared = set.filter((t) => ARMS.every((a) => cells.has(`${t}|${a}`)))
   console.log(`\n### Totals over ${title} (sum of cell means; tasks every arm has run: ${shared.join(', ') || 'none yet'})\n`)
   if (shared.length === 0) continue
-  console.log('| Arm | Runs | Completed | Hidden evaluation passed | Turns | Uncached input | Cache written | Cache read | Output | Wall time | Against 0.7.0: turns / all input / output / wall |')
+  console.log('| Arm | Runs | Completed | Hidden evaluation passed | Turns | Uncached input | Cache written | Cache read | Output | Wall time | Against the first arm: turns / all input / output / wall |')
   console.log('| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |')
   const total = (arm, f) => shared.reduce((n, t) => n + m(cells.get(`${t}|${arm}`), f), 0)
   for (const arm of ARMS) {
     const runs = shared.flatMap((t) => cells.get(`${t}|${arm}`))
-    const against = arm === '070' ? 'baseline' : `${pct(total(arm, (e) => e.turns), total('070', (e) => e.turns))} / ${pct(total(arm, input), total('070', input))} / ${pct(total(arm, (e) => e.outputTokens), total('070', (e) => e.outputTokens))} / ${pct(total(arm, (e) => e.wallMs), total('070', (e) => e.wallMs))}`
+    const against = arm === BASE ? 'baseline' : `${pct(total(arm, (e) => e.turns), total(BASE, (e) => e.turns))} / ${pct(total(arm, input), total(BASE, input))} / ${pct(total(arm, (e) => e.outputTokens), total(BASE, (e) => e.outputTokens))} / ${pct(total(arm, (e) => e.wallMs), total(BASE, (e) => e.wallMs))}`
     console.log(`| ${arm} | ${runs.length} | ${of(runs, (r) => r.quality.completed)} | ${of(runs, (r) => r.quality.hiddenPassed)} | ${total(arm, (e) => e.turns).toFixed(0)} | ${k(total(arm, (e) => e.inputTokensUncached))} | ${k(total(arm, (e) => e.cacheCreationTokens))} | ${k(total(arm, (e) => e.cacheReadTokens))} | ${k(total(arm, (e) => e.outputTokens))} | ${Math.round(total(arm, (e) => e.wallMs) / 1000)} s | ${against} |`)
   }
 }

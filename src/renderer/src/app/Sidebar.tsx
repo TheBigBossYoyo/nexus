@@ -46,6 +46,7 @@ const ICONS: Record<string, ReactNode> = {
   policy: <PolicyIcon size={16} />,
   usage: <UsageIcon size={16} />,
   providers: <ProvidersIcon size={16} />,
+  director: <IntelligenceIcon size={16} />,
   performance: <PerformanceIcon size={16} />,
   intelligence: <IntelligenceIcon size={16} />,
   knowledge: <BranchIcon size={16} />,
@@ -198,7 +199,9 @@ function ClaudeRow({ collapsed }: { collapsed: boolean }) {
           {collapsed ? null : (
             <span className="min-w-0 flex-1 truncate">
               <span className="text-text-muted">Claude · </span>
-              <span className={stale ? 'text-text-muted' : 'text-text-primary'}>{stale ? 'Unknown' : model.label}</span>
+              <span className={stale ? 'text-text-muted' : 'text-text-primary'}>
+                {stale ? 'Unknown' : model.label}
+              </span>
             </span>
           )}
         </button>
@@ -301,7 +304,11 @@ export function Sidebar() {
           <span
             className="font-mono text-caption text-text-muted"
             data-testid="app-version"
-            title={info ? `NEXUS ${info.version}` : undefined}
+            title={
+              info
+                ? `NEXUS ${info.version} · ${info.build?.commit ?? 'unknown build'} · ${info.build?.channel ?? 'unknown channel'}`
+                : undefined
+            }
           >
             {info ? (collapsed ? '' : `v${info.version}`) : ''}
           </span>

@@ -1,0 +1,447 @@
+{
+  "kind": "v72-live-acceptance",
+  "startedAt": "2026-10-10T19:48:40.838Z",
+  "verdict": "PASS",
+  "steps": {
+    "strategic": {
+      "ms": 16676,
+      "level": 2,
+      "state": "COMPLETED",
+      "message": "Advisory material only. Execution requires the normal task and policy gates.",
+      "provider": null,
+      "model": null,
+      "executionAuthorized": false,
+      "memo": {
+        "objective": "Decide whether the uploader should adopt exponential backoff with jitter now or first add missing tests, and identify required verification.",
+        "recommendation": "Add retry-behavior tests first, then evaluate exponential backoff with jitter in a separate, gated change. With no supplied evidence, do not assume the current implementation or proposed change is safe. This is advice, not authorization to execute or alter release gates.",
+        "rationale": [
+          "Tests should establish current retry semantics before changing timing behavior.",
+          "Exponential backoff with jitter can reduce synchronized retries, but may increase completion latency or expose cancellation, timeout, and duplicate-upload defects.",
+          "Separating test coverage from the behavior change makes regressions easier to diagnose."
+        ],
+        "alternatives": [
+          "Develop the tests and backoff implementation together, but require the tests and existing release gates to pass before rollout.",
+          "Retain the fixed delay if measured retry contention is low or backoff would violate upload latency requirements."
+        ],
+        "risks": [
+          "Retries may duplicate uploads if operations are not idempotent, especially after ambiguous failures.",
+          "Incorrect caps, attempt counting, or deadline handling may prolong failures or stop retries prematurely.",
+          "Jitter may create flaky tests unless clock and randomness are controllable."
+        ],
+        "unknowns": [
+          "Current retry policy, test coverage, and observed failure patterns.",
+          "Uploader idempotency and handling of partially completed uploads.",
+          "Latency requirements, total retry budget, and server-provided retry guidance."
+        ],
+        "requestedExperiments": [
+          "Add deterministic tests using a fake clock and controlled randomness for retryable versus permanent failures, success after retry, and exhaustion of attempts.",
+          "Verify exponential delay progression, jitter bounds, maximum delay, total deadline, cancellation, and attempt-count semantics without real sleeps.",
+          "Verify applicable server retry guidance is honored and permanent errors are not retried.",
+          "Test ambiguous failures and partial uploads to confirm retries do not create duplicate or corrupted uploads.",
+          "Compare fixed delay against backoff with jitter under transient failures and concurrent clients; measure request bursts, completion latency, success rate, and retry volume.",
+          "Before rollout, verify observability, rollback readiness, and compliance with unchanged security, policy, and release gates."
+        ],
+        "evidenceRefs": [],
+        "confidence": "LOW"
+      },
+      "challenge": null,
+      "synthesis": null,
+      "unresolvedDisagreements": [],
+      "routing": [
+        {
+          "stage": "DIRECTOR:strategic:ADMISSION",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "claude:opus: QUALITY_EVIDENCE_REQUIRED",
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:technical:ADMISSION",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:strategic:1",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 267,
+            "outputTokens": 434,
+            "totalTokens": 701,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        }
+      ],
+      "records": [
+        {
+          "id": "ade99f8a-8e8d-4027-ad46-58b340286060",
+          "invocationId": "1145eba6-ac2a-483e-b262-81a31f5c23a7",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "OUTCOME",
+          "state": "COMPLETED",
+          "completedStages": [
+            "MEMO"
+          ],
+          "routingIds": [
+            "5c10d342-a446-49f0-9f27-a0fecf0dfe64",
+            "07c6894a-011c-4d6e-88d4-fc5b4f73c9df",
+            "d18e387f-fcf1-4805-a340-7d570378a8d6"
+          ],
+          "consumption": "RECORDED_BY_PROVIDER_ADAPTER",
+          "replayAllowed": false,
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:49:00.573Z"
+        },
+        {
+          "id": "6ab8bb22-5129-4d06-9b69-d964266e5745",
+          "invocationId": "1145eba6-ac2a-483e-b262-81a31f5c23a7",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "DECISION",
+          "recommendation": "Add retry-behavior tests first, then evaluate exponential backoff with jitter in a separate, gated change. With no supplied evidence, do not assume the current implementation or proposed change is safe. This is advice, not authorization to execute or alter release gates.",
+          "unresolvedDisagreements": [],
+          "evidenceRefs": [],
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:49:00.573Z"
+        }
+      ]
+    },
+    "council": {
+      "ms": 53987,
+      "level": 3,
+      "state": "COMPLETED",
+      "message": "Advisory material only. Execution requires the normal task and policy gates.",
+      "provider": null,
+      "model": null,
+      "executionAuthorized": false,
+      "memo": {
+        "objective": "Decide whether to replace the uploader's fixed retry delay with exponential backoff and jitter now or first add missing tests.",
+        "recommendation": "Add tests first, then evaluate exponential backoff with jitter in a bounded experiment. No evidence was supplied to establish current retry behavior, test coverage, or operational urgency; do not recommend an immediate production change on that basis.",
+        "rationale": [
+          "Backoff with jitter can reduce synchronized retries and load during transient failures, but its benefit for this uploader is unverified.",
+          "Changing retry timing can affect completion latency, timeout handling, cancellation, and duplicate-upload risk.",
+          "Tests should establish the existing contract and verify the proposed behavior before rollout, without bypassing deterministic security, policy, or release gates."
+        ],
+        "alternatives": [
+          "Retain the fixed delay temporarily while adding retry observability and tests.",
+          "Develop the backoff implementation alongside its tests, but defer rollout until verification and existing release gates pass."
+        ],
+        "risks": [
+          "Longer delays may violate upload deadlines or user expectations.",
+          "Incorrect retry classification or unbounded retries may amplify failures.",
+          "Retries after ambiguous responses may duplicate uploads unless idempotency is verified.",
+          "Poor jitter implementation may preserve retry synchronization or make tests flaky."
+        ],
+        "unknowns": [
+          "Which tests are missing and what retry guarantees currently exist.",
+          "Whether production failures show synchronized retries, overload, or rate limiting.",
+          "Current retry limits, latency requirements, server retry guidance, and upload idempotency semantics."
+        ],
+        "requestedExperiments": [
+          "Use a fake clock and controlled randomness to test delay growth, jitter bounds, delay caps, maximum attempts, and total retry budget.",
+          "Verify transient versus permanent failure classification and handling of server-directed retry delays.",
+          "Test cancellation, deadlines, concurrent uploads, and ambiguous-response retries; confirm no retries occur after cancellation or budget exhaustion.",
+          "Compare fixed delay against backoff with jitter under simulated outages and recovery, measuring retry clustering, request volume, upload success, and completion latency.",
+          "Before any rollout, define acceptance thresholds and rollback criteria and verify that existing release gates pass."
+        ],
+        "evidenceRefs": [],
+        "confidence": "MEDIUM"
+      },
+      "challenge": {
+        "agreements": [
+          "Tests-first sequencing is sound: with no supplied evidence of current retry behavior, coverage, or operational urgency, an immediate production change to retry timing is not justified.",
+          "Exponential backoff with jitter is technically feasible and low-complexity to implement; the difficulty lies in verifying interactions with deadlines, cancellation, and idempotency, not in the algorithm itself.",
+          "Fake clock plus seeded/injected randomness is the correct way to test delay growth, jitter bounds, caps, attempt limits, and total retry budget deterministically.",
+          "Duplicate-upload risk on ambiguous responses is a real hazard that must be verified before any change in retry timing or count.",
+          "Rollout must remain subject to existing deterministic security, policy, and release gates; this advice does not authorize execution."
+        ],
+        "disagreements": [
+          "The proposal frames this as a strict either/or sequence. Characterization tests of the existing fixed-delay contract and the backoff implementation can be developed in the same change behind a default-off flag; strictly serializing them adds delay without reducing risk, provided rollout is gated.",
+          "The proposal treats duplicate-upload risk as a consequence of the backoff change. It is a pre-existing property of any retry policy, including the current fixed delay; it should be verified independently and may be the more urgent finding.",
+          "The requested experiment set is broad for an unquantified problem. A simulated outage comparison measuring clustering and latency is disproportionate unless production evidence shows synchronized retries, rate limiting, or overload; without that, the minimum bar is deterministic unit tests plus a bounded total retry budget.",
+          "MEDIUM confidence is overstated for the benefit claim given zero evidence items. Confidence is reasonable for the sequencing recommendation only, not for whether backoff with jitter will help this uploader.",
+          "The proposal does not specify the jitter strategy (full, equal, decorrelated) or the cap and budget parameters, so the experiments have no concrete target to accept or reject.",
+          "The proposal omits client-side scope: whether retries are per-chunk or per-upload, and whether resumable/multipart state survives a retry. These change both the failure modes and what the tests must cover."
+        ],
+        "missingEvidence": [
+          "Current uploader retry implementation: delay value, maximum attempts, total budget, and which errors are classified as retryable.",
+          "Existing test coverage for the uploader retry path and a concrete list of the tests said to be missing.",
+          "Production or telemetry data showing retry clustering, 429/503 rates, overload, or other evidence of an actual problem with the fixed delay.",
+          "Upload idempotency semantics: idempotency keys, resumable or multipart behavior, and server handling of repeated requests after ambiguous responses.",
+          "Server retry guidance, including whether Retry-After or equivalent headers are sent and currently honored.",
+          "Latency and deadline requirements for uploads, including user-facing timeouts and cancellation behavior.",
+          "Concurrency profile: number of simultaneous uploaders or clients that could synchronize retries, which determines whether jitter matters at all.",
+          "Whether the retry delay is injectable (clock and random source) in the current code, which determines the cost of testing."
+        ],
+        "proposedChanges": [
+          "First write characterization tests that pin the current fixed-delay behavior: retryable versus permanent classification, attempt limit, cancellation, and deadline handling.",
+          "Verify idempotency of retried uploads independently of the backoff decision and treat any gap as a blocker for increasing retry counts or durations.",
+          "Make the clock and random source injectable if they are not already, so both the old and new policies are testable deterministically.",
+          "Implement backoff with jitter behind a default-off configuration flag, with an explicit strategy (recommend full jitter), a per-delay cap, a maximum attempt count, and a total retry budget no greater than the current worst-case elapsed time unless requirements say otherwise.",
+          "Honor server-directed retry delays when present, bounded by the cap and the overall deadline.",
+          "Define acceptance criteria before running any comparison: jitter bounds hold, no retry after cancellation or budget exhaustion, no duplicate uploads, and worst-case completion latency within the stated deadline.",
+          "Run the simulated outage comparison only if production evidence indicates synchronized retries or rate limiting; otherwise skip it and rely on the deterministic tests.",
+          "Add retry observability (attempt count, delay, outcome, error class) so that the decision to enable the flag can be based on measured behavior.",
+          "Restate confidence separately: reasonable for the sequencing recommendation, low for the expected benefit until evidence is supplied."
+        ],
+        "evidenceRefs": []
+      },
+      "synthesis": {
+        "decision": "Recommend establishing the current retry contract and adding missing tests before enabling exponential backoff with jitter. Implementation may proceed alongside tests behind a default-off flag, but an immediate production change is not justified by the supplied material. This is advice, not execution authorization; existing security, policy, and release gates remain unchanged.",
+        "acceptedClaims": [
+          "No evidence was supplied to establish current retry behavior, coverage gaps, operational urgency, or uploader-specific benefit from jitter.",
+          "Backoff with jitter can reduce synchronized retries, but whether it helps this uploader is unverified.",
+          "Retry timing changes require verification of deadlines, cancellation, retry budgets, server guidance, and upload semantics.",
+          "Duplicate-upload risk is a pre-existing retry concern, not uniquely a consequence of backoff.",
+          "Injected clocks and controlled randomness support deterministic testing.",
+          "Confidence is stronger in verification-before-enablement than in the expected operational benefit."
+        ],
+        "rejectedClaims": [
+          "An immediate production switch is warranted without evidence or verification.",
+          "Tests and implementation must be strictly serialized; parallel development can be acceptable if enablement remains gated.",
+          "Implementation simplicity alone establishes that rollout is safe."
+        ],
+        "unresolvedUnknowns": [
+          "Current delay, retryable error classification, attempt limits, total retry budget, and actual missing tests.",
+          "Production evidence of retry clustering, overload, rate limiting, and relevant concurrency.",
+          "Upload deadlines, cancellation guarantees, and handling of server-directed retry delays.",
+          "Whether retries operate per chunk or per upload, and whether resumable or multipart state survives retries.",
+          "Idempotency guarantees after ambiguous responses.",
+          "Appropriate jitter strategy, delay cap, and budget parameters.",
+          "The memo favors an outage comparison; the challenge considers it disproportionate without operational evidence. Its necessity remains unresolved."
+        ],
+        "nextActions": [
+          "Inspect the implementation and coverage; add characterization tests for existing classification, limits, cancellation, and deadline behavior.",
+          "Verify idempotency and resumable/multipart behavior independently; do not increase retry exposure while those guarantees remain uncertain.",
+          "If developing backoff concurrently, keep it default-off and explicitly specify jitter strategy, caps, attempt limits, total budget, and server-delay precedence. Full jitter is a candidate, not a settled requirement.",
+          "Test delay growth and jitter bounds deterministically, including exhaustion, concurrent uploads, ambiguous responses, and no retries after cancellation or deadline expiry.",
+          "Define acceptance thresholds for correctness and completion latency, plus rollback criteria. Do not expand the current retry budget without validated requirements.",
+          "Gather retry telemetry to establish whether jitter addresses an actual problem and determine whether a bounded outage/recovery comparison is needed.",
+          "Propose enablement only after verification and all existing release gates pass."
+        ],
+        "evidenceRefs": []
+      },
+      "unresolvedDisagreements": [
+        "The proposal frames this as a strict either/or sequence. Characterization tests of the existing fixed-delay contract and the backoff implementation can be developed in the same change behind a default-off flag; strictly serializing them adds delay without reducing risk, provided rollout is gated.",
+        "The proposal treats duplicate-upload risk as a consequence of the backoff change. It is a pre-existing property of any retry policy, including the current fixed delay; it should be verified independently and may be the more urgent finding.",
+        "The requested experiment set is broad for an unquantified problem. A simulated outage comparison measuring clustering and latency is disproportionate unless production evidence shows synchronized retries, rate limiting, or overload; without that, the minimum bar is deterministic unit tests plus a bounded total retry budget.",
+        "MEDIUM confidence is overstated for the benefit claim given zero evidence items. Confidence is reasonable for the sequencing recommendation only, not for whether backoff with jitter will help this uploader.",
+        "The proposal does not specify the jitter strategy (full, equal, decorrelated) or the cap and budget parameters, so the experiments have no concrete target to accept or reject.",
+        "The proposal omits client-side scope: whether retries are per-chunk or per-upload, and whether resumable/multipart state survives a retry. These change both the failure modes and what the tests must cover.",
+        "Current uploader retry implementation: delay value, maximum attempts, total budget, and which errors are classified as retryable.",
+        "Existing test coverage for the uploader retry path and a concrete list of the tests said to be missing.",
+        "Production or telemetry data showing retry clustering, 429/503 rates, overload, or other evidence of an actual problem with the fixed delay.",
+        "Upload idempotency semantics: idempotency keys, resumable or multipart behavior, and server handling of repeated requests after ambiguous responses.",
+        "Server retry guidance, including whether Retry-After or equivalent headers are sent and currently honored.",
+        "Latency and deadline requirements for uploads, including user-facing timeouts and cancellation behavior.",
+        "Concurrency profile: number of simultaneous uploaders or clients that could synchronize retries, which determines whether jitter matters at all.",
+        "Whether the retry delay is injectable (clock and random source) in the current code, which determines the cost of testing."
+      ],
+      "routing": [
+        {
+          "stage": "DIRECTOR:strategic:ADMISSION",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "claude:opus: QUALITY_EVIDENCE_REQUIRED",
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:technical:ADMISSION",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:strategic:1",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 267,
+            "outputTokens": 481,
+            "totalTokens": 748,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        },
+        {
+          "stage": "DIRECTOR:technical:1",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "claude-haiku-4-5-20251001",
+              "claude-opus-5-5"
+            ],
+            "inputTokens": 1444,
+            "outputTokens": 1548,
+            "totalTokens": null,
+            "cacheReadTokens": 2865,
+            "cacheWriteTokens": 2303,
+            "reasoningTokens": 0
+          }
+        },
+        {
+          "stage": "DIRECTOR:strategic:2",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 1515,
+            "outputTokens": 524,
+            "totalTokens": 2039,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        }
+      ],
+      "records": [
+        {
+          "id": "bf6d411b-89f9-4dc2-841e-29148f954f7d",
+          "invocationId": "817b6237-c5ec-4cc5-8b18-1cd3ee874ce3",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "OUTCOME",
+          "state": "COMPLETED",
+          "completedStages": [
+            "MEMO",
+            "CHALLENGE",
+            "SYNTHESIS"
+          ],
+          "routingIds": [
+            "e2b1198b-a093-4fca-b997-0835084e4515",
+            "0ee1ad66-0cba-4908-8146-6d5f55d9af4b",
+            "cba7ab20-e3b3-4508-8272-b7061aa902c0",
+            "662af5c6-cbb4-4057-810c-b3818f0f640d",
+            "6d685cbc-8436-4bc2-abd4-dd3a3f1d8923"
+          ],
+          "consumption": "RECORDED_BY_PROVIDER_ADAPTER",
+          "replayAllowed": false,
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:49:54.573Z"
+        },
+        {
+          "id": "1ca02dbc-959e-438e-a292-5105c5e3e473",
+          "invocationId": "817b6237-c5ec-4cc5-8b18-1cd3ee874ce3",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "DECISION",
+          "recommendation": "Recommend establishing the current retry contract and adding missing tests before enabling exponential backoff with jitter. Implementation may proceed alongside tests behind a default-off flag, but an immediate production change is not justified by the supplied material. This is advice, not execution authorization; existing security, policy, and release gates remain unchanged.",
+          "unresolvedDisagreements": [
+            "The proposal frames this as a strict either/or sequence. Characterization tests of the existing fixed-delay contract and the backoff implementation can be developed in the same change behind a default-off flag; strictly serializing them adds delay without reducing risk, provided rollout is gated.",
+            "The proposal treats duplicate-upload risk as a consequence of the backoff change. It is a pre-existing property of any retry policy, including the current fixed delay; it should be verified independently and may be the more urgent finding.",
+            "The requested experiment set is broad for an unquantified problem. A simulated outage comparison measuring clustering and latency is disproportionate unless production evidence shows synchronized retries, rate limiting, or overload; without that, the minimum bar is deterministic unit tests plus a bounded total retry budget.",
+            "MEDIUM confidence is overstated for the benefit claim given zero evidence items. Confidence is reasonable for the sequencing recommendation only, not for whether backoff with jitter will help this uploader.",
+            "The proposal does not specify the jitter strategy (full, equal, decorrelated) or the cap and budget parameters, so the experiments have no concrete target to accept or reject.",
+            "The proposal omits client-side scope: whether retries are per-chunk or per-upload, and whether resumable/multipart state survives a retry. These change both the failure modes and what the tests must cover.",
+            "Current uploader retry implementation: delay value, maximum attempts, total budget, and which errors are classified as retryable.",
+            "Existing test coverage for the uploader retry path and a concrete list of the tests said to be missing.",
+            "Production or telemetry data showing retry clustering, 429/503 rates, overload, or other evidence of an actual problem with the fixed delay.",
+            "Upload idempotency semantics: idempotency keys, resumable or multipart behavior, and server handling of repeated requests after ambiguous responses.",
+            "Server retry guidance, including whether Retry-After or equivalent headers are sent and currently honored.",
+            "Latency and deadline requirements for uploads, including user-facing timeouts and cancellation behavior.",
+            "Concurrency profile: number of simultaneous uploaders or clients that could synchronize retries, which determines whether jitter matters at all.",
+            "Whether the retry delay is injectable (clock and random source) in the current code, which determines the cost of testing."
+          ],
+          "evidenceRefs": [],
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:49:54.573Z"
+        }
+      ]
+    }
+  },
+  "connectionBefore": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "connectionAfter": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "failures": []
+}

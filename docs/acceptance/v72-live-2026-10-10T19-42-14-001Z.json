@@ -1,0 +1,17 @@
+{
+  "kind": "v72-live-acceptance",
+  "startedAt": "2026-10-10T19:42:14.001Z",
+  "verdict": "FAIL",
+  "steps": {},
+  "connectionBefore": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "error": "compilation.preview: internal Compiler returned evidence outside the retrieved scope"
+}

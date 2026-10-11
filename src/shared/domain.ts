@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { CompiledTaskSpec } from './intelligence'
 import type { RunStrategyInfo } from './v3'
 
 // ───────────────────────────── enums ─────────────────────────────
@@ -144,7 +145,7 @@ export const COMPLEXITIES = ['small', 'medium', 'large'] as const
 export const ComplexitySchema = z.enum(COMPLEXITIES)
 export type Complexity = z.infer<typeof ComplexitySchema>
 
-export type PauseReason = 'user' | 'quota' | 'recovery'
+export type PauseReason = 'user' | 'quota' | 'recovery' | 'capacity'
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired'
 export type ApprovalKind = 'plan' | 'tool' | 'git' | 'task' | 'merge' | 'graph'
 export type MemoryScope = 'global' | 'project' | 'run'
@@ -274,6 +275,10 @@ export interface Project {
 }
 
 export interface RunConfig {
+  /** Server-validated snapshot from the user-entry compiler; absent on internal/legacy runs. */
+  compiledTaskSpec?: CompiledTaskSpec
+  /** Main-process provenance for internal subtasks; unavailable in user IPC inputs. */
+  engineeringOwner?: { kind: 'PROGRAM' | 'WORKSPACE_MISSION'; id: string }
   maxParallelAgents: number
   maxTurnsPerAgent: number
   maxRetriesPerTask: number

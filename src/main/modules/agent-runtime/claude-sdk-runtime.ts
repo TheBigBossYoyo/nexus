@@ -127,6 +127,8 @@ export function buildAgentEnv(
   for (const [key, value] of Object.entries(processEnv)) {
     if (value === undefined) continue
     if (options.subscriptionMode && KEY_VARS.includes(key.toUpperCase())) continue
+    // Where NEXUS keeps its database, its endpoint and its stored credentials is not an agent's business.
+    if (key.toUpperCase() === 'NEXUS_DATA_DIR') continue
     env[key] = value
   }
   env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
@@ -624,6 +626,8 @@ class SdkSessionHandle implements AgentSessionHandle {
     }
     await this.done
   }
+
+  stopConfirmed(): boolean { return this.finished }
 
   private async pump(q: Query): Promise<void> {
     let ended: Ended

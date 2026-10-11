@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { expect, test, type Page } from '@playwright/test'
 import { closeApp, createRepo, dismissApprovalDrawer, invoke, launchApp, removeDir, tempDir } from './helpers'
 
@@ -7,6 +8,7 @@ async function startMission(page: Page): Promise<string> {
   await expect(page.getByTestId('project-detail')).toBeVisible()
   await page.getByTestId('mission-prompt').fill('Add an API module and a UI module, then integrate them.')
   await page.getByTestId('strategy-select').selectOption('BUILD')
+  await selectExactCompilation(page)
   await page.getByTestId('create-run').click()
   await expect(page.getByTestId('plan-panel')).toBeVisible()
   await dismissApprovalDrawer(page)

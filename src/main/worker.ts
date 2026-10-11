@@ -56,7 +56,7 @@ const DECISION_TIMEOUT_MS = 60_000
 function sessionEnvironment(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env }
   for (const name of Object.keys(env)) {
-    if (name === 'ELECTRON_RUN_AS_NODE' || name === 'NEXUS_WORKER_ID' || name.startsWith('NODE_CHANNEL_')) delete env[name]
+    if (name === 'ELECTRON_RUN_AS_NODE' || name === 'NEXUS_WORKER_ID' || name.toUpperCase() === 'NEXUS_DATA_DIR' || name.startsWith('NODE_CHANNEL_')) delete env[name]
   }
   return env
 }
@@ -129,16 +129,20 @@ async function run(leaseId: string, provider: string, wire: WireSessionSpec): Pr
     const handle = runtime.startSession(toSpec(leaseId, wire))
     current = { leaseId, handle }
     for await (const event of handle.events) {
-      send({ t: 'event', leaseId, event })
-      if (event.type === 'session.ended') ended = true
+      if (event.type === 'session.ended') {
+        await handle.stop()
+        send({ t: 'event', leaseId, event: { ...event, stopConfirmed: handle.stopConfirmed?.() ?? false } })
+        ended = true
+      } else send({ t: 'event', leaseId, event })
     }
   } catch (e) {
     if (!ended) send({ t: 'event', leaseId, event: { type: 'session.ended', reason: 'crashed', error: errorText(e) } })
     ended = true
   }
   if (!ended) send({ t: 'event', leaseId, event: { type: 'session.ended', reason: 'crashed', error: 'The session ended without saying why.' } })
+  const stopConfirmed = current?.handle.stopConfirmed?.() ?? !current
   current = null
-  send({ t: 'ended', leaseId })
+  send({ t: 'ended', leaseId, stopConfirmed })
 }
 
 async function command(message: Extract<RuntimeToWorker, { t: 'cmd' }>): Promise<void> {

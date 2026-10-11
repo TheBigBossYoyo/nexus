@@ -1,0 +1,206 @@
+{
+  "kind": "campaign-run",
+  "task": "security",
+  "category": "security-sensitive task",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "be766d78ae319c469406a7891f96acc6cb4523e7",
+  "startedAt": "2026-10-11T05:10:48.019Z",
+  "finishedAt": "2026-10-11T05:16:30.224Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "fileserver",
+        "ref": "nexus/e7eb22b5/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ ordinary requests are served (2.0532ms)\n✔ dot segments that stay inside the root are served (0.4059ms)\n✔ traversal out of the root is forbidden (0.7372ms)\n✔ encoded traversal is forbidden (0.5057ms)\n✔ a backslash is a separator (0.4382ms)\n✔ a sibling directory that shares the prefix of the root is outside it (0.3729ms)\n✔ the path is decoded exactly once (0.276ms)\n✔ malformed encoding and NUL are bad requests (0.214ms)\n✔ the result is absolute and never leaves the root (0.5119ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 108.3076\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ a plain path is a file under the root (1.4888ms)\n✔ legitimate requests are served (0.5891ms)\n✔ the root may have a trailing separator or be relative (0.1816ms)\n✔ requests that climb above the root are forbidden (1.784ms)\n✔ a sibling sharing the root name prefix is forbidden (0.3655ms)\n✔ absolute-looking requests stay inside the root (0.2758ms)\n✔ the request is decoded only once (0.7165ms)\n✔ malformed encoding and NUL are bad requests (0.2332ms)\n✔ the root itself is served and works at a filesystem root (0.2251ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 121.3718\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "harden-resolve-path",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "security-review-resolve",
+        "state": "blocked",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": [
+        "Intervention required: tasks security-review-resolve are failed or blocked"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cat, node, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cat, import, readfilesync, from, const, resolve.js,, src.match, g, [], .length, console.log, decodeuricomponent calls in source:,, .test, src, async, flavour, from 'node:path',, return, await, javascript,, s, .resolvepath, let, seed, 0x7fffffff, %, for, i",
+        "verifier: PowerShell: Command not permitted for the verifier role (node, ) !== expect.join(, x]) {\n  let r; try { r = fn(roots[0], u) } catch (e) { r = throw). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "security_reviewer: PowerShell: Command not permitted for the security_reviewer role (npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: ts:\n- **Drive-letter check:** your spec rejects any absolute `relative()` result, but on Windows `/C:/Windows/win.ini` produces the relative result `C:\\Windows\\win.ini`. That is a path inside the root, and the check wrongly rejected it. I only reject it when the relative result equals the whole target path, which is what a different drive would produce.\n- **Trailing slash:** I wrap the joined path in `resolve()` so `/` returns the root without a trailing slash.\n\nI dropped one test I had drafted: with the root at a filesystem root, `/../x` normalises to `/x`, which is inside the root. That case is served rather than rejected, so I replaced it with a check that `/` returns the filesystem root.",
+        "reviewer: ",
+        "verifier: ",
+        "security_reviewer: ide the root that points outside it;\n   - Windows alternate data streams such as `/index.html::$DATA`;\n   - reserved device names such as `/NUL`;\n   - segments with a trailing dot or space such as `/..%20/secret`.\n\n   Whether any of them matters depends on how the caller opens the file, which is not in this repository.\n\n## Test integrity\n\nThe original test is unchanged (`resolve.test.js:12-15` matches `git show edfed82`). There is no `skip`, `todo` or `only`. Expected values are built with `join`, `sep` and `resolve`, and no real files are touched, so the tests are platform-independent by construction. The implementer reported running them on Windows only, and I ran them on neither platform."
+      ],
+      "approvalDetails": [],
+      "blocked": [
+        "security-review-resolve: the task requires running `npm test` and citing its output, but the security_reviewer role's PreToolUse hook denies npm. The code review itself is complete (by reading); only the test-run criterion is unmet. I did not try to run the tests another way (e.g. `node --test` or via the Bash tool), since the hook is a deliberate role restriction. A role permitted to run `npm test` (verifier/worker) needs to run it and attach the output."
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 39,
+    "inputTokensUncached": 19193,
+    "outputTokens": 32684,
+    "cacheCreationTokens": 54741,
+    "cacheReadTokens": 463606,
+    "costUsdReported": 1.1021,
+    "toolCalls": 34,
+    "toolCallsRecorded": 34,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 14,
+      "StructuredOutput": 3,
+      "Read": 7,
+      "Write": 2,
+      "Edit": 3,
+      "Grep": 1,
+      "PowerShell": 3,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 5,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 13,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "security_reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 340142,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 24
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

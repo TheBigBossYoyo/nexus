@@ -51,16 +51,23 @@ test.describe('UI review capture', () => {
       const project = (await invoke(page, 'projects.list', {}))[0]
       if (!project) throw new Error('no project')
       await shot(page, 'light-wide-projects-composer')
-      const run = await invoke(page, 'runs.create', { projectId: project.id, mode: 'mission', preset: 'balanced', prompt: 'Add an API module and a UI module, then integrate them.', strategy: 'SINGLE', requirePlanApproval: false } as never)
+      const run = await invoke(page, 'runs.create', { projectId: project.id, mode: 'mission', preset: 'balanced', compilationMode: 'EXACT', prompt: 'Add an API module and a UI module, then integrate them.', strategy: 'SINGLE', requirePlanApproval: false } as never)
       const runId = (run as { id: string }).id
       await expect.poll(async () => (await invoke(page, 'runs.get', { runId })).run.state, { timeout: 180_000, intervals: [1000] }).toMatch(/completed|failed|awaiting_approval/)
 
       // 0.4: one program that ran to completion (with a rejection, backlog and memory), one waiting for approval.
-      const finished = await invoke(page, 'program.create', { projectId: project.id, name: 'Modules program', goal: 'Build the API and UI modules, integrate them, then harden the integration.', preset: 'autonomous', start: true })
+      const finished = await invoke(page, 'program.create', {
+        projectId: project.id,
+        name: 'Modules program', goal: 'Build the API and UI modules, integrate them, then harden the integration.',
+        preset: 'autonomous',
+        start: true,
+        compilationMode: 'EXACT',
+      })
       await expect.poll(async () => (await invoke(page, 'program.get', { programId: finished.id })).program.state, { timeout: 400_000, intervals: [1000] }).toMatch(/COMPLETED|BLOCKED|FAILED/)
       const awaiting = await invoke(page, 'program.create', {
         projectId: project.id,
         name: 'Billing rework',
+        compilationMode: 'EXACT',
         goal: 'Rework the billing module in small verified steps.',
         preset: 'conservative',
         schedule: { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '23:59' }] },

@@ -49,7 +49,9 @@ import { validatePlan, wouldCreateCycle } from '@main/modules/task-graph'
 import { SessionControl } from './agent-runner'
 import { ConsensusPlanner } from './consensus'
 import { graphContextForRequest } from './context-graph'
+import { renderInstructionsInForce } from './instructions'
 import { Core } from './core'
+import { assertRunAdmission } from '@main/modules/intelligence/run-admission'
 import { buildTaskEvidence } from './evidence'
 import type { OrchestratorDeps } from './deps'
 import type { InsertTaskSpec } from './graph-service'
@@ -63,6 +65,8 @@ const MAX_PLAN_ATTEMPTS = 3
 const DEPENDENCY_BLOCK_PREFIX = 'dependency:'
 
 export interface CreateRunInput {
+  /** User-entry admission binds compiled advice to this immutable repository snapshot. */
+  expectedHead?: string
   projectId: string
   mode: RunMode
   preset: Preset
@@ -86,6 +90,12 @@ export interface CreateRunInput {
    * accepted work of the missions before them, which lives on the program branch, not in the user's checkout.
    */
   baseRef?: string
+  /**
+   * v0.7.2. A read-only run reads the user's checkout by default. With this, it reads a worktree of its own at
+   * its base commit instead: what it sees is the admitted snapshot, whatever the checkout has become since
+   * (newer commits, uncommitted files). The worktree and its branch are removed when the run ends.
+   */
+  readSnapshot?: boolean
 }
 
 /** The usage service's view for the scheduler (usage/service.ts implements it). */
@@ -119,6 +129,10 @@ interface ActivePipeline {
   done: Promise<void>
 }
 
+/** A task held for a provider's capacity is looked at again after a delay that grows with each wait. */
+export const CAPACITY_HOLD_MS = 2_000
+export const CAPACITY_HOLD_MAX_MS = 60_000
+
 /**
  * The control plane. All scheduling decisions are made here in deterministic code from durable
  * state; agents never hold orchestration state.
@@ -134,6 +148,12 @@ export class Orchestrator implements PipelineHost {
   private readonly mergeLocks = new Map<string, Promise<unknown>>()
   private readonly integrations = new Map<string, Promise<Worktree>>()
   private readonly announced = new Set<string>()
+  /**
+   * v0.7.2, provider-scoped waiting. Tasks whose last session found no provider with capacity. A held task is
+   * not restarted before `until`, and the other tasks of its run are dispatched meanwhile. In memory only:
+   * after a restart the task is an orphan like any other and is tried at once.
+   */
+  private readonly capacityHolds = new Map<string, { runId: string; until: number; count: number; held: boolean; timer: ReturnType<typeof setTimeout> }>()
   /** Set once shutdown starts: no scheduling pass may launch new work while sessions are being stopped. */
   private closing = false
   /** v0.3: the usage service's gate. Closed while Claude is limited: no new session starts. */
@@ -144,6 +164,11 @@ export class Orchestrator implements PipelineHost {
     this.core = new Core(deps)
     this.pipeline = new TaskPipeline(this.core, this)
     this.core.messages.setLiveDelivery((taskId, message) => this.deliverLive(taskId, message))
+    // The snapshot of a read-only run is of no use once the run has ended, and nothing was written in it.
+    deps.bus.subscribe((event) => {
+      if (event.type !== 'run.completed' && event.type !== 'run.failed' && event.type !== 'run.cancelled') return
+      void this.removeReadSnapshot(event.runId).catch((e: unknown) => this.core.log(`snapshot cleanup: ${errorMessage(e)}`))
+    })
     this.core.approvals.onResolved((approval) => this.onApprovalResolved(approval))
     this.core.approvals.onExpired((approval) => {
       if (approval.kind === 'graph') this.core.graph.onApprovalResolved(approval)
@@ -186,6 +211,7 @@ export class Orchestrator implements PipelineHost {
 
     const checks = project.profile?.commands ?? { build: null, test: null, lint: null, typecheck: null }
     const config = buildRunConfig(settings, input.preset, checks, project.respectProjectClaudeConfig, input.overrides)
+    if (input.expectedHead && (baseCommit !== input.expectedHead || await git.headCommit(project.rootPath) !== input.expectedHead)) throw new NexusError('invalid_state', 'Repository changed after compilation. Preview again before starting.')
     const run = bus.transaction(() => {
       const row = repos.runs.insert({
         id: newId(),
@@ -281,6 +307,8 @@ export class Orchestrator implements PipelineHost {
         ],
       })
       this.background(run.id, async () => {
+        // Created before the session starts: a read-only session works in the run's worktree when it has one.
+        if (input.readSnapshot && run.baseCommit) await this.ensureIntegration(run)
         if (await this.refreshFacts(run.id)) await this.startExecution(run.id)
       })
     } else {
@@ -418,12 +446,19 @@ export class Orchestrator implements PipelineHost {
     }
     const control = this.runControl(runId)
     let previousErrors: string[] | undefined
+    // The planner reads the snapshot the run executes: the integration worktree, created at the run's base
+    // commit. It used to read the user's checkout, which can move (or carry uncommitted files) while the run
+    // plans, waits or is paused: the plan then described one state of the repository and the workers, in
+    // worktrees made from the base commit, executed another. A run with no base commit (a folder that is not a
+    // repository, a read-only question) has only the checkout to read.
+    const planningRoot = run.baseCommit && run.mode !== 'ask' && run.mode !== 'audit' ? (await this.ensureIntegration(run)).path : project.rootPath
+    if (this.closing || repos.runs.require(runId).state !== 'planning') return
 
     if ((run.config.planningMode ?? 'single') === 'consensus') {
       const outcome = await new ConsensusPlanner(this.core).run({
         run,
         profile: project.profile,
-        projectRoot: project.rootPath,
+        projectRoot: planningRoot,
         control,
         memory: this.core.memory.relevantFor(run, { title: run.prompt.slice(0, 200), description: run.prompt, suggestedFiles: [] }),
         ...(feedback ? { feedback } : {}),
@@ -457,8 +492,8 @@ export class Orchestrator implements PipelineHost {
         role: 'planner',
         purpose: 'plan',
         label: 'Planner',
-        cwd: project.rootPath,
-        worktreeRoot: project.rootPath,
+        cwd: planningRoot,
+        worktreeRoot: planningRoot,
         projectRoot: project.rootPath,
         prompt,
         outputSchema: missionPlanJsonSchema,
@@ -466,6 +501,10 @@ export class Orchestrator implements PipelineHost {
       })
       run = repos.runs.require(runId)
       if (control.stopReason || run.state !== 'planning') return
+      if (result.outcome === 'capacity') {
+        this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved planning capacity')
+        return
+      }
       if (result.outcome === 'quota') {
         this.core.pauseRun(runId, 'quota', 'Claude usage limit reached')
         return
@@ -597,6 +636,7 @@ export class Orchestrator implements PipelineHost {
   async approvePlan(runId: string): Promise<Run> {
     const run = this.deps.repos.runs.require(runId)
     if (run.state !== 'awaiting_approval') throw new NexusError('invalid_state', `Run is ${run.state}, not awaiting approval`)
+    if (this.deps.requireEngineeringAdmission) assertRunAdmission(this.deps.repos, run)
     const pending = this.deps.repos.approvals.listPending(runId).find((a) => a.kind === 'plan')
     if (pending) {
       // Resolving the request re-enters through onApprovalResolved, which starts execution.
@@ -629,6 +669,7 @@ export class Orchestrator implements PipelineHost {
 
   private async startExecution(runId: string): Promise<void> {
     const { repos, bus } = this.deps
+    if (this.deps.requireEngineeringAdmission) assertRunAdmission(repos, repos.runs.require(runId))
     bus.transaction(() => {
       for (const task of repos.tasks.listByState(runId, 'draft')) {
         this.core.setTaskState(task.id, 'ready')
@@ -691,10 +732,37 @@ export class Orchestrator implements PipelineHost {
     })()
   }
 
+  holdForCapacity(runId: string, taskId: string): void {
+    const previous = this.capacityHolds.get(taskId)
+    if (previous) clearTimeout(previous.timer)
+    const count = (previous?.count ?? 0) + 1
+    const delay = Math.min(CAPACITY_HOLD_MAX_MS, CAPACITY_HOLD_MS * 2 ** (count - 1))
+    const timer = setTimeout(() => this.requestTick(runId), delay + 5)
+    timer.unref?.()
+    this.capacityHolds.set(taskId, { runId, until: Date.now() + delay, count, held: true, timer })
+    // Nobody drives the task while it is held: its lease is given back, so that it does not read as expired.
+    this.deps.repos.tasks.update(taskId, { leaseOwner: null, leaseExpiresAt: null })
+  }
+
+  private clearCapacityHolds(runId: string): void {
+    for (const [taskId, hold] of this.capacityHolds) {
+      if (hold.runId !== runId) continue
+      clearTimeout(hold.timer)
+      this.capacityHolds.delete(taskId)
+    }
+  }
+
   private async tick(runId: string): Promise<void> {
     const { repos, bus } = this.deps
     const run = repos.runs.get(runId)
+    if (!run || !ACTIVE_RUN_STATES.includes(run.state)) this.clearCapacityHolds(runId)
     if (this.closing || !run || !ACTIVE_RUN_STATES.includes(run.state)) return
+    if (this.deps.requireEngineeringAdmission) {
+      try { assertRunAdmission(repos, run) } catch (error) {
+        await this.pauseRun(runId, 'user', errorMessage(error))
+        return
+      }
+    }
 
     // The limit bounds active time: paused intervals (user, quota, recovery) do not count, and a resume
     // after the limit paused the run grants a fresh window.
@@ -711,6 +779,13 @@ export class Orchestrator implements PipelineHost {
         repos.tasks.update(task.id, { leaseOwner: null, leaseExpiresAt: null })
         bus.emit({ runId, taskId: task.id, type: 'task.lease_expired', payload: { owner: task.leaseOwner } })
       })
+    }
+
+    // A held task whose delay is over is asked about before it is given a session: still no capacity, and it
+    // is held longer at the cost of nothing.
+    for (const [taskId, hold] of [...this.capacityHolds]) {
+      if (hold.runId !== runId || !hold.held || hold.until > Date.now() || !this.deps.capacityReady) continue
+      if (!(await this.deps.capacityReady(taskId).catch(() => true))) this.holdForCapacity(runId, taskId)
     }
 
     const gateClosed = this.dispatchClosed(runId)
@@ -759,8 +834,17 @@ export class Orchestrator implements PipelineHost {
       this.background(runId, () => this.finalize(runId))
       return
     }
-    // Nothing is running and nothing can start. Unless an approval can unblock it, a human must step in.
     const awaitingApproval = decision.deferred.some((d) => d.reason.kind === 'awaiting_approval')
+    // Nothing is running, and what is left waits for a provider: now the run waits as a whole, where the
+    // capacity recovery finds it and resumes it when a provider can take the work.
+    if ([...this.capacityHolds.values()].some((hold) => hold.runId === runId && hold.held)) {
+      if (!awaitingApproval) {
+        this.clearCapacityHolds(runId)
+        this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved provider capacity')
+      }
+      return
+    }
+    // Nothing is running and nothing can start. Unless an approval can unblock it, a human must step in.
     if (!awaitingApproval && decision.start.length === 0) {
       const stuck = countedTasks(tasks).filter((t) => t.state === 'failed' || t.state === 'blocked').map((t) => t.key)
       await this.pauseRun(runId, 'user', `Intervention required: ${stuck.length > 0 ? `tasks ${stuck.join(', ')} are failed or blocked` : 'no task can make progress'}`)
@@ -803,6 +887,8 @@ export class Orchestrator implements PipelineHost {
     let launched = 0
     for (const task of tasks) {
       if (this.active.has(task.id) || task.parentTaskId) continue
+      const hold = this.capacityHolds.get(task.id)
+      if (hold?.held && hold.until > Date.now()) continue
       let stage: Stage | null = null
       if ((task.state === 'assigned' || task.state === 'running') && this.core.graph.unmetPrerequisites(task).length > 0) {
         // It yielded to a prerequisite before its turn ended: wait in the queue, then resume (not relaunch).
@@ -841,6 +927,8 @@ export class Orchestrator implements PipelineHost {
 
   private launch(runId: string, taskId: string, stage: Stage): void {
     const control = new SessionControl()
+    const hold = this.capacityHolds.get(taskId)
+    if (hold) hold.held = false
     const done = this.pipeline
       .run(runId, taskId, stage, control)
       .catch((e: unknown) => this.core.log(`pipeline ${taskId}: ${errorMessage(e)}`))
@@ -988,6 +1076,7 @@ export class Orchestrator implements PipelineHost {
           projectRoot: this.core.project(run).rootPath,
           prompt: buildMissionVerifierPrompt({
             run,
+            instructions: renderInstructionsInForce(repos, run, null, { withRequest: false }),
             missionCriteria: criteria.map((c) => c.text),
             diffStat: stat || '(no changes)',
             checkResults: checks.commands,
@@ -999,6 +1088,10 @@ export class Orchestrator implements PipelineHost {
           control,
         })
         if (control.stopReason || repos.runs.require(runId).state !== 'verifying') return
+        if (result.outcome === 'capacity') {
+          this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved verification capacity')
+          return
+        }
         if (result.outcome === 'quota') {
           this.core.pauseRun(runId, 'quota', 'Claude usage limit reached')
           return
@@ -1112,7 +1205,7 @@ export class Orchestrator implements PipelineHost {
 
   // ───────────────────────────── human intervention ─────────────────────────────
 
-  async pauseRun(runId: string, reason: 'user' | 'quota' | 'recovery' = 'user', detail?: string, cause?: PauseCause): Promise<Run> {
+  async pauseRun(runId: string, reason: 'user' | 'quota' | 'recovery' | 'capacity' = 'user', detail?: string, cause?: PauseCause): Promise<Run> {
     const { repos, bus } = this.deps
     const run = repos.runs.require(runId)
     if (!canPauseRun(run.state)) throw new NexusError('invalid_state', `A ${run.state} run cannot be paused`)
@@ -1126,6 +1219,7 @@ export class Orchestrator implements PipelineHost {
     const { repos, bus } = this.deps
     const run = repos.runs.require(runId)
     if (run.state !== 'paused') throw new NexusError('invalid_state', `Run is ${run.state}, not paused`)
+    if (this.deps.requireEngineeringAdmission) assertRunAdmission(repos, run)
     await this.settle(runId)
     const target = resumeTarget(run)
     // Every resume reconciles first (recovery 'inspect' included): a merge interrupted by a crash would
@@ -1516,6 +1610,21 @@ export class Orchestrator implements PipelineHost {
       })
     }
     await git.pruneWorktrees(this.core.project(run).rootPath).catch(() => undefined)
+  }
+
+  /** A finished read-only run that read a snapshot of its own: the worktree and its branch go. */
+  private async removeReadSnapshot(runId: string): Promise<void> {
+    const { repos, git } = this.deps
+    const run = repos.runs.get(runId)
+    if (!run || run.mode !== 'ask' || !TERMINAL_RUN_STATES.includes(run.state)) return
+    const snapshots = repos.worktrees.listByRun(runId).filter((w) => w.taskId === null && w.state !== 'removed')
+    if (snapshots.length === 0) return
+    await this.idle(runId)
+    await this.cleanupRun(runId)
+    const repoRoot = this.core.project(run).rootPath
+    for (const snapshot of snapshots) {
+      if (repos.worktrees.get(snapshot.id)?.state === 'removed' && (await git.branchExists(repoRoot, snapshot.branch))) await git.deleteBranch(repoRoot, snapshot.branch)
+    }
   }
 
   /** Remove the worktrees of a finished run. Branches are kept; dirty worktrees are not deleted. */

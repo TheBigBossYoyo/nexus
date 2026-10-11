@@ -57,7 +57,7 @@ async function client(dir: string, options: Parameters<typeof connect>[1] = {}):
 /** Opens a project and starts a mission that the scripted runtime plans and executes; returns the run id. */
 async function startMission(c: RuntimeClient, repo: string): Promise<string> {
   const project = await call<{ id: string }>(c, 'projects.open', { path: repo })
-  const run = await call<{ id: string }>(c, 'runs.create', { projectId: project.id, mode: 'build', prompt: 'Build the demo modules', preset: 'balanced', requirePlanApproval: false })
+  const run = await call<{ id: string }>(c, 'runs.create', { projectId: project.id, mode: 'build', prompt: 'Build the demo modules', preset: 'balanced', requirePlanApproval: false, compilationMode: 'EXACT' })
   return run.id
 }
 
@@ -260,16 +260,19 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
     const { c } = await ready(dir)
     await call(c, 'control.setLimits', { limits: { maxAgents: 3, maxActiveItems: 2, resumeOnBoot: 'hold', agingMinutes: 30 } })
     const project = await call<{ id: string }>(c, 'projects.open', { path: repo })
-    const program = await call<{ id: string }>(c, 'program.create', { projectId: project.id, name: 'Scenario program', goal: 'Build the demo modules in two milestones.', preset: 'autonomous', policy: { ...(await call<Record<string, Record<string, unknown>>>(c, 'program.presets'))['autonomous'], preset: 'custom', maxAgents: 2 }, start: false })
+    const program = await call<{ id: string }>(c, 'program.create', { projectId: project.id, name: 'Scenario program', goal: 'Build the demo modules in two milestones.', preset: 'autonomous', policy: { ...(await call<Record<string, Record<string, unknown>>>(c, 'program.presets'))['autonomous'], preset: 'custom', maxAgents: 2 }, start: false, compilationMode: 'EXACT' })
     const campaign = await call<{ id: string }>(c, 'arena.createCampaign', { name: 'Scenario campaign', caseIds: ['bugfix-localized'], strategies: ['SINGLE'], repetitions: 1, modelPreset: 'balanced', budgetPreset: 'eco', start: false })
     const programItem = await call<{ id: string }>(c, 'control.enqueue', { item: { type: 'program', programId: program.id, priority: 'P1' } })
     const arenaItem = await call<{ id: string }>(c, 'control.enqueue', { item: { type: 'arena', campaignId: campaign.id, priority: 'P2' } })
 
     let together = false
     let maxAgents = 0
+    // What the overview said when the count was at its highest: read in the message of a failure.
+    let over = ''
     const end = await until(
       async () => {
         const o = await call<ControlPlaneOverview>(c, 'control.overview')
+        if (o.agents.active > maxAgents) over = o.active.map((i) => `${i.type}: ${i.activeAgents} active, allowance ${i.allowance}`).join('; ')
         maxAgents = Math.max(maxAgents, o.agents.active)
         const types = new Set(o.active.map((i) => i.type))
         if (types.has('program') && types.has('arena')) together = true
@@ -281,7 +284,7 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
     )
     expect(together).toBe(true)
     expect(maxAgents).toBeGreaterThan(0)
-    expect(maxAgents).toBeLessThanOrEqual(3)
+    expect(maxAgents, over).toBeLessThanOrEqual(3)
     expect(end.finished.find((i) => i.id === programItem.id)?.state).toBe('COMPLETED')
     expect(['COMPLETED', 'FAILED']).toContain(end.finished.find((i) => i.id === arenaItem.id)?.state)
     const decisions = await call<{ decision: string }[]>(c, 'control.decisions', { itemId: programItem.id })
@@ -390,7 +393,7 @@ describe('scenarios of the 0.7 control plane, on a real runtime process', () => 
     dirs.push(repo)
     const first = await ready(dir)
     const project = await call<{ id: string }>(first.c, 'projects.open', { path: repo })
-    const program = await call<{ id: string }>(first.c, 'program.create', { projectId: project.id, name: 'Scheduled program', goal: 'Build the demo modules.', preset: 'autonomous', start: false })
+    const program = await call<{ id: string }>(first.c, 'program.create', { projectId: project.id, name: 'Scheduled program', goal: 'Build the demo modules.', preset: 'autonomous', start: false, compilationMode: 'EXACT' })
     const at = new Date(Date.now() + 4000).toISOString()
     const schedule = await call<{ id: string }>(first.c, 'control.createSchedule', { schedule: { name: 'Soon', rule: { kind: 'once', at }, action: { type: 'program', programId: program.id }, priority: 'P2', enabled: true } })
     // The window goes away before the schedule is due.
@@ -443,7 +446,7 @@ describe('what a holder of the runtime token cannot do', () => {
     expect(asked).toEqual(['pickDirectory'])
 
     // Power control: the question never reaches the client, and without anyone to ask the answer is no.
-    const overnight = await c.invoke('overnight.start', { projectId: project.id, preset: 'balanced', prompt: 'Build the modules.', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT, planningMode: 'single' })
+    const overnight = await c.invoke('overnight.start', { projectId: project.id, preset: 'balanced', prompt: 'Build the modules.', policy: DEFAULT_OVERNIGHT_POLICY, confirmed: true, confirmation: OVERNIGHT_CONFIRMATION_TEXT, planningMode: 'single', compilationMode: 'EXACT' })
     expect(overnight).toMatchObject({ ok: false, error: { code: 'invalid_state', message: 'The overnight run was not authorized.' } })
     expect(await call<unknown[]>(c, 'overnight.active')).toEqual([])
     expect(existsSync(join(dir, 'fake-power.log'))).toBe(false)

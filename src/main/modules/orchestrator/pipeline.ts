@@ -41,6 +41,7 @@ import { dependenciesOf } from '@main/modules/task-graph'
 import type { AgentOutcome, AgentRunResult, SessionControl } from './agent-runner'
 import { ARBITRATION_ARTIFACT } from './arbitration'
 import { composeForTask } from './context-source'
+import { renderInstructionsInForce } from './instructions'
 import type { Core } from './core'
 import { buildTaskEvidence } from './evidence'
 import { renderMessage } from './messaging'
@@ -57,6 +58,11 @@ export interface PipelineHost {
   withMergeLock<T>(runId: string, fn: () => Promise<T>): Promise<T>
   /** Reports the stage a task pipeline is in (used to derive the run phase). */
   setStage(taskId: string, stage: Stage | 'repair' | 'merge'): void
+  /**
+   * The task's session found no provider with capacity. The task is held and the rest of the run goes on;
+   * the run itself waits only when nothing else of it can.
+   */
+  holdForCapacity(runId: string, taskId: string): void
 }
 
 interface Failure {
@@ -72,7 +78,8 @@ type ReviewOutcome = { status: 'approved'; summary: string } | { status: 'change
 
 type GateResult<T> = { status: 'ok'; value: T; agentId: string } | { status: 'halt' } | { status: 'failed'; error: string }
 
-const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown'])
+// 'capacity': the session waited for a provider and no work was done in it.
+const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown', 'capacity'])
 const SIGNIFICANT = new Set(['critical', 'high'])
 const HEARTBEAT_MS = 30_000
 
@@ -335,8 +342,9 @@ export class TaskPipeline {
   ): Promise<boolean> {
     const { repos, bus } = this.core.deps
     const resumeId = resume ? undefined : this.resumableSession(initial.id)
-    // A resumed session continues the same attempt; so does a restart after a yield; a fresh one consumes a new attempt.
-    const attempt = (resumeId || resume) && initial.attempt > 0 ? initial.attempt : initial.attempt + 1
+    // A resumed session continues the same attempt; so does a restart after a yield, and so does a task whose
+    // last session only waited for a provider's capacity: waiting is not a try. A fresh one consumes a new attempt.
+    const attempt = (resumeId || resume || this.lastSessionWaited(initial.id)) && initial.attempt > 0 ? initial.attempt : initial.attempt + 1
     const leaseOwner = newId()
     let task = this.core.setTaskState(initial.id, 'running', {
       attempt,
@@ -444,7 +452,7 @@ export class TaskPipeline {
   /** Shared handling for a non-successful agent outcome in the implement stage. */
   private handleAgentFailure(run: Run, task: Task, result: AgentRunResult, control: SessionControl): void {
     const { bus } = this.core.deps
-    if (this.haltOutcome(run, result.outcome, control)) {
+    if (this.haltOutcome(run, result.outcome, control, task.id)) {
       if (control.stopReason === 'user_stop') {
         const error: TaskError = { what: 'Agent stopped by user', where: label(task.role, task.key), why: null, retryable: true }
         if (this.core.tryTaskState(task.id, 'failed', { error })) {
@@ -485,10 +493,17 @@ export class TaskPipeline {
 
   /**
    * Outcomes that stop the pipeline without failing the task: user/pause stops, quota, and auth.
-   * Quota and auth pause the whole run; the task keeps its state and resumes later.
+   * Quota and auth pause the whole run; the task keeps its state and resumes later. A wait for a provider's
+   * capacity holds the task alone (`taskId`): what another provider can take goes on. Without a task (a
+   * speculative candidate) the run waits as a whole.
    */
-  private haltOutcome(run: Run, outcome: AgentOutcome, control: SessionControl): boolean {
+  private haltOutcome(run: Run, outcome: AgentOutcome, control: SessionControl, taskId?: string): boolean {
     if (outcome === 'stopped' || control.stopReason) return true
+    if (outcome === 'capacity') {
+      if (taskId) this.host.holdForCapacity(run.id, taskId)
+      else this.core.pauseRun(run.id, 'capacity', 'Waiting for quality-approved provider capacity')
+      return true
+    }
     if (outcome === 'quota') {
       this.core.pauseRun(run.id, 'quota', 'Claude usage limit reached')
       return true
@@ -521,6 +536,8 @@ export class TaskPipeline {
     const promptFor = (lens?: string): string =>
       buildReviewPrompt({
         task,
+        // What the user asked for, later instructions included: the reviewer can only flag a broken instruction it was shown.
+        instructions: renderInstructionsInForce(repos, run, task, { withRequest: true }),
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
         patch: diff.patch,
@@ -719,6 +736,8 @@ export class TaskPipeline {
       purpose: 'verify',
       prompt: buildVerifierPrompt({
         task,
+        // The verifier judges against what the user asked for, later instructions included; none of it is the implementer's.
+        instructions: renderInstructionsInForce(repos, run, task, { withRequest: true }),
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
         checkResults: checks,
@@ -814,7 +833,7 @@ export class TaskPipeline {
         outputSchema: spec.jsonSchema,
         control,
       })
-      if (this.haltOutcome(run, result.outcome, control)) return { status: 'halt' }
+      if (this.haltOutcome(run, result.outcome, control, task.id)) return { status: 'halt' }
       if (result.outcome === 'success') {
         const parsed = spec.schema.safeParse(result.structuredOutput)
         if (parsed.success) return { status: 'ok', value: parsed.data, agentId: result.agentId }
@@ -893,6 +912,8 @@ export class TaskPipeline {
 
     const built = buildRepairPrompt({
       task: parent,
+      // A repair is a new task and a new session: it starts from what the user asked for, not only from the failure.
+      instructions: renderInstructionsInForce(repos, run, parent, { withRequest: true }),
       failure: { kind: failure.kind, summary: failure.summary, details: failure.details },
       findings: failure.findings,
       failures: failure.failures,
@@ -937,7 +958,7 @@ export class TaskPipeline {
       return true
     }
     // Paused / quota: leave parent waiting and child running; the restart logic picks it up.
-    if (this.haltOutcome(run, result.outcome, control) && control.stopReason !== 'user_stop') return false
+    if (this.haltOutcome(run, result.outcome, control, parent.id) && control.stopReason !== 'user_stop') return false
     const why = result.blocker?.summary ?? result.error ?? result.outcome
     const error: TaskError = { what: 'Repair failed', where: child.key, why, retryable: true }
     bus.transaction(() => {
@@ -1097,6 +1118,12 @@ export class TaskPipeline {
   }
 
   /** SDK session of the task's last implementing agent, when it ended in a resumable way. */
+  /** Whether the task's last worker session ended because no provider had capacity (no request was sent in it). */
+  private lastSessionWaited(taskId: string): boolean {
+    const agent = this.lastWorkerAgent(taskId)
+    return agent ? this.core.deps.repos.sessions.latestForAgent(agent.id)?.endReason === 'capacity' : false
+  }
+
   private resumableSession(taskId: string): string | undefined {
     const { repos } = this.core.deps
     const agent = this.lastWorkerAgent(taskId)

@@ -60,6 +60,7 @@ export interface ComposeContextInput {
   /** Findings of the task's latest review that asked for changes (accepted ones only in a dual review). */
   priorReview: { reviewId: string; findings: ReviewFinding[] } | null
   extra?: ContextPackInput['extra']
+  admittedTaskRequests?: ContextPackInput['admittedTaskRequests']
   factLimit?: number
   /**
    * v0.7.1 (Context Engine V3): what the Context Graph adds. Given the ids of the facts and memory entries this
@@ -69,7 +70,13 @@ export interface ComposeContextInput {
   memoryStatus?: (entry: MemoryEntry) => string | null
   /** v0.7.1: why a fact the store still calls fresh must not be shown (the graph saw its file change since), or null. */
   factStatus?: (fact: RepositoryFact) => string | null
-  graph?: (shown: { factIds: ReadonlySet<string>; memoryIds: ReadonlySet<string> }) => { text: string; entries: { nodeId: string; title: string; reason: string; chars: number; included: boolean }[] } | null
+  graph?: (shown: {
+    factIds: ReadonlySet<string>
+    memoryIds: ReadonlySet<string>
+  }) => {
+    text: string
+    entries: { nodeId: string; title: string; reason: string; chars: number; included: boolean }[]
+  } | null
 }
 
 export interface ComposedContext {
@@ -128,6 +135,17 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
   const taskById = new Map(input.tasks.map((t) => [t.id, t]))
 
   drafts.push(included('Task', 'task', task.id, `${task.key}: ${task.title}`, `The task this ${purpose} session works on.`, task.description.length))
+  for (const spec of input.admittedTaskRequests ?? [])
+    drafts.push(
+      included(
+        'Admitted user task requests',
+        'user_instruction',
+        spec.intentId ?? spec.id,
+        'Canonical user task request',
+        'Explicit task request admitted by the compiler; generated recommendations retain advisory provenance.',
+        spec.rawIntent.length,
+      ),
+    )
   const criteriaChars = [...task.acceptanceCriteria, ...input.missionCriteria].join('\n').length
   if (criteriaChars > 0) {
     drafts.push(
@@ -296,6 +314,7 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
     memory,
     facts,
     graphText: graph?.text ?? null,
+    ...(input.admittedTaskRequests ? { admittedTaskRequests: input.admittedTaskRequests } : {}),
     reviewFindings,
     messages: peerMessages,
     repo: input.repo,

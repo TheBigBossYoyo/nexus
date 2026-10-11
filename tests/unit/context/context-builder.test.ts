@@ -196,6 +196,41 @@ describe('buildContextPack', () => {
     expect(pack.prompt).toContain('test: pnpm test')
   })
 
+  describe('with an admitted specification', () => {
+    const admitted = (prompt: string): Run => {
+      const run = makeRun()
+      const spec = { mode: 'EXACT', rawIntent: prompt, recommendations: [], ambiguities: [] } as unknown as NonNullable<Run['config']['compiledTaskSpec']>
+      return { ...run, prompt, config: { ...run.config, compiledTaskSpec: spec } }
+    }
+    const copies = (text: string, part: string): number => text.split(part).length - 1
+
+    it('shows a worker the request once, whole when it fits', () => {
+      const request = `Add a dark mode toggle. ${'Keep the header layout. '.repeat(80)}`
+      const pack = buildContextPack(baseInput({ run: admitted(request) }))
+      expect(copies(pack.prompt, request)).toBe(1)
+      // What the specification adds to a pack is the request and its heading, nothing else.
+      const plain = buildContextPack(baseInput())
+      expect(pack.prompt.length - plain.prompt.length).toBeLessThan(request.length + 200)
+    })
+
+    it('keeps a long request within the limit of a section, and says so', () => {
+      const request = `${'A requirement of the user. '.repeat(800)}THE-END`
+      expect(request.length).toBeGreaterThan(20_000)
+      const pack = buildContextPack(baseInput({ run: admitted(request) }))
+      const plain = buildContextPack(baseInput())
+      expect(pack.prompt.length - plain.prompt.length).toBeLessThan(SECTION_LIMITS.task + 500)
+      expect(pack.prompt).not.toContain('THE-END')
+      expect(pack.prompt).toMatch(/truncated: \d+ more characters omitted/)
+      expect(pack.prompt).toContain('The planner read the whole request')
+    })
+
+    it('gives the planner the whole request, once', () => {
+      const request = `${'A requirement of the user. '.repeat(800)}THE-END`
+      const { prompt } = buildPlannerPrompt({ run: admitted(request), profile, memory: [] })
+      expect(copies(prompt, 'THE-END')).toBe(1)
+    })
+  })
+
   it('omits the criteria section when there are none', () => {
     const pack = buildContextPack(baseInput({ task: makeTask({ acceptanceCriteria: [] }) }))
     expect(pack.sections.map((s) => s.name)).not.toContain('Acceptance criteria')
@@ -263,12 +298,12 @@ describe('buildContextPack', () => {
   })
 
   it('truncates oversized sections with an explicit marker', () => {
-    const big = 'x'.repeat(SECTION_LIMITS.task * 2)
+    const big = 'x'.repeat(SECTION_LIMITS.taskDescription * 2)
     const pack = buildContextPack(baseInput({ task: makeTask({ description: big }) }))
     const task = pack.sections.find((s) => s.name === 'Task')
     expect(task).toBeDefined()
     expect(pack.prompt).toMatch(/\[\.\.\. truncated: \d+ more characters omitted \.\.\.\]/)
-    expect(task?.chars ?? Infinity).toBeLessThan(SECTION_LIMITS.task + 300)
+    expect(task?.chars ?? Infinity).toBeLessThan(SECTION_LIMITS.taskDescription + 300)
   })
 
   it('bounds dependency outputs and reports omitted entries', () => {

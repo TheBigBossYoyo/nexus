@@ -16,6 +16,7 @@ import {
   StatusDot,
   StopIcon,
   Textarea,
+  ErrorNote,
   TrashIcon,
 } from '../../components/ui'
 import { formatSpan } from '../../lib/format'
@@ -26,6 +27,9 @@ import { runStatus } from '../../lib/status'
 import { useUiStore } from '../../store/ui'
 import { useRunControls } from '../../app/useRunControls'
 import { AddTaskDialog } from './AddTaskDialog'
+import { MissionAdmissionInspector } from '../projects/CompiledTaskInspector'
+import { CompilationPreview } from '../projects/CompilationPreview'
+import { defaultIntentMetadata, type CompilationMode, type CompiledTaskSpec } from '@shared/intelligence'
 import { missionTitle, policyView, strategyChip, type PolicyView } from './missionModel'
 import { pauseDetailFromEvents } from './eventText'
 import { useNow, useRunCtx } from './runContext'
@@ -210,6 +214,8 @@ function DetailsPopover({ version }: { version: number }) {
 }
 
 function ReplanButton({ disabled }: { disabled: boolean }) {
+  const [mode, setMode] = useState<CompilationMode>('AUTO')
+  const [spec, setSpec] = useState<CompiledTaskSpec | null>(null)
   const { detail } = useRunCtx()
   const replan = useReplan()
   const [feedback, setFeedback] = useState('')
@@ -227,7 +233,11 @@ function ReplanButton({ disabled }: { disabled: boolean }) {
           <label className="text-small font-medium" htmlFor="header-replan-feedback">
             What should the planner change?
           </label>
-          <Textarea id="header-replan-feedback" rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+          <Textarea id="header-replan-feedback" rows={3} value={feedback} disabled={replan.isPending} onChange={(e) => { setFeedback(e.target.value); setSpec(null) }} />
+          <CompilationPreview projectId={detail.run.projectId} raw={feedback} mode={mode} spec={spec}
+            metadata={defaultIntentMetadata(feedback, 'MISSION_REPLAN')} executionScope={{ runId: detail.run.id }}
+            onModeChange={m => { setMode(m); setSpec(null) }} onSpec={setSpec} />
+          {replan.error ? <ErrorNote error={replan.error} /> : null}
           <div className="flex justify-end">
             <Button
               size="sm"
@@ -236,7 +246,7 @@ function ReplanButton({ disabled }: { disabled: boolean }) {
               disabled={feedback.trim() === ''}
               onClick={() =>
                 replan.mutate(
-                  { runId: detail.run.id, feedback: feedback.trim() },
+                  { runId: detail.run.id, feedback, compilationMode: mode, ...(spec ? { compiledSpecId: spec.id } : {}) },
                   {
                     onSuccess: () => {
                       setFeedback('')
@@ -275,7 +285,8 @@ export function MissionHeader() {
   const finished = TERMINAL_RUN_STATES.includes(run.state)
   const now = useNow(run.startedAt !== null && !finished)
   const done = tasks.filter((t) => t.state === 'completed').length
-  const pauseDetail = run.state === 'paused' && run.pauseReason !== 'quota' ? pauseDetailFromEvents(events) : null
+  // A capacity wait is explained in the state panel, in words; the header does not repeat its routing reasons.
+  const pauseDetail = run.state === 'paused' && run.pauseReason !== 'quota' && run.pauseReason !== 'capacity' ? pauseDetailFromEvents(events) : null
   const revisions = useGraphRevisions(run.id)
   const version = planVersion(revisions.data ?? [])
   const cleanable = finished && worktrees.some((w) => w.state !== 'removed')
@@ -355,9 +366,10 @@ export function MissionHeader() {
         </span>
       </div>
 
+      <MissionAdmissionInspector key={run.id} run={run} />
       {run.state === 'paused' && pauseDetail ? (
         <div className="border-b bg-warning-subtle px-5 py-1.5 text-small text-warning" data-testid="pause-reason">
-          Paused{run.pauseReason ? ` (${run.pauseReason})` : ''}: {pauseDetail}
+          {run.pauseReason === 'user' ? 'Paused by you' : run.pauseReason === 'recovery' ? 'Paused after a restart' : 'Paused'}: {pauseDetail}
         </div>
       ) : null}
 

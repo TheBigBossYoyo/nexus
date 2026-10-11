@@ -1,0 +1,200 @@
+{
+  "kind": "campaign-run",
+  "task": "refactor",
+  "category": "refactor",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "6404450849654ed8046788b6f9b64b764bf188fe",
+  "startedAt": "2026-10-10T22:06:41.088Z",
+  "finishedAt": "2026-10-10T22:09:38.092Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "accounts",
+        "ref": "nexus/d5374792/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ createUser gives the same results as before (1.0421ms)\n✔ updateUser gives the same results as before, the id checked last (0.1881ms)\n✔ inviteUser gives the same results as before, the role checked last (0.189ms)\n✔ the shared module returns null for a valid value and the message otherwise (0.1113ms)\n✔ the handlers use the shared module and no longer carry their own copy (0.814ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 82.5509\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ a valid user is created with a normalised email (1.5666ms)\n✔ an invalid email is reported (0.1667ms)\n✔ an invitation needs a known role (0.1261ms)\n✔ valid emails return null (0.6536ms)\n✔ non-string and malformed emails are not valid addresses (0.1626ms)\n✔ email length boundary is 254 (0.1816ms)\n✔ valid names return null (0.844ms)\n✔ non-string and blank names are required (0.1162ms)\n✔ name length boundary is 80 (0.0879ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 129.1473\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "extract-validation-module",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"cab163f2-0446-470a-837f-13d5695acc66\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, mkdir, echo, for, do, cp, done, cat, import, const, 249, +.co,a@+b.repeat, 250, +.co, a@+b.repeat, +.co ], 80, ,a.repeat, 81, ,  +a.repeat, +  ], let, await, ${k}.js, [k],, [k], assert.deepstrictequal, w, {email,name,id,role}, ,, n+",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, mkdir, for, do, done, echo, cat, import, pathtofileurl, from, const, process.argv[2], .href, ,, 249, +, 250, 80, 81, id:, role:, ], f,, =, try, return, r:, x, catch, e, threw:, let, await, old, [h],, cur, [h], assert.deepstrictequal"
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: .\n- **New tests:** they cover valid, whitespace-padded, non-string, malformed and the 254/255 and 80/81 boundary cases, including a name that is 80 characters only after trimming.\n- **Scope:** `git diff --stat` shows only the five listed files, committed on the current branch. Git warned that LF will become CRLF on the next touch; I made no line-ending changes myself.\n- **Test fix:** my first test helper built emails one character too short, so the 255-character case failed. I fixed the helper, not the validation code.\n- **Not done:** I didn't add any tests that call the handlers with both a bad email and a bad name. The email-first order is only confirmed by the handler code, not by a test.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/extract-validation-module [medium] Run shell command (bash): cat > src/validation.js <<'EOF'\nexport function validateEmail(value) {\n  if (typeof value !== 'string' || !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(value.trim())) return 'email: not a valid address'\n  if (value.trim().length > 254) return 'email: longer than 254 characters'\n  return null\n}\n\nexport function | path outside the worktree: /; path outside the worktree: ../validation.js\\,"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 39,
+    "inputTokensUncached": 17145,
+    "outputTokens": 16503,
+    "cacheCreationTokens": 45906,
+    "cacheReadTokens": 380079,
+    "costUsdReported": 0.6952,
+    "toolCalls": 34,
+    "toolCallsRecorded": 34,
+    "filesChangedRecorded": 5,
+    "toolCallsByName": {
+      "Bash": 18,
+      "StructuredOutput": 4,
+      "Read": 4,
+      "Write": 5,
+      "Edit": 1,
+      "Grep": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 4,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 15,
+        "toolCalls": 14,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 16,
+        "toolCalls": 14,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 175368,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 8
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 9
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

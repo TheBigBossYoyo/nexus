@@ -1,4 +1,15 @@
 import { z } from 'zod'
+import type { BuildIdentity } from './build-identity'
+import type { ChatGPTStatus } from './chatgpt'
+import type {
+  CompiledTaskSpec,
+  AdviceLearning,
+  DirectorInvocation,
+  DirectorRecord,
+  StrategicEscalation,
+} from './intelligence'
+import type { AdvisoryUsageSummary, CapacityRoutingRecord } from './capacity'
+import { COMPILATION_MODES, UserIntentMetadataSchema } from './intelligence'
 import {
   ContractKindSchema,
   DependencyKindSchema,
@@ -22,11 +33,33 @@ import {
   type WorkspaceRepository,
   type WorkspaceSummary,
 } from './workspace'
-import { ControlLimitsSchema, EnqueueInputSchema, PrioritySchema, ScheduleInputSchema, type ControlLimits, type ControlPlaneOverview, type GlobalWorkItem, type Schedule } from './control-plane'
+import {
+  ControlLimitsSchema,
+  EnqueueInputSchema,
+  PrioritySchema,
+  ScheduleInputSchema,
+  type ControlLimits,
+  type ControlPlaneOverview,
+  type GlobalWorkItem,
+  type Schedule,
+} from './control-plane'
 import { SecurityDecisionsInputSchema, type SecurityDecisionPage } from './security'
-import type { ContextGraphHealth, ContextNode, ContextNodeDetail, ContextRefreshJob, ContextSpace } from './context-graph'
+import type {
+  ContextGraphHealth,
+  ContextNode,
+  ContextNodeDetail,
+  ContextRefreshJob,
+  ContextSpace,
+} from './context-graph'
 import type { AgentTokenView, RunTokenView, TechniqueSwitch, TokenOverview } from './token'
-import { ProviderIdSchema, ProviderPolicySchema, type ProviderPolicy, type ProviderSession, type ProvidersOverview, type ProviderStatus } from './provider'
+import {
+  ProviderIdSchema,
+  ProviderPolicySchema,
+  type ProviderPolicy,
+  type ProviderSession,
+  type ProvidersOverview,
+  type ProviderStatus,
+} from './provider'
 import {
   BACKLOG_STATUSES,
   BackgroundJobKindSchema,
@@ -129,6 +162,7 @@ const GraphSpace = z.object({ kind: z.enum(['project', 'workspace']), id: Id }).
 const Empty = z.object({}).strict()
 
 export interface AppInfo {
+  build?: BuildIdentity
   version: string
   dataDir: string
   dbPath: string
@@ -208,6 +242,88 @@ import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
 import type { WorkersOverview } from './workers'
 
 export const ipcInputs = {
+  'chatgpt.status': Empty,
+  'director.invoke': z
+    .object({
+      projectId: Id,
+      objective: z.string().min(1).max(32000),
+      level: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+      escalationId: Id.optional(),
+    })
+    .strict(),
+  'director.learning': z.object({ projectId: Id }).strict(),
+  'director.history': z
+    .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
+    .strict(),
+  'director.escalate': z
+    .object({
+      projectId: Id,
+      objective: z.string().min(1).max(32000),
+      level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+      reasons: z.array(z.string().min(1).max(4000)).max(10),
+      runId: Id.optional(),
+      taskId: Id.optional(),
+    })
+    .strict(),
+  'director.records': z
+    .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
+    .strict(),
+  'director.dismissEscalation': z.object({ projectId: Id, escalationId: Id }).strict(),
+  'director.routing': z.object({ projectId: Id, operationId: Id.optional() }).strict(),
+  'director.advisoryUsage': z.object({ days: z.number().int().min(1).max(90) }).strict(),
+  'chatgpt.connect': z.object({ profileId: Id.optional() }).strict(),
+  'chatgpt.select': z.object({ profileId: Id }).strict(),
+  'chatgpt.models': Empty,
+  'chatgpt.configure': z
+    .object({ model: z.string().min(1).max(200), includedOnlyConfirmed: z.boolean() })
+    .strict(),
+  'chatgpt.disconnect': Empty,
+  'chatgpt.cancelConnect': Empty,
+  'chatgpt.recoverStorage': z.object({ discard: z.boolean() }).strict(),
+  'chatgpt.manageUsage': Empty,
+  /** The user's decision on a specification that asked for one: the additions to keep, by position. */
+  'compilation.decide': z.object({ projectId: Id, specId: Id, accept: z.array(z.number().int().min(0).max(39)).max(40) }).strict(),
+  'compilation.preview': z
+    .object({
+      projectId: Id,
+      raw: z.string().min(1).max(32000),
+      mode: z.enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL']),
+      metadata: UserIntentMetadataSchema.optional(),
+      workspaceId: Id.optional(),
+      executionScope: z
+        .union([
+          z.object({ runId: Id, taskId: Id.optional() }).strict(),
+          z.object({ programId: Id }).strict(),
+          z.object({ workspaceMissionId: Id }).strict(),
+          z.object({ workspaceProgramId: Id }).strict(),
+        ])
+        .optional(),
+    })
+    .strict(),
+  'compilation.history': z
+    .object({ projectId: Id, offset: z.number().int().min(0).max(1000000).optional() })
+    .strict(),
+  'compilation.admission': z
+    .object({ kind: z.enum(['PROGRAM', 'WORKSPACE_MISSION', 'WORKSPACE_PROGRAM']), entityId: Id })
+    .strict(),
+  'compilation.validate': z
+    .object({
+      projectId: Id,
+      specId: Id,
+      raw: z.string().min(1).max(32000),
+      mode: z.enum(COMPILATION_MODES),
+      metadata: UserIntentMetadataSchema.optional(),
+      workspaceId: Id.optional(),
+      executionScope: z
+        .union([
+          z.object({ runId: Id, taskId: Id.optional() }).strict(),
+          z.object({ programId: Id }).strict(),
+          z.object({ workspaceMissionId: Id }).strict(),
+          z.object({ workspaceProgramId: Id }).strict(),
+        ])
+        .optional(),
+    })
+    .strict(),
   'app.info': Empty,
   'app.openDataDir': Empty,
 
@@ -222,13 +338,16 @@ export const ipcInputs = {
   'projects.open': z.object({ path: z.string().min(1).optional() }).strict(),
   'projects.get': z.object({ projectId: Id }).strict(),
   'projects.reprofile': z.object({ projectId: Id }).strict(),
-  'projects.update': z
-    .object({ projectId: Id, respectProjectClaudeConfig: z.boolean() })
-    .strict(),
+  'projects.update': z.object({ projectId: Id, respectProjectClaudeConfig: z.boolean() }).strict(),
+  /** 0.7.2: whether this project's requests and knowledge may be sent to the strategic provider (OpenAI). */
+  'compilation.projectSending': z.object({ projectId: Id }).strict(),
+  'compilation.setProjectSending': z.object({ projectId: Id, allowed: z.boolean() }).strict(),
   'projects.remove': z.object({ projectId: Id }).strict(),
 
   /** Missions as the user sees them. `includeInternal` adds the read-only sessions NEXUS ran for itself (0.4). */
-  'runs.list': z.object({ projectId: Id.optional(), includeInternal: z.boolean().optional() }).strict(),
+  'runs.list': z
+    .object({ projectId: Id.optional(), includeInternal: z.boolean().optional() })
+    .strict(),
   'runs.get': z.object({ runId: Id }).strict(),
   'runs.create': z
     .object({
@@ -236,6 +355,10 @@ export const ipcInputs = {
       mode: RunModeSchema,
       preset: PresetSchema,
       prompt: z.string().min(1).max(20_000),
+      compilationMode: z
+        .enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL'])
+        .optional(),
+      compiledTaskSpecId: Id.optional(),
       maxParallelAgents: z.number().int().min(1).max(16).optional(),
       maxIterations: z.number().int().min(1).max(50).optional(),
       maxDurationMinutes: z.number().int().min(1).max(1440).optional(),
@@ -250,22 +373,42 @@ export const ipcInputs = {
     })
     .strict(),
   'runs.approvePlan': z.object({ runId: Id }).strict(),
-  'runs.replan': z.object({ runId: Id, feedback: z.string().max(10_000) }).strict(),
+  'runs.replan': z
+    .object({
+      runId: Id,
+      feedback: z.string().max(10_000),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'runs.pause': z.object({ runId: Id }).strict(),
-  'runs.resume': z.object({ runId: Id }).strict(),
+  'runs.resume': z
+    .object({
+      runId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'runs.cancel': z.object({ runId: Id }).strict(),
   'runs.summary': z.object({ runId: Id }).strict(),
   'runs.diff': z.object({ runId: Id }).strict(),
   'runs.recoverable': Empty,
   'runs.recover': z
-    .object({ runId: Id, action: z.enum(['resume', 'inspect', 'cancel']) })
+    .object({
+      runId: Id,
+      action: z.enum(['resume', 'inspect', 'cancel']),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
     .strict(),
   /** Remove worktrees of a finished run. Branches are kept. */
   'runs.cleanup': z.object({ runId: Id }).strict(),
 
   'tasks.retry': z.object({ taskId: Id }).strict(),
   'tasks.cancel': z.object({ taskId: Id }).strict(),
-  'tasks.setPriority': z.object({ taskId: Id, priority: z.number().int().min(-100).max(100) }).strict(),
+  'tasks.setPriority': z
+    .object({ taskId: Id, priority: z.number().int().min(-100).max(100) })
+    .strict(),
   'tasks.add': z
     .object({
       runId: Id,
@@ -276,26 +419,57 @@ export const ipcInputs = {
       suggestedFiles: z.array(z.string()),
       acceptanceCriteria: z.array(z.string().min(1)),
       complexity: ComplexitySchema,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
     })
     .strict(),
-  'tasks.instruct': z.object({ taskId: Id, instruction: z.string().min(1).max(10_000) }).strict(),
-  'tasks.resolveBlocker': z.object({ taskId: Id, note: z.string().max(10_000) }).strict(),
+  'tasks.instruct': z
+    .object({
+      taskId: Id,
+      instruction: z.string().min(1).max(10_000),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
+  'tasks.resolveBlocker': z
+    .object({
+      taskId: Id,
+      note: z.string().max(10_000),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'tasks.diff': z.object({ taskId: Id }).strict(),
   'tasks.reviews': z.object({ taskId: Id }).strict(),
   'tasks.verifications': z.object({ taskId: Id }).strict(),
 
-  'criteria.update': z.object({ criterionId: Id, text: z.string().min(1).max(2000) }).strict(),
+  'criteria.update': z
+    .object({
+      criterionId: Id,
+      text: z.string().min(1).max(2000),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
 
   'agents.get': z.object({ agentId: Id }).strict(),
   'agents.stop': z.object({ agentId: Id }).strict(),
   'agents.output': z
-    .object({ agentId: Id, afterSeq: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(2000).optional() })
+    .object({
+      agentId: Id,
+      afterSeq: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(2000).optional(),
+    })
     .strict(),
   'agents.tools': z.object({ agentId: Id }).strict(),
 
   'messages.list': z.object({ runId: Id, taskId: Id.optional() }).strict(),
   'events.list': z
-    .object({ runId: Id, afterSeq: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(5000).optional() })
+    .object({
+      runId: Id,
+      afterSeq: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(5000).optional(),
+    })
     .strict(),
   'reviews.list': z.object({ runId: Id }).strict(),
   'verifications.list': z.object({ runId: Id }).strict(),
@@ -307,7 +481,11 @@ export const ipcInputs = {
     .strict(),
 
   'memory.list': z
-    .object({ projectId: Id.optional(), scope: z.enum(['global', 'project', 'run']).optional(), query: z.string().max(500).optional() })
+    .object({
+      projectId: Id.optional(),
+      scope: z.enum(['global', 'project', 'run']).optional(),
+      query: z.string().max(500).optional(),
+    })
     .strict(),
   'memory.add': z
     .object({
@@ -328,7 +506,13 @@ export const ipcInputs = {
   'planning.recommend': z.object({ projectId: Id, prompt: z.string().max(20_000) }).strict(),
   'routing.list': z.object({ runId: Id }).strict(),
   'performance.summary': z.object({ projectId: Id.optional() }).strict(),
-  'intelligence.list': z.object({ projectId: Id, query: z.string().max(500).optional(), includeStale: z.boolean().optional() }).strict(),
+  'intelligence.list': z
+    .object({
+      projectId: Id,
+      query: z.string().max(500).optional(),
+      includeStale: z.boolean().optional(),
+    })
+    .strict(),
   'intelligence.refresh': z.object({ projectId: Id }).strict(),
   'context.packs': z.object({ taskId: Id.optional(), agentId: Id.optional() }).strict(),
 
@@ -339,6 +523,10 @@ export const ipcInputs = {
       projectId: Id,
       preset: PresetSchema,
       prompt: z.string().min(1).max(20_000),
+      compilationMode: z
+        .enum(['AUTO', 'EXACT', 'LIGHT', 'STANDARD', 'TECHNICAL', 'COUNCIL'])
+        .optional(),
+      compiledTaskSpecId: Id.optional(),
       policy: OvernightPolicySchema,
       /** The run-specific authorization: the ticked box and the exact sentence that was shown. */
       confirmed: z.literal(true),
@@ -378,9 +566,23 @@ export const ipcInputs = {
    * v0.4: a program under the overnight supervisor for one autonomous work window. The policy's duration is
    * the window; at its end the program is paused in a safe state before the end action.
    */
-  'overnight.startProgram': z.object({ programId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
+  'overnight.startProgram': z
+    .object({
+      programId: Id,
+      policy: OvernightPolicySchema,
+      confirmed: z.literal(true),
+      confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT),
+    })
+    .strict(),
   /** v0.5: a cross-repository mission under the overnight supervisor. */
-  'overnight.startWorkspaceMission': z.object({ missionId: Id, policy: OvernightPolicySchema, confirmed: z.literal(true), confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT) }).strict(),
+  'overnight.startWorkspaceMission': z
+    .object({
+      missionId: Id,
+      policy: OvernightPolicySchema,
+      confirmed: z.literal(true),
+      confirmation: z.literal(OVERNIGHT_CONFIRMATION_TEXT),
+    })
+    .strict(),
   'overnight.get': z.object({ runId: Id }).strict(),
   'overnight.active': Empty,
   'overnight.cancelPower': z.object({ runId: Id }).strict(),
@@ -393,7 +595,16 @@ export const ipcInputs = {
       forceCloseApplications: z.boolean().optional(),
     })
     .strict(),
-  'overnight.extend': z.object({ runId: Id, minutes: z.number().int().min(1).max(24 * 60) }).strict(),
+  'overnight.extend': z
+    .object({
+      runId: Id,
+      minutes: z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 60),
+    })
+    .strict(),
   'overnight.cancelMission': z.object({ runId: Id }).strict(),
   'overnight.report': z.object({ runId: Id }).strict(),
   'overnight.audit': z.object({ runId: Id }).strict(),
@@ -402,7 +613,12 @@ export const ipcInputs = {
   // v0.3: usage intelligence
   'usage.overview': Empty,
   'usage.totals': z
-    .object({ runId: Id.optional(), projectId: Id.optional(), campaignId: Id.optional(), sinceDays: z.number().int().min(1).max(365).optional() })
+    .object({
+      runId: Id.optional(),
+      projectId: Id.optional(),
+      campaignId: Id.optional(),
+      sinceDays: z.number().int().min(1).max(365).optional(),
+    })
     .strict(),
   'usage.breakdown': z
     .object({
@@ -413,7 +629,12 @@ export const ipcInputs = {
       limit: z.number().int().min(1).max(400).optional(),
     })
     .strict(),
-  'usage.limitHistory': z.object({ limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'usage.limitHistory': z
+    .object({
+      limit: z.number().int().min(1).max(200).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
+    .strict(),
   'usage.run': z.object({ runId: Id }).strict(),
   'usage.efficiency': Empty,
   /** Ask the runtime now (no prompt is sent when the runtime supports its usage report). */
@@ -431,7 +652,12 @@ export const ipcInputs = {
   /** Opens the native folder picker; returns null when cancelled. The case is registered untrusted. */
   'arena.importCase': Empty,
   'arena.trustCase': z.object({ caseVersionId: Id }).strict(),
-  'arena.campaigns': z.object({ limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'arena.campaigns': z
+    .object({
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
+    .strict(),
   'arena.createCampaign': z
     .object({
       name: z.string().min(1).max(120),
@@ -447,14 +673,20 @@ export const ipcInputs = {
     .strict(),
   'arena.campaign': z.object({ campaignId: Id }).strict(),
   'arena.trials': z
-    .object({ campaignId: Id, limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() })
+    .object({
+      campaignId: Id,
+      limit: z.number().int().min(1).max(200).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
     .strict(),
   'arena.trial': z.object({ trialId: Id }).strict(),
   'arena.start': z.object({ campaignId: Id }).strict(),
   'arena.pause': z.object({ campaignId: Id }).strict(),
   'arena.resume': z.object({ campaignId: Id }).strict(),
   'arena.cancel': z.object({ campaignId: Id }).strict(),
-  'arena.results': z.object({ campaignId: Id.optional(), sinceDays: z.number().int().min(1).max(730).optional() }).strict(),
+  'arena.results': z
+    .object({ campaignId: Id.optional(), sinceDays: z.number().int().min(1).max(730).optional() })
+    .strict(),
 
   // v0.3: adaptive policy
   'policy.overview': Empty,
@@ -465,8 +697,18 @@ export const ipcInputs = {
   'policy.reject': z.object({ candidateId: Id }).strict(),
   'policy.rollback': Empty,
   'policy.pin': z.object({ snapshotId: Id.nullable() }).strict(),
-  'policy.setConfig': z.object({ exploration: ExplorationModeSchema.optional(), speculation: SpeculationPolicySchema.optional() }).strict(),
-  'policy.decisions': z.object({ limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'policy.setConfig': z
+    .object({
+      exploration: ExplorationModeSchema.optional(),
+      speculation: SpeculationPolicySchema.optional(),
+    })
+    .strict(),
+  'policy.decisions': z
+    .object({
+      limit: z.number().int().min(1).max(200).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
+    .strict(),
   /** What ADAPTIVE would choose for this mission, and why. Nothing is stored. */
   'policy.preview': z.object({ projectId: Id, prompt: z.string().min(1).max(20_000) }).strict(),
   'policy.run': z.object({ runId: Id }).strict(),
@@ -474,19 +716,54 @@ export const ipcInputs = {
   // v0.3: speculative execution, home, activity
   'speculative.list': z.object({ runId: Id }).strict(),
   'home.summary': Empty,
-  'activity.recent': z.object({ limit: z.number().int().min(1).max(500).optional(), beforeSeq: z.number().int().min(1).optional() }).strict(),
+  'activity.recent': z
+    .object({
+      limit: z.number().int().min(1).max(500).optional(),
+      beforeSeq: z.number().int().min(1).optional(),
+    })
+    .strict(),
 
   // v0.4: programs, backlog, background engineering, expertise
-  'program.list': z.object({ projectId: Id.optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() }).strict(),
+  'program.list': z
+    .object({
+      projectId: Id.optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
+    .strict(),
   'program.get': z.object({ programId: Id }).strict(),
   'program.presets': Empty,
   'program.create': z
     .object({
       projectId: Id,
       name: z.string().trim().min(1).max(120),
-      goal: z.string().trim().min(1).max(8000),
-      successCriteria: z.array(z.string().trim().min(1).max(400)).max(10).optional(),
-      constraints: z.array(z.string().trim().min(1).max(400)).max(10).optional(),
+      goal: z
+        .string()
+        .min(1)
+        .max(8000)
+        .refine((v) => v.trim().length > 0),
+      successCriteria: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(400)
+            .refine((v) => v.trim().length > 0),
+        )
+        .max(10)
+        .optional(),
+      constraints: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(400)
+            .refine((v) => v.trim().length > 0),
+        )
+        .max(10)
+        .optional(),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
       preset: z.enum(PROGRAM_PRESETS),
       /** A custom policy; when absent the preset is used as it is. */
       policy: ProgramPolicySchema.optional(),
@@ -494,15 +771,44 @@ export const ipcInputs = {
       start: z.boolean().optional(),
     })
     .strict(),
-  'program.start': z.object({ programId: Id }).strict(),
+  'program.start': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'program.pause': z.object({ programId: Id }).strict(),
-  'program.resume': z.object({ programId: Id }).strict(),
+  'program.resume': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'program.cancel': z.object({ programId: Id }).strict(),
   'program.decidePlan': z.object({ programId: Id, revisionId: Id, accept: z.boolean() }).strict(),
   /** The user asks for a reassessment of the remaining plan. The note is data for the planner, never a command. */
-  'program.replan': z.object({ programId: Id, note: z.string().trim().min(1).max(2000) }).strict(),
+  'program.replan': z
+    .object({
+      programId: Id,
+      note: z
+        .string()
+        .min(1)
+        .max(2000)
+        .refine((v) => v.trim().length > 0),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'backlog.list': z
-    .object({ projectId: Id.optional(), programId: Id.optional(), statuses: z.array(z.enum(BACKLOG_STATUSES)).max(6).optional(), limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional() })
+    .object({
+      projectId: Id.optional(),
+      programId: Id.optional(),
+      statuses: z.array(z.enum(BACKLOG_STATUSES)).max(6).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
     .strict(),
   /** A person changes the status of a backlog item. Nothing in the backlog becomes work by itself. */
   'backlog.setStatus': z.object({ itemId: Id, status: z.enum(BACKLOG_STATUSES) }).strict(),
@@ -517,35 +823,127 @@ export const ipcInputs = {
   // command, and a path inside a repository is checked again in the main process.
   'workspace.list': Empty,
   'workspace.get': z.object({ workspaceId: Id }).strict(),
-  'workspace.create': z.object({ name: z.string().trim().min(1).max(120), description: z.string().trim().max(2000).optional() }).strict(),
+  'workspace.create': z
+    .object({
+      name: z.string().trim().min(1).max(120),
+      description: z.string().trim().max(2000).optional(),
+    })
+    .strict(),
   'workspace.setPolicy': z.object({ workspaceId: Id, policy: WorkspacePolicySchema }).strict(),
   'workspace.remove': z.object({ workspaceId: Id }).strict(),
   /** Without `path` the native folder picker opens. Enrolling is always an explicit choice. */
-  'workspace.enroll': z.object({ workspaceId: Id, path: z.string().min(1).max(1024).optional(), key: WorkspaceKey.optional(), role: RepositoryRoleSchema.optional() }).strict(),
+  'workspace.enroll': z
+    .object({
+      workspaceId: Id,
+      path: z.string().min(1).max(1024).optional(),
+      key: WorkspaceKey.optional(),
+      role: RepositoryRoleSchema.optional(),
+    })
+    .strict(),
   'workspace.refresh': z.object({ repositoryId: Id }).strict(),
   'workspace.unenroll': z.object({ repositoryId: Id }).strict(),
   'workspace.setRole': z.object({ repositoryId: Id, role: RepositoryRoleSchema }).strict(),
   'workspace.discover': z.object({ workspaceId: Id }).strict(),
-  'workspace.addDependency': z.object({ workspaceId: Id, from: WorkspaceKey, to: WorkspaceKey, kind: DependencyKindSchema, detail: z.string().trim().min(1).max(400) }).strict(),
+  'workspace.addDependency': z
+    .object({
+      workspaceId: Id,
+      from: WorkspaceKey,
+      to: WorkspaceKey,
+      kind: DependencyKindSchema,
+      detail: z.string().trim().min(1).max(400),
+    })
+    .strict(),
   'workspace.removeDependency': z.object({ dependencyId: Id }).strict(),
-  'workspace.addService': z.object({ repositoryId: Id, name: z.string().trim().min(1).max(80), description: z.string().trim().max(400) }).strict(),
-  'workspace.registerContract': z.object({ workspaceId: Id, key: WorkspaceKey, name: z.string().trim().min(1).max(120), kind: ContractKindSchema, provider: WorkspaceKey, path: z.string().trim().min(1).max(400) }).strict(),
-  'workspace.addConsumer': z.object({ contractId: Id, repository: WorkspaceKey, copyPath: z.string().trim().min(1).max(400).nullable().optional() }).strict(),
+  'workspace.addService': z
+    .object({
+      repositoryId: Id,
+      name: z.string().trim().min(1).max(80),
+      description: z.string().trim().max(400),
+    })
+    .strict(),
+  'workspace.registerContract': z
+    .object({
+      workspaceId: Id,
+      key: WorkspaceKey,
+      name: z.string().trim().min(1).max(120),
+      kind: ContractKindSchema,
+      provider: WorkspaceKey,
+      path: z.string().trim().min(1).max(400),
+    })
+    .strict(),
+  'workspace.addConsumer': z
+    .object({
+      contractId: Id,
+      repository: WorkspaceKey,
+      copyPath: z.string().trim().min(1).max(400).nullable().optional(),
+    })
+    .strict(),
   'workspace.captureContract': z.object({ contractId: Id }).strict(),
   'workspace.addMemory': z
-    .object({ workspaceId: Id, kind: z.enum(WORKSPACE_MEMORY_KINDS), title: z.string().trim().min(1).max(160), content: z.string().trim().min(1).max(1500), evidence: z.string().trim().min(1).max(1500), repositories: z.array(WorkspaceKey).min(2).max(20) })
+    .object({
+      workspaceId: Id,
+      kind: z.enum(WORKSPACE_MEMORY_KINDS),
+      title: z.string().trim().min(1).max(160),
+      content: z.string().trim().min(1).max(1500),
+      evidence: z.string().trim().min(1).max(1500),
+      repositories: z.array(WorkspaceKey).min(2).max(20),
+    })
     .strict(),
-  'workspace.createMission': z.object({ workspaceId: Id, goal: z.string().trim().min(1).max(8000), start: z.boolean().optional() }).strict(),
+  'workspace.createMission': z
+    .object({
+      workspaceId: Id,
+      goal: z
+        .string()
+        .min(1)
+        .max(8000)
+        .refine((v) => v.trim().length > 0),
+      start: z.boolean().optional(),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.mission': z.object({ missionId: Id }).strict(),
-  'workspace.startMission': z.object({ missionId: Id }).strict(),
+  'workspace.startMission': z
+    .object({
+      missionId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.decidePlan': z.object({ missionId: Id, accept: z.boolean() }).strict(),
   'workspace.pauseMission': z.object({ missionId: Id }).strict(),
-  'workspace.resumeMission': z.object({ missionId: Id }).strict(),
+  'workspace.resumeMission': z
+    .object({
+      missionId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.cancelMission': z.object({ missionId: Id }).strict(),
   /** A workspace program: an ordered series of cross-repository missions, one per milestone the user wrote. */
-  'workspace.createProgram': z.object({ workspaceId: Id, program: WorkspaceProgramInputSchema, start: z.boolean().optional() }).strict(),
-  'workspace.startProgram': z.object({ programId: Id }).strict(),
-  'workspace.resumeProgram': z.object({ programId: Id }).strict(),
+  'workspace.createProgram': z
+    .object({
+      workspaceId: Id,
+      program: WorkspaceProgramInputSchema,
+      start: z.boolean().optional(),
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
+  'workspace.startProgram': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
+  'workspace.resumeProgram': z
+    .object({
+      programId: Id,
+      compilationMode: z.enum(COMPILATION_MODES).optional(),
+      compiledSpecId: Id.optional(),
+    })
+    .strict(),
   'workspace.cancelProgram': z.object({ programId: Id }).strict(),
   'workspace.prepareRelease': z.object({ missionId: Id }).strict(),
   /** Always refused in 0.5: NEXUS prepares release trains and does not publish them. */
@@ -586,15 +984,42 @@ export const ipcInputs = {
   'security.decisions': SecurityDecisionsInputSchema,
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
-  'knowledge.tree': z.object({ projectId: Id, space: GraphSpace.optional(), parentId: Id.nullish(), includeHistory: z.boolean().optional(), offset: z.number().int().min(0).max(1_000_000).optional() }).strict(),
-  'knowledge.node': z.object({ projectId: Id, nodeId: Id, includeHistory: z.boolean().optional() }).strict(),
-  'knowledge.search': z.object({ projectId: Id, query: z.string().min(1).max(400), includeHistory: z.boolean().optional() }).strict(),
+  'knowledge.tree': z
+    .object({
+      projectId: Id,
+      space: GraphSpace.optional(),
+      parentId: Id.nullish(),
+      includeHistory: z.boolean().optional(),
+      offset: z.number().int().min(0).max(1_000_000).optional(),
+    })
+    .strict(),
+  'knowledge.node': z
+    .object({ projectId: Id, nodeId: Id, includeHistory: z.boolean().optional() })
+    .strict(),
+  'knowledge.search': z
+    .object({
+      projectId: Id,
+      query: z.string().min(1).max(400),
+      includeHistory: z.boolean().optional(),
+    })
+    .strict(),
   'knowledge.refresh': z.object({ projectId: Id }).strict(),
   'knowledge.confirm': z.object({ projectId: Id, nodeId: Id }).strict(),
-  'knowledge.writeNote': z.object({ projectId: Id, title: z.string().trim().min(1).max(200), body: z.string().trim().min(1).max(16_000), evidence: z.string().max(16_000).optional() }).strict(),
+  'knowledge.writeNote': z
+    .object({
+      projectId: Id,
+      title: z.string().trim().min(1).max(200),
+      body: z.string().trim().min(1).max(16_000),
+      evidence: z.string().max(16_000).optional(),
+    })
+    .strict(),
   'knowledge.promote': z.object({ projectId: Id, nodeId: Id }).strict(),
-  'knowledge.archive': z.object({ projectId: Id, nodeId: Id, reason: z.string().trim().min(1).max(300) }).strict(),
-  'knowledge.supersede': z.object({ projectId: Id, olderId: Id, newerId: Id, reason: z.string().trim().min(1).max(300) }).strict(),
+  'knowledge.archive': z
+    .object({ projectId: Id, nodeId: Id, reason: z.string().trim().min(1).max(300) })
+    .strict(),
+  'knowledge.supersede': z
+    .object({ projectId: Id, olderId: Id, newerId: Id, reason: z.string().trim().min(1).max(300) })
+    .strict(),
   // v0.7.1: token figures (read-only).
   'tokens.overview': z.object({ days: z.number().int().min(1).max(90).optional() }).strict(),
   'tokens.agent': z.object({ agentId: Id }).strict(),
@@ -605,6 +1030,28 @@ export type IpcChannel = keyof typeof ipcInputs
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcInputs)[C]>
 
 export interface IpcOutputs {
+  'chatgpt.status': ChatGPTStatus
+  'director.invoke': DirectorInvocation
+  'director.learning': AdviceLearning
+  'director.history': DirectorInvocation[]
+  'director.escalate': StrategicEscalation
+  'director.records': DirectorRecord[]
+  'director.dismissEscalation': StrategicEscalation
+  'director.routing': CapacityRoutingRecord[]
+  'director.advisoryUsage': AdvisoryUsageSummary
+  'chatgpt.connect': ChatGPTStatus
+  'chatgpt.select': ChatGPTStatus
+  'chatgpt.models': ChatGPTStatus
+  'chatgpt.configure': ChatGPTStatus
+  'chatgpt.disconnect': ChatGPTStatus
+  'chatgpt.cancelConnect': ChatGPTStatus
+  'chatgpt.recoverStorage': ChatGPTStatus
+  'chatgpt.manageUsage': null
+  'compilation.preview': CompiledTaskSpec
+  'compilation.decide': CompiledTaskSpec
+  'compilation.admission': CompiledTaskSpec | null
+  'compilation.history': CompiledTaskSpec[]
+  'compilation.validate': CompiledTaskSpec
   'app.info': AppInfo
   'app.openDataDir': null
   'auth.status': AuthStatus
@@ -617,6 +1064,8 @@ export interface IpcOutputs {
   'projects.get': Project
   'projects.reprofile': Project
   'projects.update': Project
+  'compilation.projectSending': { allowed: boolean }
+  'compilation.setProjectSending': { allowed: boolean }
   'projects.remove': null
   'runs.list': Run[]
   'runs.get': RunDetail
@@ -702,7 +1151,11 @@ export interface IpcOutputs {
   'workspace.addService': Service
   'workspace.registerContract': Contract
   'workspace.addConsumer': ContractConsumer
-  'workspace.captureContract': { version: ContractVersion; result: CompatibilityResult; created: boolean }
+  'workspace.captureContract': {
+    version: ContractVersion
+    result: CompatibilityResult
+    created: boolean
+  }
   'workspace.addMemory': WorkspaceMemoryEntry
   'workspace.createMission': WorkspaceMission
   'workspace.mission': { mission: WorkspaceMission; tasks: CrossRepoTask[] }
@@ -738,7 +1191,13 @@ export interface IpcOutputs {
   'runtime.status': RuntimeStatus
   'runtime.workers': WorkersOverview
   /** Starts one worker process without a session and says whether it came up. Uses no provider. */
-  'runtime.workerSelfTest': { ok: boolean; pid: number | null; capabilities: string[]; milliseconds: number; detail: string }
+  'runtime.workerSelfTest': {
+    ok: boolean
+    pid: number | null
+    capabilities: string[]
+    milliseconds: number
+    detail: string
+  }
   /** What the tray shows; read by tests. */
   'runtime.tray': unknown
   'runtime.setDispatchPaused': { paused: boolean }
@@ -747,11 +1206,37 @@ export interface IpcOutputs {
   'desktop.connection': ConnectionState
   'desktop.reconnect': ConnectionState
   'security.decisions': SecurityDecisionPage
-  'knowledge.health': { spaces: { space: ContextSpace; name: string; health: ContextGraphHealth | null; refreshes: ContextRefreshJob[] }[]; enabled: boolean; setting: TechniqueSwitch }
-  'knowledge.tree': { parent: ContextNode | null; children: ContextNode[]; total: number; childCounts: Record<string, number> }
+  'knowledge.health': {
+    spaces: {
+      space: ContextSpace
+      name: string
+      health: ContextGraphHealth | null
+      refreshes: ContextRefreshJob[]
+    }[]
+    enabled: boolean
+    setting: TechniqueSwitch
+  }
+  'knowledge.tree': {
+    parent: ContextNode | null
+    children: ContextNode[]
+    total: number
+    childCounts: Record<string, number>
+  }
   'knowledge.node': ContextNodeDetail
   'knowledge.search': ContextNode[]
-  'knowledge.refresh': { sync: { created: number; updated: number; archived: number; restored: number; stale: number; conflicts: number; nodes: number; edges: number }; job: ContextRefreshJob }
+  'knowledge.refresh': {
+    sync: {
+      created: number
+      updated: number
+      archived: number
+      restored: number
+      stale: number
+      conflicts: number
+      nodes: number
+      edges: number
+    }
+    job: ContextRefreshJob
+  }
   'knowledge.confirm': ContextNode
   'knowledge.writeNote': ContextNode
   'knowledge.promote': ContextNode
@@ -816,8 +1301,7 @@ export interface IpcOutputs {
 }
 
 export type IpcResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string } }
+  { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 export { IPC_INVOKE_CHANNEL, IPC_PUSH_CHANNEL } from './ipc-channels'
 

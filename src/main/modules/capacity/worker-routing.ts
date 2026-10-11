@@ -1,0 +1,410 @@
+import type { CapacityWaitDetail } from '@shared/events'
+import { createHash, randomUUID } from 'node:crypto'
+import { z } from 'zod'
+import type { AgentRole } from '@shared/domain'
+import type { CapacityPool, CapacityRoutingRecord, IntelligenceRole, ProviderCapacityLease, ProviderUsageReceipt, RoutingCandidate } from '@shared/capacity'
+import { capabilitiesAdmit, routeSession, unusableReason, type ProviderId } from '@shared/provider'
+import type { AgentEvent, AgentRuntime, AgentSessionHandle, SessionSpec, UsageInfo } from '../agent-runtime/types'
+import { AsyncQueue } from '../agent-runtime/async-queue'
+import type { Repositories } from '../persistence'
+import type { ProviderService, AdmittedSessionProvider } from '../providers/service'
+import type { UsageIntelligenceService } from '../usage/service'
+import { CapacityAwareProviderRouter, CapacityRoutingWaitError } from './router'
+import { RuntimeCapacityPools } from './runtime-pools'
+import { ProviderQualityRegistry } from './quality'
+import { DISPATCH_POLICY, hostedSessionPool, sessionReservePolicy } from './reserves'
+
+const Wait = z.object({
+  runId: z.string(), projectId: z.string(), agentId: z.string(), routingId: z.string(),
+  role: z.string(), label: z.string().nullable(), model: z.string(), resumeSessionId: z.string().nullable(),
+  state: z.enum(['WAITING_FOR_CAPACITY', 'RESUMED', 'ENDED']), createdAt: z.string(),
+  // What the wait is on. Absent on records written before these fields existed. A reset time is there only
+  // when the provider gave one (resetConfidence EXACT); nothing is estimated.
+  provider: z.string().nullable().optional(), reasons: z.array(z.string()).optional(),
+  waitingOn: z.object({
+    providers: z.array(z.object({ provider: z.string(), state: z.string(), resetAt: z.number().nullable(), resetConfidence: z.enum(['EXACT', 'UNKNOWN']), usable: z.boolean() }).strict()),
+    slotsFull: z.boolean(),
+  }).strict().optional(),
+}).strict()
+type WorkerWait = z.infer<typeof Wait>
+const reviewRoles = new Set<AgentRole>(['reviewer', 'security_reviewer', 'verifier'])
+/** States a rejection leaves a pool in. */
+const PAUSED_STATES: ReadonlySet<string> = new Set(['QUOTA_PAUSED', 'WAITING_FOR_RESET', 'THROTTLED', 'AUTH_REQUIRED', 'RUNTIME_UNAVAILABLE'])
+/** How long a pause with no known reset time holds before the provider is tried again. */
+export const PAUSE_RETRY_MS = 15 * 60_000
+export const AUTH_RETRY_MS = 2 * 60_000
+/**
+ * How long after a start a new session waits for the worker processes of the earlier start to be gone. A worker
+ * ends itself when its runtime disappears, and without its runtime none of its tool calls is authorized; a
+ * command it had already started may still run for a moment in a worktree the task is about to be resumed in.
+ * The wait ends as soon as they are gone, and after this long whatever a process id says: an id may by now
+ * belong to anything.
+ */
+export const EARLIER_START_GRACE_MS = 20_000
+/** A run resumed from a capacity wait that waits again is tried with a growing delay, not every pass. */
+export const RESUME_BACKOFF_MS = 2_000
+export const RESUME_BACKOFF_MAX_MS = 60_000
+const ACCOUNT_TTL_MS = 30_000
+const roleOf = (role: AgentRole): IntelligenceRole => reviewRoles.has(role) ? 'reviewer' : 'worker'
+
+/** The production worker front door. No wait starts a runtime or spends a model request. */
+export class WorkerCapacityRouting {
+  private readonly kernel: CapacityAwareProviderRouter
+  private readonly pools: RuntimeCapacityPools
+  private readonly quality: ProviderQualityRegistry
+  private readonly listeners = new Set<() => void>()
+  private readonly pending = new Set<Promise<void>>()
+  private readonly quarantined = new Map<AgentSessionHandle, ProviderCapacityLease[]>()
+  /** Leases of sessions that never started and whose release could not be written; tried again on recovery. */
+  private unreleased: ProviderCapacityLease[][] = []
+  /** Per run that waits for capacity: how often it was resumed in a row, and when it may be tried again. */
+  private readonly retries = new Map<string, { count: number; nextAt: number }>()
+  /** What a runtime said about its account, kept briefly: asking starts a process, and recovery asks for every wait. */
+  private readonly accounts = new Map<string, { at: number; info: Awaited<ReturnType<AgentRuntime['getAccountInfo']>> | null }>()
+  private disposed = false
+  private recovering: Promise<void> | null = null
+
+  constructor(private readonly o: {
+    repos: Repositories; providers: ProviderService; usage: UsageIntelligenceService;
+    bootId: string; dataDir: string; maxAgents: () => number;
+    /** Worker processes the earlier start left on record, and how to tell that one has exited. */
+    earlierStart?: { pids: readonly number[]; isProcessStopped: (pid: number) => boolean; graceMs?: number }
+  }) {
+    const store = o.repos.intelligenceArtifacts
+    this.kernel = new CapacityAwareProviderRouter(store, o.bootId)
+    this.pools = new RuntimeCapacityPools(store, o.dataDir)
+    this.quality = new ProviderQualityRegistry(store)
+    o.providers.setSessionAdmission((spec, dispatch) => this.start(spec, dispatch))
+  }
+
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+  private changed(): void { for (const listener of this.listeners) listener() }
+
+  private readonly startedAt = Date.now()
+  private earlierGone = false
+  /** Resolves when no worker of the earlier start is alive any more, or when the grace has passed. */
+  private async earlierStartSettled(): Promise<void> {
+    const earlier = this.o.earlierStart
+    if (!earlier || this.earlierGone) return
+    const grace = earlier.graceMs ?? EARLIER_START_GRACE_MS
+    while (!this.disposed && Date.now() - this.startedAt < grace && earlier.pids.some((pid) => !earlier.isProcessStopped(pid)))
+      await new Promise<void>((resolve) => { setTimeout(resolve, 100).unref() })
+    this.earlierGone = true
+  }
+
+  private async snapshot(spec: Pick<SessionSpec, 'role' | 'label' | 'model' | 'resumeSessionId'>) {
+    await this.earlierStartSettled()
+    // A session asked for before the providers were detected waits for that detection, not for capacity.
+    if (!this.disposed && this.o.providers.list().length === 0) await this.o.providers.refresh().catch(() => undefined)
+    const policy = this.o.providers.policy()
+    const owner = spec.resumeSessionId ? this.o.providers.sessionProvider(spec.resumeSessionId) : null
+    const request = routeSession({ role: spec.role, label: spec.label ?? null, resumeProvider: owner }, policy, this.o.providers.list())
+    const role = roleOf(spec.role)
+    const candidates: RoutingCandidate[] = [], pools: CapacityPool[] = []
+    const hostPool = hostedSessionPool(this.o.dataDir)
+    pools.push(hostPool)
+    // A provider session whose owner is missing is never resumed in a different runtime.
+    const ids: ('claude' | 'codex')[] = spec.resumeSessionId
+      ? owner === 'claude' || owner === 'codex' ? [owner] : []
+      : request.requested === 'codex' ? ['codex', ...(policy.fallbackToClaude ? ['claude' as const] : [])]
+        : request.requested === 'claude' ? ['claude', 'codex'] : []
+    for (const provider of ids) {
+      const runtime = this.o.providers.pinnedRuntime(provider)
+      const status = this.o.providers.list().find((s) => s.id === provider)
+      if (!runtime || !status) continue
+      const model = provider === 'claude' ? spec.model ?? this.o.repos.settings.get().models.tiers.strongest
+        : policy.models.codex ?? this.o.providers.defaultModel('codex')
+      if (!model) continue
+      // The provider the policy asks for in this role: Claude by default, another one where the user chose it
+      // (cross-model review). It is the user's decision, not a substitution, and needs no evidence.
+      const primary = provider === request.requested
+      const account = await this.account(provider, runtime)
+      if (!account || account.state !== 'authenticated') continue
+      // A provider that stands in for the requested one is admitted on quality evidence, and that evidence is
+      // bound to an account profile: with no identity, or outside a subscription, there is nothing to bind it
+      // to. The requested primary needs none: an account that reports no email, or an API key, still works.
+      if (!primary && (account.mode !== 'subscription' || !account.email)) continue
+      const profile = createHash('sha256').update(JSON.stringify([account.email, account.organization, account.mode])).digest('hex')
+      let pool = this.pools.pool(provider, profile)
+      if (provider === 'claude') {
+        // After a change of account, what was observed before belongs to the other account's pool.
+        const since = this.o.usage.observationsSince(profile)
+        const observed = this.o.usage.capacityObservation()
+        if (observed && observed.observedAt >= since && observed.observedAt >= (pool.stateEvidence?.observedAt ?? 0))
+          pool = this.pools.observe(pool, observed.state, observed)
+        if (!this.o.usage.canDispatch()) {
+          const machine = this.o.usage.machineState()
+          if (pool.state !== machine.status && machine.since >= since) pool = this.pools.observe(pool, machine.status, { resetAt: machine.resetAt, utilization: machine.utilizationPercent, observedAt: machine.since })
+        }
+      } else if (PAUSED_STATES.has(pool.state)) {
+        // Claude's pool follows the usage service. A provider with no observation of its own gets its chance
+        // again when the pause's evidence has run out; the account check above already says it is signed in.
+        const since = pool.stateEvidence?.observedAt ?? 0
+        const reset = pool.resetAt.value
+        const wait = pool.state === 'AUTH_REQUIRED' ? AUTH_RETRY_MS : PAUSE_RETRY_MS
+        if (reset !== null ? Date.now() >= reset : Date.now() - since >= wait) pool = this.pools.expire(pool)
+      }
+      pools.push(pool)
+      const evidence = primary ? [`PRIMARY_ROLE_POLICY:${DISPATCH_POLICY}:${profile}:${model}:${role}`]
+        : this.quality.evidence({ provider, model, role, profile, policyVersion: DISPATCH_POLICY, runtimeVersion: status.version ?? 'unknown' })
+      candidates.push({
+        provider, model, roles: [role], poolIds: [pool.id, hostPool.id],
+        available: !this.disposed && spec.model !== ''
+          && unusableReason(provider, policy, status, spec.role) === null
+          // Something must confine the agent: the NEXUS policy on every tool call, or the provider's own sandbox
+          // (Codex, read-only roles). A provider with neither is never admitted.
+          && capabilitiesAdmit(status.capabilities, spec.role)
+          && (provider !== 'claude' || this.o.usage.canDispatch()),
+        qualityApproved: evidence.length > 0, qualityEvidence: evidence, reserve: 'NONE', paid: false,
+      })
+    }
+    return { candidates, pools, role, requested: request.requested, owner }
+  }
+
+  private async account(provider: string, runtime: AgentRuntime): Promise<Awaited<ReturnType<AgentRuntime['getAccountInfo']>> | null> {
+    const cached = this.accounts.get(provider)
+    if (cached && Date.now() - cached.at < ACCOUNT_TTL_MS) return cached.info
+    const info = await runtime.getAccountInfo({ subscriptionMode: this.o.repos.settings.get().claude.subscriptionMode }).catch(() => null)
+    this.accounts.set(provider, { at: Date.now(), info })
+    return info
+  }
+
+  private saveWait(spec: SessionSpec, record: CapacityRoutingRecord, waitingOn?: CapacityWaitDetail): void {
+    const runId = this.o.repos.agents.get(spec.agentId)?.runId
+    if (!runId) return
+    const key = `worker-capacity-wait:${spec.agentId}`
+    const store = this.o.repos.intelligenceArtifacts, saved = store.readCheckpoint(key)
+    const wait: WorkerWait = {
+      runId, projectId: record.projectId, agentId: spec.agentId, routingId: record.id,
+      role: spec.role, label: spec.label ?? null, model: spec.model ?? record.model ?? '',
+      resumeSessionId: spec.resumeSessionId ?? null, state: 'WAITING_FOR_CAPACITY', createdAt: new Date().toISOString(),
+      provider: record.provider ?? null, reasons: record.reasons,
+      ...(waitingOn ? { waitingOn: { slotsFull: waitingOn.slotsFull, providers: waitingOn.providers.map((p) => ({ ...p, resetConfidence: p.resetAt === null ? 'UNKNOWN' as const : 'EXACT' as const })) } } : {}),
+    }
+    if (!store.checkpoint(key, saved?.revision ?? null, Wait.parse(wait))) throw new Error('Worker capacity wait changed concurrently')
+  }
+
+  private start(spec: SessionSpec, dispatch: (selection: AdmittedSessionProvider) => AgentSessionHandle): AgentSessionHandle {
+    const queue = new AsyncQueue<AgentEvent>()
+    let inner: AgentSessionHandle | null = null, stopped = false, inputEnded = false, sent = false
+    const messages: string[] = []
+    let record: CapacityRoutingRecord | null = null, leases: ProviderCapacityLease[] = []
+    let usage: UsageInfo[] = [], terminal = false, failed = false
+    let terminalEvent: Extract<AgentEvent, { type: 'session.ended' }> | null = null
+    // What the wait is on, as seen when it was decided: read by the user, never by the recovery.
+    let waitingOn: CapacityWaitDetail | undefined
+    const wait = (decision: CapacityRoutingRecord): void => {
+      this.saveWait(spec, decision, waitingOn)
+      queue.push({ type: 'capacity.wait', routingId: decision.id, provider: decision.provider, reasons: decision.reasons, ...(waitingOn ? { waitingOn } : {}) })
+    }
+    const work = (async () => {
+      try {
+        const agent = this.o.repos.agents.get(spec.agentId)
+        const run = agent ? this.o.repos.runs.get(agent.runId) : null
+        if (!run) throw new Error('Worker capacity admission requires an owning run')
+        const snapshot = await this.snapshot(spec)
+        if (stopped || this.disposed) return
+        // A session whose provider is not on record cannot be resumed anywhere, now or later: that is a failed
+        // session, which the task can retry afresh, and not a wait that nothing would ever end.
+        if (spec.resumeSessionId && !snapshot.owner) throw new Error('The provider of the session to resume is not on record')
+        const reserve = sessionReservePolicy(snapshot.pools, this.o.maxAgents())
+        const hostPoolId = hostedSessionPool(this.o.dataDir).id
+        waitingOn = {
+          providers: snapshot.candidates.map((c) => {
+            const pool = snapshot.pools.find((p) => p.id === c.poolIds[0])
+            return { provider: c.provider, state: pool?.state ?? 'USAGE_UNKNOWN', resetAt: pool?.resetAt.value ?? null, usable: c.available && c.qualityApproved }
+          }),
+          slotsFull: !this.kernel.slotFree(hostPoolId, snapshot.role, reserve),
+        }
+        record = this.kernel.decide({
+          projectId: run.projectId, operationId: spec.agentId, stage: `WORKER:${spec.role}:${randomUUID()}`, ...snapshot,
+          policy: reserve, coherentBoundary: !spec.resumeSessionId,
+          ...(spec.resumeSessionId && snapshot.owner ? { activeSession: { provider: snapshot.owner as 'claude' | 'codex', model: spec.model ?? '' } } : {}),
+        })
+        if (record.action === 'WAIT') { wait(record); return }
+        leases = this.kernel.claim(record, reserve)
+        if (stopped || this.disposed) return
+        this.kernel.dispatched(record)
+        sent = true
+        inner = dispatch({ provider: record.provider as ProviderId, requested: snapshot.requested, model: record.model!,
+          reason: record.reasons.join('; '), fallbackReason: record.provider === snapshot.requested ? null : 'Quality-approved provider transition at a fresh session boundary.' })
+        if (inputEnded) inner.end()
+        for (const message of messages) inner.send(message)
+        for await (const event of inner.events) {
+          if (event.type === 'turn.completed') {
+            usage = event.result.usage
+            if (event.result.outcome !== 'success') failed = true
+            if (event.result.outcome === 'quota' || event.result.outcome === 'auth') {
+              const providerPool = snapshot.pools.find((p) => p.id === record!.poolIds[0])!
+              this.pools.observe(providerPool, event.result.outcome === 'auth' ? 'AUTH_REQUIRED' : 'QUOTA_PAUSED')
+              const paused: CapacityRoutingRecord = { ...record, action: 'WAIT', state: 'WAITING_FOR_CAPACITY', failure: 'CAPACITY', reasons: [...record.reasons, event.result.outcome === 'auth' ? 'PROVIDER_AUTH_REQUIRED' : 'PROVIDER_QUOTA_REJECTED'] }
+              // The provider refused a request that was sent. The routing record says so, and the session's own
+              // result carries the outcome: the run pauses for quota or authentication as it always has (the
+              // banner, the reset time, the automatic resume, an overnight run's shutdown all hang on that
+              // pause). A capacity wait is only for work that was never dispatched.
+              this.o.repos.intelligenceArtifacts.saveRouting(paused)
+              record = paused
+            }
+          } else if (event.type === 'rate_limit' && event.status === 'rejected') {
+            const providerPool = snapshot.pools.find((p) => p.id === record!.poolIds[0])!
+            this.pools.observe(providerPool, 'QUOTA_PAUSED', { resetAt: event.resetsAt === null ? null : event.resetsAt * 1000 })
+          } else if (event.type === 'session.ended') {
+            terminal = true
+            failed ||= event.reason === 'crashed'
+            terminalEvent = event
+          }
+          if (event.type !== 'session.ended') queue.push(event)
+        }
+      } catch (error) {
+        if (error instanceof CapacityRoutingWaitError) { record = error.decision; wait(error.decision) }
+        else {
+          failed = true
+          terminalEvent = { type: 'session.ended', reason: 'crashed', error: 'Provider capacity dispatch could not complete safely.' }
+        }
+      } finally {
+        // With no handle nothing was started (the admission stopped before the dispatch, or the dispatch itself
+        // threw: a missing command line tool): there is no session whose stop is still to be confirmed.
+        let confirmed = inner === null
+        if (inner) {
+          try { await inner.stop(); confirmed = inner.stopConfirmed?.() ?? terminal } catch { confirmed = false }
+        }
+        if (leases.length) {
+          // A failure to write the release must not take the session's end with it: the consumer still gets its
+          // terminal event and the outcome is still recorded. The leases stay as they are and are looked at again.
+          try {
+            this.kernel.release(leases, !confirmed)
+            if (!confirmed && inner) this.quarantined.set(inner, leases)
+          } catch {
+            if (inner) this.quarantined.set(inner, leases)
+            else this.unreleased.push(leases)
+          }
+        }
+        if (record && record.action === 'ROUTE') {
+          const sum = (key: keyof UsageInfo) => usage.reduce((n, u) => n + (typeof u[key] === 'number' ? u[key] as number : 0), 0)
+          const receipt: ProviderUsageReceipt | null = usage.length ? {
+            models: [...new Set(usage.map((u) => u.model))], inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
+            totalTokens: null, cacheReadTokens: sum('cacheReadTokens'), cacheWriteTokens: sum('cacheCreationTokens'),
+            reasoningTokens: usage.every((u) => u.thinkingTokens !== undefined) ? sum('thinkingTokens') : null,
+          } : null
+          this.kernel.outcome(record, terminal && !failed ? 'COMPLETED' : 'FAILED', confirmed ? (terminal && !failed ? null : 'PROVIDER') : 'STOP_UNCONFIRMED', receipt)
+        }
+        queue.push(terminalEvent ?? { type: 'session.ended', reason: 'stopped', error: null })
+        queue.close(); this.changed()
+      }
+    })()
+    this.pending.add(work)
+    void work.catch(() => queue.close()).finally(() => this.pending.delete(work))
+    return {
+      agentId: spec.agentId, sessionId: () => inner?.sessionId() ?? null, events: queue,
+      send: (text) => inner ? inner.send(text) : void messages.push(text),
+      end: () => { inputEnded = true; inner?.end() }, interrupt: async () => { await inner?.interrupt() },
+      stop: async () => { stopped = true; await inner?.stop(); await work },
+      stopConfirmed: () => !sent || (inner?.stopConfirmed?.() ?? terminal),
+    }
+  }
+
+  /**
+   * Whether the task's last session, which waited, would be routed now. Asked by the scheduler before it gives
+   * a held task a new session, so that a long wait costs no session, no routing record and no checkpoint.
+   * A task with no wait on record is ready: there is nothing to wait for.
+   */
+  async taskReady(taskId: string): Promise<boolean> {
+    const agent = this.o.repos.agents.listByTask(taskId).at(-1)
+    const saved = agent ? this.o.repos.intelligenceArtifacts.readCheckpoint(`worker-capacity-wait:${agent.id}`) : null
+    if (!saved) return true
+    const wait = Wait.parse(saved.body)
+    if (wait.state !== 'WAITING_FOR_CAPACITY') return true
+    const snapshot = await this.snapshot({ role: wait.role as AgentRole, label: wait.label ?? undefined, model: wait.model, resumeSessionId: wait.resumeSessionId ?? undefined })
+    const decision = this.kernel.assess({ ...snapshot, policy: sessionReservePolicy(snapshot.pools, this.o.maxAgents()), coherentBoundary: !wait.resumeSessionId, allowPaid: false,
+      ...(wait.resumeSessionId && snapshot.owner ? { activeSession: { provider: snapshot.owner as 'claude' | 'codex', model: wait.model } } : {}) })
+    return decision.action === 'ROUTE'
+  }
+
+  /** Reconcile stop evidence and wait at coherent run boundaries. Never replays Director/compiler calls. */
+  async recover(resume: (runId: string) => Promise<unknown>): Promise<void> {
+    if (this.recovering) return this.recovering
+    this.recovering = this.recoverWaits(resume).finally(() => { this.recovering = null })
+    return this.recovering
+  }
+  private async recoverWaits(resume: (runId: string) => Promise<unknown>): Promise<void> {
+    for (const [handle, leases] of this.quarantined) {
+      if (!handle.stopConfirmed?.()) continue
+      // Held (the release was never written) or quarantined: either way the stop is now confirmed.
+      try { this.kernel.settle(leases); this.quarantined.delete(handle); this.changed() } catch { /* looked at again on the next pass */ }
+    }
+    this.unreleased = this.unreleased.filter((leases) => {
+      try { this.kernel.settle(leases); this.changed(); return false } catch { return true }
+    })
+    const store = this.o.repos.intelligenceArtifacts
+    const now = Date.now()
+    const waitingRuns = new Set<string>()
+    let resumed = false
+    for (const run of this.o.repos.runs.listActive()) {
+      if (this.disposed || run.state !== 'paused' || run.pauseReason !== 'capacity') continue
+      waitingRuns.add(run.id)
+      // One run that cannot be resumed (its admission is stale, its repository is gone) must not keep the
+      // others waiting: each run is tried on its own, and a failure is remembered with a growing delay.
+      const marked: WorkerWait[] = []
+      try {
+        const agents = this.o.repos.agents.listByRun(run.id)
+        // Only the wait of the newest agent of a task counts. An older one is left over from a resume whose
+        // mark was never written (a crash, a concurrent change): its task has been given a new agent since.
+        const newest = new Map<string, string>()
+        for (const agent of agents) newest.set(agent.taskId ?? `:${agent.role}`, agent.id)
+        const waiting: { wait: WorkerWait; revision: number }[] = []
+        for (const agent of agents) {
+          const key = `worker-capacity-wait:${agent.id}`
+          const saved = store.readCheckpoint(key)
+          if (!saved) continue
+          const wait = Wait.parse(saved.body)
+          if (wait.state !== 'WAITING_FOR_CAPACITY') continue
+          if (newest.get(agent.taskId ?? `:${agent.role}`) === agent.id) waiting.push({ wait, revision: saved.revision })
+          else store.checkpoint(key, saved.revision, { ...wait, state: 'ENDED' })
+        }
+        // A run paused for capacity with no wait on record (the record was never written, or a resume was
+        // marked and the process died before it happened) is still a run that waits: it is tried like the others.
+        const retry = this.retries.get(run.id)
+        if (retry && now < retry.nextAt) continue
+        // One run per pass: every run would otherwise be judged against the same free slot and resumed, and all
+        // but one would wait again at once.
+        if (resumed) continue
+        let ready = true
+        for (const { wait } of waiting) {
+          const snapshot = await this.snapshot({ role: wait.role as AgentRole, label: wait.label ?? undefined, model: wait.model, resumeSessionId: wait.resumeSessionId ?? undefined })
+          const decision = this.kernel.assess({ ...snapshot, policy: sessionReservePolicy(snapshot.pools, this.o.maxAgents()), coherentBoundary: !wait.resumeSessionId, allowPaid: false,
+            ...(wait.resumeSessionId && snapshot.owner ? { activeSession: { provider: snapshot.owner as 'claude' | 'codex', model: wait.model } } : {}) })
+          if (decision.action !== 'ROUTE') { ready = false; break }
+        }
+        if (!ready || agents.some((a) => a.state === 'starting' || a.state === 'working')) continue
+        // Marked before the resume: a wait that is resumed and then waits again writes a new record, and a
+        // failure after this point leaves nothing that reads as still waiting.
+        for (const { wait, revision } of waiting) if (store.checkpoint(`worker-capacity-wait:${wait.agentId}`, revision, { ...wait, state: 'RESUMED' })) marked.push(wait)
+        const count = (retry?.count ?? 0) + 1
+        this.retries.set(run.id, { count, nextAt: now + Math.min(RESUME_BACKOFF_MAX_MS, RESUME_BACKOFF_MS * 2 ** (count - 1)) })
+        resumed = true
+        await resume(run.id)
+      } catch {
+        // The resume did not happen: the waits are waits again.
+        for (const wait of marked) {
+          const key = `worker-capacity-wait:${wait.agentId}`
+          const saved = store.readCheckpoint(key)
+          if (saved) store.checkpoint(key, saved.revision, { ...wait, state: 'WAITING_FOR_CAPACITY' })
+        }
+        const count = (this.retries.get(run.id)?.count ?? 0) + 1
+        this.retries.set(run.id, { count, nextAt: now + Math.min(RESUME_BACKOFF_MAX_MS, RESUME_BACKOFF_MS * 2 ** (count - 1)) })
+      }
+    }
+    // A run that no longer waits for capacity starts from no delay the next time it does.
+    for (const runId of this.retries.keys()) if (!waitingRuns.has(runId)) this.retries.delete(runId)
+  }
+
+  async dispose(): Promise<void> {
+    this.disposed = true
+    await Promise.allSettled([...this.pending, ...(this.recovering ? [this.recovering] : [])])
+    this.listeners.clear()
+  }
+  closeAdmission(): void { this.disposed = true }
+}

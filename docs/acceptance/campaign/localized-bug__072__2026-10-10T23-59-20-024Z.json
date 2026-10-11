@@ -1,0 +1,227 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "6404450849654ed8046788b6f9b64b764bf188fe",
+  "startedAt": "2026-10-10T23:59:20.024Z",
+  "finishedAt": "2026-10-11T00:04:30.894Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/d950d2ed/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ laps stay in driving order when the sequence counter wraps (1.0364ms)\n✔ packets of an ordinary batch are still ordered (0.1192ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 76.7653\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 4,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (0.4963ms)\n✔ orders packets by sequence number (0.9127ms)\n✔ orders packets by session clock across the seq wrap (0.1648ms)\n✔ applyBatch keeps laps in driving order across the seq wrap (0.9816ms)\nℹ tests 4\nℹ suites 0\nℹ pass 4\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 135.0874\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "fix-seq-wrap-ordering-fix1",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 1,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"970865a2-5038-47f2-9b6f-dcef647fcebb\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (set, (redirection), mktemp, cp, git, cd, rm, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "debugger: Bash: Denied by the user",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, mkdir, cp, git, cd, rm, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, cp, git, cd, rm, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: PowerShell: Command not permitted for the verifier role (npm_exit=$lastexitcode). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [
+        "{\"id\":\"72dd61ae-070a-4244-9a16-f237c20aff15\",\"runId\":\"d950d2ed-27f2-457f-84b9-e4c71c48f3ac\",\"taskId\":\"e9d7061c-6b91-4115-9ea4-bf23a9844825\",\"agentId\":\"773d8db3-aca4-4e8e-ad3d-7a8d81a3986a\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"The fix is correct and in scope, but one task criterion does not pass: the worker's result does not contain the pre-fix `npm test` output, and I could not reproduce the failing run by execution.\\n\\nThe verifier role's hook blocked every command that could run the new tests against the original comparator (direct `node`, and any temp-copy approach). I did not route around it. My evidence that the new tests fail pre-fix is therefore from reading the code, not from running it.\\n\\n- **Fix:** `orderPackets` now sorts a copy by `a.clock - b.clock`, so it orders by session clock and does not mutate its input.\\n- **Tests:** both new tests use seqs 65534, "
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: rator is now `a.clock - b.clock`. It still copies the input, so it doesn't mutate it. I also reworded the doc comment to say the order is by session clock.\n- **`src/telemetry/order.test.js`:** the new test passes a shuffled batch with seq 65534, 65535, 0, 1 and strictly increasing clocks. It expects laps `[1, 2, 3, 4]`. The existing test is unchanged and still passes.\n- **`src/telemetry/state.test.js`:** this is a new file. It checks that `applyBatch(emptyState(), batch)` gives `laps[1]` equal to `[1, 2, 3, 4]` for the same kind of batch.\n\n`git diff --stat HEAD~1` shows only those three files. Git printed LF-to-CRLF warnings on them, which are line-ending notices and don't affect the result.",
+        "reviewer: ",
+        "verifier: ",
+        "debugger: T=0\n```\n\n## Cause, fix, tests\n\n- **Cause:** `orderPackets` sorted by `seq`, a 16-bit counter that wraps from 65535 to 0. In a batch straddling the wrap, post-wrap packets sorted first, so `applyBatch` appended laps as `[3, 4, 1, 2]`.\n- **Fix:** `src/telemetry/order.js` sorts a copy of the input by `clock` ascending, so the input is not mutated.\n- **Tests:** one new test in `src/telemetry/order.test.js` and one in the new `src/telemetry/state.test.js`, both using seqs 65534, 65535, 0, 1 delivered shuffled. The existing test \"orders packets by sequence number\" is unchanged and passes in both runs.\n- **Scope:** `git diff --stat HEAD~1` lists only `order.js`, `order.test.js` and `state.test.js`.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Debugger/fix-seq-wrap-ordering-fix1 [high] Run shell command (bash): git checkout HEAD~1 -- src/telemetry/order.js && npm test; echo \"EXIT=$?\"; git checkout HEAD -- src/telemetry/order.js; git status --short; echo \"--- restored ---\"; npm test; echo \"EXIT=$?\" | git checkout can discard uncommitted changes"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 66,
+    "inputTokensUncached": 27360,
+    "outputTokens": 25752,
+    "cacheCreationTokens": 75325,
+    "cacheReadTokens": 673341,
+    "costUsdReported": 1.2333,
+    "toolCalls": 58,
+    "toolCallsRecorded": 58,
+    "filesChangedRecorded": 1,
+    "toolCallsByName": {
+      "Bash": 38,
+      "StructuredOutput": 6,
+      "Read": 10,
+      "Grep": 1,
+      "Edit": 2,
+      "PowerShell": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 11,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 19,
+        "toolCalls": 17,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 26,
+        "toolCalls": 23,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 309069,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

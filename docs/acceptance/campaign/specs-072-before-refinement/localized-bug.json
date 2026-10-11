@@ -1,0 +1,167 @@
+{
+  "task": "localized-bug",
+  "compiledAt": "2026-10-10T21:47:29.728Z",
+  "nexusCommit": "2d4383e95e94e8f6e4e0bd689023d5a994bb2f7c",
+  "spec": {
+    "id": "43154b9b-f021-4195-a14a-3d2f2aacd523",
+    "projectId": "6216f1aa-e9db-4fbf-b831-68e48dc13291",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Trace telemetry ingestion, ordering, and race-state updates to identify the cause of a car's laps appearing out of driving order after roughly eighteen hours of continuous operation.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Fix the identified cause so that long-running telemetry processing preserves each car's lap sequence in driving order.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add a deterministic regression test that reproduces the identified corruption, fails on the pre-fix implementation, and passes with the fix. Exercise the relevant long-session boundary without requiring an eighteen-hour wall-clock run.",
+        "kind": "ACCEPTANCE",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Verify that the regression test checks per-car lap order in the resulting race state, not merely an intermediate telemetry value, and that ordinary short-session ordering remains correct.",
+        "kind": "VERIFICATION",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run the reported project test command, npm test, and report the regression test's pre-fix failure and post-fix success along with any remaining test failures.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [
+          "repository:6216f1aa-e9db-4fbf-b831-68e48dc13291"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "Treat the approximate eighteen-hour onset as a diagnostic clue, not proof of a specific overflow, rollover, or ordering defect; establish the cause from code and reproducible evidence before choosing the fix.",
+        "kind": "CONSTRAINT",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Keep changes focused on the telemetry ordering defect and its regression coverage; unrelated pipeline redesign and repair of previously corrupted race data are outside this scope.",
+        "kind": "NON_GOAL",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [
+      "Is there an affected-session telemetry capture or reproduction procedure available to establish the observed lap order and triggering conditions?",
+      "Requiring `npm test` assumes a project test command not established by the supplied user request. The cited repository evidence is not available here to verify that assumption.",
+      "Requiring verification that ordinary short-session ordering remains correct adds acceptance coverage beyond the requested regression test.",
+      "Mandating a deterministic test that avoids an eighteen-hour wall-clock run adds test-design constraints not specified by the user, although they are sensible recommendations."
+    ],
+    "identity": "2f3e9f61759fc6feddfbf9c0204dd972d3cbc7dd05a428c879e74b5ec94be42b",
+    "createdAt": "2026-10-10T21:47:01.415Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": true,
+        "conflicts": [],
+        "unjustifiedRequirements": [
+          "Requiring `npm test` assumes a project test command not established by the supplied user request. The cited repository evidence is not available here to verify that assumption.",
+          "Requiring verification that ordinary short-session ordering remains correct adds acceptance coverage beyond the requested regression test.",
+          "Mandating a deterministic test that avoids an eighteen-hour wall-clock run adds test-design constraints not specified by the user, although they are sensible recommendations."
+        ]
+      }
+    },
+    "rawIntent": "In long sessions the race state gets corrupted: after roughly eighteen hours of running, laps of a car appear out of driving order. Find the cause in the telemetry pipeline and fix it, with a test that fails before the fix.",
+    "intentId": "932ed50e-5673-4a3d-a5bf-3d7c28e90c5f",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "In long sessions the race state gets corrupted: after roughly eighteen hours of running, laps of a car appear out of driving order. Find the cause in the telemetry pipeline and fix it, with a test that fails before the fix."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:6216f1aa-e9db-4fbf-b831-68e48dc13291",
+        "version": "20ce9c3b7d0bc8a3cf21a178da85975310f1a78b:1dd56ac83ed233c0b32f65d29f0aaf6a99419520d29f284454ecf0a46d30bb0d"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 27654,
+    "recommendations": 7,
+    "recommendationChars": 2083,
+    "byKind": {
+      "REQUIREMENT": 2,
+      "ACCEPTANCE": 1,
+      "VERIFICATION": 2,
+      "CONSTRAINT": 1,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [
+      "Is there an affected-session telemetry capture or reproduction procedure available to establish the observed lap order and triggering conditions?",
+      "Requiring `npm test` assumes a project test command not established by the supplied user request. The cited repository evidence is not available here to verify that assumption.",
+      "Requiring verification that ordinary short-session ordering remains correct adds acceptance coverage beyond the requested regression test.",
+      "Mandating a deterministic test that avoids an eighteen-hour wall-clock run adds test-design constraints not specified by the user, although they are sensible recommendations."
+    ],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 656,
+          "outputTokens": 620,
+          "totalTokens": 1276,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 729,
+          "outputTokens": 234,
+          "totalTokens": 963,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 103
+        }
+      }
+    ]
+  }
+}

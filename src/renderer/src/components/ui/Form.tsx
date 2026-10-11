@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useId,
   useState,
@@ -9,15 +11,27 @@ import {
 import { cn } from '../../lib/cn'
 
 const CONTROL =
-  'w-full rounded-md border border-border-strong bg-surface px-2.5 text-text-primary placeholder:text-text-muted ' +
+  'w-full rounded-md border border-control-border bg-surface px-2.5 text-text-primary placeholder:text-text-muted ' +
   'hover:border-text-muted disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-60'
 
+/**
+ * What a Field says about the control inside it: the element that describes it (its hint or its error) and
+ * whether it is in error. The controls below read it, so a screen reader hears the hint and the error with
+ * the control and not only somewhere near it.
+ */
+const FieldContext = createContext<{ describedBy?: string; invalid?: boolean }>({})
+
+function useFieldAria(): { 'aria-describedby'?: string; 'aria-invalid'?: true } {
+  const field = useContext(FieldContext)
+  return { ...(field.describedBy ? { 'aria-describedby': field.describedBy } : {}), ...(field.invalid ? { 'aria-invalid': true as const } : {}) }
+}
+
 export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(CONTROL, 'h-[var(--control-h)]', className)} {...rest} />
+  return <input className={cn(CONTROL, 'h-[var(--control-h)]', className)} {...useFieldAria()} {...rest} />
 }
 
 export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={cn(CONTROL, 'resize-y py-1.5 leading-snug', className)} {...rest} />
+  return <textarea className={cn(CONTROL, 'resize-y py-1.5 leading-snug', className)} {...useFieldAria()} {...rest} />
 }
 
 export interface SelectOption<T extends string> {
@@ -34,6 +48,7 @@ export function Select<T extends string>({
   options,
   className,
   disabled,
+  busy,
   ...rest
 }: {
   value: T
@@ -41,16 +56,23 @@ export function Select<T extends string>({
   options: readonly SelectOption<T>[]
   className?: string
   disabled?: boolean
+  /** Not usable right now (a request runs), but it keeps the focus: aria-disabled, changes are ignored. */
+  busy?: boolean
   id?: string
   'aria-label'?: string
   'data-testid'?: string
 }) {
+  const aria = useFieldAria()
   return (
     <select
       value={value}
       disabled={disabled}
-      onChange={(e) => onChange(e.target.value as T)}
-      className={cn(CONTROL, 'h-[var(--control-h)] pr-1', className)}
+      aria-disabled={busy || undefined}
+      onChange={(e) => {
+        if (!busy) onChange(e.target.value as T)
+      }}
+      className={cn(CONTROL, 'h-[var(--control-h)] pr-1', busy && 'cursor-not-allowed opacity-60', className)}
+      {...aria}
       {...rest}
     >
       {options.map((o) => (
@@ -69,6 +91,7 @@ export function Toggle({
   label,
   description,
   disabled,
+  busy,
   className,
   ...rest
 }: {
@@ -77,6 +100,8 @@ export function Toggle({
   label?: ReactNode
   description?: ReactNode
   disabled?: boolean
+  /** Not usable right now (a request runs), but it keeps the focus: aria-disabled, activation is ignored. */
+  busy?: boolean
   className?: string
   'data-testid'?: string
   'aria-label'?: string
@@ -93,10 +118,13 @@ export function Toggle({
         aria-labelledby={named ? `${id}-label` : undefined}
         aria-describedby={description ? `${id}-description` : undefined}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
+        aria-disabled={busy || undefined}
+        onClick={() => {
+          if (!busy) onChange(!checked)
+        }}
         className={cn(
-          'relative mt-px h-[18px] w-8 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-          checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface-hover',
+          'relative mt-px h-[18px] w-8 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
+          checked ? 'border-accent bg-accent' : 'border-control-border bg-surface-hover',
         )}
         {...rest}
       >
@@ -187,18 +215,19 @@ export function Field({
   className?: string
 }) {
   const id = useId()
+  const describedBy = error || hint ? `${id}-note` : undefined
   return (
     <div className={cn('flex flex-col gap-1', className)}>
       <label htmlFor={id} className="text-small font-medium text-text-secondary">
         {label}
       </label>
-      {children(id)}
+      <FieldContext.Provider value={{ ...(describedBy ? { describedBy } : {}), invalid: Boolean(error) }}>{children(id)}</FieldContext.Provider>
       {error ? (
-        <div role="alert" className="text-small text-danger">
+        <div role="alert" id={describedBy} className="text-small text-danger">
           {error}
         </div>
       ) : hint ? (
-        <div className="text-small text-text-muted">{hint}</div>
+        <div id={describedBy} className="text-small text-text-muted">{hint}</div>
       ) : null}
     </div>
   )

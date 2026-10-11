@@ -1,0 +1,216 @@
+{
+  "kind": "campaign-run",
+  "task": "localized-bug",
+  "category": "localized bugfix",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "be766d78ae319c469406a7891f96acc6cb4523e7",
+  "startedAt": "2026-10-11T04:51:42.993Z",
+  "finishedAt": "2026-10-11T04:54:42.187Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": false,
+    "evaluations": [
+      {
+        "repository": "racedeck-lite",
+        "ref": "nexus/a027727c/integration",
+        "hiddenPassed": false,
+        "hidden": {
+          "ok": false,
+          "pass": 1,
+          "fail": 1,
+          "output": "✖ laps stay in driving order when the sequence counter wraps (1.4487ms)\n✔ packets of an ordinary batch are still ordered (0.1297ms)\nℹ tests 2\nℹ suites 0\nℹ pass 1\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 81.6608\n\n✖ failing tests:\n\ntest at hidden.test.js:6:1\n✖ laps stay in driving order when the sequence counter wraps (1.4487ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n    [\n  +   12,\n  +   13,\n      10,\n      11,\n  -   12,\n  -   13\n    ]\n  \n      at TestContext.<anonymous> (file:///C:/Users/user/AppData/Local/Temp/nexus-campaign-localized-bug-072-5rWAMk/eval-racedeck-lite/hidden.test.js:9:10)\n      at Test.runInAsyncScope (node:async_hooks:228:14)\n      at Test.run (node:internal/test_runner/test:1118:25)\n      at Test.start (node:internal/test_runner/test:1015:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [ 12, 13, 10, 11 ],\n    expected: [ 10, 11, 12, 13 ],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 2,
+          "fail": 0,
+          "output": "✔ pace of evenly spaced laps (0.4895ms)\n✔ orders packets by sequence number (0.8302ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 114.9423\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-seq-wrap-ordering",
+        "state": "failed",
+        "attempts": 1
+      },
+      {
+        "key": "fix-seq-wrap-ordering-fix1",
+        "state": "failed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 3,
+      "pauses": [
+        "Intervention required: tasks fix-seq-wrap-ordering, fix-seq-wrap-ordering-fix1 failed"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"527d7305-8022-41fe-82e0-e851f5f687e0\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"28343f6c-ceaf-4776-a377-217f0fa4b785\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"2a0ba012-ad1a-4a34-9a0b-1bae04034bcd\",\"action\":\"Run PowerShell command\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, git, tar, cd, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "debugger: Bash: Denied by the user",
+        "debugger: Bash: Denied by the user",
+        "debugger: PowerShell: Denied by the user"
+      ],
+      "taskErrors": [
+        "fix-seq-wrap-ordering: {\"what\":\"Repair failed\",\"where\":\"fix-seq-wrap-ordering-fix1\",\"why\":\"The pre-fix failing `npm test` output is captured, but I cannot remove the untracked scratch directory `.prefix-repro/` I created in the worktree to produce it: both deletion attempts were denied. It needs deleting by someone with permission; nothing in it is committed.\",\"retryable\":true}",
+        "fix-seq-wrap-ordering-fix1: {\"what\":\"Repair failed\",\"where\":\"fix-seq-wrap-ordering-fix1\",\"why\":\"The pre-fix failing `npm test` output is captured, but I cannot remove the untracked scratch directory `.prefix-repro/` I created in the worktree to produce it: both deletion attempts were denied. It needs deleting by someone with permission; nothing in it is committed.\",\"retryable\":true}"
+      ],
+      "verificationFailures": [
+        "{\"id\":\"54089cf8-ea41-429c-b70d-a17a11a863dd\",\"runId\":\"a027727c-70d3-4351-9b28-ac0fcdc121cb\",\"taskId\":\"d1463a2d-863b-4d5b-9d7f-eeb56d4b05ad\",\"agentId\":\"4a6e150d-e603-4622-bbda-da98d09cbca3\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"The fix and its tests are correct, but one of seven task criteria fails: the worker's result does not include the pre-fix `npm test` output, only a prose description of it. Everything about the code passes: `npm test` shows 5 of 5 passing, `orderPackets` sorts by clock with a wrap-aware seq tie-break, and only the three allowed files changed.\\n\\nI could not run the new tests against the old code myself; the verifier role blocked both a scratch checkout and inline `node`. That the new tests fail on the old seq-only sort is established by reading the comparator and the test inputs, not by execution.\\n\\nThe repair is to the report only: the worker ne"
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: falls back to a wrap-aware 16-bit seq difference, `((a.seq - b.seq) << 16) >> 16`. It still copies the array and keeps the same export and signature. I updated the doc comment to say why clock is used.\n\n**Tests added:**\n- **`order.test.js`:** the wrap-straddling batch (seq 65534, 65535, 0, 1 shuffled) asserts laps `[10, 11, 12, 13]`. A second test checks that two packets with the same clock and seq 65535 and 0 come out with 65535 first.\n- **`state.test.js` (new):** an `applyBatch` test with two interleaved cars across the wrap asserts each car's laps are in driving order. It also asserts the input state is not mutated.\n\nOnly those three files changed, and no temporary files were left behind.",
+        "reviewer: ",
+        "verifier: ",
+        "debugger: efix-repro/`. It holds a copy of `package.json` and `src/`, with `order.js` taken from `9027299`. None of it is committed.\n- **Why it is there:** my first attempt, swapping the old `order.js` into the tracked file and restoring it afterwards, was declined, so I used a copy inside the worktree instead.\n- **What it breaks:** the \"leave no temporary files\" requirement and the `git status` criterion both fail until it is gone.\n- **What is needed:** delete `.prefix-repro/` from the worktree root. I recorded this as a NEXUS blocker.\n\nThe committed diff is unaffected: `git diff --stat 9027299 HEAD` lists only `src/telemetry/order.js`, `src/telemetry/order.test.js` and `src/telemetry/state.test.js`."
+      ],
+      "approvalDetails": [
+        "Debugger/fix-seq-wrap-ordering-fix1 [high] Run shell command (bash): git status --short; git show 9027299:src/telemetry/order.js > src/telemetry/order.js && cat src/telemetry/order.js; npm test 2>&1; echo \"EXIT=$?\"; git checkout HEAD -- src/telemetry/order.js; git status --short; echo \"--- restored:\"; cat src/telemetry/order.js | git checkout can discard uncommitted changes",
+        "Debugger/fix-seq-wrap-ordering-fix1 [high] Run shell command (bash): rm -rf .prefix-repro && git status --short && echo \"clean-check-done\" && git diff --stat 9027299 HEAD | recursive delete (rm)",
+        "Debugger/fix-seq-wrap-ordering-fix1 [high] Run PowerShell command: Remove-Item -Recurse -Force -Confirm:$false \".prefix-repro\" | recursive delete (remove-item)"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 35,
+    "inputTokensUncached": 17048,
+    "outputTokens": 16640,
+    "cacheCreationTokens": 37234,
+    "cacheReadTokens": 421487,
+    "costUsdReported": 0.6825,
+    "toolCalls": 30,
+    "toolCallsRecorded": 30,
+    "filesChangedRecorded": 0,
+    "toolCallsByName": {
+      "Bash": 18,
+      "StructuredOutput": 3,
+      "Read": 6,
+      "Grep": 1,
+      "PowerShell": 1,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 3,
+        "toolCalls": 2,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 177619,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 18
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

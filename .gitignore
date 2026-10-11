@@ -1,5 +1,7 @@
 node_modules/
 out/
+# electron-vite bundles its configuration beside the source before evaluating build identity.
+electron.vite.config.[0-9]*.mjs
 dist/
 release/
 coverage/

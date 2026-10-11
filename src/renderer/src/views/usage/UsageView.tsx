@@ -9,6 +9,7 @@ import { HistorySection } from './HistorySection'
 import { LimitSection } from './LimitSection'
 import { EfficiencySection } from './EfficiencySection'
 import { TokenSections } from './TokenSections'
+import { CapacitySection } from './CapacitySection'
 
 /** Claude usage: what Claude reports, what NEXUS itself observed, and how limits were handled. */
 export function UsageView() {
@@ -23,7 +24,7 @@ export function UsageView() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="usage-view">
       <PageHeader
-        title="Usage"
+        title="Capacity & usage"
         context="Intelligence"
         actions={
           <>
@@ -54,6 +55,7 @@ export function UsageView() {
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-6 py-5">
+          <CapacitySection />
           <StatusSection
             overview={o}
             pending={overview.isPending}

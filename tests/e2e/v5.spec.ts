@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { CrossRepoTask, WorkspaceMission } from '../../src/shared/workspace'
-import { closeApp, git, invoke, launchApp, removeDir, screenshot, tempDir } from './helpers'
+import { closeApp, git, invoke, launchApp, removeDir, screenshot, tempDir, selectExactCompilation } from './helpers'
 
 /**
  * NEXUS 0.5 against the built app with the scripted runtime: a workspace of three repositories with a shared
@@ -152,6 +152,7 @@ async function startMissionFromDialog(
   await page.getByTestId('workspace-tab-missions').click()
   await page.getByTestId('workspace-mission-new').click()
   await page.getByTestId('workspace-mission-goal').fill(goal)
+  await selectExactCompilation(page)
   await page.getByTestId('workspace-mission-start').click()
   await expect(page.getByTestId('mission-detail')).toBeVisible({ timeout: 30_000 })
   const missions = (await invoke(page, 'workspace.get', { workspaceId })).missions

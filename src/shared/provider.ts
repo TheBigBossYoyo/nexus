@@ -106,6 +106,16 @@ export const DEFAULT_PROVIDER_POLICY: ProviderPolicy = {
 
 /** Roles whose session reads and judges and must not change files. */
 export const READ_ONLY_ROLES: readonly AgentRole[] = ['reviewer', 'security_reviewer', 'verifier', 'researcher', 'planner', 'architect']
+
+/**
+ * What admission asks of a provider's declared capabilities before a session of `role` may start on it.
+ * Something must confine the agent: the NEXUS policy on every tool call, or the provider's own sandbox. A role
+ * that changes files needs a provider that may write. One place, so the declarations of the real adapters can
+ * be held against it in a test.
+ */
+export function capabilitiesAdmit(capabilities: ProviderCapabilities, role: AgentRole): boolean {
+  return (capabilities.toolAuthorization || capabilities.confinement === 'provider_sandbox') && (READ_ONLY_ROLES.includes(role) || capabilities.writes)
+}
 const REVIEW_ROLES: readonly AgentRole[] = ['reviewer', 'security_reviewer']
 const CANDIDATE_B = /\bcandidate B\b/
 

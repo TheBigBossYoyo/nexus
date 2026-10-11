@@ -1,0 +1,211 @@
+{
+  "kind": "campaign-run",
+  "task": "security",
+  "category": "security-sensitive task",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "startedAt": "2026-10-11T09:14:30.215Z",
+  "finishedAt": "2026-10-11T09:21:15.121Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "fileserver",
+        "ref": "nexus/3bfa2013/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ ordinary requests are served (4.0017ms)\n✔ dot segments that stay inside the root are served (0.6293ms)\n✔ traversal out of the root is forbidden (1.1751ms)\n✔ encoded traversal is forbidden (0.4981ms)\n✔ a backslash is a separator (0.6067ms)\n✔ a sibling directory that shares the prefix of the root is outside it (0.3807ms)\n✔ the path is decoded exactly once (0.4815ms)\n✔ malformed encoding and NUL are bad requests (0.8167ms)\n✔ the result is absolute and never leaves the root (0.7586ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 248.541\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 8,
+          "fail": 0,
+          "output": "✔ a plain path is a file under the root (1.7897ms)\n✔ traversal attempts are forbidden (3.8639ms)\n✔ a sibling directory sharing the name prefix is forbidden (0.5023ms)\n✔ malformed encoding and NUL are bad requests (0.4617ms)\n✔ the path is decoded exactly once (0.5037ms)\n✔ requests staying inside the root are served (0.8116ms)\n✔ absolute-looking prefixes cannot replace the root (0.7359ms)\n✔ a relative root yields an absolute result (0.3814ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 203.4047\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-resolve-path-traversal",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "security-review-resolve-path",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cat, node, rm). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "security_reviewer: Bash: Command not permitted for the security_reviewer role (npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role ((redirection), mktemp, cat, import, resolvepath, from, const, for, void, web, r,, =, return, t, !, rel, rel.startswith, .., path.isabsolute, t.startswith, r, try, root,, console.log, json.stringify, c, ,, ?, catch, e, path.resolve, let, s, 0x7fffffff, i, ",
+        "verifier: PowerShell: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  check uses `path.relative` on the normalised paths and throws `EFORBIDDEN` when the result is `..`, starts with `..` plus the separator, or is absolute. That makes the `www` versus `www-private` sibling case fail correctly, while `/a/../index.html` and `/..foo` are still served.\n- **Tests:** they cover every case in your list. The ones that could behave differently by platform (`/C:/Windows/win.ini`, `//host/share/x`) assert that the result either stays inside the root or throws `EFORBIDDEN`.\n\nI ran the tests only on Windows 11, not on Linux.\n\nMy first attempt used `join`, which kept a trailing slash for `/` and so didn't return the bare root. I switched to `resolve`, as the task suggested.",
+        "reviewer: ",
+        "verifier: ",
+        "security_reviewer: d still catch a real escape as written.\n\n3. **Nit (test gap): some (e) sub-cases have no test.** There is no test for a drive or filesystem root as `root`, and none for a request without a leading slash such as `C:/Windows/win.ini` or `..`. The code handles them (see (d) and (e)); they are just unpinned.\n\n4. **Nit: a non-string `root` throws a `TypeError` with no contract `code`.** This comes from `resolve(root)` at `src/static/resolve.js:21`. `root` is server configuration, not attacker input, so there is no exposure. A non-string `urlPath` is coerced to a string at `:14` and then goes through all the checks.\n\nThe worktree is clean (`git status --short` prints nothing); I modified no files.",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 6,
+    "turns": 46,
+    "inputTokensUncached": 22406,
+    "outputTokens": 32170,
+    "cacheCreationTokens": 59394,
+    "cacheReadTokens": 584016,
+    "costUsdReported": 1.1585,
+    "toolCalls": 40,
+    "toolCallsRecorded": 40,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 22,
+      "StructuredOutput": 4,
+      "Read": 6,
+      "Write": 1,
+      "Edit": 4,
+      "Grep": 2,
+      "PowerShell": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 17,
+        "toolCalls": 16,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 11,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "security_reviewer": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 401251,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 16
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 23
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

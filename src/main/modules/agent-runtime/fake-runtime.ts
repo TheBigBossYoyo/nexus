@@ -292,6 +292,7 @@ class FakeHandle implements AgentSessionHandle {
   private readonly inbox = new AsyncQueue<string>()
   private controller = new AbortController()
   private finished = false
+  private scriptSettled = false
   private stopRequested = false
   private readonly sdkSessionId: string
   private readonly done: Promise<void>
@@ -355,12 +356,16 @@ class FakeHandle implements AgentSessionHandle {
     this.finish('stopped', null)
   }
 
+  stopConfirmed(): boolean { return this.finished && this.scriptSettled }
+
   private async run(script: FakeScript): Promise<void> {
     try {
       await script(this.spec, this.context())
       this.finish(this.stopRequested ? 'stopped' : 'completed', null)
     } catch (e) {
       this.finish(this.stopRequested ? 'stopped' : 'crashed', e instanceof FakeCrash ? e.message : errorMessage(e))
+    } finally {
+      this.scriptSettled = true
     }
   }
 

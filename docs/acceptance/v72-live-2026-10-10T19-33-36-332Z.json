@@ -1,0 +1,17 @@
+{
+  "kind": "v72-live-acceptance",
+  "startedAt": "2026-10-10T19:33:36.332Z",
+  "verdict": "FAIL",
+  "steps": {},
+  "connectionBefore": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "USAGE_UNKNOWN",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "error": "compilation.preview: internal Advisory provider returned invalid structured output"
+}

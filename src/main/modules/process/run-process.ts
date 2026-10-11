@@ -104,7 +104,8 @@ export function killProcessTree(pid: number): Promise<void> {
 }
 
 /** Variables that carry Claude credentials or redirect Node. Project commands never need them. */
-const WITHHELD_ENV = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_OPTIONS', 'NODE_PATH'])
+// NEXUS_DATA_DIR: where NEXUS keeps its database, its endpoint and its stored credentials (0.7.2).
+const WITHHELD_ENV = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_OPTIONS', 'NODE_PATH', 'NEXUS_DATA_DIR'])
 
 /**
  * The environment for commands NEXUS itself runs in a project (dependency setup, check commands, Arena

@@ -1,5 +1,5 @@
 import type { AuthStatus } from '@shared/auth'
-import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { TERMINAL_RUN_STATES, type RunConfig } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
 import {
   ipcInputs,
@@ -17,7 +17,11 @@ import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
 import type { GitService } from '@main/modules/git'
 import type { OvernightSupervisor } from '@main/modules/overnight'
-import { attachArbitration, refreshProjectFacts, type Orchestrator } from '@main/modules/orchestrator'
+import {
+  attachArbitration,
+  refreshProjectFacts,
+  type Orchestrator,
+} from '@main/modules/orchestrator'
 import type { Repositories } from '@main/modules/persistence'
 import { recommendPlanningMode } from '@main/modules/planning'
 import { aggregatePerformance } from '@main/modules/routing'
@@ -30,8 +34,24 @@ import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
 import { createV71Handlers } from './v71-handlers'
+import { createV72Handlers } from './v72-handlers'
+import type { ChatGPTConnection } from '@main/modules/intelligence/connection'
+import { IntelligenceOperations } from '@main/modules/intelligence/operations'
+import { TaskAdmissionService } from '@main/modules/intelligence/admission'
+import type { AdvisoryRoutingService } from '@main/modules/intelligence/routing'
+import {
+  defaultIntentMetadata,
+  type CompilationSelection,
+  type UserIntentMetadata,
+  type CompiledTaskSpec,
+} from '@shared/intelligence'
+import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 
 export interface IpcContext {
+  chatgpt?: ChatGPTConnection
+  intelligenceOperations?: IntelligenceOperations
+  taskAdmission?: TaskAdmissionService
+  advisoryRouting?: AdvisoryRoutingService
   repos: Repositories
   git: GitService
   runtime: AgentRuntime
@@ -70,19 +90,72 @@ export interface IpcContext {
   v7?: V7Handlers
 }
 
-type Handlers = { [C in IpcChannel]: (input: z.output<(typeof ipcInputs)[C]>) => Promise<IpcOutputs[C]> | IpcOutputs[C] }
+type Handlers = {
+  [C in IpcChannel]: (
+    input: z.output<(typeof ipcInputs)[C]>,
+  ) => Promise<IpcOutputs[C]> | IpcOutputs[C]
+}
 
 export function createIpcHandlers(ctx: IpcContext): Handlers {
   const { repos, orchestrator, runtime } = ctx
   const projects = new ProjectService(repos, ctx.git)
   const queries = new QueryService(repos, ctx.git)
+  const intelligenceOperations = ctx.intelligenceOperations ?? new IntelligenceOperations()
+  const taskAdmission =
+    ctx.taskAdmission ??
+    new TaskAdmissionService(repos, ctx.git, ctx.chatgpt, intelligenceOperations)
+  const v72 = createV72Handlers(
+    repos,
+    ctx.chatgpt,
+    ctx.git,
+    intelligenceOperations,
+    taskAdmission,
+    ctx.advisoryRouting,
+  )
+  const taskRequest = async (
+    runId: string,
+    raw: string,
+    selection: CompilationSelection,
+    metadata: UserIntentMetadata,
+    taskId?: string,
+  ) => {
+    const run = repos.runs.require(runId)
+    const input = {
+      projectId: run.projectId,
+      raw,
+      mode: selection.compilationMode ?? taskAdmission.defaultMode(run.projectId),
+      metadata,
+      executionScope: { runId, ...(taskId ? { taskId } : {}) },
+    }
+    const id = selection.compiledSpecId ?? (await taskAdmission.preview(input)).id
+    return taskAdmission.validate(input, id)
+  }
   let authCache: AuthStatus | null = null
+  const admitResumedRun = async (runId: string, selection: CompilationSelection) => {
+    if (!selection.compilationMode && !selection.compiledSpecId) return
+    const run = repos.runs.require(runId)
+    if (run.state !== 'paused')
+      throw new NexusError('invalid_state', 'Only a paused mission can be admitted for recovery.')
+    if (
+      run.config.engineeringOwner ||
+      repos.programMissions.getByRun(runId) ||
+      repos.workspaceTasks.getByRun(runId) ||
+      repos.arenaTrials.getByRun(runId)
+    )
+      throw new NexusError('invalid_state', 'Resume this internal workload from its parent page.')
+    const raw = run.config.compiledTaskSpec?.rawIntent ?? run.prompt
+    const metadata = run.config.compiledTaskSpec?.userMetadata ?? defaultIntentMetadata(raw)
+    const spec = await taskRequest(runId, raw, selection, metadata)
+    repos.runs.update(runId, { config: { ...run.config, compiledTaskSpec: spec } })
+  }
   const overnight = (): OvernightSupervisor => {
-    if (!ctx.overnight) throw new NexusError('runtime_unavailable', 'Overnight Mode is not available in this process')
+    if (!ctx.overnight)
+      throw new NexusError('runtime_unavailable', 'Overnight Mode is not available in this process')
     return ctx.overnight
   }
 
   return {
+    ...v72,
     'app.info': () => ctx.appInfo(),
     'app.openDataDir': async () => {
       await ctx.openDataDir()
@@ -91,17 +164,24 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
 
     'auth.status': async ({ refresh }) => {
       if (!authCache || refresh) {
-        authCache = await runtime.getAccountInfo({ subscriptionMode: repos.settings.get().claude.subscriptionMode })
+        authCache = await runtime.getAccountInfo({
+          subscriptionMode: repos.settings.get().claude.subscriptionMode,
+        })
       }
       return authCache
     },
-    'auth.models': async () => (await runtime.getCapabilities().catch(() => ({ models: [] }))).models,
+    'auth.models': async () =>
+      (await runtime.getCapabilities().catch(() => ({ models: [] }))).models,
 
     'settings.get': () => repos.settings.get(),
     'settings.update': async ({ settings }) => {
       const before = repos.settings.get()
       const changes = sensitiveSettingsChanges(before, settings)
-      if (changes.length > 0 && ctx.confirmSettings && !(await ctx.confirmSettings(changes))) throw new NexusError('invalid_state', 'The change was not confirmed, so the settings are as they were.')
+      if (changes.length > 0 && ctx.confirmSettings && !(await ctx.confirmSettings(changes)))
+        throw new NexusError(
+          'invalid_state',
+          'The change was not confirmed, so the settings are as they were.',
+        )
       const saved = repos.settings.set(settings)
       if (before.claude.subscriptionMode !== saved.claude.subscriptionMode) {
         authCache = null
@@ -121,27 +201,59 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       const project = repos.projects.require(projectId)
       // Loading a repository's own Claude configuration lets that repository run its hooks and set the session's
       // environment, outside NEXUS's policy. Switching it on is confirmed like a program in the settings.
-      if (respectProjectClaudeConfig && !project.respectProjectClaudeConfig && ctx.confirmSettings) {
-        const ok = await ctx.confirmSettings([`Load the Claude configuration of the repository "${project.name}" (.claude/settings.json, CLAUDE.md). Its hooks are programs that run on this computer outside NEXUS's policy, and it can set the environment of the agent sessions, including where they send their credentials. Do this only for a repository you trust.`])
-        if (!ok) throw new NexusError('invalid_state', 'The change was not confirmed, so the project is as it was.')
+      if (
+        respectProjectClaudeConfig &&
+        !project.respectProjectClaudeConfig &&
+        ctx.confirmSettings
+      ) {
+        const ok = await ctx.confirmSettings([
+          `Load the Claude configuration of the repository "${project.name}" (.claude/settings.json, CLAUDE.md). Its hooks are programs that run on this computer outside NEXUS's policy, and it can set the environment of the agent sessions, including where they send their credentials. Do this only for a repository you trust.`,
+        ])
+        if (!ok)
+          throw new NexusError(
+            'invalid_state',
+            'The change was not confirmed, so the project is as it was.',
+          )
       }
       return repos.projects.update(projectId, { respectProjectClaudeConfig })
     },
     'projects.remove': ({ projectId }) => {
-      const active = repos.runs.listByProject(projectId).filter((r) => !TERMINAL_RUN_STATES.includes(r.state))
+      const active = repos.runs
+        .listByProject(projectId)
+        .filter((r) => !TERMINAL_RUN_STATES.includes(r.state))
       if (active.length > 0) {
-        throw new NexusError('invalid_state', 'Cancel the active runs of this project before removing it')
+        throw new NexusError(
+          'invalid_state',
+          'Cancel the active runs of this project before removing it',
+        )
       }
       // The overnight record is the only thing that knows about an armed Windows shutdown timer or a
       // pending power action; it must not disappear with the project.
       for (const run of repos.runs.listByProject(projectId)) {
         const overnightRun = repos.overnight.getByRun(run.id)
         if (!overnightRun) continue
-        const armed = overnightRun.failsafe !== null && overnightRun.failsafe.result.ok && !overnightRun.failsafe.cancelledAt && !overnightRun.failsafe.lostAt
-        const pending = overnightRun.powerAction !== null && !overnightRun.powerAction.cancelledAt && !overnightRun.powerAction.executedAt
-        const live = ['ARMING', 'RUNNING', 'QUOTA_PAUSED', 'FINALIZING', 'POWER_ACTION_SCHEDULED', 'CANCELLING'].includes(overnightRun.state)
+        const armed =
+          overnightRun.failsafe !== null &&
+          overnightRun.failsafe.result.ok &&
+          !overnightRun.failsafe.cancelledAt &&
+          !overnightRun.failsafe.lostAt
+        const pending =
+          overnightRun.powerAction !== null &&
+          !overnightRun.powerAction.cancelledAt &&
+          !overnightRun.powerAction.executedAt
+        const live = [
+          'ARMING',
+          'RUNNING',
+          'QUOTA_PAUSED',
+          'FINALIZING',
+          'POWER_ACTION_SCHEDULED',
+          'CANCELLING',
+        ].includes(overnightRun.state)
         if (live || armed || pending) {
-          throw new NexusError('invalid_state', 'This project has an overnight run with a shutdown timer or power action still pending. Cancel the shutdown first.')
+          throw new NexusError(
+            'invalid_state',
+            'This project has an overnight run with a shutdown timer or power action still pending. Cancel the shutdown first.',
+          )
         }
       }
       // Removes NEXUS records only; the repository on disk is not touched.
@@ -149,11 +261,14 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       for (const run of repos.runs.listByProject(projectId)) {
         repos.settings.deleteValue(`run-active:${run.id}`)
         repos.settings.deleteValue(`overnight-heartbeat:${run.id}`)
-        for (const task of repos.tasks.listByRun(run.id)) repos.settings.deleteValue(`graph-yield:${task.id}`)
-        for (const approval of repos.approvals.listByRun(run.id)) repos.settings.deleteValue(`graph-approval:${approval.id}`)
+        for (const task of repos.tasks.listByRun(run.id))
+          repos.settings.deleteValue(`graph-yield:${task.id}`)
+        for (const approval of repos.approvals.listByRun(run.id))
+          repos.settings.deleteValue(`graph-approval:${approval.id}`)
         for (const agent of repos.agents.listByRun(run.id)) {
           for (const session of repos.sessions.listByAgent(agent.id)) {
-            if (session.sdkSessionId) repos.settings.deleteValue(`usage-cumulative:${session.sdkSessionId}`)
+            if (session.sdkSessionId)
+              repos.settings.deleteValue(`usage-cumulative:${session.sdkSessionId}`)
           }
         }
       }
@@ -162,7 +277,9 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     },
 
     'runs.list': ({ projectId, includeInternal }) => {
-      const runs = projectId ? repos.runs.listByProject(projectId) : repos.projects.list().flatMap((p) => repos.runs.listByProject(p.id))
+      const runs = projectId
+        ? repos.runs.listByProject(projectId)
+        : repos.projects.list().flatMap((p) => repos.runs.listByProject(p.id))
       // A program's planning, verification and reassessment sessions are its own; they are not missions of the user.
       return includeInternal ? runs : runs.filter((r) => !isReasoningRun(r))
     },
@@ -175,22 +292,78 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       worktrees: repos.worktrees.listByRun(runId),
       pendingApprovals: repos.approvals.listPending(runId),
     }),
-    'runs.create': ({ projectId, mode, preset, prompt, strategy, speculativeCandidates, ...overrides }) => {
-      const defined = Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined))
-      return orchestrator.createRun({
-        projectId,
-        mode,
-        preset,
-        prompt,
-        overrides: defined,
-        ...(strategy ? { strategy } : {}),
-        ...(speculativeCandidates !== undefined ? { speculativeCandidates } : {}),
-      })
-    },
+    'runs.create': ({
+      projectId,
+      mode,
+      preset,
+      prompt,
+      strategy,
+      speculativeCandidates,
+      compilationMode,
+      compiledTaskSpecId,
+      ...overrides
+    }) =>
+      intelligenceOperations.run(async () => {
+        const defined: Partial<RunConfig> = Object.fromEntries(
+          Object.entries(overrides).filter(([, v]) => v !== undefined),
+        )
+        let compiledHead: string | undefined
+        if (mode !== 'ask') {
+          const selectedMode = compilationMode ?? taskAdmission.defaultMode(projectId)
+          const specId =
+            compiledTaskSpecId ??
+            (await v72['compilation.preview']({ projectId, raw: prompt, mode: selectedMode })).id
+          const spec = await v72['compilation.validate']({
+            projectId,
+            specId,
+            raw: prompt,
+            mode: selectedMode,
+          })
+          defined.compiledTaskSpec = spec
+          const snapshot = spec.dependencies
+            .find((d) => d.id === `repository:${projectId}`)
+            ?.version.split(':')[0]
+          if (snapshot && snapshot !== 'no-head') compiledHead = snapshot
+        }
+        return orchestrator.createRun({
+          projectId,
+          mode,
+          preset,
+          prompt,
+          overrides: defined,
+          ...(compiledHead ? { expectedHead: compiledHead } : {}),
+          ...(strategy ? { strategy } : {}),
+          ...(speculativeCandidates !== undefined ? { speculativeCandidates } : {}),
+        })
+      }),
     'runs.approvePlan': ({ runId }) => orchestrator.approvePlan(runId),
-    'runs.replan': ({ runId, feedback }) => orchestrator.replan(runId, feedback),
+    'runs.replan': ({ runId, feedback, ...selection }) =>
+      intelligenceOperations.serial(`run:${runId}`, async () => {
+        const run = repos.runs.require(runId)
+        if (run.state !== 'awaiting_approval')
+          throw new NexusError('invalid_state', 'Only a plan awaiting approval can be replanned')
+        if (!feedback.trim()) return orchestrator.replan(runId, feedback)
+        const spec = await taskRequest(
+          runId,
+          feedback,
+          selection,
+          defaultIntentMetadata(feedback, 'MISSION_REPLAN'),
+        )
+        // The compilation took time: the plan may have been approved or the run ended meanwhile. An instruction
+        // is put on record only when it is about to apply; one that was refused never becomes history.
+        if (repos.runs.require(runId).state !== 'awaiting_approval')
+          throw new NexusError('invalid_state', 'The plan is no longer awaiting approval. Nothing was changed.')
+        repos.intelligenceArtifacts.bindAdmission('RUN_INSTRUCTION', runId, spec)
+        return orchestrator.replan(
+          runId,
+          spec.mode === 'EXACT' ? feedback : withAdmittedIntent(feedback, spec),
+        )
+      }),
     'runs.pause': ({ runId }) => orchestrator.pauseRun(runId),
-    'runs.resume': ({ runId }) => orchestrator.resumeRun(runId),
+    'runs.resume': async ({ runId, ...selection }) => {
+      await admitResumedRun(runId, selection)
+      return orchestrator.resumeRun(runId)
+    },
     'runs.cancel': ({ runId }) => orchestrator.cancelRun(runId),
     'runs.summary': ({ runId }) => queries.runSummary(runId),
     'runs.diff': ({ runId }) => queries.runDiff(repos.runs.require(runId)),
@@ -199,7 +372,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       const overnightRuns = new Set((ctx.overnight?.active() ?? []).map((o) => o.runId))
       return orchestrator.listRecoverable().filter((r) => !overnightRuns.has(r.run.id))
     },
-    'runs.recover': ({ runId, action }) => orchestrator.recover(runId, action),
+    'runs.recover': async ({ runId, action, ...selection }) => {
+      if (action === 'resume') await admitResumedRun(runId, selection)
+      return orchestrator.recover(runId, action)
+    },
     'runs.cleanup': async ({ runId }) => {
       await orchestrator.cleanupRun(runId)
       return null
@@ -208,15 +384,111 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'tasks.retry': ({ taskId }) => orchestrator.retryTask(taskId),
     'tasks.cancel': ({ taskId }) => orchestrator.cancelTask(taskId),
     'tasks.setPriority': ({ taskId, priority }) => orchestrator.setPriority(taskId, priority),
-    'tasks.add': (input) => orchestrator.addTask(input),
-    'tasks.instruct': ({ taskId, instruction }) => orchestrator.instruct(taskId, instruction),
-    'tasks.resolveBlocker': ({ taskId, note }) => orchestrator.resolveBlocker(taskId, note),
+    'tasks.add': ({ compilationMode, compiledSpecId, ...input }) =>
+      intelligenceOperations.run(async () => {
+        const spec = await taskRequest(
+          input.runId,
+          input.description,
+          {
+            ...(compilationMode ? { compilationMode } : {}),
+            ...(compiledSpecId ? { compiledSpecId } : {}),
+          },
+          {
+            entryPoint: 'TASK_ADDITION',
+            goals: [input.title, input.description],
+            constraints: [],
+            acceptanceCriteria: input.acceptanceCriteria,
+          },
+        )
+        return repos.transaction(() => {
+          const task = orchestrator.addTask(input)
+          repos.intelligenceArtifacts.bindAdmission('TASK_ADDITION', task.id, spec)
+          return task
+        })
+      }),
+    'tasks.instruct': ({ taskId, instruction, ...selection }) =>
+      intelligenceOperations.serial(`task:${taskId}`, async () => {
+        const task = repos.tasks.require(taskId)
+        const spec = await taskRequest(
+          task.runId,
+          instruction,
+          selection,
+          defaultIntentMetadata(instruction, 'TASK_INSTRUCTION'),
+          taskId,
+        )
+        // Recorded and delivered together: if the delivery is refused, the history does not keep the instruction.
+        return repos.transaction(() => {
+          repos.intelligenceArtifacts.bindAdmission('TASK_INSTRUCTION', taskId, spec)
+          return orchestrator.instruct(
+            taskId,
+            spec.mode === 'EXACT' ? instruction : withAdmittedIntent(instruction, spec),
+          )
+        })
+      }),
+    'tasks.resolveBlocker': ({ taskId, note, ...selection }) =>
+      intelligenceOperations.serial(`task:${taskId}`, async () => {
+        const current = repos.tasks.require(taskId)
+        if (current.state !== 'blocked')
+          throw new NexusError('invalid_state', `Task is ${current.state}, not blocked`)
+        let spec: CompiledTaskSpec | undefined
+        if (note.trim()) {
+          const task = repos.tasks.require(taskId)
+          spec = await taskRequest(
+            task.runId,
+            note,
+            selection,
+            defaultIntentMetadata(note, 'TASK_INSTRUCTION'),
+            taskId,
+          )
+        }
+        return repos.transaction(() => {
+          const task = repos.tasks.require(taskId)
+          if (task.state !== 'blocked')
+            throw new NexusError('invalid_state', `Task is ${task.state}, not blocked`)
+          if (spec) repos.intelligenceArtifacts.bindAdmission('TASK_INSTRUCTION', taskId, spec)
+          return orchestrator.resolveBlocker(taskId, note)
+        })
+      }),
     'tasks.diff': ({ taskId }) => queries.taskDiff(repos.tasks.require(taskId)),
     // The arbiter's decisions live in an 'arbitration' artifact (the reviews table has no column for them).
-    'tasks.reviews': ({ taskId }) => attachArbitration(repos.reviews.listByTask(taskId), repos.artifacts.listByTask(taskId)),
+    'tasks.reviews': ({ taskId }) =>
+      attachArbitration(repos.reviews.listByTask(taskId), repos.artifacts.listByTask(taskId)),
     'tasks.verifications': ({ taskId }) => repos.verifications.listByTask(taskId),
 
-    'criteria.update': ({ criterionId, text }) => orchestrator.updateCriterion(criterionId, text),
+    'criteria.update': ({ criterionId, text, ...selection }) => {
+      const criterion = repos.criteria.require(criterionId)
+      return intelligenceOperations.serial(
+        criterion.taskId ? `task:${criterion.taskId}` : `run:${criterion.runId}`,
+        async () => {
+          const before = repos.criteria.require(criterionId)
+          const spec = await taskRequest(
+            before.runId,
+            text,
+            selection,
+            {
+              ...defaultIntentMetadata(text, 'CRITERION_UPDATE'),
+              acceptanceCriteria: [text],
+            },
+            before.taskId ?? undefined,
+          )
+          return repos.transaction(() => {
+            const current = repos.criteria.require(criterionId)
+            if (current.text !== before.text)
+              throw new NexusError(
+                'invalid_state',
+                'The criterion changed during compilation. Preview again.',
+              )
+            const updated = orchestrator.updateCriterion(criterionId, text)
+            repos.intelligenceArtifacts.bindAdmission(
+              before.taskId ? 'TASK_INSTRUCTION' : 'RUN_INSTRUCTION',
+              before.taskId ?? before.runId,
+              spec,
+            )
+            return updated
+          })
+        },
+      )
+    },
 
     'agents.get': ({ agentId }) => {
       const agent = repos.agents.require(agentId)
@@ -227,30 +499,38 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       }
     },
     'agents.stop': ({ agentId }) => orchestrator.stopAgent(agentId),
-    'agents.output': ({ agentId, afterSeq, limit }) => repos.outputs.listByAgent(agentId, afterSeq ?? 0, limit ?? 1000),
+    'agents.output': ({ agentId, afterSeq, limit }) =>
+      repos.outputs.listByAgent(agentId, afterSeq ?? 0, limit ?? 1000),
     'agents.tools': ({ agentId }) => repos.toolEvents.listByAgent(agentId),
 
     'messages.list': ({ runId, taskId }) => {
       const all = repos.messages.listByRun(runId)
       if (!taskId) return all
       return all.filter(
-        (m) => m.fromTaskId === taskId || m.toTaskId === taskId || repos.messages.listRecipients(m.id).some((r) => r.taskId === taskId),
+        (m) =>
+          m.fromTaskId === taskId ||
+          m.toTaskId === taskId ||
+          repos.messages.listRecipients(m.id).some((r) => r.taskId === taskId),
       )
     },
-    'events.list': ({ runId, afterSeq, limit }) => repos.events.listByRun(runId, afterSeq ?? 0, limit ?? 1000),
-    'reviews.list': ({ runId }) => attachArbitration(repos.reviews.listByRun(runId), repos.artifacts.listByRun(runId)),
+    'events.list': ({ runId, afterSeq, limit }) =>
+      repos.events.listByRun(runId, afterSeq ?? 0, limit ?? 1000),
+    'reviews.list': ({ runId }) =>
+      attachArbitration(repos.reviews.listByRun(runId), repos.artifacts.listByRun(runId)),
     'verifications.list': ({ runId }) => repos.verifications.listByRun(runId),
     'decisions.list': ({ runId }) => repos.decisions.listByRun(runId),
 
     'approvals.pending': () => repos.approvals.listPending(),
-    'approvals.resolve': ({ approvalId, approve, note }) => orchestrator.resolveApproval(approvalId, approve, note),
+    'approvals.resolve': ({ approvalId, approve, note }) =>
+      orchestrator.resolveApproval(approvalId, approve, note),
 
     'memory.list': ({ projectId, scope, query }) =>
       query?.trim()
         ? repos.memory.search(query, { projectId, scope, status: 'any', limit: 50 })
         : repos.memory.list({ projectId, scope }),
     'memory.add': ({ scope, projectId, title, content, tags }) => {
-      if (scope === 'project' && !projectId) throw new NexusError('invalid_input', 'A project memory entry needs a project')
+      if (scope === 'project' && !projectId)
+        throw new NexusError('invalid_input', 'A project memory entry needs a project')
       return repos.memory.insert({
         id: newId(),
         scope,
@@ -281,11 +561,18 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       candidates: repos.planningCandidates.listByRun(runId),
       critiques: repos.planningCritiques.listByRun(runId),
     }),
-    'planning.recommend': ({ projectId, prompt }) => recommendPlanningMode(prompt, repos.projects.require(projectId).profile),
+    'planning.recommend': ({ projectId, prompt }) =>
+      recommendPlanningMode(prompt, repos.projects.require(projectId).profile),
     'routing.list': ({ runId }) => repos.routingDecisions.listByRun(runId),
     'performance.summary': ({ projectId }) => {
-      const outcomes = projectId ? repos.taskOutcomes.listByProject(projectId) : repos.taskOutcomes.listAll()
-      return { stats: aggregatePerformance(outcomes), totalOutcomes: outcomes.length, minSamples: MIN_ROUTING_SAMPLES }
+      const outcomes = projectId
+        ? repos.taskOutcomes.listByProject(projectId)
+        : repos.taskOutcomes.listAll()
+      return {
+        stats: aggregatePerformance(outcomes),
+        totalOutcomes: outcomes.length,
+        minSamples: MIN_ROUTING_SAMPLES,
+      }
     },
     'intelligence.list': ({ projectId, query, includeStale }) =>
       query?.trim()
@@ -294,40 +581,98 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     'intelligence.refresh': async ({ projectId }) => {
       const project = repos.projects.require(projectId)
       const result = await refreshProjectFacts({ repos, git: ctx.git }, project)
-      if (!result) throw new NexusError('internal', 'Repository analysis failed; the previous facts are unchanged')
+      if (!result)
+        throw new NexusError(
+          'internal',
+          'Repository analysis failed; the previous facts are unchanged',
+        )
       return result
     },
     'context.packs': ({ taskId, agentId }) => {
-      if (!taskId && !agentId) throw new NexusError('invalid_input', 'context.packs needs a taskId or an agentId')
-      const packs = [...(taskId ? repos.contextPacks.listByTask(taskId) : []), ...(agentId ? repos.contextPacks.listByAgent(agentId) : [])]
+      if (!taskId && !agentId)
+        throw new NexusError('invalid_input', 'context.packs needs a taskId or an agentId')
+      const packs = [
+        ...(taskId ? repos.contextPacks.listByTask(taskId) : []),
+        ...(agentId ? repos.contextPacks.listByAgent(agentId) : []),
+      ]
       const seen = new Set<string>()
       return packs.filter((p) => !seen.has(p.id) && seen.add(p.id))
     },
 
-    'overnight.start': async ({ confirmed, confirmation, ...input }) => {
-      const defined = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) as typeof input
-      const supervisor = overnight()
-      const p = input.policy
-      if (ctx.confirmPower) {
-        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
-        const detail = [
-          `Project: ${repos.projects.require(input.projectId).name}`,
-          `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
-          `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the mission ends`,
-          `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
-          p.endAction !== 'NONE' && p.failsafeEnabled
-            ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
-            : 'Failsafe: none',
-        ].join('\n')
-        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Start an unattended overnight run?' : 'Authorize NEXUS to control Windows power state for this run?', detail)
-        if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
-      }
-      return supervisor.start({ ...defined, confirmed, confirmation })
-    },
+    'overnight.start': ({
+      confirmed,
+      confirmation,
+      compilationMode,
+      compiledTaskSpecId,
+      ...input
+    }) =>
+      intelligenceOperations.run(async () => {
+        const defined = Object.fromEntries(
+          Object.entries(input).filter(([, v]) => v !== undefined),
+        ) as typeof input
+        const supervisor = overnight()
+        const selectedMode = compilationMode ?? taskAdmission.defaultMode(input.projectId)
+        const metadata = defaultIntentMetadata(input.prompt, 'OVERNIGHT')
+        const specId =
+          compiledTaskSpecId ??
+          (
+            await v72['compilation.preview']({
+              projectId: input.projectId,
+              raw: input.prompt,
+              mode: selectedMode,
+              metadata,
+            })
+          ).id
+        const spec = await v72['compilation.validate']({
+          projectId: input.projectId,
+          specId,
+          raw: input.prompt,
+          mode: selectedMode,
+          metadata,
+        })
+        const snapshot = spec.dependencies
+          .find((d) => d.id === `repository:${input.projectId}`)
+          ?.version.split(':')[0]
+        const p = input.policy
+        if (ctx.confirmPower) {
+          const conditions =
+            Object.entries(p.shutdownOn)
+              .filter(([, on]) => on)
+              .map(([name]) => name)
+              .join(', ') || 'never'
+          const detail = [
+            `Project: ${repos.projects.require(input.projectId).name}`,
+            `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
+            `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the mission ends`,
+            `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
+            p.endAction !== 'NONE' && p.failsafeEnabled
+              ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
+              : 'Failsafe: none',
+          ].join('\n')
+          const ok = await ctx.confirmPower(
+            p.endAction === 'NONE'
+              ? 'Start an unattended overnight run?'
+              : 'Authorize NEXUS to control Windows power state for this run?',
+            detail,
+          )
+          if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
+        }
+        return supervisor.start({
+          ...defined,
+          confirmed,
+          confirmation,
+          compiledTaskSpec: spec,
+          ...(snapshot && snapshot !== 'no-head' ? { expectedHead: snapshot } : {}),
+        })
+      }),
     'overnight.startArena': async ({ campaign, policy: p, confirmed, confirmation }) => {
       const supervisor = overnight()
       if (ctx.confirmPower) {
-        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const conditions =
+          Object.entries(p.shutdownOn)
+            .filter(([, on]) => on)
+            .map(([name]) => name)
+            .join(', ') || 'never'
         const detail = [
           `Arena campaign: ${campaign.name}`,
           `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
@@ -337,16 +682,27 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
             ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
             : 'Failsafe: none',
         ].join('\n')
-        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Start an unattended overnight Arena campaign?' : 'Authorize NEXUS to control Windows power state for this campaign?', detail)
+        const ok = await ctx.confirmPower(
+          p.endAction === 'NONE'
+            ? 'Start an unattended overnight Arena campaign?'
+            : 'Authorize NEXUS to control Windows power state for this campaign?',
+          detail,
+        )
         if (!ok) throw new NexusError('invalid_state', 'The overnight campaign was not authorized.')
       }
-      const defined = Object.fromEntries(Object.entries(campaign).filter(([, v]) => v !== undefined)) as typeof campaign
+      const defined = Object.fromEntries(
+        Object.entries(campaign).filter(([, v]) => v !== undefined),
+      ) as typeof campaign
       return supervisor.startArena({ campaign: defined, policy: p, confirmed, confirmation })
     },
     'overnight.startProgram': async ({ programId, policy: p, confirmed, confirmation }) => {
       const supervisor = overnight()
       if (ctx.confirmPower) {
-        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const conditions =
+          Object.entries(p.shutdownOn)
+            .filter(([, on]) => on)
+            .map(([name]) => name)
+            .join(', ') || 'never'
         const detail = [
           `Program: ${repos.programs.require(programId).name}`,
           `Work window: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
@@ -356,15 +712,30 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
             ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
             : 'Failsafe: none',
         ].join('\n')
-        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Run this program unattended for one work window?' : 'Authorize NEXUS to control Windows power state for this program window?', detail)
-        if (!ok) throw new NexusError('invalid_state', 'The overnight program window was not authorized.')
+        const ok = await ctx.confirmPower(
+          p.endAction === 'NONE'
+            ? 'Run this program unattended for one work window?'
+            : 'Authorize NEXUS to control Windows power state for this program window?',
+          detail,
+        )
+        if (!ok)
+          throw new NexusError('invalid_state', 'The overnight program window was not authorized.')
       }
       return supervisor.startProgram({ programId, policy: p, confirmed, confirmation })
     },
-    'overnight.startWorkspaceMission': async ({ missionId, policy: p, confirmed, confirmation }) => {
+    'overnight.startWorkspaceMission': async ({
+      missionId,
+      policy: p,
+      confirmed,
+      confirmation,
+    }) => {
       const supervisor = overnight()
       if (ctx.confirmPower) {
-        const conditions = Object.entries(p.shutdownOn).filter(([, on]) => on).map(([name]) => name).join(', ') || 'never'
+        const conditions =
+          Object.entries(p.shutdownOn)
+            .filter(([, on]) => on)
+            .map(([name]) => name)
+            .join(', ') || 'never'
         const detail = [
           `Workspace mission: ${repos.workspaceMissions.require(missionId).goal.replace(/\s+/g, ' ').slice(0, 160)}`,
           `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
@@ -374,8 +745,17 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
             ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
             : 'Failsafe: none',
         ].join('\n')
-        const ok = await ctx.confirmPower(p.endAction === 'NONE' ? 'Run this workspace mission unattended?' : 'Authorize NEXUS to control Windows power state for this workspace mission?', detail)
-        if (!ok) throw new NexusError('invalid_state', 'The overnight workspace mission was not authorized.')
+        const ok = await ctx.confirmPower(
+          p.endAction === 'NONE'
+            ? 'Run this workspace mission unattended?'
+            : 'Authorize NEXUS to control Windows power state for this workspace mission?',
+          detail,
+        )
+        if (!ok)
+          throw new NexusError(
+            'invalid_state',
+            'The overnight workspace mission was not authorized.',
+          )
       }
       return supervisor.startWorkspaceMission({ missionId, policy: p, confirmed, confirmation })
     },
@@ -389,11 +769,20 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       // Anything that gives NEXUS more power than was authorized needs the native confirmation again.
       const escalates =
         current !== null &&
-        ((change.endAction !== undefined && change.endAction !== 'NONE' && change.endAction !== current.policy.endAction) ||
+        ((change.endAction !== undefined &&
+          change.endAction !== 'NONE' &&
+          change.endAction !== current.policy.endAction) ||
           (change.forceCloseApplications === true && !current.policy.forceCloseApplications) ||
-          (change.shutdownOn !== undefined && Object.entries(change.shutdownOn).some(([name, on]) => on && !current.policy.shutdownOn[name as keyof typeof current.policy.shutdownOn])))
+          (change.shutdownOn !== undefined &&
+            Object.entries(change.shutdownOn).some(
+              ([name, on]) =>
+                on && !current.policy.shutdownOn[name as keyof typeof current.policy.shutdownOn],
+            )))
       if (escalates && ctx.confirmPower) {
-        const ok = await ctx.confirmPower('Change what NEXUS may do to Windows at the end of this run?', `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}`)
+        const ok = await ctx.confirmPower(
+          'Change what NEXUS may do to Windows at the end of this run?',
+          `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}`,
+        )
         if (!ok) throw new NexusError('invalid_state', 'The change was not authorized.')
       }
       return supervisor.changeEndPolicy(runId, defined)
@@ -418,13 +807,19 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
  * Single entry point for renderer requests. The channel must be part of the contract and the
  * input must pass its zod schema before any handler runs; errors become typed results.
  */
-export async function dispatchIpc(handlers: Handlers, channel: unknown, input: unknown): Promise<IpcResult<unknown>> {
+export async function dispatchIpc(
+  handlers: Handlers,
+  channel: unknown,
+  input: unknown,
+): Promise<IpcResult<unknown>> {
   if (!isIpcChannel(channel)) {
     return { ok: false, error: { code: 'invalid_input', message: 'Unknown IPC channel' } }
   }
   const parsed = ipcInputs[channel].safeParse(input ?? {})
   if (!parsed.success) {
-    const message = parsed.error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ')
+    const message = parsed.error.issues
+      .map((i) => `${i.path.join('.') || 'input'}: ${i.message}`)
+      .join('; ')
     return { ok: false, error: { code: 'invalid_input', message } }
   }
   try {

@@ -1,0 +1,203 @@
+{
+  "kind": "campaign-run",
+  "task": "security",
+  "category": "security-sensitive task",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T02:18:52.072Z",
+  "finishedAt": "2026-10-11T02:23:23.207Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": false,
+    "finalState": "paused",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "fileserver",
+        "ref": "nexus/b41208b1/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ ordinary requests are served (1.6411ms)\n✔ dot segments that stay inside the root are served (0.187ms)\n✔ traversal out of the root is forbidden (0.4635ms)\n✔ encoded traversal is forbidden (0.2176ms)\n✔ a backslash is a separator (0.2416ms)\n✔ a sibling directory that shares the prefix of the root is outside it (0.141ms)\n✔ the path is decoded exactly once (0.1492ms)\n✔ malformed encoding and NUL are bad requests (0.1776ms)\n✔ the result is absolute and never leaves the root (0.2334ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 88.6979\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 7,
+          "fail": 0,
+          "output": "✔ a plain path is a file under the root (0.6749ms)\n✔ requests that leave the root are forbidden (1.3616ms)\n✔ malformed encoding and NUL are bad requests (0.1623ms)\n✔ the path is decoded exactly once (0.1105ms)\n✔ paths inside the root are served (0.4892ms)\n✔ the result is absolute for a relative root (0.1982ms)\n✔ a drive path is forbidden on Windows (0.2037ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 99.4319\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "fix-resolve-path",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "security-review-resolve",
+        "state": "blocked",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": [
+        "Intervention required: tasks security-review-resolve are failed or blocked"
+      ]
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "reviewer: Bash: Command not permitted for the reviewer role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "security_reviewer: Bash: Command not permitted for the security_reviewer role (cd, npm). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: us the separator, or is absolute. `..foo` is still served and `www-private` is rejected for root `www`.\n- **Tests:** the original test is unchanged. I added tests for the forbidden, bad-request, decoded-once, served and absolute-result cases. A Windows-only test, skipped on other platforms, covers `/C:/Windows/win.ini`.\n\n**`//server/share/x` on Windows:** the Windows-only test asserts this resolves to `join(root, 'server', 'share', 'x')`, not `EFORBIDDEN`, as your brief suggested. Contract step 4 strips the leading slashes first, so the path ends up inside the root. This is safe, so I kept stripping and changed the test.\n\nOnly `src/static/resolve.js` and `src/static/resolve.test.js` changed.",
+        "reviewer: ",
+        "verifier: ",
+        "security_reviewer: ing on the same volume can escape; other drives are EFORBIDDEN | `rel` never starts with `..` from a root |\n\n## Tests\n\n- **Assert on `code`:** every negative test uses `{ code: ... }` (lines 19, 25, 51).\n- **Not weakened:** the diff against `d713b5a` removes only the import line, which was widened to add `isAbsolute` and `resolve`. The original test at lines 6-9 is unchanged.\n- **Cross-platform:** expectations are built with `join`/`resolve`, and the one Windows-specific test is skipped elsewhere (line 50). By reading, none should fail on Linux, including `/a\\b.txt` at line 40.\n\nI recorded the blocker in NEXUS. Someone with execution rights still needs to run `npm test` and the probes above."
+      ],
+      "approvalDetails": [],
+      "blocked": [
+        "security-review-resolve: the security_reviewer role is not permitted to run `npm test` or `node -e` probes, so the dynamic part of the review (test run + ad-hoc probes) could not be done. The review was completed by code reading only; the \"npm test was run\" acceptance criterion is not met by this task."
+      ],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 40,
+    "inputTokensUncached": 18119,
+    "outputTokens": 25832,
+    "cacheCreationTokens": 59003,
+    "cacheReadTokens": 394197,
+    "costUsdReported": 1.001,
+    "toolCalls": 35,
+    "toolCallsRecorded": 35,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Read": 11,
+      "StructuredOutput": 3,
+      "Write": 1,
+      "Bash": 14,
+      "Edit": 3,
+      "Grep": 2,
+      "mcp__nexus__report_blocker": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 3,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 13,
+        "toolCalls": 12,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "security_reviewer": {
+        "sessions": 1,
+        "turns": 6,
+        "toolCalls": 5,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 269410,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 35
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 36
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

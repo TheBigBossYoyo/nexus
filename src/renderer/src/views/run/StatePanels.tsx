@@ -5,13 +5,14 @@ import { DASH, formatCost, formatDuration } from '../../lib/format'
 import { useResumeRun, useRetryTask, useRunSummary } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
 import { CandidatesSection } from './CandidatesSection'
-import { pauseDetailFromEvents } from './eventText'
+import { capacityWaitLines, pauseDetailFromEvents } from './eventText'
 import { useRunCtx } from './runContext'
 
 const PAUSE_LABEL = {
   user: 'Paused by you',
   quota: 'Paused: Claude usage limit reached',
   recovery: 'Paused after an app restart (recovery)',
+  capacity: 'Waiting for a provider: nothing failed, and NEXUS resumes this mission by itself',
 } as const
 
 function TaskProblem({ task, canRetry }: { task: Task; canRetry: boolean }) {
@@ -47,11 +48,11 @@ function TaskProblem({ task, canRetry }: { task: Task; canRetry: boolean }) {
 /** A quota pause is an expected wait: one calm line. Timing and actions live in the quota banner. */
 function QuotaPaused() {
   return (
-    <div className="shrink-0 border-b bg-surface-muted px-5 py-2 text-small text-text-secondary" data-testid="run-state-panel" data-kind="quota">
+    <div role="status" className="shrink-0 border-b bg-surface-muted px-5 py-2 text-small text-text-secondary" data-testid="run-state-panel" data-kind="quota">
       <span className="font-medium text-text-primary" data-testid="quota-paused-title">
         Waiting for the Claude usage limit.
       </span>{' '}
-      <span data-testid="quota-paused-lines">No work has been lost; the mission resumes when Claude is available.</span>
+      <span data-testid="quota-paused-lines">Finished tasks are kept; unfinished work resumes from its last checkpoint when Claude is available again.</span>
     </div>
   )
 }
@@ -68,9 +69,18 @@ export function RunStatePanel() {
 
   if (run.state === 'paused') {
     const reason = run.pauseReason ? PAUSE_LABEL[run.pauseReason] : 'Paused'
-    const detailText = pauseDetailFromEvents(events)
+    const waitingOn = run.pauseReason === 'capacity' ? capacityWaitLines(events) : []
+    // A capacity wait says what it waits on in words; the raw routing reasons stay in the event log.
+    const detailText = waitingOn.length > 0 ? null : pauseDetailFromEvents(events)
     return (
-      <Notice tone="warning" title={reason} className="m-3 shrink-0" data-testid="run-state-panel">
+      <Notice live tone="warning" title={reason} className="m-3 shrink-0" data-testid="run-state-panel">
+        {waitingOn.length > 0 ? (
+          <ul className="list-disc pl-4" data-testid="capacity-wait-detail">
+            {waitingOn.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
         {detailText ? (
           <div className="whitespace-pre-wrap break-words" data-testid="pause-detail">
             {detailText}
@@ -78,7 +88,7 @@ export function RunStatePanel() {
         ) : null}
         <div className="mt-1.5 flex items-center gap-2">
           <Button size="sm" variant="primary" icon={<PlayIcon size={12} />} loading={resume.isPending} onClick={() => resume.mutate({ runId: run.id })}>
-            Resume
+            {run.pauseReason === 'capacity' ? 'Try now' : 'Resume'}
           </Button>
           {run.resumeState ? <span className="text-text-muted">Resumes into {run.resumeState}.</span> : null}
         </div>

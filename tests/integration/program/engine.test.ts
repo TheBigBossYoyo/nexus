@@ -143,6 +143,37 @@ describe('program engine', () => {
     expect(rig.host.missionsOf().at(-1)!.input.prompt).toContain('Work in smaller steps.')
   })
 
+  it('keeps every reassessment note of the user: two notes reach one reassessment and the missions after it', async () => {
+    rig = makeProgramRig()
+    rig.host.answers.plan = [planJson([milestone('core'), milestone('api', { dependsOn: ['core'] })])]
+    // Nothing is dispatched yet, so the second note arrives before the reassessment of the first has started.
+    rig.gate.set(false)
+    const program = await rig.program()
+    await rig.engine.requestUserReplan(program.id, 'Keep the public API of the parser unchanged.')
+    await rig.engine.requestUserReplan(program.id, 'Use the existing logger, no new dependency.')
+    rig.gate.set(true)
+    await rig.untilState(program.id, ['COMPLETED'])
+
+    const replans = rig.host.created.filter((c) => c.kind === 'replan')
+    expect(replans[0]!.input.prompt).toContain('Keep the public API of the parser unchanged.')
+    expect(replans[0]!.input.prompt).toContain('Use the existing logger, no new dependency.')
+    // The notes are the user's instructions for the program, not only for the reassessment that read them.
+    const missions = rig.host.missionsOf()
+    expect(missions.length).toBeGreaterThanOrEqual(2)
+    for (const mission of missions) {
+      expect(mission.input.prompt).toContain('Keep the public API of the parser unchanged.')
+      expect(mission.input.prompt).toContain('Use the existing logger, no new dependency.')
+    }
+  })
+
+  it('refuses a reassessment note when the reassessment budget is used, and does not drop it later', async () => {
+    rig = makeProgramRig()
+    rig.host.answers.plan = [planJson([milestone('core')])]
+    rig.gate.set(false)
+    const program = await rig.program({ policy: { maxReplans: 0 } })
+    await expect(rig.engine.requestUserReplan(program.id, 'Split the work.')).rejects.toThrow(/reassessment/)
+  })
+
   it('plan approval: nothing runs before the user accepts; a rejected revision leaves the plan as it was', async () => {
     rig = makeProgramRig()
     rig.host.answers.plan = [planJson([milestone('core'), milestone('api')])]
@@ -189,6 +220,28 @@ describe('program engine', () => {
     const done = await rig.untilState(program.id, ['COMPLETED'])
     expect(kinds(program.id)).toEqual(expect.arrayContaining(['quota_wait', 'quota_resumed']))
     expect(done.missions).toBe(1)
+    expect(rig.repos.milestones.getByKey(program.id, 'core')!.attempts).toBe(1)
+  })
+
+  it('a run that waits for provider capacity is not a problem for a person: the program is not blocked, does not resume the run itself, and goes on when capacity returns', async () => {
+    rig = makeProgramRig()
+    rig.host.answers.plan = [planJson([milestone('core')])]
+    rig.host.mission = () => 'hang'
+    const program = await rig.program()
+    await rig.untilState(program.id, ['ACTIVE'])
+    const run = rig.host.missionsOf()[0]!.run
+    // What the orchestrator does when admission finds no provider with capacity for the run's next session.
+    rig.repos.runs.update(run.id, { state: 'paused', resumeState: 'executing', pauseReason: 'capacity' })
+    rig.bus.emit({ runId: run.id, type: 'run.paused', payload: { reason: 'capacity', cause: 'capacity' } })
+    for (let i = 0; i < 3; i++) await rig.engine.tick()
+    // It used to be BLOCKED here ("the current run is paused and needs attention") and stayed so after the run went on.
+    expect(rig.get(program.id)).toMatchObject({ state: 'ACTIVE', blockedReason: null, error: null })
+    // The capacity recovery resumes the run. The program does not, or the two would race.
+    expect(rig.host.resumed).toEqual([])
+    await rig.host.resumeRun(run.id)
+    await rig.host.apply(run.id, 'complete')
+    const done = await rig.untilState(program.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
     expect(rig.repos.milestones.getByKey(program.id, 'core')!.attempts).toBe(1)
   })
 

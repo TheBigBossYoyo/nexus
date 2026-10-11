@@ -1,0 +1,216 @@
+{
+  "kind": "campaign-run",
+  "task": "feature",
+  "category": "normal feature",
+  "arm": "072-auto",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection",
+  "compilation": {
+    "requestedMode": "AUTO",
+    "mode": "LIGHT",
+    "status": "READY",
+    "reasons": [
+      "LOCALIZED_WELL_SPECIFIED_TASK",
+      "PROFILE:feature|medium|low:scope=few:ambiguity=low",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "ms": 2223,
+    "recommendations": 1,
+    "recommendationChars": 190,
+    "byKind": {
+      "VERIFICATION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": []
+  },
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "startedAt": "2026-10-11T08:29:08.420Z",
+  "finishedAt": "2026-10-11T08:31:41.053Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "addressbook",
+        "ref": "nexus/a5bb2df6/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ header row, columns in order, byte order mark and CRLF after every line (0.6332ms)\n✔ an empty address book is the header alone (0.0967ms)\n✔ missing values are empty fields (0.0936ms)\n✔ fields with a comma, a quote or a line break are quoted, and quotes are doubled (0.6413ms)\n✔ contacts keep the order given (0.1634ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 87.1259\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 7,
+          "fail": 0,
+          "output": "✔ the CSV export starts with the byte order mark and the header row (1.0217ms)\n✔ the CSV export keeps column and contact order and ends every line with CRLF (0.2348ms)\n✔ missing values are empty unquoted fields (0.1412ms)\n✔ an empty list gives the byte order mark, the header and a CRLF (0.2173ms)\n✔ fields with a comma, double quote, line feed or carriage return are quoted (0.2538ms)\n✔ plain and empty fields are not quoted (0.1759ms)\n✔ the JSON export starts with the byte order mark and parses (1.1845ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 147.0858\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "csv-export",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker: ts green, including the existing JSON test. No existing file was modified.\n\nThe output follows `docs/CONVENTIONS.md`: a leading U+FEFF, the `name,email,phone` header, then one row per contact in the order given. Every line, including the last, ends with CRLF. Missing values (undefined or null) become empty unquoted fields. A field containing a comma, double quote, CR or LF is quoted with inner quotes doubled, and all other fields stay unquoted.\n\nThe six new tests check exact full output strings and cover every case you listed.\n\nGit printed a warning that LF will be replaced by CRLF in the working copy of both new files the next time Git touches them. I didn't change any line-ending settings.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 38,
+    "inputTokensUncached": 15884,
+    "outputTokens": 14955,
+    "cacheCreationTokens": 33646,
+    "cacheReadTokens": 277453,
+    "costUsdReported": 0.5842,
+    "toolCalls": 33,
+    "toolCallsRecorded": 33,
+    "filesChangedRecorded": 2,
+    "toolCallsByName": {
+      "Bash": 12,
+      "Read": 13,
+      "StructuredOutput": 4,
+      "Write": 2,
+      "Grep": 2
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 4,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 10,
+        "toolCalls": 9,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 10,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 150686,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 4
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 22
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 5
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 22
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

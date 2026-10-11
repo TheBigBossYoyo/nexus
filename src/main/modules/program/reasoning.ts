@@ -80,14 +80,20 @@ export function buildPlanPrompt(ctx: PlanContext): string {
     'verifiable through its acceptance criteria and small enough for one mission (a few hours of agent work).',
     'Order them so that every milestone only depends on earlier ones. You may read the repository; do not change it.',
     '',
-    data('goal', program.goal.statement),
-    data('success_criteria', bullets(program.goal.successCriteria)),
-    data('constraints', bullets(program.goal.constraints)),
+    data('goal', program.goal.statement, 8000),
+    data('success_criteria', bullets(program.goal.successCriteria), 5000),
+    data('constraints', bullets(program.goal.constraints), 5000),
     data('repository', ctx.repository),
     data('project_history', bullets(ctx.history)),
     data('arena_and_policy_evidence', ctx.evidence ?? 'none'),
-    data('known_backlog', bullets(ctx.backlog.slice(0, 20).map((b) => `[${b.category}/${b.severity}] ${b.title}`))),
-    data('program_memory', bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`))),
+    data(
+      'known_backlog',
+      bullets(ctx.backlog.slice(0, 20).map((b) => `[${b.category}/${b.severity}] ${b.title}`)),
+    ),
+    data(
+      'program_memory',
+      bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`)),
+    ),
     '',
     OUTPUT_RULES,
     '',
@@ -129,15 +135,31 @@ export function buildReplanPrompt(ctx: ReplanContext): string {
     'approach. When you revise, return every remaining milestone as it should be from now on (keep the key of a',
     'milestone you keep), not only the changed ones. Milestone level only: no tasks, no file lists.',
     '',
-    data('goal', ctx.program.goal.statement),
-    data('success_criteria', bullets(ctx.program.goal.successCriteria)),
+    data('goal', ctx.program.goal.statement, 8000),
+    data('success_criteria', bullets(ctx.program.goal.successCriteria), 5000),
+    data('constraints', bullets(ctx.program.goal.constraints), 5000),
     data('trigger', ctx.trigger),
-    ...(ctx.userRequest ? ['The user asked for this reassessment. Their request is about the plan: follow it unless it contradicts the goal.', data('user_request', ctx.userRequest, 2000)] : []),
+    ...(ctx.userRequest
+      ? [
+          'The user asked for this reassessment. Their request is about the plan: follow it unless it contradicts the goal.',
+          data('user_request', ctx.userRequest, 8000),
+        ]
+      : []),
     data('situation', ctx.situation),
     data('completed_milestones', bullets(ctx.completed.map(line))),
     data('remaining_milestones', bullets(ctx.remaining.map(line))),
-    data('open_backlog', bullets(ctx.backlog.slice(0, 20).map((b) => `[${b.category}/${b.severity}] ${b.title}: ${b.description.slice(0, 200)}`))),
-    data('program_memory', bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`))),
+    data(
+      'open_backlog',
+      bullets(
+        ctx.backlog
+          .slice(0, 20)
+          .map((b) => `[${b.category}/${b.severity}] ${b.title}: ${b.description.slice(0, 200)}`),
+      ),
+    ),
+    data(
+      'program_memory',
+      bullets(ctx.memory.slice(0, 20).map((m) => `[${m.kind}] ${m.title}: ${m.content}`)),
+    ),
     '',
     OUTPUT_RULES,
     '',
@@ -248,6 +270,8 @@ export function buildMissionPrompt(input: {
   completed: Milestone[]
   memory: ProgramMemoryEntry[]
   strategyNote: string | null
+  /** What the user asked for when they had the plan reassessed, oldest first. */
+  userNotes?: readonly string[]
   /** True when the mission starts from the previous attempt's result (false: from the accepted work only). */
   continuesPreviousAttempt?: boolean
 }): { prompt: string; acceptanceCriteria: string[] } {
@@ -275,6 +299,18 @@ export function buildMissionPrompt(input: {
     parts.push('', 'Already completed in this program (do not redo):', data('completed_milestones', bullets(input.completed.map((m) => `${m.title}: ${m.objective.slice(0, 200)}`)), 3000))
   }
   if (program.goal.constraints.length > 0) parts.push('', 'Constraints of the program (set by the user):', bullets(program.goal.constraints))
+  // The newest notes are kept when they do not all fit: a later request of the user overrides an earlier one.
+  if (input.userNotes && input.userNotes.length > 0) {
+    const kept: string[] = []
+    let room = 6000
+    for (const n of [...input.userNotes].reverse()) {
+      if (n.length > room) break
+      kept.unshift(n)
+      room -= n.length
+    }
+    const dropped = input.userNotes.length - kept.length
+    parts.push('', `What the user asked for when they had the plan of this program reassessed (written by the user, oldest first${dropped > 0 ? `; ${dropped} older one(s) not shown` : ''}). The plan was revised with them; where one applies to this milestone, respect it, a later one before an earlier one:`, data('user_requests', kept.map((n, i) => `${i + 1}. ${n}`).join('\n'), 6200))
+  }
   if (input.memory.length > 0) {
     parts.push('', 'Facts recorded earlier in this program and relevant to this milestone:', data('program_memory', bullets(input.memory.map((m) => `[${m.kind}] ${m.title}: ${m.content}`)), 6000))
   }

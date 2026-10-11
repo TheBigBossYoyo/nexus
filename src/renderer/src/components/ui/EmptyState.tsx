@@ -88,16 +88,19 @@ export function Notice({
   title,
   children,
   className,
+  live = false,
   ...rest
 }: {
   tone?: 'warning' | 'danger' | 'active' | 'neutral' | 'success'
   title?: string
   children: ReactNode
   className?: string
+  /** Announce the notice when it appears or changes (a state the user is waiting for). Off for static text. */
+  live?: boolean
   'data-testid'?: string
 }) {
   return (
-    <div className={cn('relative overflow-hidden rounded-md border py-2 pl-4 pr-3', NOTICE_STYLES[tone], className)} {...rest}>
+    <div role={live ? 'status' : undefined} className={cn('relative overflow-hidden rounded-md border py-2 pl-4 pr-3', NOTICE_STYLES[tone], className)} {...rest}>
       <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-1', NOTICE_ACCENT[tone])} />
       {title ? <div className="mb-0.5 font-semibold text-text-primary">{title}</div> : null}
       <div className="text-text-secondary">{children}</div>

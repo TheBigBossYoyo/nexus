@@ -97,6 +97,7 @@ class CodexHandle implements AgentSessionHandle {
   private stopped = false
   private started = false
   private readonly done: Promise<void>
+  private settled = false
 
   constructor(
     private readonly spec: SessionSpec,
@@ -108,7 +109,7 @@ class CodexHandle implements AgentSessionHandle {
     this.agentId = spec.agentId
     this.events = this.queue
     this.threadId = spec.resumeSessionId ?? null
-    this.done = this.run()
+    this.done = this.run().finally(() => { this.settled = true })
   }
 
   sessionId(): string | null {
@@ -134,6 +135,8 @@ class CodexHandle implements AgentSessionHandle {
     await Promise.race([this.done, new Promise<void>((r) => setTimeout(r, 3000).unref())])
     this.finish('stopped', null)
   }
+
+  stopConfirmed(): boolean { return this.settled }
 
   private finish(reason: 'completed' | 'stopped' | 'crashed', error: string | null): void {
     if (this.finished) return

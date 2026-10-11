@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -17,7 +18,8 @@ test.describe('mission happy path', () => {
     try {
       // The main window shows.
       expect(app.windows()).toHaveLength(1)
-      expect(await page.title()).toBe('NEXUS')
+      // The title names the view the window shows, then the application.
+      expect(await page.title()).toMatch(/ · NEXUS$/)
 
       // Open the project through the real "Open Project" button (the native dialog is stubbed in main).
       await page.getByTestId('nav-projects').click()
@@ -33,6 +35,7 @@ test.describe('mission happy path', () => {
       await page.getByTestId('mode-select').selectOption('build')
       await page.getByTestId('strategy-select').selectOption('BUILD')
       await page.getByTestId('preset-select').selectOption('balanced')
+      await selectExactCompilation(page)
       await page.getByTestId('create-run').click()
 
       // The planner's plan is shown while the run awaits approval.

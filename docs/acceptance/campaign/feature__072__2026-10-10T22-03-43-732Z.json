@@ -1,0 +1,197 @@
+{
+  "kind": "campaign-run",
+  "task": "feature",
+  "category": "normal feature",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "6404450849654ed8046788b6f9b64b764bf188fe",
+  "startedAt": "2026-10-10T22:03:43.732Z",
+  "finishedAt": "2026-10-10T22:06:33.373Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "addressbook",
+        "ref": "nexus/bfffb00f/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ header row, columns in order, byte order mark and CRLF after every line (0.9359ms)\n✔ an empty address book is the header alone (0.1508ms)\n✔ missing values are empty fields (0.1198ms)\n✔ fields with a comma, a quote or a line break are quoted, and quotes are doubled (0.6674ms)\n✔ contacts keep the order given (0.2509ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 109.9146\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 11,
+          "fail": 0,
+          "output": "✔ starts with the byte order mark followed by the header (1.4149ms)\n✔ an empty list gives the header only (0.8563ms)\n✔ every line ends with CRLF, including the last, and no bare LF (0.444ms)\n✔ keeps column order and input order (0.243ms)\n✔ missing values are empty unquoted fields (0.2355ms)\n✔ a field with a comma is quoted (0.1804ms)\n✔ a field with a double quote is quoted and the quote doubled (0.2229ms)\n✔ fields with CR or LF are quoted and the break is kept (0.169ms)\n✔ plain fields are not quoted (0.1326ms)\n✔ non-string values are converted with String() (0.1862ms)\n✔ the JSON export starts with the byte order mark and parses (1.6054ms)\nℹ tests 11\nℹ suites 0\nℹ pass 11\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 157.0889\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 1
+      }
+    ],
+    "reviewerFindings": 1,
+    "findingsBySeverity": {
+      "low": 1
+    },
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "csv-export",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 0,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "reviewer: Bash: Command not permitted for the reviewer role (cd, for, do, done, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, file). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd, node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node, od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  a comma, double quote, CR or LF are quoted with inner quotes doubled, and other fields are left plain. Non-string values go through `String()` first.\n- **Tests:** They assert on exact output strings and cover every case you listed. I also added two small cases of my own: `null` values, and a number converted with `String()`.\n- **Files and commit:** Both files use CRLF line endings, and no existing file was changed. The work is committed on `nexus/bfffb00f/csv-export` as \"Add CSV export\", and `git status` is clean.\n- **Not checked:** The tail of the `npm test` output didn't show the first few tests. I didn't re-run `git status` before the commit to confirm only the two new files were staged.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 5,
+    "turns": 37,
+    "inputTokensUncached": 15700,
+    "outputTokens": 16110,
+    "cacheCreationTokens": 34915,
+    "cacheReadTokens": 287275,
+    "costUsdReported": 0.6216,
+    "toolCalls": 32,
+    "toolCallsRecorded": 32,
+    "filesChangedRecorded": 0,
+    "toolCallsByName": {
+      "Bash": 14,
+      "StructuredOutput": 4,
+      "Read": 10,
+      "Grep": 4
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 5,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 8,
+        "toolCalls": 7,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 2,
+        "turns": 19,
+        "toolCalls": 17,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 167498,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 7
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 8
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 15
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

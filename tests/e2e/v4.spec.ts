@@ -2,7 +2,17 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { ProgramDetail } from '../../src/shared/program'
-import { closeApp, createRepo, git, invoke, launchApp, removeDir, screenshot, tempDir } from './helpers'
+import {
+  closeApp,
+  createRepo,
+  git,
+  invoke,
+  launchApp,
+  removeDir,
+  screenshot,
+  tempDir,
+  selectExactCompilation,
+} from './helpers'
 
 /**
  * NEXUS 0.4 against the built app with the scripted runtime: a program from the dialog to completion, plan
@@ -61,6 +71,7 @@ test.describe('NEXUS 0.4 programs', () => {
       await dialog.getByTestId('program-name').fill('Modules program')
       await dialog.getByTestId('program-goal').fill('Build the API and UI modules, integrate them, then harden the integration.')
       await dialog.getByTestId('program-preset-autonomous').click()
+      await selectExactCompilation(page)
       await screenshot(page, 'v4-program-dialog')
       await dialog.getByTestId('program-create-start').click()
 
@@ -128,7 +139,14 @@ test.describe('NEXUS 0.4 programs', () => {
       let page = launched.page
       const projectId = await openProject(page)
       // Balanced: the first plan waits for the user.
-      const program = await invoke(page, 'program.create', { projectId, name: 'Approved program', goal: 'Build the modules and harden them.', preset: 'balanced', start: true })
+      const program = await invoke(page, 'program.create', {
+        projectId,
+        name: 'Approved program',
+        goal: 'Build the modules and harden them.',
+        preset: 'balanced',
+        start: true,
+        compilationMode: 'EXACT',
+      })
       const waiting = await waitForProgram(page, program.id, (d) => d.program.state === 'PAUSED' && d.program.pauseReason === 'approval')
       expect(waiting.roadmap).toHaveLength(0)
       // The planner session is the program's own: it is not in the user's list of missions.
@@ -145,6 +163,16 @@ test.describe('NEXUS 0.4 programs', () => {
       await page.getByTestId('program-replan').click()
       await expect(page.getByTestId('program-replan-submit')).toBeDisabled()
       await page.getByTestId('program-replan-note').fill('Add a final milestone that documents the modules.')
+      await page
+        .getByTestId('program-replan-dialog')
+        .getByTestId('compilation-preview')
+        .locator('summary')
+        .first()
+        .click()
+      await page
+        .getByTestId('program-replan-dialog')
+        .getByTestId('compilation-mode')
+        .selectOption('EXACT')
       await page.getByTestId('program-replan-submit').click()
       const revised = await waitForProgram(page, program.id, (d) => d.revisions.some((r) => r.trigger === 'user' && r.status === 'accepted'), 300_000)
       const revision = revised.revisions.find((r) => r.trigger === 'user')

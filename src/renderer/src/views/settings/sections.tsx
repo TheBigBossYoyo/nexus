@@ -104,7 +104,8 @@ export function ModelsSection({ draft, set, error }: SectionProps) {
       {models.isPending ? <Loading label="Asking the runtime for available models" /> : null}
       {models.isError ? (
         <Notice tone="warning" title="Model list unavailable">
-          The runtime did not report its models ({models.error.message}). Tiers can still be set to any alias or id already configured.
+          The runtime did not report its models ({models.error.message}). Tiers can still be set to
+          any alias or id already configured.
         </Notice>
       ) : null}
       <div>
@@ -135,7 +136,10 @@ export function ModelsSection({ draft, set, error }: SectionProps) {
         <div className="border">
           <DataTable columns={columns} rows={AGENT_ROLES} rowKey={(r) => r} />
         </div>
-        <p className="mb-0 mt-2 text-small text-text-muted">The ECO preset moves most roles one tier down at run time; this table is the BALANCED and MAXIMUM baseline.</p>
+        <p className="mb-0 mt-2 text-small text-text-muted">
+          The ECO preset moves most roles one tier down at run time; this table is the BALANCED and
+          MAXIMUM baseline.
+        </p>
       </div>
     </div>
   )
@@ -295,7 +299,10 @@ export function TokensSection({ draft, set, error }: SectionProps) {
   return (
     <Stack>
       <p className="m-0 text-text-secondary">
-        Quality first. None of these changes a model, an effort level, the number of agents or the number of reviews. Automatic follows the release default: {TECHNIQUE_FIELDS.filter((t) => AUTO_DEFAULTS[t.key]).map((t) => t.label.toLowerCase()).join(', ') || 'none'} on, the rest off.
+        Quality first. None of these changes a model, an effort level, the number of agents or the
+        number of reviews. Automatic follows the release default:{' '}
+        {TECHNIQUE_FIELDS.filter((t) => AUTO_DEFAULTS[t.key]).map((t) => t.label.toLowerCase()).join(', ') || 'none'}{' '}
+        on, the rest off.
       </p>
       {TECHNIQUE_FIELDS.map((t) => (
         <Field key={t.key} label={t.label} hint={t.hint}>
@@ -352,8 +359,9 @@ export function McpSection({ draft, set }: SectionProps) {
   return (
     <div className="flex max-w-3xl flex-col gap-4">
       <Notice tone="neutral" title="Nothing is installed automatically">
-        Servers listed here are only configuration. A server runs only when it is enabled and only for the roles you grant. A stdio
-        server is a local process started with your user permissions: add only software you trust.
+        Servers listed here are only configuration. A server runs only when it is enabled and only
+        for the roles you grant. A stdio server is a local process started with your user
+        permissions: add only software you trust.
       </Notice>
 
       {servers.length === 0 ? <div className="text-fg-muted">No MCP servers configured.</div> : null}
@@ -403,16 +411,14 @@ export function McpSection({ draft, set }: SectionProps) {
           <Field label="Type">
             {(id) => <Select id={id} value={form.type} onChange={(type) => setForm({ ...form, type })} options={MCP_TYPES} />}
           </Field>
-          {form.type === 'stdio' ? (
-            <>
+          {form.type === 'stdio' ? <>
               <Field label="Command">
                 {(id) => <Input id={id} className="font-mono" value={form.command} placeholder="npx" onChange={(e) => setForm({ ...form, command: e.target.value })} />}
               </Field>
               <Field label="Arguments" hint="One per line">
                 {(id) => <Textarea id={id} rows={3} className="font-mono" value={form.args} onChange={(e) => setForm({ ...form, args: e.target.value })} />}
               </Field>
-            </>
-          ) : (
+            </> : (
             <Field label="URL" className="col-span-2">
               {(id) => <Input id={id} className="font-mono" value={form.url} placeholder="https://" onChange={(e) => setForm({ ...form, url: e.target.value })} />}
             </Field>
@@ -487,7 +493,8 @@ export function UsageSection({ draft, set, error }: SectionProps) {
   return (
     <Stack>
       <p className="m-0 text-text-secondary">
-        When Claude reports a usage limit, NEXUS pauses the affected missions, keeps their work, and resumes them when Claude is available again.
+        When Claude reports a usage limit, NEXUS pauses the affected missions, keeps their work, and
+        resumes them when Claude is available again.
       </p>
       <Toggle
         checked={u.autoResume}
@@ -580,6 +587,25 @@ export function AdvancedSection({ draft, set }: SectionProps) {
               { label: 'Database', value: info.data.dbPath, mono: true },
               { label: 'Worktrees', value: info.data.worktreesDir, mono: true },
               { label: 'NEXUS version', value: info.data.version, mono: true },
+              {
+                label: 'Build commit',
+                value: info.data.build
+                  ? `${info.data.build.commit}${info.data.build.dirty ? ' (modified sources)' : ''}`
+                  : 'Unknown',
+                mono: true,
+              },
+              { label: 'Built at', value: info.data.build?.builtAt ?? 'Unknown', mono: true },
+              { label: 'Channel', value: info.data.build?.channel ?? 'Unknown' },
+              {
+                label: 'Runtime protocol',
+                value: String(info.data.build?.runtimeProtocol ?? 'Unknown'),
+                mono: true,
+              },
+              {
+                label: 'Database schema',
+                value: String(info.data.build?.databaseSchema ?? 'Unknown'),
+                mono: true,
+              },
               { label: 'Claude SDK', value: info.data.sdkVersion, mono: true },
               { label: 'Git', value: info.data.gitVersion ?? 'not found', mono: true },
               { label: 'Platform', value: info.data.platform, mono: true },
@@ -588,8 +614,8 @@ export function AdvancedSection({ draft, set }: SectionProps) {
           />
         ) : null}
         <p className="mb-0 mt-2 text-small text-text-muted">
-          Worktrees live under the data directory, never inside your repository. If one is removed by hand, run{' '}
-          <InlineCode>git worktree prune</InlineCode> in the repository.
+          Worktrees live under the data directory, never inside your repository. If one is removed
+          by hand, run <InlineCode>git worktree prune</InlineCode> in the repository.
         </p>
       </div>
     </div>

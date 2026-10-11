@@ -1,3 +1,4 @@
+import { selectExactCompilation } from './helpers'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { closeApp, createRepo, invoke, launchApp, removeDir, screenshot, tempDir } from './helpers'
 
@@ -45,6 +46,7 @@ async function startMission(page: Page, prompt: string, strategy = 'BUILD'): Pro
   await page.getByTestId('mode-select').selectOption('build')
   await page.getByTestId('strategy-select').selectOption(strategy)
   await page.getByTestId('plan-approval-toggle').uncheck()
+  await selectExactCompilation(page)
   await page.getByTestId('create-run').click()
   await expect(page.getByTestId('run-view')).toBeVisible()
   const runs = await invoke(page, 'runs.list', {})
@@ -185,7 +187,7 @@ test.describe('NEXUS 0.3 UI', () => {
       const banner = page.getByTestId('quota-banner')
       await expect(banner).toBeVisible({ timeout: 60_000 })
       await expect(banner).toContainText(/usage limit/i)
-      await expect(banner).toContainText(/No work has been lost/i)
+      await expect(banner).toContainText(/Finished tasks are kept/i)
       // The reset time is the one the runtime gave, shown as a clock time, with the planned resume after it.
       await expect(page.getByTestId('quota-reset')).toHaveText(/\d{1,2}:\d{2}/)
       await expect(page.getByTestId('quota-resume-at')).toHaveText(/\d{1,2}:\d{2}/)
@@ -297,6 +299,9 @@ test.describe('NEXUS 0.3 UI', () => {
       expect(usage.totals.inputTokens).toBeGreaterThan(0)
 
       // Inspector and agents open on the redesigned screens.
+      // What the run was when the graph is opened: read in the message of a failure of the steps below.
+      const shown = await invoke(page, 'runs.get', { runId })
+      expect(shown.tasks.length, `run ${shown.run.state}, pause reason ${String(shown.run.pauseReason)}, ${shown.tasks.length} tasks`).toBeGreaterThan(0)
       await page.getByTestId('stage-tab-graph').click()
       const node = page.locator('[data-testid^="task-node-"]').first()
       await node.click()

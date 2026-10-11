@@ -1,0 +1,118 @@
+{
+  "kind": "campaign-observation",
+  "task": "program",
+  "arm": "071-graph",
+  "nexusVersion": "0.7.1",
+  "nexusCommit": "dbe38e9",
+  "startedAt": "2026-10-11T04:28:10Z",
+  "note": "A control run of the program cell on the 0.7.1 sources, started after three 0.7.2 runs of it had paused. Read from the run database while it ran and stopped by hand once its outcome was known, about eleven minutes in, so that the campaign checkout was free again; it is therefore not a campaign-run and is in no total. Milestone one was implemented, verified and accepted. In the mission of milestone two the task verifier failed kv-entries-accessor on the five mission criteria about persistence, which belong to a later task; its repair found nothing to fix and failed; the two tasks that depended on it were blocked; the run paused for intervention and the program paused with it.",
+  "programState": "PAUSED",
+  "runs": [
+    "ask completed",
+    "mission completed",
+    "ask completed",
+    "ask completed",
+    "mission paused"
+  ],
+  "tasks": [
+    {
+      "key": "ask",
+      "role": "researcher",
+      "kind": "ask",
+      "state": "completed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": null,
+      "created_at": "2026-10-11T04:28:16.748Z",
+      "finished_at": "2026-10-11T04:28:33.644Z"
+    },
+    {
+      "key": "implement-kv-store",
+      "role": "worker",
+      "kind": "implement",
+      "state": "completed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": null,
+      "created_at": "2026-10-11T04:29:24.288Z",
+      "finished_at": "2026-10-11T04:30:23.335Z"
+    },
+    {
+      "key": "verify-kv-store",
+      "role": "verifier",
+      "kind": "audit",
+      "state": "completed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": null,
+      "created_at": "2026-10-11T04:29:24.289Z",
+      "finished_at": "2026-10-11T04:30:55.954Z"
+    },
+    {
+      "key": "ask",
+      "role": "researcher",
+      "kind": "ask",
+      "state": "completed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": null,
+      "created_at": "2026-10-11T04:31:19.040Z",
+      "finished_at": "2026-10-11T04:31:36.812Z"
+    },
+    {
+      "key": "ask",
+      "role": "researcher",
+      "kind": "ask",
+      "state": "completed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": null,
+      "created_at": "2026-10-11T04:31:37.247Z",
+      "finished_at": "2026-10-11T04:31:43.653Z"
+    },
+    {
+      "key": "kv-entries-accessor",
+      "role": "worker",
+      "kind": "implement",
+      "state": "failed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": "{\"what\":\"Repair failed\",\"where\":\"kv-entries-accessor-fix1\",\"why\":\"Repair kv-entries-accessor-fix1 has nothing to fix in this task's scope. The only failed criteria are the five mission-level persistence criteria, which all require src/persist.js; that file belongs to a later task and is not part of kv-entries-accessor. All five task criteria pass. I made no code changes and no commit; implementing persist.js here would be doing another task's work.\",\"retryable\":true}",
+      "created_at": "2026-10-11T04:32:58.684Z",
+      "finished_at": "2026-10-11T04:34:22.676Z"
+    },
+    {
+      "key": "persist-save-load",
+      "role": "worker",
+      "kind": "implement",
+      "state": "blocked",
+      "attempt": 0,
+      "blocked_reason": "dependency: Blocked because dependency kv-entries-accessor failed or was cancelled",
+      "error": null,
+      "created_at": "2026-10-11T04:32:58.684Z",
+      "finished_at": null
+    },
+    {
+      "key": "verify-milestone",
+      "role": "verifier",
+      "kind": "audit",
+      "state": "blocked",
+      "attempt": 0,
+      "blocked_reason": "dependency: Blocked because dependency kv-entries-accessor failed or was cancelled",
+      "error": null,
+      "created_at": "2026-10-11T04:32:58.684Z",
+      "finished_at": null
+    },
+    {
+      "key": "kv-entries-accessor-fix1",
+      "role": "debugger",
+      "kind": "repair",
+      "state": "failed",
+      "attempt": 1,
+      "blocked_reason": null,
+      "error": "{\"what\":\"Repair failed\",\"where\":\"kv-entries-accessor-fix1\",\"why\":\"Repair kv-entries-accessor-fix1 has nothing to fix in this task's scope. The only failed criteria are the five mission-level persistence criteria, which all require src/persist.js; that file belongs to a later task and is not part of kv-entries-accessor. All five task criteria pass. I made no code changes and no commit; implementing persist.js here would be doing another task's work.\",\"retryable\":true}",
+      "created_at": "2026-10-11T04:34:04.327Z",
+      "finished_at": "2026-10-11T04:34:22.676Z"
+    }
+  ]
+}

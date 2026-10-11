@@ -1,0 +1,180 @@
+{
+  "task": "architecture",
+  "compiledAt": "2026-10-10T21:50:13.490Z",
+  "nexusCommit": "2d4383e95e94e8f6e4e0bd689023d5a994bb2f7c",
+  "spec": {
+    "id": "b5b22eba-42e0-4924-a6d9-0d44cf52353a",
+    "projectId": "ce66c80a-d33a-4642-b161-761602ec1c6c",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Replace the format switch in src/export/index.js with an exporter registry so teams can add formats by registering exporters from new code without editing existing files.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Expose registerExporter(name, fn), exportData(format, rows), and listFormats() through the public interface of src/export/index.js.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "registerExporter(name, fn) registers a function that receives rows and returns a string. Registering an already registered name must throw without replacing the existing exporter.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "exportData(format, rows) invokes the registered exporter with rows and returns its output. An unknown format must throw an Error whose message names the requested format and lists the known formats.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "listFormats() returns the registered names sorted alphabetically.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Register json and csv by default and preserve their existing output exactly.",
+        "kind": "CONSTRAINT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Create docs/adr/0001-exporter-registry.md with Context, Decision, and Consequences sections documenting the switch-based limitation, registry API, default exporters, and extension and duplicate-registration behavior.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Include tests covering custom exporter registration and dispatch, duplicate rejection with the original exporter retained, alphabetically sorted format listings, unknown-format Error messages containing the requested and known formats, default json/csv availability, and regression coverage for their current output.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Verify the implementation with npm test, the repository's supplied test command.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:ce66c80a-d33a-4642-b161-761602ec1c6c"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "Treat explicit registration by consuming code as the extension mechanism; automatic plugin discovery, configuration-driven loading, and unregister/reset APIs are outside the requested scope.",
+        "kind": "NON_GOAL",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [
+      "Requiring verification specifically with `npm test` assumes that this is the repository's supplied test command. The user requests tests but does not specify a command, and the repository evidence referenced in the proposal is not provided for independent verification. Use the repository's actual test command once confirmed."
+    ],
+    "identity": "ab6b3bd1089df756072ac60e9a55c6aa3383e809a20d4e7ce60bbd988868b6ee",
+    "createdAt": "2026-10-10T21:49:47.869Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": true,
+        "conflicts": [],
+        "unjustifiedRequirements": [
+          "Requiring verification specifically with `npm test` assumes that this is the repository's supplied test command. The user requests tests but does not specify a command, and the repository evidence referenced in the proposal is not provided for independent verification. Use the repository's actual test command once confirmed."
+        ]
+      }
+    },
+    "rawIntent": "Every new report format means editing the switch in src/export/index.js, and two teams now want to add formats of their own. Redesign the exporters so that a format is added without editing an existing file. The public interface of src/export/index.js becomes: `registerExporter(name, fn)` (fn takes the rows and returns a string; registering a name twice throws), `exportData(format, rows)` (an unknown format throws an Error whose message names the format and lists the known formats), and `listFormats()` (the registered names, sorted alphabetically). `json` and `csv` are registered by default and keep their current output. Record the decision as docs/adr/0001-exporter-registry.md with the sections Context, Decision and Consequences. Include tests.",
+    "intentId": "f2f18263-2fd1-4576-9315-4ccc4e461778",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "Every new report format means editing the switch in src/export/index.js, and two teams now want to add formats of their own. Redesign the exporters so that a format is added without editing an existing file. The public interface of src/export/index.js becomes: `registerExporter(name, fn)` (fn takes the rows and returns a string; registering a name twice throws), `exportData(format, rows)` (an unknown format throws an Error whose message names the format and lists the known formats), and `listFormats()` (the registered names, sorted alphabetically). `json` and `csv` are registered by default and keep their current output. Record the decision as docs/adr/0001-exporter-registry.md with the sections Context, Decision and Consequences. Include tests."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:ce66c80a-d33a-4642-b161-761602ec1c6c",
+        "version": "9398501bb42bf9e4922b197d1898bec1db0838f5:651710698e69fdcb22f8ab328cda4f1b364da468b442136fba07123d7a76ae43"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 24929,
+    "recommendations": 10,
+    "recommendationChars": 2748,
+    "byKind": {
+      "REQUIREMENT": 6,
+      "CONSTRAINT": 1,
+      "ACCEPTANCE": 1,
+      "VERIFICATION": 1,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [
+      "Requiring verification specifically with `npm test` assumes that this is the repository's supplied test command. The user requests tests but does not specify a command, and the repository evidence referenced in the proposal is not provided for independent verification. Use the repository's actual test command once confirmed."
+    ],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 869,
+          "outputTokens": 786,
+          "totalTokens": 1655,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 1095,
+          "outputTokens": 153,
+          "totalTokens": 1248,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 50
+        }
+      }
+    ]
+  }
+}

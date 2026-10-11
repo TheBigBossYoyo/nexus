@@ -214,7 +214,7 @@ export class QuotaRecoveryController {
         kind: 'usage.notice',
         notice: 'limit_reached',
         title: 'Claude usage limit reached',
-        detail: `NEXUS has safely paused ${plural(1 + others, 'run')}${window}. ${when} No work has been lost.`,
+        detail: `NEXUS has safely paused ${plural(1 + others, 'run')}${window}. ${when} Finished tasks are kept; unfinished work resumes from its last checkpoint.`,
       })
     }
   }

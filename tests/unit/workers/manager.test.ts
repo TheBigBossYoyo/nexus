@@ -214,6 +214,9 @@ describe('WorkerManager', () => {
     const all = await events
     expect(all.at(-1)).toMatchObject({ type: 'session.ended', reason: 'crashed' })
     expect((all.at(-1) as { error: string }).error).toContain('Worker lost')
+    // The process that hosted the session is gone, so its stop is confirmed: capacity held for it can be freed.
+    // (It was not: an unexpected exit left the capacity quarantined until the runtime was restarted.)
+    expect(handle.stopConfirmed?.()).toBe(true)
     expect(r.repos.workerLeases.get(leaseId)).toMatchObject({ state: 'REVOKED' })
     expect(r.repos.workerLeases.listActive()).toEqual([])
     const record = r.repos.workers.listEnded(5)[0]

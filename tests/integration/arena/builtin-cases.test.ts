@@ -80,7 +80,7 @@ describe('built-in Arena suite', () => {
       // (b) hidden evaluator on the unmodified fixture
       const unmodified = await evaluateTrial({ repoPath: a.repoPath, resultCommit: a.baselineCommit, caseVersion: version, sourcePath: dir, trialDir: join(work, id, 'a'), git })
       expect(unmodified.timedOut).toBe(false)
-      expect(unmodified.passed, 'the evaluator must fail the unmodified fixture').toBe(false)
+      expect(unmodified.passed, `the evaluator must fail the unmodified fixture: ${unmodified.output.slice(-2500)}`).toBe(false)
       expect(unmodified.exitCode).not.toBe(0)
       expect(existsSync(join(work, id, 'a', 'eval'))).toBe(false)
 

@@ -100,7 +100,7 @@ export function buildCreateInput(form: ProgramForm, start: boolean): IpcInput<'p
   return {
     projectId: form.projectId ?? '',
     name: form.name.trim(),
-    goal: form.goal.trim(),
+    goal: form.goal,
     ...(criteria.length ? { successCriteria: criteria } : {}),
     ...(constraints.length ? { constraints } : {}),
     preset: form.preset,

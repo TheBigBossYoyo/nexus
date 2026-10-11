@@ -364,6 +364,30 @@ describe('workspace engine', () => {
     expect(rig.host.created.filter((c) => c.kind === 'mission').map((c) => rig.repos.projects.require(c.input.projectId).name)).toEqual(['shared-sdk', 'backend', 'backend', 'desktop'])
   })
 
+  it('a task whose run waits for provider capacity does not block the mission, and the mission goes on when capacity returns', async () => {
+    rig = makeRig()
+    const ws = await rig.workspace()
+    rig.host.answers.plan = [planJson(CHAIN)]
+    rig.host.files = writes(rig, V2_COMPATIBLE)
+    rig.host.mission = (i) => (i === 0 ? 'hang' : 'complete')
+    const mission = await rig.engine.createMission(ws.id, { goal: 'Add a currency.', start: true })
+    await rig.untilState(mission.id, ['AWAITING_APPROVAL'])
+    await rig.engine.decidePlan(mission.id, true)
+    await rig.until(() => rig.host.created.filter((c) => c.kind === 'mission').length === 1, 'the first task')
+    const first = rig.host.created.filter((c) => c.kind === 'mission')[0]!.run
+    // What the orchestrator does when admission finds no provider with capacity for the run's next session.
+    rig.repos.runs.update(first.id, { state: 'paused', resumeState: 'executing', pauseReason: 'capacity' })
+    rig.bus.emit({ runId: first.id, type: 'run.paused', payload: { reason: 'capacity', cause: 'capacity' } })
+    for (let i = 0; i < 3; i++) await rig.engine.tick()
+    // It used to be BLOCKED here: "the run of task ... is paused and needs attention".
+    expect(rig.repos.workspaceMissions.require(mission.id)).toMatchObject({ state: 'ACTIVE', blockedReason: null })
+    expect(rig.host.resumed).toEqual([])
+    await rig.host.resumeRun(first.id)
+    await rig.host.apply(first.id, 'complete')
+    const done = await rig.untilState(mission.id, ['COMPLETED', 'BLOCKED'])
+    expect(done.state, done.blockedReason ?? '').toBe('COMPLETED')
+  })
+
   it('a usage limit is a wait; a restart continues the same runs', async () => {
     rig = makeRig()
     const ws = await rig.workspace()
@@ -467,7 +491,9 @@ describe('workspace programs and overnight workspace missions', () => {
       step++
       return writes(rig, schema(fields))(run, repoPath)
     }
-    const program = rig.engine.createProgram(ws.id, { name: 'Money', goal: 'Orders carry currency and tax everywhere.', milestones: [{ title: 'Currency', goal: 'Add the currency field.' }, { title: 'Tax', goal: 'Add the tax field.' }] })
+    const program = await rig.engine.createProgram(ws.id, {
+      name: 'Money', goal: 'Orders carry currency and tax everywhere.', milestones: [{ title: 'Currency', goal: 'Add the currency field.' }, { title: 'Tax', goal: 'Add the tax field.' }],
+    })
     expect(program).toMatchObject({ state: 'DRAFT', milestones: [{ state: 'PLANNED', missionId: null }, { state: 'PLANNED', missionId: null }] })
     await rig.engine.startProgram(program.id)
     await drive(() => rig.repos.workspacePrograms.require(program.id).state === 'COMPLETED', 'the workspace program to complete')
@@ -496,7 +522,10 @@ describe('workspace programs and overnight workspace missions', () => {
     rig.host.answers.plan = [planJson(CHAIN)]
     rig.host.files = writes(rig, V2_COMPATIBLE)
     rig.host.mission = (i) => (i === 0 ? 'fail' : 'complete')
-    const program = rig.engine.createProgram(ws.id, { name: 'Money', goal: 'g', milestones: [{ title: 'Currency', goal: 'Add the currency field.' }] })
+    const program = await rig.engine.createProgram(ws.id, {
+      name: 'Money',
+      goal: 'g', milestones: [{ title: 'Currency', goal: 'Add the currency field.' }],
+    })
     await rig.engine.startProgram(program.id)
     await drive(() => rig.repos.workspacePrograms.require(program.id).state === 'BLOCKED', 'the workspace program to block')
     const blocked = rig.repos.workspacePrograms.require(program.id)
@@ -508,14 +537,19 @@ describe('workspace programs and overnight workspace missions', () => {
     // Still one mission for the milestone: the blocked one was resumed, not replaced.
     expect(rig.repos.workspaceMissions.listByProgram(program.id)).toHaveLength(1)
 
-    const cancelled = rig.engine.createProgram(ws.id, { name: 'Other', goal: 'g', milestones: [{ title: 'One', goal: 'x' }, { title: 'Two', goal: 'y' }] })
+    const cancelled = await rig.engine.createProgram(ws.id, {
+      name: 'Other',
+      goal: 'g', milestones: [{ title: 'One', goal: 'x' }, { title: 'Two', goal: 'y' }],
+    })
     rig.host.mission = () => 'hang'
     await rig.engine.startProgram(cancelled.id)
     await drive(() => rig.repos.workspaceMissions.listByProgram(cancelled.id).some((m) => m.state === 'ACTIVE'), 'the mission to be active')
     const after = await rig.engine.cancelProgram(cancelled.id)
     expect(after).toMatchObject({ state: 'CANCELLED', milestones: [{ state: 'CANCELLED' }, { state: 'CANCELLED' }] })
     expect(rig.repos.workspaceMissions.listByProgram(cancelled.id).map((m) => m.state)).toEqual(['CANCELLED'])
-    expect(() => rig.engine.createProgram(ws.id, { name: 'x', goal: 'g', milestones: [] })).toThrow()
+    await expect(
+      rig.engine.createProgram(ws.id, { name: 'x', goal: 'g', milestones: [] }),
+    ).rejects.toThrow()
   })
 
   it('a workspace mission under the overnight supervisor: failsafe first, global verification, report, power action', async () => {
@@ -593,7 +627,10 @@ describe('workspace engine: audit regressions', () => {
     // Milestone 1 changes the provider only; milestone 2 brings the consumers in step.
     rig.host.answers.plan = [planJson([task('sdk', 'shared-sdk', { contracts: ['order'] })]), planJson([task('api', 'backend', { contracts: ['order'] }), task('ui', 'desktop', { dependsOn: ['api'], contracts: ['order'] })])]
     rig.host.files = writes(rig, V2_COMPATIBLE)
-    const program = rig.engine.createProgram(ws.id, { name: 'Currency', goal: 'g', milestones: [{ title: 'Provider', goal: 'Add the field to the contract.' }, { title: 'Consumers', goal: 'Adapt the consumers.' }] })
+    const program = await rig.engine.createProgram(ws.id, {
+      name: 'Currency',
+      goal: 'g', milestones: [{ title: 'Provider', goal: 'Add the field to the contract.' }, { title: 'Consumers', goal: 'Adapt the consumers.' }],
+    })
     await rig.engine.startProgram(program.id)
     await drive(() => ['COMPLETED', 'BLOCKED'].includes(rig.repos.workspacePrograms.require(program.id).state), 'the program to end')
     expect(rig.repos.workspacePrograms.require(program.id)).toMatchObject({ state: 'COMPLETED' })

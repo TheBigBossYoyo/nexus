@@ -16,6 +16,15 @@ describe('buildAgentEnv', () => {
     expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBe('1')
   })
 
+  it('never tells an agent where NEXUS keeps its data, in either mode and whatever the case of the name', () => {
+    for (const subscriptionMode of [true, false]) {
+      const env = buildAgentEnv({ ...base, NEXUS_DATA_DIR: 'C:/data', Nexus_Data_Dir: 'C:/data2', NEXUS_OTHER: 'kept' }, { subscriptionMode })
+      expect(Object.keys(env).filter((k) => k.toUpperCase() === 'NEXUS_DATA_DIR')).toEqual([])
+      // A project may have variables of its own that start with NEXUS_: only this one is withheld.
+      expect(env['NEXUS_OTHER']).toBe('kept')
+    }
+  })
+
   it('strips key variables case-insensitively in subscription mode', () => {
     const env = buildAgentEnv(base, { subscriptionMode: true })
     expect(Object.keys(env).filter((k) => k.toUpperCase().startsWith('ANTHROPIC_'))).toEqual([])

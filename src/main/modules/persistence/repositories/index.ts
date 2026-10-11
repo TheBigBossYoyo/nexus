@@ -1,4 +1,5 @@
 import type { Database } from '../database'
+import { IntelligenceStore } from './intelligence'
 import {
   AgentRepository,
   MessageRepository,
@@ -98,6 +99,7 @@ import {
 } from './work'
 
 export interface Repositories {
+  intelligenceArtifacts: IntelligenceStore
   projects: ProjectRepository
   runs: RunRepository
   tasks: TaskRepository
@@ -206,6 +208,7 @@ export interface Repositories {
 
 export function createRepositories(db: Database): Repositories {
   return {
+    intelligenceArtifacts: new IntelligenceStore(db),
     projects: new ProjectRepository(db),
     runs: new RunRepository(db),
     tasks: new TaskRepository(db),

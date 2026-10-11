@@ -1,0 +1,518 @@
+{
+  "kind": "v72-live-acceptance",
+  "startedAt": "2026-10-10T19:44:34.529Z",
+  "verdict": "FAIL",
+  "steps": {
+    "technical": {
+      "ms": 67498,
+      "request": "Refactor the retry of the uploader so that the delay policy can be replaced without touching the upload code. Keep five attempts and the current behaviour by default.",
+      "spec": {
+        "id": "f42f3590-39d4-494e-b3c9-34f92207db1e",
+        "requestedMode": "TECHNICAL",
+        "mode": "TECHNICAL",
+        "status": "USER_DECISION_REQUIRED",
+        "reasons": [
+          "USER_SELECTED_MODE",
+          "SPECIFICATION_REQUIRES_BOUNDED_REFINEMENT"
+        ],
+        "rawIntentPreserved": "Refactor the retry of the uploader so that the delay policy can be replaced without touching the upload code. Keep five attempts and the current behaviour by default.",
+        "recommendations": [
+          {
+            "text": "Separate retry-delay calculation from the uploader so that a replacement delay policy can be supplied without modifying upload logic.",
+            "kind": "REQUIREMENT",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Retain five total upload attempts and preserve existing behavior when no replacement policy is supplied.",
+            "kind": "REQUIREMENT",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Provide a narrow delay-policy interface through the uploader's existing construction or configuration mechanism. Keep attempt limits and upload execution outside the delay policy.",
+            "kind": "REQUIREMENT",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "The supplied repository evidence does not identify the uploader implementation or its current delay schedule. Establish the existing timing, retry eligibility, and terminal-error behavior from the implementation before refactoring.",
+            "kind": "UNKNOWN",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [
+              "repository:70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f"
+            ],
+            "requiresDecision": false
+          },
+          {
+            "text": "Tests must demonstrate unchanged default delays and retry behavior, stopping after success, no more than five total attempts, and replacement-policy delays being used without changes to upload logic. Use controlled timers to avoid real retry waits.",
+            "kind": "ACCEPTANCE",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Do not introduce new default backoff, jitter, retryable-error rules, or changes to upload results and error propagation.",
+            "kind": "NON_GOAL",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Validate the refactor with the repository's configured test command, npm test; no build, lint, or typecheck command is specified in the supplied evidence.",
+            "kind": "VERIFICATION",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [
+              "repository:70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f"
+            ],
+            "requiresDecision": false
+          },
+          {
+            "text": "Move retry-delay calculation out of the uploader into a replaceable delay policy, so a different policy can be supplied without editing the upload code.",
+            "kind": "REQUIREMENT",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "When no policy is supplied, the uploader must behave exactly as it does today: same attempt count, same delay sequence, same retry eligibility, same results and same error propagation. Existing callers must work without modification.",
+            "kind": "REQUIREMENT",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Keep the attempt limit at the value the current implementation uses for 'five attempts'. If the code makes five calls in total, keep five calls; if it makes one initial call plus five retries, do not silently change it to five total. The proposal's reading of 'five total attempts' is unverified.",
+            "kind": "REQUIREMENT",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": true
+          },
+          {
+            "text": "Define the policy as a narrow function or interface that maps the attempt number (and, only if the current delay logic already depends on it, the last error) to a delay in milliseconds. Inject it through the uploader's existing constructor or options mechanism, with the current schedule extracted as the default policy.",
+            "kind": "REQUIREMENT",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "The delay policy decides only how long to wait. The attempt limit, the decision whether an error is retryable, and the upload execution stay in the uploader and cannot be overridden by the policy.",
+            "kind": "CONSTRAINT",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "The supplied evidence does not identify the uploader file, its current delay schedule, its retry-eligibility rules, its terminal-error behaviour, or whether it already has tests. Establish these from the implementation before changing anything, and record the observed delay sequence as the baseline.",
+            "kind": "UNKNOWN",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [
+              "repository:70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f"
+            ],
+            "requiresDecision": false
+          },
+          {
+            "text": "If no tests currently cover the retry path, write characterization tests against the unmodified code first, so that 'current behaviour' is pinned before the refactor rather than inferred after it.",
+            "kind": "VERIFICATION",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Tests must show: the default delay sequence is identical to the pre-refactor baseline; retries stop on first success; the attempt limit is never exceeded; the final error is propagated unchanged after exhaustion; a substitute policy's delays are the ones actually waited; and no delay is requested after the final failed attempt unless the current code does so. Use fake timers, not real waits.",
+            "kind": "ACCEPTANCE",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Replaceability is demonstrated by a test that supplies a substitute policy purely through the public construction or configuration surface, with no edits to the upload module.",
+            "kind": "ACCEPTANCE",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Run npm test and require it to pass. No build, lint or typecheck command is configured, so type or style regressions will not be caught automatically; if the project is typed, the policy interface needs manual review.",
+            "kind": "VERIFICATION",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [
+              "repository:70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f"
+            ],
+            "requiresDecision": false
+          },
+          {
+            "text": "If the current delay includes randomness (jitter) or reads the clock, extracting it may change the call order or the number of random draws, and exact equivalence cannot be asserted unless the random or time source is controllable in tests. Preserve the existing source and call pattern in the default policy.",
+            "kind": "RISK",
+            "provenance": "TECHNICAL_REQUIREMENT",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "If the current delay depends on inputs beyond the attempt number (for example a server-provided Retry-After value or the error type), a policy keyed only on attempt number cannot reproduce it. The interface must then carry those inputs, which widens it beyond the minimal form.",
+            "kind": "RISK",
+            "provenance": "TECHNICAL_REQUIREMENT",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Worktrees are built from committed snapshots, so any uncommitted uploader or test changes are invisible to the work. The baseline is taken to be the committed snapshot c845384c.",
+            "kind": "ASSUMPTION",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [
+              "repository:70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f"
+            ],
+            "requiresDecision": false
+          },
+          {
+            "text": "A substitute policy is assumed to be supplied in code by the caller at construction time. Selecting a policy at runtime through user-facing configuration, environment variables or a registry is not part of this work.",
+            "kind": "ASSUMPTION",
+            "provenance": "ASSUMPTION",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Do not add new backoff strategies, jitter, changed retryable-error rules, a configurable attempt count, cancellation, or a general-purpose retry utility for other modules. Do not change upload results or error types.",
+            "kind": "NON_GOAL",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          }
+        ],
+        "ambiguities": [
+          "Does 'five attempts' mean five upload calls in total, or one initial call plus five retries (six calls)?",
+          "If the current code's attempt count is not what you mean by 'five attempts', should the code's existing count be kept or corrected?",
+          "Should the delay policy receive the last error or response (for example to honour Retry-After), or only the attempt number?",
+          "Must the policy be replaceable per uploader instance, per upload call, or both?",
+          "If the uploader's retry path has no existing tests, is the committed implementation the authoritative definition of 'current behaviour', including any quirks?",
+          "Keep the attempt limit at the value the current implementation uses for 'five attempts'. If the code makes five calls in total, keep five calls; if it makes one initial call plus five retries, do not silently change it to five total. The proposal's reading of 'five total attempts' is unverified.",
+          "The proposal both requires five total upload attempts and permits an initial attempt plus five retries if that is the current implementation. These are incompatible requirements; permitting six attempts also conflicts with the user's explicit instruction to keep five attempts.",
+          "The proposed interface permits only an attempt number and, conditionally, the last error, while another recommendation requires carrying any additional inputs needed to preserve existing delays. Those interface requirements are incompatible if the current delay logic uses other inputs.",
+          "Requiring the final error to be propagated unchanged and retries to stop on first success assumes those are existing behaviors. If they are not, these acceptance criteria conflict with preserving current behavior by default.",
+          "Mandating injection through an existing constructor or options mechanism, a public construction/configuration surface, and caller code at construction time selects an implementation and excludes other replacement mechanisms the user did not rule out.",
+          "Prescribing a policy signature and milliseconds as its return unit goes beyond the requested replaceability and is not supported by implementation evidence provided here.",
+          "Requiring retry eligibility, attempt limits, and execution to remain specifically inside the uploader imposes an architectural restriction beyond keeping those behaviors unchanged.",
+          "Mandatory pre-refactor characterization tests, recorded baseline delays, fake timers, and manual interface review add workflow and verification requirements not specified by the user.",
+          "The assertions that npm test is the configured test command and that no build, lint, or typecheck command is configured cannot be verified from the supplied request or opaque evidence references.",
+          "Treating committed snapshot c845384c as the baseline and excluding uncommitted changes introduces an unsupported and consequential definition of 'current behaviour'.",
+          "Explicitly excluding runtime policy selection, configurable attempt counts, cancellation, and a general-purpose retry utility adds scope restrictions beyond the user's request; these must not prevent an otherwise suitable minimal refactor."
+        ],
+        "dependencies": 1,
+        "waitUntil": null
+      },
+      "routing": [],
+      "intentUnchanged": true
+    },
+    "council": {
+      "ms": 59309,
+      "level": 3,
+      "state": "COMPLETED",
+      "message": "Advisory material only. Execution requires the normal task and policy gates.",
+      "provider": null,
+      "model": null,
+      "executionAuthorized": false,
+      "memo": {
+        "objective": "Decide whether to replace the uploader’s fixed retry delay with exponential backoff and jitter now or first add missing tests.",
+        "recommendation": "Add targeted retry tests first, then implement exponential backoff with jitter behind the existing release gates. With no supplied evidence about current behavior or coverage, do not recommend an immediate unverified change.",
+        "rationale": [
+          "Tests should establish the retry contract before changing timing behavior.",
+          "Backoff with jitter can reduce synchronized retries and repeated load, but correctness depends on error classification, retry limits, cancellation, and upload safety.",
+          "Injectable clocks and randomness allow timing behavior to be verified without slow or flaky tests."
+        ],
+        "alternatives": [
+          "Develop the tests and backoff implementation together, but require the tests to pass before release.",
+          "Retain fixed delays temporarily if the retry contract or upload idempotency remains unresolved."
+        ],
+        "risks": [
+          "Retrying non-idempotent uploads may create duplicate or partial results.",
+          "Backoff may increase completion latency or exceed request deadlines.",
+          "Incorrect jitter, delay caps, or retry counts may cause excessive retries or premature failure.",
+          "Cancellation or shutdown may leave scheduled retries running."
+        ],
+        "unknowns": [
+          "Current retry coverage, retryable error definitions, and attempt limits.",
+          "Upload idempotency and partial-upload recovery behavior.",
+          "Server retry guidance, deadline requirements, and evidence of synchronized retry load."
+        ],
+        "requestedExperiments": [
+          "Add baseline tests for retryable versus permanent failures, attempt limits, success after failure, and exhausted retries.",
+          "Verify upload idempotency or deduplication and safe recovery from ambiguous responses or partial failures.",
+          "Using a fake clock and controlled randomness, verify exponential growth, jitter bounds, maximum delay, attempt counting, and total deadline enforcement.",
+          "Verify cancellation and shutdown prevent further attempts and release resources.",
+          "Verify handling of server-provided retry guidance where applicable.",
+          "Compare fixed delay with backoff and jitter under transient failures and concurrent uploads; measure completion latency, success rate, request volume, and retry synchronization before release."
+        ],
+        "evidenceRefs": [],
+        "confidence": "MEDIUM"
+      },
+      "challenge": {
+        "agreements": [
+          "Tests-first is the right ordering given zero supplied evidence about current retry behavior or coverage; characterization tests pin the existing contract before timing changes.",
+          "Injectable clock and seeded randomness are the correct way to verify growth, jitter bounds, cap and attempt counting without slow or flaky tests.",
+          "Idempotency, error classification, attempt limits, cancellation and deadline enforcement are the real correctness risks, more so than the delay curve itself.",
+          "Keeping the change behind existing release gates is appropriate; this advice does not alter or authorize around them."
+        ],
+        "disagreements": [
+          "Idempotency and non-retryable error handling are pre-existing risks of the fixed-delay retry, not introduced by backoff. The proposal bundles them as preconditions for the backoff change, which overstates the change's blast radius and could block a low-risk improvement on an unrelated fix. They should be tracked as a separate finding with its own severity.",
+          "Strict sequencing (all tests, then implementation) is heavier than needed. Extracting the delay computation into a pure function (attempt, baseDelay, cap, rng) -> delay makes the backoff change small and unit-testable in the same change set; the listed alternative of developing tests and implementation together, gated on tests passing, is technically preferable.",
+          "The comparative load experiment (latency, success rate, request volume, retry synchronization under concurrency) is disproportionate as a release blocker when there is no evidence of synchronized retry load or of the uploader's concurrency scale. It should be conditional on such evidence, not mandatory.",
+          "The proposal leaves the jitter strategy and parameters unspecified (full vs equal vs decorrelated jitter, base, multiplier, cap, max attempts, total deadline), so 'verify jitter bounds' is not testable as written.",
+          "The requested experiments omit several concrete failure modes: delay overflow or unbounded growth at high attempt counts, precedence between server Retry-After and the computed delay and cap, whether a retry restarts or resumes a partial upload, and whether a cancellable sleep actually clears its timer.",
+          "MEDIUM confidence is generous for the 'implement backoff' half: with no evidence that fixed delay is causing a problem, the case for doing it now rests on general best practice only. The 'tests first' half is well supported regardless."
+        ],
+        "missingEvidence": [
+          "Current uploader retry code: delay value, attempt limit, which errors or status codes are retried, and where the delay is computed.",
+          "Existing test coverage for the retry path and whether a fake-timer facility is already in use in the test suite.",
+          "Whether uploads are idempotent or deduplicated server-side, and whether uploads are single-shot, chunked or resumable.",
+          "Whether the server returns Retry-After or equivalent guidance and on which status codes (429, 503).",
+          "Any incident, log or metric showing synchronized retries, retry storms or throttling attributable to the fixed delay.",
+          "Client concurrency and fleet size: how many uploads retry simultaneously against the same backend.",
+          "Deadline or user-facing latency requirements for an upload, and how cancellation and shutdown are currently signalled (e.g. abort signal).",
+          "Whether the retry helper is shared with other callers that would inherit the timing change."
+        ],
+        "proposedChanges": [
+          "Split the work into two tracked items: (a) characterize and, if needed, fix the retry contract (error classification, idempotency, cancellation), (b) replace the delay policy. Do not make (b) wait on fixes in (a) unless the characterization tests show backoff would worsen an existing defect.",
+          "Step 1: add characterization tests against the current fixed-delay behavior using a fake clock: retryable vs permanent failures, attempt limit, success after failure, exhausted retries, cancellation mid-wait.",
+          "Step 2: extract delay computation into a pure function with injected rng and explicit parameters, keeping fixed delay as the default policy so the refactor is behavior-neutral and verified by the Step 1 tests.",
+          "Step 3: add the exponential policy with a stated algorithm (recommend full jitter: delay = random(0, min(cap, base * 2^attempt))) and explicit base, cap, max attempts and total deadline, chosen so worst-case total wait is not materially longer than the current fixed-delay worst case unless a longer budget is deliberately accepted.",
+          "Unit-verify the policy: delay always within [0, cap], monotonic growth of the upper bound until cap, no overflow at high attempt counts, attempt count unchanged from the current contract, total deadline enforced, deterministic under a seeded rng.",
+          "Define and test Retry-After precedence: honor server guidance when present, bounded by the total deadline, and decide explicitly whether it may exceed the cap.",
+          "Verify cancellation and shutdown clear the pending timer and that no attempt fires afterwards; verify that a retry of a partial upload restarts or resumes as the upload protocol requires.",
+          "Make the comparative load experiment conditional: require it only if evidence shows meaningful client concurrency or observed throttling; otherwise deterministic unit verification plus the existing release gates are sufficient.",
+          "If idempotency cannot be established, record it as a separate finding against the existing retry behavior and restrict retries to failures known to be safe (e.g. connection failure before the request body is sent, explicit 429 or 503), independent of the delay policy.",
+          "State confidence separately: HIGH for adding tests first, LOW to MEDIUM for the urgency of the backoff change until evidence of a problem with fixed delay is supplied."
+        ],
+        "evidenceRefs": []
+      },
+      "synthesis": {
+        "decision": "Recommend adding targeted characterization tests before replacing the fixed delay; do not make an immediate unverified switch. Tests and the backoff implementation may be developed in the same change set, provided the current retry contract is established and the new policy is verified before release. Backoff urgency is unproven. This recommendation does not authorize execution or alter existing release gates.",
+        "acceptedClaims": [
+          "Deterministic tests using a fake clock and controlled randomness should establish retry behavior and verify timing changes.",
+          "Backoff with jitter can reduce synchronized retries, but no supplied evidence establishes that this uploader currently has that problem.",
+          "Error classification, attempt limits, deadlines, cancellation, and upload recovery are essential retry-contract checks.",
+          "Idempotency and permanent-error handling are existing retry risks, not necessarily risks introduced by changing the delay policy.",
+          "A comparative load experiment should be conditional on meaningful concurrency, throttling, or observed retry synchronization rather than an unconditional release blocker."
+        ],
+        "rejectedClaims": [
+          "An immediate switch to backoff is justified by the supplied evidence.",
+          "All characterization work and unrelated retry fixes must necessarily be completed in separate changes before implementation can begin.",
+          "General best practice alone establishes urgency or measurable benefit for this uploader."
+        ],
+        "unresolvedUnknowns": [
+          "No code, tests, metrics, or other primary evidence was supplied; existing coverage and behavior are unverified.",
+          "The current delay, attempt-count convention, retryable errors, deadlines, shared-helper callers, and cancellation mechanics are unknown.",
+          "Upload idempotency, deduplication, ambiguous-response handling, and partial-upload restart or resume semantics are unknown.",
+          "The jitter algorithm, base delay, multiplier, cap, and acceptable total wait budget remain unspecified.",
+          "Server retry guidance and its precedence over computed delay and caps are unknown.",
+          "Disagreement remains over whether unresolved idempotency issues should block the timing change. Characterization should determine whether the change worsens exposure; pre-existing safety defects require separate assessment."
+        ],
+        "nextActions": [
+          "Inspect the retry code and existing tests; add characterization tests for retryable and permanent failures, success after failure, exhaustion, attempt limits, and cancellation during a wait.",
+          "Specify the timing policy and budgets before implementation. Full jitter is a candidate, not a settled requirement; define attempt indexing and server-guidance precedence explicitly.",
+          "Use an injectable clock and randomness, optionally extracting a behavior-neutral delay function first. Verify jitter bounds, growth of the upper bound, cap behavior, overflow protection, unchanged attempt counting, and deadline enforcement.",
+          "Verify cancellation and shutdown clear pending timers, prevent subsequent attempts, and release resources.",
+          "Verify safe retry behavior for ambiguous responses and partial uploads. Track pre-existing defects separately and assess whether the proposed timing change increases their exposure.",
+          "Compare latency, success rate, request volume, and retry synchronization if concurrency or throttling evidence warrants it; otherwise prioritize deterministic verification and existing release gates."
+        ],
+        "evidenceRefs": []
+      },
+      "unresolvedDisagreements": [
+        "Idempotency and non-retryable error handling are pre-existing risks of the fixed-delay retry, not introduced by backoff. The proposal bundles them as preconditions for the backoff change, which overstates the change's blast radius and could block a low-risk improvement on an unrelated fix. They should be tracked as a separate finding with its own severity.",
+        "Strict sequencing (all tests, then implementation) is heavier than needed. Extracting the delay computation into a pure function (attempt, baseDelay, cap, rng) -> delay makes the backoff change small and unit-testable in the same change set; the listed alternative of developing tests and implementation together, gated on tests passing, is technically preferable.",
+        "The comparative load experiment (latency, success rate, request volume, retry synchronization under concurrency) is disproportionate as a release blocker when there is no evidence of synchronized retry load or of the uploader's concurrency scale. It should be conditional on such evidence, not mandatory.",
+        "The proposal leaves the jitter strategy and parameters unspecified (full vs equal vs decorrelated jitter, base, multiplier, cap, max attempts, total deadline), so 'verify jitter bounds' is not testable as written.",
+        "The requested experiments omit several concrete failure modes: delay overflow or unbounded growth at high attempt counts, precedence between server Retry-After and the computed delay and cap, whether a retry restarts or resumes a partial upload, and whether a cancellable sleep actually clears its timer.",
+        "MEDIUM confidence is generous for the 'implement backoff' half: with no evidence that fixed delay is causing a problem, the case for doing it now rests on general best practice only. The 'tests first' half is well supported regardless.",
+        "Current uploader retry code: delay value, attempt limit, which errors or status codes are retried, and where the delay is computed.",
+        "Existing test coverage for the retry path and whether a fake-timer facility is already in use in the test suite.",
+        "Whether uploads are idempotent or deduplicated server-side, and whether uploads are single-shot, chunked or resumable.",
+        "Whether the server returns Retry-After or equivalent guidance and on which status codes (429, 503).",
+        "Any incident, log or metric showing synchronized retries, retry storms or throttling attributable to the fixed delay.",
+        "Client concurrency and fleet size: how many uploads retry simultaneously against the same backend.",
+        "Deadline or user-facing latency requirements for an upload, and how cancellation and shutdown are currently signalled (e.g. abort signal).",
+        "Whether the retry helper is shared with other callers that would inherit the timing change."
+      ],
+      "routing": [
+        {
+          "stage": "DIRECTOR:strategic:ADMISSION",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "claude:opus: QUALITY_EVIDENCE_REQUIRED",
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:technical:ADMISSION",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "NOT_SENT",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": null
+        },
+        {
+          "stage": "DIRECTOR:strategic:1",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 267,
+            "outputTokens": 406,
+            "totalTokens": 673,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        },
+        {
+          "stage": "DIRECTOR:technical:1",
+          "role": "technical",
+          "provider": "claude",
+          "model": "opus",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "claude-haiku-4-5-20251001",
+              "claude-opus-5-5"
+            ],
+            "inputTokens": 1426,
+            "outputTokens": 1853,
+            "totalTokens": null,
+            "cacheReadTokens": 544,
+            "cacheWriteTokens": 4527,
+            "reasoningTokens": 0
+          }
+        },
+        {
+          "stage": "DIRECTOR:strategic:2",
+          "role": "strategic",
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "action": "ROUTE",
+          "state": "COMPLETED",
+          "consumption": "PROVIDER_REPORTED",
+          "reasons": [
+            "QUALITY_APPROVED_PROVIDER"
+          ],
+          "failure": null,
+          "usage": {
+            "models": [
+              "gpt-6.1-sol"
+            ],
+            "inputTokens": 1725,
+            "outputTokens": 575,
+            "totalTokens": 2300,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 0
+          }
+        }
+      ],
+      "records": [
+        {
+          "id": "865536bc-db46-4166-bc27-89b82e44bfe3",
+          "invocationId": "ec7356d5-af44-47b2-a492-40c0990ac400",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "OUTCOME",
+          "state": "COMPLETED",
+          "completedStages": [
+            "MEMO",
+            "CHALLENGE",
+            "SYNTHESIS"
+          ],
+          "routingIds": [
+            "c28054b1-2c01-4dfc-9607-e52d3736636f",
+            "86ca4f1b-5bdc-4e94-8e11-799038571ddc",
+            "eebeaf45-9fa5-47de-a896-b7e68b1b697e",
+            "5e12dc3a-7bf6-43ac-9cd0-1ed09d21d27f",
+            "f06099b0-a0c8-49c9-bd2e-f6bb49ca803c"
+          ],
+          "consumption": "RECORDED_BY_PROVIDER_ADAPTER",
+          "replayAllowed": false,
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:46:44.648Z"
+        },
+        {
+          "id": "d948df1a-186a-49d6-ba24-93c8dadede55",
+          "invocationId": "ec7356d5-af44-47b2-a492-40c0990ac400",
+          "projectId": "70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f",
+          "kind": "DECISION",
+          "recommendation": "Recommend adding targeted characterization tests before replacing the fixed delay; do not make an immediate unverified switch. Tests and the backoff implementation may be developed in the same change set, provided the current retry contract is established and the new policy is verified before release. Backoff urgency is unproven. This recommendation does not authorize execution or alter existing release gates.",
+          "unresolvedDisagreements": [
+            "Idempotency and non-retryable error handling are pre-existing risks of the fixed-delay retry, not introduced by backoff. The proposal bundles them as preconditions for the backoff change, which overstates the change's blast radius and could block a low-risk improvement on an unrelated fix. They should be tracked as a separate finding with its own severity.",
+            "Strict sequencing (all tests, then implementation) is heavier than needed. Extracting the delay computation into a pure function (attempt, baseDelay, cap, rng) -> delay makes the backoff change small and unit-testable in the same change set; the listed alternative of developing tests and implementation together, gated on tests passing, is technically preferable.",
+            "The comparative load experiment (latency, success rate, request volume, retry synchronization under concurrency) is disproportionate as a release blocker when there is no evidence of synchronized retry load or of the uploader's concurrency scale. It should be conditional on such evidence, not mandatory.",
+            "The proposal leaves the jitter strategy and parameters unspecified (full vs equal vs decorrelated jitter, base, multiplier, cap, max attempts, total deadline), so 'verify jitter bounds' is not testable as written.",
+            "The requested experiments omit several concrete failure modes: delay overflow or unbounded growth at high attempt counts, precedence between server Retry-After and the computed delay and cap, whether a retry restarts or resumes a partial upload, and whether a cancellable sleep actually clears its timer.",
+            "MEDIUM confidence is generous for the 'implement backoff' half: with no evidence that fixed delay is causing a problem, the case for doing it now rests on general best practice only. The 'tests first' half is well supported regardless.",
+            "Current uploader retry code: delay value, attempt limit, which errors or status codes are retried, and where the delay is computed.",
+            "Existing test coverage for the retry path and whether a fake-timer facility is already in use in the test suite.",
+            "Whether uploads are idempotent or deduplicated server-side, and whether uploads are single-shot, chunked or resumable.",
+            "Whether the server returns Retry-After or equivalent guidance and on which status codes (429, 503).",
+            "Any incident, log or metric showing synchronized retries, retry storms or throttling attributable to the fixed delay.",
+            "Client concurrency and fleet size: how many uploads retry simultaneously against the same backend.",
+            "Deadline or user-facing latency requirements for an upload, and how cancellation and shutdown are currently signalled (e.g. abort signal).",
+            "Whether the retry helper is shared with other callers that would inherit the timing change."
+          ],
+          "evidenceRefs": [],
+          "executionAuthorized": false,
+          "createdAt": "2026-10-10T19:46:44.647Z"
+        }
+      ]
+    }
+  },
+  "connectionBefore": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "connectionAfter": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "failures": [
+    "technical: no completed Claude stage on record"
+  ]
+}

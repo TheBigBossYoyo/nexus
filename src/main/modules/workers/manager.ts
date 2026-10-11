@@ -85,6 +85,7 @@ interface Session {
   workerId: string | null
   leaseId: string | null
   ended: boolean
+  stopConfirmed: boolean
 }
 
 interface Live {
@@ -197,7 +198,7 @@ export class WorkerManager {
 
   /** Starts a session of `provider` on a worker. Returns at once; the session waits for a worker if none is free. */
   startSession(provider: string, spec: SessionSpec): AgentSessionHandle {
-    const session: Session = { provider, spec, events: new AsyncQueue<AgentEvent>(), sessionId: null, queued: [], workerId: null, leaseId: null, ended: false }
+    const session: Session = { provider, spec, events: new AsyncQueue<AgentEvent>(), sessionId: null, queued: [], workerId: null, leaseId: null, ended: false, stopConfirmed: false }
     if (this.stopping) this.endSession(session, 'crashed', 'The runtime is stopping.')
     else {
       this.waiting.push(session)
@@ -212,12 +213,16 @@ export class WorkerManager {
       end: () => this.sendToSession(session, 'end'),
       interrupt: () => this.command(session, 'interrupt').catch(() => undefined),
       stop: () => this.stopSession(session),
+      stopConfirmed: () => session.stopConfirmed,
     }
   }
 
   private endSession(session: Session, reason: 'completed' | 'stopped' | 'crashed', error: string | null): void {
     if (session.ended) return
     session.ended = true
+    // A session that never reached a worker (none could start, the grant failed, the runtime was stopping)
+    // started nothing: there is no process whose end is still to be confirmed.
+    if (session.workerId === null) session.stopConfirmed = true
     session.events.push({ type: 'session.ended', reason, error })
     session.events.close()
   }
@@ -247,6 +252,7 @@ export class WorkerManager {
     const index = this.waiting.indexOf(session)
     if (index >= 0) {
       this.waiting.splice(index, 1)
+      session.stopConfirmed = true
       this.endSession(session, 'stopped', null)
       return
     }
@@ -386,6 +392,7 @@ export class WorkerManager {
           this.save(worker.record)
         }
         if (message.event.type === 'session.ended') {
+          session.stopConfirmed = message.event.stopConfirmed === true
           // The lease ends with the session, before anyone can react to its end: the same agent session may be
           // started again at once (a rotation), and must not find its own old lease in the way.
           this.endLease(message.leaseId, 'RELEASED', null)
@@ -395,6 +402,11 @@ export class WorkerManager {
         return
       }
       case 'ended':
+        if (message.stopConfirmed === false) {
+          void this.failWorker(worker, 'Its runtime could not confirm the child session stopped.', 'crashed')
+          return
+        }
+        if (message.stopConfirmed && worker.session) worker.session.stopConfirmed = true
         this.release(worker, message.leaseId)
         return
       case 'call':
@@ -477,11 +489,13 @@ export class WorkerManager {
   /** Ends a worker that is lost or must not go on, and takes its session back. */
   private async failWorker(worker: Live, why: string, sessionEnds: 'crashed' | 'stopped'): Promise<void> {
     if (worker.exited && !LIVE_WORKER_STATES.includes(worker.record.state)) return
+    const session = worker.session
     this.revoke(worker, why, sessionEnds, sessionEnds === 'stopped' ? 'REVOKED' : 'EXPIRED')
     worker.record.error = why
     this.transition(worker, 'FAILED', why)
     try {
       await worker.process.kill()
+      if (session) session.stopConfirmed = true
     } catch (e) {
       this.log(`worker ${worker.record.id} could not be ended: ${errorMessage(e)}`)
     }
@@ -504,7 +518,11 @@ export class WorkerManager {
     worker.record.exitCode = code
     const expected = worker.record.state === 'STOPPING' || worker.record.state === 'DRAINING'
     const why = `The worker process ended (${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`}).`
-    // The exit of a process says that it is gone, not what its session achieved.
+    // The exit of a process says that it is gone, not what its session achieved. It does say that the session
+    // has stopped: the worker that hosted it no longer exists, and the provider's process it started has lost
+    // its pipes. Without this an unexpected exit left the session's capacity quarantined with nothing able to
+    // confirm it, and a few such exits left every later session waiting until the runtime was restarted.
+    if (worker.session) worker.session.stopConfirmed = true
     this.revoke(worker, why, 'crashed', 'REVOKED')
     if (LIVE_WORKER_STATES.includes(worker.record.state)) {
       if (expected) this.transition(worker, 'STOPPED')
@@ -644,7 +662,7 @@ export function checkedWorkerMessage(raw: unknown): WorkerToRuntime | null {
     case 'cmdResult':
       return Number.isInteger(m['id']) && typeof m['ok'] === 'boolean' ? (raw as WorkerToRuntime) : null
     case 'ended':
-      return isText(m['leaseId'], 64) ? (raw as WorkerToRuntime) : null
+      return isText(m['leaseId'], 64) && (m['stopConfirmed'] === undefined || typeof m['stopConfirmed'] === 'boolean') ? (raw as WorkerToRuntime) : null
     case 'call':
       return Number.isInteger(m['id']) && isText(m['leaseId'], 64) && typeof m['method'] === 'string' && CALL_METHODS.includes(m['method']) && Array.isArray(m['args']) && m['args'].length <= 4 ? (raw as WorkerToRuntime) : null
     case 'event': {
@@ -653,6 +671,9 @@ export function checkedWorkerMessage(raw: unknown): WorkerToRuntime | null {
       // The session id is stored and used to resume: it is a short token, nothing else.
       if (event['type'] === 'session.started' && !(isText(event['sessionId'], 200) && /^[\w.:-]+$/.test(event['sessionId']))) return null
       if (event['type'] === 'session.ended' && !['completed', 'stopped', 'crashed'].includes(String(event['reason']))) return null
+      if (event['type'] === 'session.ended' && event['stopConfirmed'] !== undefined && typeof event['stopConfirmed'] !== 'boolean') return null
+      // Only the host admission kernel can signal a capacity wait.
+      if (event['type'] === 'capacity.wait') return null
       return raw as WorkerToRuntime
     }
     default:
@@ -686,7 +707,7 @@ export function forkLauncher(options: { entry: string; execPath?: string; env?: 
       },
       kill: async () => {
         // The tree, not only the worker: a session's own children (claude.exe, shells) must not be left behind.
-        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) await options.killTree(child.pid).catch(() => undefined)
+        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) await options.killTree(child.pid)
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
       },
       onMessage: (listener) => void child.on('message', (message) => listener(message as WorkerToRuntime)),

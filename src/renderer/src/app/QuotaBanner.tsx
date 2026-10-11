@@ -29,7 +29,7 @@ export function QuotaBanner() {
       <ClockIcon size={16} className="shrink-0 text-warning" />
       <div className="min-w-0 flex-1 basis-80" role="status">
         <div className="font-semibold text-text-primary">
-          {model.headline} <span className="font-normal text-text-secondary">No work has been lost.</span>
+          {model.headline} <span className="font-normal text-text-secondary">Finished tasks are kept; unfinished work resumes from its last checkpoint.</span>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-text-secondary">
           {model.checking ? <span>Checking availability…</span> : null}
@@ -56,7 +56,7 @@ export function QuotaBanner() {
                 {model.resumeAtText}
               </span>
               <SourceLabel confidence="ESTIMATED" source="LOCAL_AGGREGATION" />
-              {model.countdown ? <span className="tnum text-text-muted">(in {model.countdown})</span> : null}
+              {model.countdown ? <span aria-hidden="true" className="tnum text-text-muted">(in {model.countdown})</span> : null}
             </span>
           ) : null}
         </div>

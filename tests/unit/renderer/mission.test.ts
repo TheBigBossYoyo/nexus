@@ -18,12 +18,12 @@ const base: MissionDraft = {
 }
 
 describe('mission composer input', () => {
-  it('trims the prompt and omits untouched overrides', () => {
+  it('preserves raw intent and omits untouched overrides', () => {
     expect(buildCreateRunInput(base)).toEqual({
       projectId: 'p1',
       mode: 'build',
       preset: 'balanced',
-      prompt: 'add a health endpoint',
+      prompt: '  add a health endpoint  ',
       requirePlanApproval: true,
     })
   })

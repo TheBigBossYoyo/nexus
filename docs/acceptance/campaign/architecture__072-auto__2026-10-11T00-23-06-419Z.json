@@ -1,0 +1,285 @@
+{
+  "kind": "campaign-run",
+  "task": "architecture",
+  "category": "architecture task",
+  "arm": "072-auto",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in the default AUTO depth, compiled with the real ChatGPT connection",
+  "compilation": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT"
+    ],
+    "ms": 24007,
+    "recommendations": 11,
+    "recommendationChars": 3136,
+    "byKind": {
+      "REQUIREMENT": 3,
+      "ACCEPTANCE": 3,
+      "CONSTRAINT": 1,
+      "UNKNOWN": 1,
+      "VERIFICATION": 2,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 986,
+          "outputTokens": 877,
+          "totalTokens": 1863,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 1249,
+          "outputTokens": 69,
+          "totalTokens": 1318,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 35
+        }
+      }
+    ]
+  },
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "ca43de49fdf47897a6c6db253580293115858e27",
+  "startedAt": "2026-10-11T00:23:06.419Z",
+  "finishedAt": "2026-10-11T00:27:37.406Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 35,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "reports",
+        "ref": "nexus/7cf4e949/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 5,
+          "fail": 0,
+          "output": "✔ json and csv are registered by default and their output is unchanged (1.497ms)\n✔ an unknown format names itself and the known formats (0.3823ms)\n✔ a format is added from outside, without touching the module (0.2402ms)\n✔ registering a name twice throws and keeps the first exporter (0.1847ms)\n✔ the decision is recorded with its three sections (12.473ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 134.8065\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 9,
+          "fail": 0,
+          "output": "✔ json output (0.6138ms)\n✔ csv output (0.6158ms)\n✔ default formats are listed (1.1736ms)\n✔ csv with no rows is empty (0.9375ms)\n✔ csv renders missing, null and undefined values as empty fields (0.8668ms)\n✔ custom exporter is dispatched with the given rows (0.8237ms)\n✔ duplicate registration throws and keeps the original (1.572ms)\n✔ listFormats is sorted alphabetically (1.8158ms)\n✔ unknown format error names the format and the known formats (1.1161ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 166.6044\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": true
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": true,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      },
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "adr-exporter-registry",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 3,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"a4c4bcee-13ed-438e-9203-a984b37280af\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}",
+        "{\"approvalId\":\"59236071-e96a-4c42-a9f7-4952f5f47c8c\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}",
+        "{\"approvalId\":\"02a33f29-f073-48cc-8c74-12ee10cda99f\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}"
+      ],
+      "denials": [
+        "planner: Bash: Denied by the user",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (for, do, tr, done, base64, (redirection), node, import, const, javascript;base64,, index.js?verify=1, console.log, exports:,, m, .sort, fresh listformats:,, [{, ,, id:, ],, [],, a:, x:, nested:, 0, [{}],, ], assert.equal, m.exportdata, f,, old vs new iden",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [],
+      "lastMessages": [
+        "planner: ",
+        "worker:  updated.\n- **`src/export/index.test.js`**: the two original tests are untouched. Each new test loads a fresh module with `import('./index.js?case=N')`, so they don't depend on order. They cover the cases you listed.\n- **`docs/adr/0001-exporter-registry.md`**: this wasn't in the task's file list, but the original request and project memory call for it. It has the sections Context, Decision and Consequences.\n\nI committed everything as `ed0e30a` on the current branch. Git warned that LF line endings in `index.js` and the ADR will become CRLF the next time it touches them.\n\nI haven't compared the `json` and `csv` output against the old switch beyond the existing tests, which check both formats.",
+        "reviewer: ",
+        "verifier: ",
+        "worker: iour.\n\nConsequences now covers each point from the task:\n- A format is added from a new file that calls `registerExporter`, with no edit to an existing file.\n- The registry is process-wide module state, so a format exists only once its module has been imported, and the importer decides.\n- Duplicate names throw, so one team can't silently replace another's format.\n- There is no unregister, no replace and no automatic discovery.\n- The defaults stay in `index.js` to avoid a circular import.\n- `json` and `csv` are registered by default with output unchanged, byte for byte.\n\nI also kept the existing line that tests load a fresh module instance per test. I did not check that against the test file.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Planner [high] Run shell command (bash): git ls-files; echo ---; cat package.json; echo ---; cat -A src/export/index.js; echo ---; cat src/export/index.test.js; echo ---; cat README.md; echo ---; grep -rn \"export\" --include=*.js --include=*.json --include=*.md . --exclude-dir=node_modules --exclude-dir=.git | grep -v \"^./src/export/\" | hea | touching Git's own files: .git",
+        "Worker/exporter-registry [medium] Run shell command (bash): cat >> src/export/index.test.js <<'EOF'\n\nlet instance = 0\nconst fresh = () => import(`./index.js?case=${++instance}`)\n\ntest('default formats are listed', async () => {\n  const m = await fresh()\n  assert.deepEqual(m.listFormats(), ['csv', 'json'])\n})\n\ntest('csv with no rows is empty', async () => {\n  | index.js does not exist yet; another part of this command may create it",
+        "Worker/adr-exporter-registry [medium] Run shell command (bash): python3 - <<'E' 2>/dev/null || python - <<'E2'\nE\nimport re\nE2\np='docs/adr/0001-exporter-registry.md'\ns=open(p,encoding='utf-8').read()\ni=s.index('## Consequences')\ns=s[:i]+'''## Consequences\n\n- A format is added from a new file that calls `registerExporter`; no existing file is edited.\n- The registr | index.js does not exist yet; another part of this command may create it"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 63,
+    "inputTokensUncached": 27924,
+    "outputTokens": 24509,
+    "cacheCreationTokens": 70500,
+    "cacheReadTokens": 567152,
+    "costUsdReported": 1.0595,
+    "toolCalls": 55,
+    "toolCallsRecorded": 55,
+    "filesChangedRecorded": 4,
+    "toolCallsByName": {
+      "Bash": 22,
+      "Glob": 1,
+      "Read": 19,
+      "StructuredOutput": 6,
+      "Write": 2,
+      "Edit": 2,
+      "PowerShell": 2,
+      "Grep": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 6,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 9,
+        "toolCalls": 8,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 2,
+        "turns": 17,
+        "toolCalls": 15,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 2,
+        "turns": 12,
+        "toolCalls": 10,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 3,
+        "turns": 25,
+        "toolCalls": 22,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 268638,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 25
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 27
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 17
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

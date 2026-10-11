@@ -1,0 +1,157 @@
+{
+  "task": "localized-bug",
+  "compiledAt": "2026-10-11T08:15:34.374Z",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "spec": {
+    "id": "259d558b-b014-4a31-a6cd-4fb8bbc18821",
+    "projectId": "606bd56b-b10f-40af-ba6b-0ac5f12cf98a",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT",
+      "PROFILE:bugfix|medium|low:scope=few:ambiguity=medium",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "recommendations": [
+      {
+        "text": "Trace the telemetry pipeline to identify the root cause of per-car laps appearing out of driving order during long sessions, reported after roughly eighteen hours. Establish the actual failure condition rather than assuming an exact duration threshold.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Inspect the repository to establish how telemetry ordering, time values, lap identity, and race-state updates are represented, and locate the relevant tests and test conventions.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Fix the identified telemetry-pipeline defect so that each car's laps remain in driving order across the failure condition, preserving existing behavior outside the defect.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add a deterministic regression test that reproduces the identified failure condition without requiring an eighteen-hour wall-clock run. Assert the affected car's lap sequence in race state, not merely an intermediate sorting result.",
+        "kind": "ACCEPTANCE",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Demonstrate that the regression test fails on the original implementation because laps are out of driving order and passes with the fix. Document the root cause and how the test exercises it.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run the relevant tests and the repository test suite; the supplied snapshot reports npm test as the test command, which agents should confirm against the checked-out repository. Report results and any unrelated failures.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:606bd56b-b10f-40af-ba6b-0ac5f12cf98a"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "Keep the work focused on the ordering defect and its regression coverage; unrelated telemetry refactoring or redesign is outside scope.",
+        "kind": "NON_GOAL",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "69e6258655cea2bd6259a18dee34282def1a21782a02df99e2587654bc667402",
+    "createdAt": "2026-10-11T08:15:06.568Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "In long sessions the race state gets corrupted: after roughly eighteen hours of running, laps of a car appear out of driving order. Find the cause in the telemetry pipeline and fix it, with a test that fails before the fix.",
+    "intentId": "141484c3-61d3-4614-b5dd-ad6c5e05201c",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "In long sessions the race state gets corrupted: after roughly eighteen hours of running, laps of a car appear out of driving order. Find the cause in the telemetry pipeline and fix it, with a test that fails before the fix."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:606bd56b-b10f-40af-ba6b-0ac5f12cf98a",
+        "version": "2c9251241c6658f36f0b7aabd4b1d5e72f3ad4a6:546d4edd72af47ba1232074664a95d75cf3a4a9cced2ef521cbfe45fa14e3e8b"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "READY",
+    "reasons": [
+      "ENGINEERING_REQUIREMENT_DEVELOPMENT",
+      "PROFILE:bugfix|medium|low:scope=few:ambiguity=medium",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "ms": 27967,
+    "recommendations": 7,
+    "recommendationChars": 2195,
+    "byKind": {
+      "REQUIREMENT": 2,
+      "UNKNOWN": 1,
+      "ACCEPTANCE": 1,
+      "VERIFICATION": 2,
+      "NON_GOAL": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 776,
+          "outputTokens": 609,
+          "totalTokens": 1385,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 823,
+          "outputTokens": 56,
+          "totalTokens": 879,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 22
+        }
+      }
+    ]
+  }
+}

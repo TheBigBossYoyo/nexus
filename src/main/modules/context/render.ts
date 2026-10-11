@@ -8,6 +8,12 @@ export interface PackSection {
 
 /** Per-section character budgets. Truncation is always marked in the text. */
 export const SECTION_LIMITS = {
+  // What the user wrote is shown to the sessions that answer for all of it up to the length it was accepted
+  // at (the request and a task's description 20,000 characters, feedback on a plan 10,000). It used to be
+  // accepted at that length and cut to the general limits below, so the end of a long request was never read.
+  request: 20_000,
+  taskDescription: 20_000,
+  userFeedback: 10_000,
   task: 8_000,
   criteria: 4_000,
   decisions: 6_000,
@@ -117,7 +123,7 @@ export function renderTaskSpec(
   if (task.suggestedFiles.length > 0) {
     parts.push('', 'Expected files (a hint, not a limit):', bullets(task.suggestedFiles))
   }
-  return truncate(parts.join('\n'), SECTION_LIMITS.task)
+  return truncate(parts.join('\n'), SECTION_LIMITS.taskDescription)
 }
 
 export function criteriaSection(
@@ -130,7 +136,10 @@ export function criteriaSection(
   }
   if (mission.length > 0) {
     if (parts.length > 0) parts.push('')
-    parts.push('Mission criteria:', bullets(mission))
+    // Said with the list, because a task's verifier failed a finished task on criteria only a later task can
+    // meet. With no task criteria the mission's are all there is to judge by, and the note would only mislead.
+    const scoped = task.acceptanceCriteria.length > 0
+    parts.push(scoped ? 'Mission criteria (of the whole mission: this task answers for them as far as its own scope goes; what belongs to another task is not a failure of this one):' : 'Mission criteria:', bullets(mission))
   }
   return parts.length > 0 ? truncate(parts.join('\n'), SECTION_LIMITS.criteria) : null
 }

@@ -1,0 +1,228 @@
+{
+  "kind": "campaign-run",
+  "task": "cross-module-bug",
+  "category": "cross-module bug",
+  "arm": "072",
+  "armIs": "NEXUS 0.7.2 sources, default settings, mission admitted in EXACT depth (no strategic provider)",
+  "compilation": null,
+  "nexusVersion": "0.7.2-development",
+  "nexusCommit": "be766d78ae319c469406a7891f96acc6cb4523e7",
+  "startedAt": "2026-10-11T04:54:48.165Z",
+  "finishedAt": "2026-10-11T04:59:46.310Z",
+  "held": {
+    "repository": "identical starting commit content per task",
+    "models": "default role policy and tiers of both versions (unchanged between them)",
+    "preset": "balanced",
+    "maxParallelAgents": 1,
+    "permissions": "default plus safe prefixes node --test, npm test; every approval request refused",
+    "budgetMinutes": 30,
+    "evaluator": "hidden node --test files, the same for every arm"
+  },
+  "quality": {
+    "completed": true,
+    "finalState": "completed",
+    "timedOut": false,
+    "hiddenPassed": true,
+    "evaluations": [
+      {
+        "repository": "shopfront",
+        "ref": "nexus/68f82490/integration",
+        "hiddenPassed": true,
+        "hidden": {
+          "ok": true,
+          "pass": 14,
+          "fail": 0,
+          "output": "✔ order 0: the cart follows the money rules (0.8718ms)\n✔ order 0: the invoice follows the money rules and equals the cart (0.202ms)\n✔ order 1: the cart follows the money rules (0.0998ms)\n✔ order 1: the invoice follows the money rules and equals the cart (0.1292ms)\n✔ order 2: the cart follows the money rules (0.1942ms)\n✔ order 2: the invoice follows the money rules and equals the cart (0.1371ms)\n✔ order 3: the cart follows the money rules (0.0758ms)\n✔ order 3: the invoice follows the money rules and equals the cart (0.068ms)\n✔ order 4: the cart follows the money rules (0.0923ms)\n✔ order 4: the invoice follows the money rules and equals the cart (0.14ms)\n✔ order 5: the cart follows the money rules (0.0753ms)\n✔ order 5: the invoice follows the money rules and equals the cart (0.0808ms)\n✔ order 6: the cart follows the money rules (0.0791ms)\n✔ order 6: the invoice follows the money rules and equals the cart (0.1124ms)\nℹ tests 14\nℹ suites 0\nℹ pass 14\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 106.5792\n"
+        },
+        "suitePassed": true,
+        "suite": {
+          "ok": true,
+          "pass": 12,
+          "fail": 0,
+          "output": "✔ a cart without discount or tax is the sum of its lines (0.9538ms)\n✔ three lines of 35 cents at 15% discount and 20% tax total 107 (0.1681ms)\n✔ a single 30 cent item at 15% discount and 20% tax totals 30 (0.1048ms)\n✔ an invoice without discount or tax is the sum of its lines (0.8994ms)\n✔ three lines of 35 cents at 15% discount and 20% tax are discounted and taxed once on the subtotal (0.7313ms)\n✔ the discount and the tax are rounded once on the order, not per line (2.0283ms)\n✔ one line of three items totals the same as three lines of one item (0.1728ms)\n✔ the discount is rounded half up (0.1528ms)\n✔ the tax is rounded half up (0.1176ms)\n✔ an order without items totals zero (0.1509ms)\n✔ a mixed order follows the money rules (0.1154ms)\n✔ the cart and the invoice agree with the shared totals for every order (0.3233ms)\nℹ tests 12\nℹ suites 0\nℹ pass 12\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 185.9987\n"
+        },
+        "note": null
+      }
+    ],
+    "contractInSync": null,
+    "firstPassVerification": [
+      {
+        "key": "task:checks",
+        "passed": true
+      },
+      {
+        "key": "task:verifier",
+        "passed": false
+      },
+      {
+        "key": "mission:checks",
+        "passed": true
+      },
+      {
+        "key": "mission:verifier",
+        "passed": true
+      }
+    ],
+    "firstPassAllPassed": false,
+    "reviews": [
+      {
+        "verdict": "approved",
+        "findings": 0
+      }
+    ],
+    "reviewerFindings": 0,
+    "findingsBySeverity": {},
+    "repairs": 0,
+    "tasks": [
+      {
+        "key": "unify-order-totals",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "verify-money-rules",
+        "state": "completed",
+        "attempts": 1
+      },
+      {
+        "key": "unify-order-totals-fix1",
+        "state": "completed",
+        "attempts": 1
+      }
+    ],
+    "regressions": [],
+    "humanIntervention": {
+      "approvalsRequestedAndRefused": 2,
+      "pauses": []
+    },
+    "diagnostics": {
+      "approvals": [
+        "{\"approvalId\":\"3165f24f-9dc8-4dad-93e3-80727530d7bd\",\"action\":\"Run shell command (bash)\",\"risk\":\"medium\"}",
+        "{\"approvalId\":\"f4923394-1cef-412a-a1a3-95d89ef01750\",\"action\":\"Run shell command (bash)\",\"risk\":\"high\"}"
+      ],
+      "denials": [
+        "planner: Bash: Command not permitted for the planner role (for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.",
+        "worker: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "reviewer: Bash: Denied by the user",
+        "verifier: Bash: Command not permitted for the verifier role (cd). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (for, do, done). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.",
+        "verifier: Bash: Command not permitted for the verifier role (node). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed."
+      ],
+      "taskErrors": [],
+      "verificationFailures": [
+        "{\"id\":\"0aacc484-5b34-45ea-a0de-190c8810510a\",\"runId\":\"68f82490-8862-43c1-b2ea-a5a82cfd0bff\",\"taskId\":\"022af193-5105-4b39-b7d7-e392a53f4137\",\"agentId\":\"4e0702e2-5533-4502-b765-01c267d02753\",\"attempt\":1,\"kind\":\"verifier\",\"passed\":false,\"summary\":\"Not done: the task was never implemented. The worktree is clean at the initial commit 00e484a, with no diff against main, and the implementer's own report says its write command was denied. `npm test` exits 0, but only with the 2 original tests. I could not execute the modules directly (the verifier hook blocks `node`), so the behavioural failures are read from the source, which is unambiguous.\",\"criteria\":[{\"criterion\":\"src/money.js exports a single order-totals function implementing MONEY.md rules 2-6 with exactly two roundings via roundCents; roundCents and formatCents are unchanged.\",\"passed\":false,\"evidence\":\"src/money.js contains only roundC"
+      ],
+      "lastMessages": [
+        "planner: ",
+        "worker: I haven't changed anything. The command that would have written the code, written the tests and committed was denied, and `git status` shows a clean tree. `npm test` hasn't run either.\n\nI can retry in smaller steps, for example the code edits first, then the tests, then a commit. If you object to a specific part, such as the commit, the combined shell command or writing files from the shell, tell me which and I'll avoid it.",
+        "verifier: ",
+        "debugger: e half-up discount (30 gives 30), the half-up tax (250 at 5% gives 263) and empty items. It also has a mixed-quantity order (1753/263/298/1788) and a cart/invoice agreement loop over all six orders.\n- **`src/cart/total.test.js`**: added the 107 and 30 cases; the original test is kept.\n- **`src/invoice/invoice.test.js`**: added the 105/16/18/107, printed `'1.07'`, lines `[35, 35, 35]` case; the original test is kept.\n\nBefore the fix, the cart 30-cent test and the invoice test failed and `money.test.js` could not load. The cart's 107 case passed even then, since the old code happened to get that order right.\n\n`docs/MONEY.md`, `README.md` and `package.json` are untouched, and the tree is clean.",
+        "reviewer: ",
+        "verifier: ",
+        "verifier: discount or tax arithmetic, no `priceCents / 100`:** true (see criterion 3).\n- **Regression tests assert cart equals invoice total across several orders:** true (`src/money.test.js:38-45`).\n\n## Behaviour change to be aware of\nInvoice `lines` entries changed shape from `{ gross, discount, tax, net }` to `{ gross }` (`src/invoice/invoice.js:5`, asserted at `src/invoice/invoice.test.js:18`). This is not a failure: per-line discount and tax were the per-line rounding MONEY.md forbids, and no pre-existing test or in-repo code reads those fields. Any consumer outside this repository that reads `lines[].net`, `.discount` or `.tax` would be affected.\n\nI created no scratch files and modified nothing.",
+        "verifier: "
+      ],
+      "approvalDetails": [
+        "Worker/unify-order-totals [medium] Run shell command (bash): cat >> src/money.js <<'EOF'\n\n/** Subtotal, discount, tax and total of an order in cents, per docs/MONEY.md. */\nexport function orderTotals(order) {\n  const subtotal = order.items.reduce((n, item) => n + item.priceCents * item.quantity, 0)\n  const discount = roundCents((subtotal * order.discountPerce | the script path is computed at run time and cannot be inspected",
+        "Reviewer/unify-order-totals [high] Run shell command (bash): git status --short; git diff --stat 00e484a HEAD; cat src/money.js docs/MONEY.md README.md package.json; grep -rn \"buildInvoice\\|cartTotal\\|\\.net\\|lines\" --include=*.js --include=*.md . --exclude-dir=node_modules --exclude-dir=.git | grep -v test.js; git ls-files | touching Git's own files: .git"
+      ],
+      "blocked": [],
+      "keptAt": null
+    },
+    "detail": {}
+  },
+  "efficiency": {
+    "runs": 1,
+    "sessions": 8,
+    "turns": 63,
+    "inputTokensUncached": 31344,
+    "outputTokens": 30650,
+    "cacheCreationTokens": 76911,
+    "cacheReadTokens": 543449,
+    "costUsdReported": 1.3115,
+    "toolCalls": 55,
+    "toolCallsRecorded": 55,
+    "filesChangedRecorded": 6,
+    "toolCallsByName": {
+      "Bash": 23,
+      "StructuredOutput": 5,
+      "Read": 15,
+      "Write": 3,
+      "Edit": 3,
+      "PowerShell": 3,
+      "Grep": 2,
+      "Glob": 1
+    },
+    "contextToolCalls": [],
+    "deniedToolCalls": 7,
+    "byRole": {
+      "planner": {
+        "sessions": 1,
+        "turns": 5,
+        "toolCalls": 4,
+        "contextToolCalls": 0
+      },
+      "worker": {
+        "sessions": 1,
+        "turns": 4,
+        "toolCalls": 3,
+        "contextToolCalls": 0
+      },
+      "verifier": {
+        "sessions": 4,
+        "turns": 31,
+        "toolCalls": 27,
+        "contextToolCalls": 0
+      },
+      "debugger": {
+        "sessions": 1,
+        "turns": 16,
+        "toolCalls": 15,
+        "contextToolCalls": 0
+      },
+      "reviewer": {
+        "sessions": 1,
+        "turns": 7,
+        "toolCalls": 6,
+        "contextToolCalls": 0
+      }
+    },
+    "models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+    ],
+    "sessionRotations": 0,
+    "compactions": 0,
+    "compactionNote": "Reported by the runtime adapter.",
+    "wallMs": 296185,
+    "usageWindowsBefore": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 18
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ],
+    "usageWindowsAfter": [
+      {
+        "limitType": "five_hour",
+        "utilizationPercent": 20
+      },
+      {
+        "limitType": "seven_day",
+        "utilizationPercent": 19
+      },
+      {
+        "limitType": "iguana_necktie",
+        "utilizationPercent": 0
+      }
+    ]
+  }
+}

@@ -1,5 +1,9 @@
 import { planningWords, strategyWord } from '../../lib/wording'
-import { useEffect, useState } from 'react'
+import { CompilationPreview } from './CompilationPreview'
+import type { CompilationMode, CompiledTaskSpec } from '@shared/intelligence'
+import { defaultIntentMetadata } from '@shared/intelligence'
+import { api } from '../../lib/bridge'
+import { useEffect, useRef, useState } from 'react'
 import { PRESETS, RUN_MODES, type Preset, type Project, type RunMode } from '@shared/domain'
 import { presetMaxAgents } from '@shared/settings'
 import type { PlanningMode, ReviewMode } from '@shared/v2'
@@ -8,7 +12,7 @@ import { useCreateRun, usePlanningRecommendation, useSettings, useStartOvernight
 import { usePolicyPreview } from '../../lib/queries-run'
 import { useDebounced } from '../../lib/useDebounced'
 import { useUiStore } from '../../store/ui'
-import { Button, Card, Field, NumberField, Notice, Select, Textarea, Toggle, type SelectOption } from '../../components/ui'
+import { Button, Card, ErrorNote, Field, NumberField, Notice, Select, Textarea, Toggle, type SelectOption } from '../../components/ui'
 import { cn } from '../../lib/cn'
 import {
   buildCreateRunInput,
@@ -99,6 +103,17 @@ export function MissionComposer({ project }: { project: Project }) {
   const [planningMode, setPlanningMode] = useState<PlanningMode>('single')
   const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
   const [submitted, setSubmitted] = useState(false)
+  const [compilationMode, setCompilationMode] = useState<CompilationMode>('AUTO')
+  const [compiledSpec, setCompiledSpec] = useState<CompiledTaskSpec | null>(null)
+  const [compiling, setCompiling] = useState(false)
+  const [compilationError, setCompilationError] = useState<unknown>(null)
+  const blocker = useRef<HTMLParagraphElement>(null)
+  const [blockerMessage, setBlockerMessage] = useState('')
+  // The form is disabled while the request is compiled, which drops the keyboard focus. When a blocker is the
+  // answer, the focus goes to it once the form is back: the message is where the user has to read next.
+  useEffect(() => {
+    if (blockerMessage && !compiling) blocker.current?.focus()
+  }, [blockerMessage, compiling])
   const [strategy, setStrategy] = useState<Strategy>(DEFAULT_STRATEGY)
   const [candidates, setCandidates] = useState<2 | 3>(2)
   const [advancedOpen, setAdvancedOpen] = useState(true)
@@ -120,15 +135,35 @@ export function MissionComposer({ project }: { project: Project }) {
   const overnightValidation = validateOvernight(overnightForm, prompt)
 
   const submitOvernight = async () => {
+    if (compiling || startOvernight.isPending) return
     setOvernightError(null)
     try {
-      const out = await startOvernight.mutateAsync(buildOvernightStartInput(overnightForm, project.id, prompt))
+      setCompiling(true)
+      setBlockerMessage('')
+      const spec = await api.invoke('compilation.preview', {
+        projectId: project.id,
+        raw: prompt,
+        mode: compilationMode,
+        metadata: defaultIntentMetadata(prompt, 'OVERNIGHT'),
+      })
+      setCompiledSpec(spec)
+      if (spec.status !== 'READY') {
+        setConfirmOpen(false)
+        setBlockerMessage(spec.status === 'WAITING_FOR_PROVIDER'
+          ? 'Overnight mission has not started. Configure the required provider, then preview again.'
+          : 'Overnight mission has not started. The specification needs your decision: open the specification preview above, keep or drop what would be added, then start again.')
+        requestAnimationFrame(() => blocker.current?.focus())
+        return
+      }
+      const out = await startOvernight.mutateAsync({ ...buildOvernightStartInput(overnightForm, project.id, prompt), compilationMode, compiledTaskSpecId: spec.id })
       setPrompt('')
       setConfirmOpen(false)
       setOvernight((f) => ({ ...f, authorized: false }))
       openRun(out.run.id, out.run.projectId)
     } catch (e) {
       setOvernightError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCompiling(false)
     }
   }
 
@@ -150,29 +185,48 @@ export function MissionComposer({ project }: { project: Project }) {
     project.profile !== null && Object.values(project.profile.commands).every((c) => c === null || c === '')
 
   const submit = async () => {
+    if (compiling || create.isPending) return
     setSubmitted(true)
     if (overnightMode) return
     if (problem || !settings) return
     try {
-      const run = await create.mutateAsync(buildCreateRunInput(draft))
+      setCompilationError(null)
+      setBlockerMessage('')
+      setCompiling(true)
+      const spec = mode === 'ask' ? null : await api.invoke('compilation.preview', { projectId: project.id, raw: prompt, mode: compilationMode })
+      setCompiledSpec(spec)
+      if (spec && spec.status !== 'READY') {
+        setBlockerMessage(spec.status === 'WAITING_FOR_PROVIDER'
+          ? 'Mission has not started. Configure the required provider, then preview again.'
+          : 'Mission has not started. The specification needs your decision: open the specification preview above, keep or drop what would be added, then start again.')
+        requestAnimationFrame(() => blocker.current?.focus())
+        return
+      }
+      const run = await create.mutateAsync({ ...buildCreateRunInput(draft), compilationMode, ...(spec ? { compiledTaskSpecId: spec.id } : {}) })
       setPrompt('')
       setSubmitted(false)
       openRun(run.id, run.projectId)
-    } catch {
+    } catch (error) {
+      setCompilationError(error)
       // Surfaced as a toast by the mutation cache.
-    }
+    } finally { setCompiling(false) }
   }
-
 
   const previewView = previewText(preview.data)
   const strategyInfo = STRATEGY_BY_VALUE[strategy]
 
   return (
     <Card title="New mission" data-testid="mission-composer">
-      <div className="flex flex-col gap-4">
+      <fieldset
+        className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0"
+        disabled={compiling || create.isPending || startOvernight.isPending}
+        aria-busy={compiling || create.isPending || startOvernight.isPending}
+        data-testid="mission-form"
+      >
         {project.profile && !project.profile.isGitRepo ? (
           <Notice tone="danger" title="Not a Git repository">
-            NEXUS needs a Git repository to create isolated worktrees. Creating a run is likely to fail.
+            NEXUS needs a Git repository to create isolated worktrees. Creating a run is likely to
+            fail.
           </Notice>
         ) : null}
         {dirty ? (
@@ -200,10 +254,25 @@ export function MissionComposer({ project }: { project: Project }) {
             />
           )}
         </Field>
+        {mode !== 'ask' ? (
+          <CompilationPreview
+            projectId={project.id}
+            raw={prompt}
+            metadata={defaultIntentMetadata(prompt, overnightMode ? 'OVERNIGHT' : 'MISSION')}
+            mode={compilationMode}
+            onModeChange={setCompilationMode}
+            spec={compiledSpec}
+            onSpec={setCompiledSpec}
+          />
+        ) : null}
+        {compilationError ? <ErrorNote error={compilationError} /> : null}
+        <p ref={blocker} tabIndex={-1} role="status" aria-live="polite" className={blockerMessage ? 'text-small text-text-primary' : 'sr-only'}>
+          {blockerMessage}
+        </p>
         {noChecks && mode !== 'ask' ? (
           <p className="m-0 -mt-2 text-small text-text-muted" data-testid="no-check-commands">
-            No check commands configured for this project (build, test, lint, typecheck). Missions run without
-            automatic checks; set them up in the project's scripts and reprofile.
+            No check commands configured for this project (build, test, lint, typecheck). Missions
+            run without automatic checks; set them up in the project's scripts and reprofile.
           </p>
         ) : null}
 
@@ -376,7 +445,7 @@ export function MissionComposer({ project }: { project: Project }) {
             <span className="text-small text-text-muted">Ctrl+Enter to start</span>
             <Button
               variant="primary"
-              loading={create.isPending}
+              loading={create.isPending || compiling}
               disabled={!settings || (submitted && !!problem)}
               onClick={() => void submit()}
               data-testid="create-run"
@@ -390,10 +459,10 @@ export function MissionComposer({ project }: { project: Project }) {
           onClose={() => setConfirmOpen(false)}
           onConfirm={() => void submitOvernight()}
           lines={summarizeOvernight(overnightForm)}
-          loading={startOvernight.isPending}
+          loading={startOvernight.isPending || compiling}
           error={overnightError}
         />
-      </div>
+      </fieldset>
     </Card>
   )
 }

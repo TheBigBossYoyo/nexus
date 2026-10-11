@@ -1,0 +1,149 @@
+{
+  "kind": "campaign-gate-072",
+  "at": "2026-10-11T09:45:52.030Z",
+  "baseline": "071-graph",
+  "finalSourceFrom": "be766d7",
+  "commitsBeforeIt": [
+    "6404450",
+    "ca43de4"
+  ],
+  "runsOnFinalSource": {
+    "072": 23,
+    "072-auto": 6
+  },
+  "runsPerCell": {
+    "071-graph": {
+      "localized-bug": 6,
+      "cross-module-bug": 2,
+      "feature": 1,
+      "refactor": 2,
+      "architecture": 1,
+      "security": 1,
+      "program": 1,
+      "workspace": 2
+    },
+    "072": {
+      "localized-bug": 8,
+      "cross-module-bug": 4,
+      "feature": 4,
+      "refactor": 4,
+      "architecture": 4,
+      "security": 4,
+      "program": 9,
+      "workspace": 4
+    },
+    "072-auto": {
+      "localized-bug": 3,
+      "cross-module-bug": 3,
+      "feature": 3,
+      "refactor": 3,
+      "architecture": 3,
+      "security": 3,
+      "program": 0,
+      "workspace": 0
+    }
+  },
+  "gates": {
+    "072": {
+      "pairs": 8,
+      "baselinePassRate": 0.8541666666666667,
+      "optimizedPassRate": 0.8489583333333334,
+      "passRateLowerBound": -0.0972008332222226,
+      "regressions": [
+        "program"
+      ],
+      "improvements": [
+        "localized-bug",
+        "security"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": -0.043086390526858524,
+      "outputTokenDelta": -0.028765938630972036,
+      "turnDelta": -0.04998258446534313,
+      "wallClockDelta": 0.8070839209736812,
+      "verdict": "INFERIOR",
+      "mayBecomeDefault": false,
+      "reasons": [
+        "The pass rate may be lower by more than 5 points (lower bound -9.7)."
+      ]
+    },
+    "072-final-source": {
+      "pairs": 8,
+      "baselinePassRate": 0.8541666666666667,
+      "optimizedPassRate": 0.9125,
+      "passRateLowerBound": -0.04567979517830108,
+      "regressions": [
+        "localized-bug"
+      ],
+      "improvements": [
+        "security"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": 0.012517099960432071,
+      "outputTokenDelta": 0.025169393564186744,
+      "turnDelta": -0.02563566701497733,
+      "wallClockDelta": 0.15060402754235103,
+      "verdict": "NON_INFERIOR",
+      "mayBecomeDefault": true,
+      "reasons": [
+        "Pass rate 85% against 91% over 8 paired cases, within the margin; no rise in critical findings or repairs."
+      ]
+    },
+    "072-auto": {
+      "pairs": 6,
+      "baselinePassRate": 0.8055555555555557,
+      "optimizedPassRate": 0.8333333333333334,
+      "passRateLowerBound": -0.017916666666666668,
+      "regressions": [],
+      "improvements": [
+        "localized-bug"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": 0.09635025297024717,
+      "outputTokenDelta": 0.07589107826605558,
+      "turnDelta": 0.0962962962962963,
+      "wallClockDelta": 0.10916226988280052,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "mayBecomeDefault": false,
+      "reasons": [
+        "2 baseline case(s) have no optimized trial (program, workspace). A case that was not run cannot be assumed to pass. The baseline stays the default."
+      ]
+    },
+    "072-auto-final-source": {
+      "pairs": 6,
+      "baselinePassRate": 0.8055555555555557,
+      "optimizedPassRate": 0.8333333333333334,
+      "passRateLowerBound": -0.017916666666666668,
+      "regressions": [],
+      "improvements": [
+        "localized-bug"
+      ],
+      "severityDelta": {
+        "critical": 0,
+        "high": 0
+      },
+      "repairDelta": 0,
+      "inputTokenDelta": -0.07722793493057144,
+      "outputTokenDelta": -0.022538534005715778,
+      "turnDelta": -0.07037037037037037,
+      "wallClockDelta": 0.04427895668636691,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "mayBecomeDefault": false,
+      "reasons": [
+        "2 baseline case(s) have no optimized trial (program, workspace). A case that was not run cannot be assumed to pass. The baseline stays the default."
+      ]
+    }
+  }
+}

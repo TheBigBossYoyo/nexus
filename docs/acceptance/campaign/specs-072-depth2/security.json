@@ -1,0 +1,168 @@
+{
+  "task": "security",
+  "compiledAt": "2026-10-11T08:19:03.887Z",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "spec": {
+    "id": "7aaf73f1-97af-4f21-a01e-fec70fa47c00",
+    "projectId": "6bbf252a-0f9c-4eb9-8d7e-f765589067fe",
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "HIGH_RISK_BOUNDED",
+      "PROFILE:bugfix|medium|medium:scope=single:ambiguity=low:sensitive",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "recommendations": [
+      {
+        "text": "Fix src/static/resolve.js so resolvePath(root, urlPath) returns an absolute path equal to the resolved root or contained within it. Reject paths outside that boundary with an Error whose code is 'EFORBIDDEN'; use path-component containment rather than a string-prefix check.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Percent-decode the URL path exactly once. Malformed percent-encoding and NUL characters, including percent-encoded NULs, must produce an Error whose code is 'EBADREQUEST'. Do not decode again during normalization or containment checking.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Treat backslashes as path separators, including backslashes produced by percent-decoding. Normalize the requested path and accept requests containing '..' when their resolved destination remains equal to or inside root.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Establish the existing resolver API, leading-slash URL handling, callers' decoding behavior, supported platforms, and test conventions from the repository. Preserve compatible behavior except where the requested security rules require a change, and ensure the request path is not decoded twice across the serving pipeline.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Add regression tests for ordinary files, root itself, safe internal '..' paths, direct and percent-encoded traversal, mixed slash/backslash traversal, repeated separators, and sibling-directory names sharing root's string prefix. Assert returned absolute paths and exact error codes.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Test malformed percent escapes, invalid encoded sequences, literal and encoded NULs, encoded separators, and double-encoded traversal. Double-encoded input must retain its once-decoded literal representation rather than becoming traversal through a second decode. Cover platform-relevant drive, UNC, and absolute-path forms to verify they cannot bypass containment.",
+        "kind": "ACCEPTANCE",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Lexical path containment alone does not prevent a symlink inside root from referring to a file outside root. Filesystem-aware containment would require additional semantics for symlinks, missing files, and race conditions that are not specified here.",
+        "kind": "RISK",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run the regression tests and full npm test suite, reporting results. Confirm available checks from the repository; the supplied snapshot lists npm test and no build, lint, or typecheck commands.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [
+          "repository:6bbf252a-0f9c-4eb9-8d7e-f765589067fe"
+        ],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [
+      "Must this fix also prevent access through symlinks inside root that point outside root, or is containment of the normalized absolute path the intended boundary?"
+    ],
+    "identity": "85a152fd273c084305275965b4c34c9f86b19baae81e7f3a49774cf3184f2faa",
+    "createdAt": "2026-10-11T08:18:20.795Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "A security review found that the static file handler lets a request read files outside the served directory. Fix src/static/resolve.js: `resolvePath(root, urlPath)` returns the absolute path of the requested file, which must be `root` itself or inside it, and otherwise throws an Error with `code` set to 'EFORBIDDEN'. The URL path is percent-decoded exactly once; malformed percent-encoding and a NUL character throw an Error with `code` 'EBADREQUEST'. A backslash is treated as a path separator. A request that stays inside the root is served even when it contains `..`. Add tests that cover the attacks you can think of.",
+    "intentId": "bdc95167-24b2-49bb-9635-edc1883d6199",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "A security review found that the static file handler lets a request read files outside the served directory. Fix src/static/resolve.js: `resolvePath(root, urlPath)` returns the absolute path of the requested file, which must be `root` itself or inside it, and otherwise throws an Error with `code` set to 'EFORBIDDEN'. The URL path is percent-decoded exactly once; malformed percent-encoding and a NUL character throw an Error with `code` 'EBADREQUEST'. A backslash is treated as a path separator. A request that stays inside the root is served even when it contains `..`. Add tests that cover the attacks you can think of."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:6bbf252a-0f9c-4eb9-8d7e-f765589067fe",
+        "version": "68b7f90489fd92514abe20d9ba81cfbb0ed52ce0:584cdf7702b6725290c14277101d6b178d1eb14aaf55daaa82a4da54f7339a46"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "STANDARD",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "HIGH_RISK_BOUNDED",
+      "PROFILE:bugfix|medium|medium:scope=single:ambiguity=low:sensitive",
+      "DEPTH_POLICY:depth-2"
+    ],
+    "ms": 43021,
+    "recommendations": 8,
+    "recommendationChars": 3055,
+    "byKind": {
+      "REQUIREMENT": 3,
+      "UNKNOWN": 1,
+      "ACCEPTANCE": 2,
+      "RISK": 1,
+      "VERIFICATION": 1
+    },
+    "ambiguities": [
+      "Must this fix also prevent access through symlinks inside root that point outside root, or is containment of the normalized absolute path the intended boundary?"
+    ],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 948,
+          "outputTokens": 1053,
+          "totalTokens": 2001,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 204
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 1195,
+          "outputTokens": 71,
+          "totalTokens": 1266,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 37
+        }
+      }
+    ]
+  }
+}

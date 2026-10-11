@@ -15,9 +15,19 @@ import type { UsageOverview } from './v3'
  * Why a run paused, more precisely than PauseReason: 'user' is the person pausing it, 'intervention'
  * is NEXUS stopping because no task can make progress. Absent on events written before 0.2.1.
  */
-export type PauseCause = 'user' | 'intervention' | 'time_limit' | 'auth' | 'quota' | 'recovery'
+export type PauseCause = 'user' | 'intervention' | 'time_limit' | 'auth' | 'quota' | 'recovery' | 'capacity'
 
 /** Payload shape for every durable event type. Adding an event means adding a key here. */
+/**
+ * What a session that found no provider was waiting on, as observed when it was decided: each provider that was
+ * considered with the state of its capacity, and whether every session slot of this machine was taken.
+ * Nothing here is inferred: a reset time is present only when the provider gave one.
+ */
+export interface CapacityWaitDetail {
+  providers: { provider: string; state: string; resetAt: number | null; usable: boolean }[]
+  slotsFull: boolean
+}
+
 export interface EventPayloads {
   'run.created': { mode: string; preset: string }
   'run.state_changed': { from: RunState; to: RunState; reason?: string }
@@ -56,6 +66,7 @@ export interface EventPayloads {
   'agent.tool.completed': { toolUseId: string; toolName: string; isError: boolean }
   'agent.tool.denied': { toolName: string; reason: string }
   'agent.waiting': { reason: string }
+  'capacity.waiting': { routingId: string; provider: string | null; reasons: string[]; waitingOn?: CapacityWaitDetail }
   'agent.failed': { error: string }
   'agent.stopped': { reason: string }
   'agent.rotated': { fromSessionId: string | null; turns: number }

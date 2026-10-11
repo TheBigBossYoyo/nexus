@@ -19,15 +19,29 @@ import {
   type UsageWindow,
   type UsageWindowView,
 } from '@shared/v3'
-import type { RunUsage, StrategyEfficiencyRow, UsageEfficiency, UsageLimitHistory } from '@shared/v3-read'
+import type {
+  RunUsage,
+  StrategyEfficiencyRow,
+  UsageEfficiency,
+  UsageLimitHistory,
+} from '@shared/v3-read'
 import type { EventBus } from '../events'
 import type { Repositories } from '../persistence'
 import type { UsageFilter } from '../persistence/repositories/v3'
 import type { AgentRuntime, RuntimeUsageReport } from '../agent-runtime/types'
 import { evidenceLabel, mean, median, wilsonInterval } from '../policy/stats'
 import { classifyUsageSignal, limitingWindow, type UsageSignal } from './classify'
-import { initialUsageState, isDispatchBlocked, rampLimit, RAMP_MS, reduceUsage, type UsageMachineEvent, type UsageMachineState } from './machine'
+import {
+  initialUsageState,
+  isDispatchBlocked,
+  rampLimit,
+  RAMP_MS,
+  reduceUsage,
+  type UsageMachineEvent,
+  type UsageMachineState,
+} from './machine'
 import type { ProbeResult } from './probe'
+import type { CapacityState } from '@shared/capacity'
 
 export interface UsageServiceDeps {
   repos: Repositories
@@ -78,7 +92,10 @@ export class UsageIntelligenceService {
   private readonly listeners = new Set<() => void>()
   private readonly unsubscribe: () => void
   private readonly sessions = new Map<string, SessionRow>()
-  private readonly runInfo = new Map<string, { projectId: string; strategy: Strategy | null; campaignId: string | null }>()
+  private readonly runInfo = new Map<
+    string,
+    { projectId: string; strategy: Strategy | null; campaignId: string | null }
+  >()
   private readonly lastRejected = new Map<string, number>()
   private observed: UsageTotals = { ...EMPTY_USAGE_TOTALS }
   private account: AuthStatus | null = null
@@ -88,6 +105,41 @@ export class UsageIntelligenceService {
   private pushTimer: NodeJS.Timeout | null = null
   private lastPushAt = 0
   private disposed = false
+  private capacityEvidence: {
+    state: CapacityState
+    observedAt: number
+    resetAt: number | null
+    utilization: number | null
+    /** When the provider last gave that reset time and that percentage: a value kept across later events keeps its own time. */
+    resetObservedAt: number | null
+    utilizationObservedAt: number | null
+  } | null = null
+  private boundProfile: string | null = null
+  private boundSince = 0
+  /**
+   * The time since which this service's observations are those of the given account profile. The service
+   * watches one Claude installation and does not know which account is signed in; whoever routes does, and
+   * says so here. When the profile differs from the last one named, everything observed before now was the
+   * other account's and must not be written to this one's capacity pool.
+   */
+  observationsSince(profile: string): number {
+    if (this.boundProfile !== profile) {
+      if (this.boundProfile !== null) this.boundSince = this.now()
+      this.boundProfile = profile
+    }
+    return this.boundSince
+  }
+  /** Only actual runtime signals/report/probe/session results; excludes optimistic startup and wait expiry. */
+  capacityObservation(): {
+    state: CapacityState
+    observedAt: number
+    resetAt: number | null
+    utilization: number | null
+    resetObservedAt: number | null
+    utilizationObservedAt: number | null
+  } | null {
+    return this.capacityEvidence ? { ...this.capacityEvidence } : null
+  }
 
   constructor(private readonly deps: UsageServiceDeps) {
     this.now = deps.now ?? Date.now
@@ -158,7 +210,35 @@ export class UsageIntelligenceService {
     const before = this.state
     const next = reduceUsage(before, event, this.now())
     this.state = next
-    const gateChanged = before.status !== next.status || before.resumedAt !== next.resumedAt || before.resetAt !== next.resetAt
+    if (
+      event.type === 'session_ok' ||
+      event.type === 'probe_result' ||
+      (event.type === 'report' && event.windows.some((w) => w.utilizationPercent !== null)) ||
+      (event.type === 'signal' && event.signal.availability !== 'UNKNOWN')
+    ) {
+      const gavePercent =
+        (event.type === 'report' && event.windows.some((w) => w.utilizationPercent !== null)) ||
+        (event.type === 'signal' && event.signal.utilizationUnit === 'percent' && event.signal.utilization != null)
+      const gaveReset =
+        (event.type === 'report' && event.windows.some((w) => w.resetsAt !== null)) ||
+        (event.type === 'signal' && event.signal.resetAt != null) ||
+        (event.type === 'probe_result' && event.resetAt !== null)
+      const previous = this.capacityEvidence
+      const kept = (value: number | null, was: number | null | undefined, at: number | null | undefined): number | null =>
+        value === null ? null : value === was && at != null ? at : next.since
+      this.capacityEvidence = {
+        state: next.status,
+        observedAt: this.now(),
+        resetAt: next.resetAt,
+        utilization: next.utilizationPercent,
+        resetObservedAt: gaveReset && next.resetAt !== null ? this.now() : kept(next.resetAt, previous?.resetAt, previous?.resetObservedAt),
+        utilizationObservedAt: gavePercent && next.utilizationPercent !== null ? this.now() : kept(next.utilizationPercent, previous?.utilization, previous?.utilizationObservedAt),
+      }
+    }
+    const gateChanged =
+      before.status !== next.status ||
+      before.resumedAt !== next.resumedAt ||
+      before.resetAt !== next.resetAt
     if (gateChanged) {
       if (before.status !== next.status) this.log(`${before.status} -> ${next.status}`)
       this.notify()
@@ -206,7 +286,12 @@ export class UsageIntelligenceService {
 
   private onEvent(event: RunEvent): void {
     if (this.disposed) return
-    if (event.agentId && event.type.startsWith('agent.') && this.deps.isOtherProvider?.(event.agentId)) return
+    if (
+      event.agentId &&
+      event.type.startsWith('agent.') &&
+      this.deps.isOtherProvider?.(event.agentId)
+    )
+      return
     try {
       switch (event.type) {
         case 'agent.rate_limited':
@@ -220,7 +305,8 @@ export class UsageIntelligenceService {
         case 'overnight.state_changed': {
           // Every exit from an overnight quota wait (resume by hand, deadline, cancel, ...) releases the gate.
           const p = event.payload as RunEvent<'overnight.state_changed'>['payload']
-          if (p.from === 'QUOTA_PAUSED' && !this.deps.repos.quotaPauses.liveGlobal()) this.apply({ type: 'wait_ended' })
+          if (p.from === 'QUOTA_PAUSED' && !this.deps.repos.quotaPauses.liveGlobal())
+            this.apply({ type: 'wait_ended' })
           return
         }
         case 'agent.stopped':
@@ -229,7 +315,11 @@ export class UsageIntelligenceService {
           return
         case 'run.paused': {
           const payload = event.payload as RunEvent<'run.paused'>['payload']
-          if (payload.cause === 'auth') this.recordSignal(event, classifyUsageSignal({ kind: 'turn_outcome', outcome: 'auth' }, this.now()))
+          if (payload.cause === 'auth')
+            this.recordSignal(
+              event,
+              classifyUsageSignal({ kind: 'turn_outcome', outcome: 'auth' }, this.now()),
+            )
           return
         }
         case 'run.resumed':
@@ -246,7 +336,9 @@ export class UsageIntelligenceService {
     }
   }
 
-  private runDetails(runId: string): { projectId: string; strategy: Strategy | null; campaignId: string | null } | null {
+  private runDetails(
+    runId: string,
+  ): { projectId: string; strategy: Strategy | null; campaignId: string | null } | null {
     const cached = this.runInfo.get(runId)
     if (cached) return cached
     const run: Run | null = this.deps.repos.runs.get(runId)
@@ -265,7 +357,13 @@ export class UsageIntelligenceService {
     const now = this.now()
     const signal =
       p.status === 'throttled'
-        ? classifyUsageSignal({ kind: 'assistant_error', error: p.limitType === 'server_error' ? 'server_error' : 'overloaded' }, now)
+        ? classifyUsageSignal(
+            {
+              kind: 'assistant_error',
+              error: p.limitType === 'server_error' ? 'server_error' : 'overloaded',
+            },
+            now,
+          )
         : classifyUsageSignal(
             {
               kind: 'rate_limit',
@@ -283,7 +381,8 @@ export class UsageIntelligenceService {
     if (signal.eventType === 'limit_rejected') {
       const key = event.runId
       const last = this.lastRejected.get(key)
-      const duplicate = last !== undefined && now - last < LIMIT_DEDUPE_MS && signal.resetAt === null
+      const duplicate =
+        last !== undefined && now - last < LIMIT_DEDUPE_MS && signal.resetAt === null
       this.lastRejected.set(key, now)
       this.apply({ type: 'signal', signal })
       this.recordWindow(signal, p.status)
@@ -303,7 +402,10 @@ export class UsageIntelligenceService {
     this.persistSignal(signal, event)
   }
 
-  private persistSignal(signal: UsageSignal, ctx: { runId: string | null; taskId?: string | null; agentId?: string | null }): void {
+  private persistSignal(
+    signal: UsageSignal,
+    ctx: { runId: string | null; taskId?: string | null; agentId?: string | null },
+  ): void {
     const now = this.now()
     const info = ctx.runId ? this.runDetails(ctx.runId) : null
     this.deps.repos.usageEvents.insert(
@@ -328,7 +430,11 @@ export class UsageIntelligenceService {
     this.schedulePush(false)
   }
 
-  private blankEvent(now: number, eventType: UsageEvent['eventType'], over: Partial<UsageEvent>): UsageEvent {
+  private blankEvent(
+    now: number,
+    eventType: UsageEvent['eventType'],
+    over: Partial<UsageEvent>,
+  ): UsageEvent {
     return {
       id: newId(),
       createdAt: this.iso(now),
@@ -385,7 +491,8 @@ export class UsageIntelligenceService {
     const turn = event.payload.turn
     if (!turn || !event.agentId) return
     const now = this.now()
-    const sum = (pick: (m: NonNullable<typeof turn>['models'][number]) => number): number => turn.models.reduce((n, m) => n + pick(m), 0)
+    const sum = (pick: (m: NonNullable<typeof turn>['models'][number]) => number): number =>
+      turn.models.reduce((n, m) => n + pick(m), 0)
     const delta = {
       inputTokens: sum((m) => m.inputTokens),
       outputTokens: sum((m) => m.outputTokens),
@@ -406,7 +513,8 @@ export class UsageIntelligenceService {
     row.costUsd += delta.costUsd
     row.turns += turn.turns
     row.durationMs += turn.durationMs
-    for (const m of turn.models) row.byModel.set(m.model, (row.byModel.get(m.model) ?? 0) + m.outputTokens + 1)
+    for (const m of turn.models)
+      row.byModel.set(m.model, (row.byModel.get(m.model) ?? 0) + m.outputTokens + 1)
     const model = [...row.byModel.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
     const fields = {
       model,
@@ -460,7 +568,11 @@ export class UsageIntelligenceService {
     const p = event.payload
     if (p.action === 'waiting') {
       const resetAt = p.resetsAt ? Date.parse(p.resetsAt) : Number.NaN
-      this.apply({ type: 'restore_wait', resetAt: Number.isFinite(resetAt) ? resetAt : null, limitType: null })
+      this.apply({
+        type: 'restore_wait',
+        resetAt: Number.isFinite(resetAt) ? resetAt : null,
+        limitType: null,
+      })
     } else if (p.action === 'resumed') {
       this.apply({ type: 'probe_result', outcome: 'available', resetAt: null })
     } else {
@@ -477,7 +589,13 @@ export class UsageIntelligenceService {
     this.deps.repos.usageEvents.insert(
       this.blankEvent(now, 'probe', {
         runId: ctx.runId ?? null,
-        availability: result.available ? 'AVAILABLE' : result.outcome === 'auth' ? 'AUTH_REQUIRED' : result.outcome === 'runtime' ? 'RUNTIME_UNAVAILABLE' : 'QUOTA_EXHAUSTED',
+        availability: result.available
+          ? 'AVAILABLE'
+          : result.outcome === 'auth'
+            ? 'AUTH_REQUIRED'
+            : result.outcome === 'runtime'
+              ? 'RUNTIME_UNAVAILABLE'
+              : 'QUOTA_EXHAUSTED',
         limitType: w?.limitType ?? null,
         utilization: w?.utilizationPercent ?? null,
         utilizationUnit: w ? 'percent' : null,
@@ -501,7 +619,12 @@ export class UsageIntelligenceService {
       this.deps.repos.usageWindows.upsert({
         id: newId(),
         limitType: w.limitType,
-        status: w.utilizationPercent !== null && w.utilizationPercent >= 100 ? 'rejected' : w.utilizationPercent !== null && w.utilizationPercent >= 90 ? 'allowed_warning' : 'allowed',
+        status:
+          w.utilizationPercent !== null && w.utilizationPercent >= 100
+            ? 'rejected'
+            : w.utilizationPercent !== null && w.utilizationPercent >= 90
+              ? 'allowed_warning'
+              : 'allowed',
         utilizationPercent: w.utilizationPercent,
         resetAt: w.resetsAt,
         source: 'RUNTIME',
@@ -579,8 +702,12 @@ export class UsageIntelligenceService {
       s.resetAt !== null
         ? measured(this.iso(s.resetAt), 'SDK_EVENT', 'EXACT')
         : (() => {
-            const future = windows.filter((w) => w.resetAt && Date.parse(w.resetAt) > now && w.confidence === 'EXACT').sort((a, b) => Date.parse(a.resetAt as string) - Date.parse(b.resetAt as string))[0]
-            return future ? measured(future.resetAt, future.source, 'EXACT') : unknownValue<string>()
+            const future = windows
+              .filter((w) => w.resetAt && Date.parse(w.resetAt) > now && w.confidence === 'EXACT')
+              .sort((a, b) => Date.parse(a.resetAt as string) - Date.parse(b.resetAt as string))[0]
+            return future
+              ? measured(future.resetAt, future.source, 'EXACT')
+              : unknownValue<string>()
           })()
     const nextCheck = pause?.nextCheckAt ?? live.find((p) => p.nextCheckAt)?.nextCheckAt ?? null
     const checkOwner = pause ?? live.find((p) => p.nextCheckAt) ?? null
@@ -588,19 +715,32 @@ export class UsageIntelligenceService {
       capturedAt: this.iso(now),
       provider: 'claude',
       accountMode: mode && mode !== 'unknown' ? measured(mode, 'RUNTIME', 'EXACT') : unknownValue(),
-      subscriptionType: subscriptionType ? measured(subscriptionType, 'RUNTIME', 'EXACT') : unknownValue(),
+      subscriptionType: subscriptionType
+        ? measured(subscriptionType, 'RUNTIME', 'EXACT')
+        : unknownValue(),
       status: s.status,
       availability: s.availability,
       session: { ...this.observed },
       windows,
-      subscriptionUtilizationPercent: top ? measured(top.utilizationPercent, top.source, 'EXACT') : unknownValue(),
+      subscriptionUtilizationPercent: top
+        ? measured(top.utilizationPercent, top.source, 'EXACT')
+        : unknownValue(),
       nextResetAt: nextReset,
-      retryAfterMs: s.retryAfterMs !== null && s.status === 'QUOTA_PAUSED' ? measured(s.retryAfterMs, 'ERROR_METADATA', 'EXACT') : unknownValue(),
+      retryAfterMs:
+        s.retryAfterMs !== null && s.status === 'QUOTA_PAUSED'
+          ? measured(s.retryAfterMs, 'ERROR_METADATA', 'EXACT')
+          : unknownValue(),
       lastLimitAt: this.lastLimitAtIso(),
       autoResume: {
         enabled: repos.settings.get().usage.autoResume,
         pause,
-        nextCheckAt: nextCheck ? measured(nextCheck, 'LOCAL_AGGREGATION', checkOwner?.resetConfidence === 'EXACT' ? 'EXACT' : 'ESTIMATED') : unknownValue(),
+        nextCheckAt: nextCheck
+          ? measured(
+              nextCheck,
+              'LOCAL_AGGREGATION',
+              checkOwner?.resetConfidence === 'EXACT' ? 'EXACT' : 'ESTIMATED',
+            )
+          : unknownValue(),
         pausedRuns: live.filter((p) => p.scope === 'run').length,
       },
       usageReportSupported: this.reportSupported,
@@ -653,7 +793,9 @@ export class UsageIntelligenceService {
           return key
       }
     }
-    return repos.usageEvents.breakdown(by, filter, limit).map((row) => ({ ...row, label: label(row.key) }))
+    return repos.usageEvents
+      .breakdown(by, filter, limit)
+      .map((row) => ({ ...row, label: label(row.key) }))
   }
 
   limitHistory(page: { limit?: number; offset?: number } = {}): UsageLimitHistory {
@@ -663,7 +805,9 @@ export class UsageIntelligenceService {
     return { events, pauses: this.withResumes(pauses) }
   }
 
-  private withResumes(pauses: ReturnType<Repositories['quotaPauses']['listRecent']>): UsageLimitHistory['pauses'] {
+  private withResumes(
+    pauses: ReturnType<Repositories['quotaPauses']['listRecent']>,
+  ): UsageLimitHistory['pauses'] {
     const { repos } = this.deps
     const resumes = repos.quotaResumes.listByPauses(pauses.map((p) => p.id))
     return pauses.map((p) => ({
@@ -695,12 +839,18 @@ export class UsageIntelligenceService {
     const outcomes = repos.taskOutcomes.listAll()
     const successful = outcomes.filter((o) => o.completed).length
     const tokens = totals.inputTokens + totals.outputTokens
-    const per = (n: number): ReturnType<typeof measured<number>> => (successful > 0 ? measured(n / successful, 'LOCAL_AGGREGATION', 'OBSERVED') : unknownValue<number>())
+    const per = (n: number): ReturnType<typeof measured<number>> =>
+      successful > 0
+        ? measured(n / successful, 'LOCAL_AGGREGATION', 'OBSERVED')
+        : unknownValue<number>()
     const repairs = outcomes.reduce((n, o) => n + o.repairCount, 0)
     return {
       tokensPerSuccessfulTask: per(tokens),
       sessionsPerSuccessfulTask: per(totals.sessions),
-      repairsPerTask: outcomes.length > 0 ? measured(repairs / outcomes.length, 'LOCAL_AGGREGATION', 'OBSERVED') : unknownValue<number>(),
+      repairsPerTask:
+        outcomes.length > 0
+          ? measured(repairs / outcomes.length, 'LOCAL_AGGREGATION', 'OBSERVED')
+          : unknownValue<number>(),
       successfulTasks: successful,
       byStrategy: [...this.missionRows(), ...this.arenaRows()],
     }
@@ -712,7 +862,9 @@ export class UsageIntelligenceService {
     for (const m of missions) groups.set(m.strategy, [...(groups.get(m.strategy) ?? []), m])
     return [...groups.entries()].map(([strategy, list]) => {
       const successes = list.filter((m) => m.success).length
-      const tokens = list.filter((m) => m.inputTokens !== null || m.outputTokens !== null).map((m) => (m.inputTokens ?? 0) + (m.outputTokens ?? 0))
+      const tokens = list
+        .filter((m) => m.inputTokens !== null || m.outputTokens !== null)
+        .map((m) => (m.inputTokens ?? 0) + (m.outputTokens ?? 0))
       const interval = wilsonInterval(successes, list.length)
       return {
         strategy,
@@ -722,7 +874,9 @@ export class UsageIntelligenceService {
         passRate: list.length > 0 ? successes / list.length : null,
         meanSessions: mean(list.map((m) => m.sessions)),
         meanObservedTokens: mean(tokens),
-        medianDurationMs: median(list.map((m) => m.elapsedMs).filter((v): v is number => v !== null)),
+        medianDurationMs: median(
+          list.map((m) => m.elapsedMs).filter((v): v is number => v !== null),
+        ),
         label: evidenceLabel(list.length, interval),
       }
     })
@@ -730,17 +884,22 @@ export class UsageIntelligenceService {
 
   private arenaRows(): StrategyEfficiencyRow[] {
     const { repos } = this.deps
-    const trials = repos.arenaTrials.listFinishedSince('1970-01-01T00:00:00.000Z').filter((t) => t.state === 'passed' || t.state === 'failed')
+    const trials = repos.arenaTrials
+      .listFinishedSince('1970-01-01T00:00:00.000Z')
+      .filter((t) => t.state === 'passed' || t.state === 'failed')
     if (trials.length === 0) return []
     const metrics = new Map<string, NonNullable<ReturnType<typeof repos.arenaMetrics.getByTrial>>>()
     for (let i = 0; i < trials.length; i += 400) {
-      for (const m of repos.arenaMetrics.listByTrials(trials.slice(i, i + 400).map((t) => t.id))) metrics.set(m.trialId, m)
+      for (const m of repos.arenaMetrics.listByTrials(trials.slice(i, i + 400).map((t) => t.id)))
+        metrics.set(m.trialId, m)
     }
     const groups = new Map<ConcreteStrategy, typeof trials>()
     for (const t of trials) groups.set(t.strategy, [...(groups.get(t.strategy) ?? []), t])
     return [...groups.entries()].map(([strategy, list]) => {
       const successes = list.filter((t) => t.state === 'passed').length
-      const ms = list.map((t) => metrics.get(t.id)).filter((m): m is NonNullable<typeof m> => m !== undefined)
+      const ms = list
+        .map((t) => metrics.get(t.id))
+        .filter((m): m is NonNullable<typeof m> => m !== undefined)
       const interval = wilsonInterval(successes, list.length)
       return {
         strategy,
@@ -749,8 +908,14 @@ export class UsageIntelligenceService {
         successes,
         passRate: list.length > 0 ? successes / list.length : null,
         meanSessions: mean(ms.map((m) => m.sessions)),
-        meanObservedTokens: mean(ms.filter((m) => m.inputTokens !== null || m.outputTokens !== null).map((m) => (m.inputTokens ?? 0) + (m.outputTokens ?? 0))),
-        medianDurationMs: median(ms.map((m) => m.wallClockMs).filter((v): v is number => v !== null)),
+        meanObservedTokens: mean(
+          ms
+            .filter((m) => m.inputTokens !== null || m.outputTokens !== null)
+            .map((m) => (m.inputTokens ?? 0) + (m.outputTokens ?? 0)),
+        ),
+        medianDurationMs: median(
+          ms.map((m) => m.wallClockMs).filter((v): v is number => v !== null),
+        ),
         label: evidenceLabel(list.length, interval),
       }
     })
@@ -767,10 +932,13 @@ export class UsageIntelligenceService {
       return
     }
     if (this.pushTimer) return
-    this.pushTimer = setTimeout(() => {
-      this.pushTimer = null
-      this.pushNow()
-    }, PUSH_INTERVAL_MS - (wall - this.lastPushAt))
+    this.pushTimer = setTimeout(
+      () => {
+        this.pushTimer = null
+        this.pushNow()
+      },
+      PUSH_INTERVAL_MS - (wall - this.lastPushAt),
+    )
     this.pushTimer.unref?.()
   }
 

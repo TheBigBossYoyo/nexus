@@ -1,0 +1,345 @@
+{
+  "task": "architecture",
+  "compiledAt": "2026-10-11T08:18:07.566Z",
+  "nexusCommit": "91fa7591c735f2fffae2a39aa7ac4193cdac4d6a",
+  "spec": {
+    "id": "7f3f9b51-b4fe-46aa-9d08-3c273eb4a0d8",
+    "projectId": "801697f7-b9b1-4397-83b9-ee40fde7b239",
+    "requestedMode": "AUTO",
+    "mode": "TECHNICAL",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "REPOSITORY_DEPENDENT_BREADTH",
+      "PROFILE:architecture|large|low:scope=few:ambiguity=low",
+      "DEPTH_POLICY:depth-2",
+      "SPECIFICATION_REQUIRES_BOUNDED_REFINEMENT"
+    ],
+    "recommendations": [
+      {
+        "text": "Replace the format switch in src/export/index.js with an exporter registry so teams can add formats through registration without editing existing files.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Expose registerExporter(name, fn), exportData(format, rows), and listFormats() from src/export/index.js. Registered functions take rows and return a string; exportData dispatches to the registered function and returns its output.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "registerExporter must throw when a name is already registered, including the default names, without replacing the existing exporter.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "exportData must throw an Error for an unknown format. Its message must name the requested format and list the known formats. listFormats() must return the registered names sorted alphabetically.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Register json and csv by default and preserve their current output exactly.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Inspect the existing exporter implementation, callers, module conventions, and tests to establish current JSON/CSV behavior and how external modules should register exporters before use.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Create docs/adr/0001-exporter-registry.md with Context, Decision, and Consequences sections describing the switch's extension bottleneck, the registry API and default exporters, and the implications of explicit registration and duplicate-name rejection.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Include tests for default registration, unchanged JSON/CSV output, registering and exporting a custom format, duplicate rejection without replacement, unknown-format Error messages, and alphabetical listing. Demonstrate custom-format registration from separate code without modifying existing exporter files.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Keep registry storage internal and ensure callers cannot mutate it through listFormats(); isolate tests so registrations do not create order-dependent failures.",
+        "kind": "CONSTRAINT",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Run npm test after implementation and report results; inspect the repository for any additional applicable checks.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:801697f7-b9b1-4397-83b9-ee40fde7b239"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "Automatic plugin discovery, asynchronous exporters, unregistering or replacing exporters, and implementing the teams' new formats are outside this change.",
+        "kind": "NON_GOAL",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Replace the format switch in src/export/index.js with an internal registry keyed by format name, so that a new format is added by calling registerExporter from a new file, with no edit to any existing file.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "src/export/index.js exposes registerExporter(name, fn), exportData(format, rows) and listFormats(). fn takes the rows and returns a string; exportData calls the function registered for the format with the rows and returns its result unchanged.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "registerExporter throws when the name is already registered, including for json and csv, and the exporter registered first stays in place and still produces its output afterwards.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "exportData with an unregistered format throws an Error whose message contains the requested format name and every currently registered format name, including formats registered after load.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "listFormats() returns the registered names sorted alphabetically. With only the defaults it returns ['csv', 'json'], and it reflects later registrations.",
+        "kind": "ACCEPTANCE",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "json and csv are registered when src/export/index.js is loaded, with no setup call by the consumer, and produce byte-identical output to the current switch for the same rows (including whitespace, line endings, quoting, header and empty-rows behaviour).",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Capture the current json and csv output as characterization tests before the refactor, or take expected values from the existing implementation and tests, so that 'keeps current output' is verified against the pre-change behaviour rather than against the new code.",
+        "kind": "VERIFICATION",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Establish from the repository: the current exports of src/export/index.js and every caller of them, the module system (CommonJS or ESM), the test framework and test file location behind npm test, what the switch does today for an unknown format, and whether docs/adr or any ADR convention already exists.",
+        "kind": "UNKNOWN",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:801697f7-b9b1-4397-83b9-ee40fde7b239"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "The intent says the public interface 'becomes' the three functions. If index.js currently exports anything else, or callers depend on a different function name or on non-throwing behaviour for unknown formats, those callers must be migrated in this change so nothing is left broken. Report any export that was removed or renamed.",
+        "kind": "RISK",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Store the registry in a Map or a prototype-less object, so that names such as 'constructor' or 'toString' are not treated as registered and can be reported as unknown formats.",
+        "kind": "CONSTRAINT",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Keep the registry private to the module. listFormats() returns a fresh array each call, so mutating the result does not affect the registry.",
+        "kind": "CONSTRAINT",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "If the json and csv exporters are moved to their own files, the default registration must not create a circular import that leaves registerExporter undefined at load time. index.js may import the exporter functions and register them itself.",
+        "kind": "CONSTRAINT",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "A format defined in a new file is only available once that file has been loaded by the consuming application. The registry removes the need to edit the exporter module, but each team must still import its own registration module from code it owns. State this in the ADR's Consequences.",
+        "kind": "RISK",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "The registry is process-global and has no unregister. Tests must not depend on execution order: use a unique format name per test or a fresh module instance, and do not add a reset or unregister function to the public interface for the sake of the tests.",
+        "kind": "CONSTRAINT",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Tests cover: the defaults being present without setup; unchanged json and csv output; registering a custom format from a separate file and exporting through it; a duplicate registration throwing for both a custom and a default name, with the original exporter kept; the unknown-format Error naming the format and listing the known ones; and listFormats being sorted after registrations made out of alphabetical order.",
+        "kind": "VERIFICATION",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Create docs/adr/0001-exporter-registry.md with the headings Context, Decision and Consequences. Context covers the switch as an edit bottleneck with two teams wanting their own formats. Decision covers the three-function registry and the default json and csv. Consequences covers duplicate names throwing, load-order dependence, global state and the absence of unregistering.",
+        "kind": "REQUIREMENT",
+        "provenance": "CONTEXT_DERIVED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "npm test passes on the final source, with the new tests included in the run. No build, lint or typecheck command is configured for the project, so npm test is the only declared gate.",
+        "kind": "VERIFICATION",
+        "provenance": "TECHNICAL_REQUIREMENT",
+        "evidenceRefs": [
+          "repository:801697f7-b9b1-4397-83b9-ee40fde7b239"
+        ],
+        "requiresDecision": false
+      },
+      {
+        "text": "The intent does not specify behaviour for a non-string name, a non-function fn or an exporter that returns a non-string. Do not add coercion or new error contracts beyond what is needed, and do not make tests depend on such behaviour.",
+        "kind": "ASSUMPTION",
+        "provenance": "ASSUMPTION",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      },
+      {
+        "text": "Out of scope: automatic plugin discovery or directory scanning, asynchronous or streaming exporters, unregistering or overriding exporters, implementing the two teams' formats, and changes to the json or csv output.",
+        "kind": "NON_GOAL",
+        "provenance": "DIRECTOR_RECOMMENDED",
+        "evidenceRefs": [],
+        "requiresDecision": false
+      }
+    ],
+    "ambiguities": [],
+    "identity": "62f8555b74b61165a3035edcb5c2f7d5e6c7d6bddc0fb36d5e7f4516e8f65919",
+    "createdAt": "2026-10-11T08:16:51.627Z",
+    "driftCheck": {
+      "structuredFlags": [],
+      "semantic": {
+        "changesIntent": false,
+        "expandsScope": false,
+        "conflicts": [],
+        "unjustifiedRequirements": []
+      }
+    },
+    "rawIntent": "Every new report format means editing the switch in src/export/index.js, and two teams now want to add formats of their own. Redesign the exporters so that a format is added without editing an existing file. The public interface of src/export/index.js becomes: `registerExporter(name, fn)` (fn takes the rows and returns a string; registering a name twice throws), `exportData(format, rows)` (an unknown format throws an Error whose message names the format and lists the known formats), and `listFormats()` (the registered names, sorted alphabetically). `json` and `csv` are registered by default and keep their current output. Record the decision as docs/adr/0001-exporter-registry.md with the sections Context, Decision and Consequences. Include tests.",
+    "intentId": "b0ce8a96-4164-48da-88dc-5598afa73b9b",
+    "userMetadata": {
+      "entryPoint": "MISSION",
+      "goals": [
+        "Every new report format means editing the switch in src/export/index.js, and two teams now want to add formats of their own. Redesign the exporters so that a format is added without editing an existing file. The public interface of src/export/index.js becomes: `registerExporter(name, fn)` (fn takes the rows and returns a string; registering a name twice throws), `exportData(format, rows)` (an unknown format throws an Error whose message names the format and lists the known formats), and `listFormats()` (the registered names, sorted alphabetically). `json` and `csv` are registered by default and keep their current output. Record the decision as docs/adr/0001-exporter-registry.md with the sections Context, Decision and Consequences. Include tests."
+      ],
+      "constraints": [],
+      "acceptanceCriteria": []
+    },
+    "dependencies": [
+      {
+        "id": "repository:801697f7-b9b1-4397-83b9-ee40fde7b239",
+        "version": "77b30c3c4c008064e175ccc1288294d91693bc47:59ac6a5945080354cead0fba0b7c8aae60acb522a8fc7f89a2562f84e5335986"
+      }
+    ]
+  },
+  "record": {
+    "requestedMode": "AUTO",
+    "mode": "TECHNICAL",
+    "status": "USER_DECISION_REQUIRED",
+    "reasons": [
+      "REPOSITORY_DEPENDENT_BREADTH",
+      "PROFILE:architecture|large|low:scope=few:ambiguity=low",
+      "DEPTH_POLICY:depth-2",
+      "SPECIFICATION_REQUIRES_BOUNDED_REFINEMENT"
+    ],
+    "ms": 75368,
+    "recommendations": 30,
+    "recommendationChars": 9992,
+    "byKind": {
+      "REQUIREMENT": 8,
+      "ACCEPTANCE": 5,
+      "UNKNOWN": 2,
+      "VERIFICATION": 5,
+      "CONSTRAINT": 5,
+      "NON_GOAL": 2,
+      "RISK": 2,
+      "ASSUMPTION": 1
+    },
+    "ambiguities": [],
+    "contextItems": 1,
+    "note": "The project knowledge seeded for the agents is not in the profile the application compiled on: the compiler saw the repository only.",
+    "providerCalls": [
+      {
+        "stage": "COMPILER:compiler:1",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 985,
+          "outputTokens": 883,
+          "totalTokens": 1868,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 0
+        }
+      },
+      {
+        "stage": "COMPILER:technical:1",
+        "provider": "claude",
+        "model": "opus",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-opus-5-5"
+          ],
+          "inputTokens": 2248,
+          "outputTokens": 3440,
+          "totalTokens": null,
+          "cacheReadTokens": 544,
+          "cacheWriteTokens": 5665,
+          "reasoningTokens": 910
+        }
+      },
+      {
+        "stage": "COMPILER:compiler:2",
+        "provider": "openai",
+        "model": "gpt-6.1-sol",
+        "state": "COMPLETED",
+        "usage": {
+          "models": [
+            "gpt-6.1-sol"
+          ],
+          "inputTokens": 2721,
+          "outputTokens": 265,
+          "totalTokens": 2986,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "reasoningTokens": 231
+        }
+      }
+    ]
+  }
+}

@@ -29,6 +29,7 @@ import type {
   UsageInfo,
 } from '@main/modules/agent-runtime/types'
 import { canProposeGraphChange, rolePrompt } from '@main/modules/context/prompts'
+import { renderInstructionsInForce } from './instructions'
 import {
   buildHandoffRequestPrompt,
   buildResumeFromHandoffPrompt,
@@ -131,7 +132,7 @@ export interface AgentRunInput {
   onActivity?: () => void
 }
 
-export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped'
+export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped' | 'capacity'
 
 export interface AgentRunResult {
   agentId: string
@@ -328,6 +329,9 @@ export class AgentRunner {
         prompt = buildResumeFromHandoffPrompt({
           task: input.task as Task,
           handoff,
+          // The handoff is what a model chose to write down. What the user asked for is given again in full.
+          instructions: renderInstructionsInForce(repos, input.run, input.task, { withRequest: true }),
+          missionCriteria: input.run.plan?.acceptanceCriteria ?? [],
           worktreePath: input.cwd,
           branch: input.task?.branch ?? '',
         }).prompt
@@ -350,7 +354,7 @@ export class AgentRunner {
     }
 
     // A usage limit or an authentication stop is not a failure of the agent: it ends 'stopped', reason recorded.
-    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth'
+    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth' && last.outcome !== 'capacity'
     const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
     try {
       this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
@@ -616,6 +620,7 @@ export class AgentRunner {
     let result: TurnResult | null = null
     let ended: { reason: string; error: string | null } = { reason: 'crashed', error: null }
     let quota = false
+    let capacity = false
     let turns = 0
     let sdkId: string | null = spec.resumeSessionId ?? null
     const toolNames = new Map<string, string>()
@@ -629,6 +634,10 @@ export class AgentRunner {
       for await (const event of handle.events) {
         input.onActivity?.()
         switch (event.type) {
+          case 'capacity.wait':
+            capacity = true
+            bus.emit({ ...ids, type: 'capacity.waiting', payload: { routingId: event.routingId, provider: event.provider, reasons: event.reasons, ...(event.waitingOn ? { waitingOn: event.waitingOn } : {}) } })
+            break
           case 'session.started': {
             sdkId = event.sessionId
             this.context?.tokens.sessionStarted(agentId, { provider: event.provider ?? 'claude', model: event.model }, { resumed: spec.resumeSessionId !== undefined, handoff: opts.handoff === true })
@@ -762,13 +771,14 @@ export class AgentRunner {
     const stopReason = input.control.stopReason
     let outcome: AgentOutcome
     if (stopReason) outcome = 'stopped'
+    else if (capacity) outcome = 'capacity'
     else if (result) outcome = result.outcome
     else if (quota) outcome = 'quota'
     else outcome = 'crashed'
     if (outcome === 'crashed' && ended.error) appendOutput('error', ended.error)
 
     repos.sessions.update(session.id, {
-      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' ? 'ended' : 'failed',
+      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' || outcome === 'capacity' ? 'ended' : 'failed',
       endReason: stopReason ?? (outcome === 'success' ? 'completed' : outcome),
       endedAt: nowIso(),
     })

@@ -1,0 +1,99 @@
+{
+  "kind": "v72-live-acceptance",
+  "startedAt": "2026-10-10T19:38:47.068Z",
+  "verdict": "PASS",
+  "steps": {
+    "standard": {
+      "ms": 31247,
+      "request": "Replace the fixed two second delay of the upload retry with an exponential backoff with jitter, keep the limit of five attempts, and add a test that does not sleep.",
+      "spec": {
+        "id": "eabe1d13-3e16-408a-9e77-0ead3c5fbcf9",
+        "requestedMode": "STANDARD",
+        "mode": "STANDARD",
+        "status": "USER_DECISION_REQUIRED",
+        "reasons": [
+          "USER_SELECTED_MODE"
+        ],
+        "rawIntentPreserved": "Replace the fixed two second delay of the upload retry with an exponential backoff with jitter, keep the limit of five attempts, and add a test that does not sleep.",
+        "recommendations": [
+          {
+            "text": "Replace the upload retry's fixed two-second delay with exponential backoff with jitter.",
+            "kind": "REQUIREMENT",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Preserve the existing five-attempt limit and its counting semantics; do not schedule a retry delay after the final failed attempt.",
+            "kind": "CONSTRAINT",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Proposed delay policy: before retry number r, starting at r = 1, choose a delay uniformly from zero to 2,000 × 2^(r−1) milliseconds. No separate delay cap is proposed because the attempt limit bounds the sequence.",
+            "kind": "REQUIREMENT",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": true
+          },
+          {
+            "text": "Add a deterministic test that performs no real sleeping. Control the randomness and replace or fake the wait mechanism so the test verifies exponential delay bounds, jitter application, the five-attempt limit, and no further retries after success or exhaustion.",
+            "kind": "ACCEPTANCE",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Keep existing retry eligibility, upload behavior, and terminal error handling unchanged; broader retry-policy redesign is out of scope.",
+            "kind": "NON_GOAL",
+            "provenance": "DIRECTOR_RECOMMENDED",
+            "evidenceRefs": [],
+            "requiresDecision": false
+          },
+          {
+            "text": "Verify the added test and existing suite using the repository's configured npm test command.",
+            "kind": "VERIFICATION",
+            "provenance": "CONTEXT_DERIVED",
+            "evidenceRefs": [
+              "repository:70e2794d-3c2d-4c92-ba6f-4d99fb6ba84f"
+            ],
+            "requiresDecision": false
+          }
+        ],
+        "ambiguities": [
+          "Is the proposed two-second base with doubling and full jitter acceptable, or should a different base, jitter distribution, or delay cap be used?",
+          "Proposed delay policy: before retry number r, starting at r = 1, choose a delay uniformly from zero to 2,000 × 2^(r−1) milliseconds. No separate delay cap is proposed because the attempt limit bounds the sequence.",
+          "The exact delay policy—uniform jitter from zero to 2,000 × 2^(r−1) milliseconds, with no separate cap—is not specified by the user. Although marked as requiring a decision, it must remain a proposal rather than a binding requirement.",
+          "Requiring verification through a configured npm test command assumes a repository toolchain not established by the supplied user request. The repository reference alone does not substantiate that assumption.",
+          "Running the entire existing test suite is an additional verification requirement beyond the explicit request to add a test that does not sleep."
+        ],
+        "dependencies": 1,
+        "waitUntil": null
+      },
+      "routing": [],
+      "intentUnchanged": true
+    }
+  },
+  "connectionBefore": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "connectionAfter": {
+    "state": "SIGNED_IN_PLAN_USAGE",
+    "model": "gpt-6.1-sol",
+    "includedOnlyConfirmed": true,
+    "capacity": {
+      "state": "AVAILABLE",
+      "nextProbeAt": null
+    },
+    "error": null
+  },
+  "failures": []
+}
