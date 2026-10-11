@@ -108,22 +108,50 @@ exists) runs harmless hostile programs and asserts what Windows did:
 | NEXUS data directory (`%APPDATA%\nexus`: database, endpoint and token, credentials, logs) | no access | no read, no write (labeled protected) |
 | `~/.claude`, `~/.codex`, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.docker`, `~/.config/gh`, `.npmrc`, `.netrc`, `.git-credentials` | no access | no read, no write (labeled protected) |
 | Browser profiles, Documents, Desktop, Downloads, other repositories | no access | **read**; no write |
-| The enrolled project's own repository | no access; git commands run as the user at low integrity (below) | read; no write except the parts below |
+| The enrolled project's own repository (its `.git`) | read; add objects; write the task's own worktree entry and the refs of its own mission (an access grant, below) | read; no write except the parts below |
 
 **Labels.** "Protected" is a mandatory integrity label on the directory (medium, no-read-up, no-write-up,
 no-execute-up, inherited). Only the label is set; the owner and the access list are untouched; `nexus-launch
 label clear` removes it. The list above is what the user approved for this machine on 2026-10-11. Browser
 profiles and personal folders are not on it, and are named in "What is not contained".
 
-**Git.** A linked worktree keeps its data in the user's repository. A command that is `git` and nothing else,
-with no finding of the classifier, runs as the user at low integrity even in an ISOLATED session, with hooks,
-the file-system monitor, the pager, the editor, the external diff and the `ext` transport switched off in its
-environment (which outranks the repository's configuration). To let it commit, NEXUS labels low exactly: the
-worktree's own entry (`.git/worktrees/<name>`), the object store, and the directory of the task's branch among
-the refs and their logs. The paths come from NEXUS's record of the worktree, never from the `.git` file an agent
-can rewrite. The user's branches, tags, configuration and hooks stay medium: a contained git cannot write them
-(`v8-containment.test.ts`, "commits on its own branch"). The object store is writable by contained code, so an
-object can be added or damaged; NEXUS's own git (trusted, medium) does the merging.
+**Git.** A linked worktree keeps its data in the user's repository, which is in the user's profile. Revised
+2026-10-11 after the first real acceptance, in which sessions under ISOLATED met "not a git repository" in every
+command that was more than git, and reported themselves blocked.
+
+- *Under ISOLATED, the sandbox account is given access to the Git data of the enrolled project* (`icacls`, by
+  the user's own right as owner; no elevation): read on `.git`; create-only on the object store (who creates a
+  file may finish it; nothing that is there can be replaced or removed); modify on the worktree's own entry
+  (`.git/worktrees/<name>`) and on the directory of the mission's branches among the refs and their logs. The
+  paths come from NEXUS's record of the worktree, never from the `.git` file an agent can rewrite. Each grant is
+  on record and is taken back when the project is no longer enrolled. The enrollment confirmation says so.
+  With it, `git status`, `log`, `diff`, `show`, `add` work in any contained command, as the sandbox account.
+- *A commit cannot be made by that account.* Before git changes a ref it looks at every directory above it, and
+  the account can see none of the user's above the repository ("cannot lock ref 'HEAD': unable to create
+  directory"). A junction from the sandbox root does not help: git resolves it. Giving the account rights on
+  the user's own folders above the repository is not something NEXUS does.
+- *So a command that is git alone still runs as the user at low integrity*, in an ISOLATED session too. "Git
+  alone" includes git with nothing around it but text filters and listings (`git log | head -3`, `git status;
+  git diff --stat | tail`): every program is git or one of a few tools that only read (`head`, `tail`, `grep`,
+  `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `ls`, `nl`, `echo`, `pwd`, `cd`), every file named is inside the
+  worktree (links resolved), and the shell is given nothing to expand, substitute, redirect or group
+  (`policies/git-pipeline.ts`, `tests/unit/policies/git-pipeline.test.ts`). Such a command has the user's
+  network and reads what the user's low-integrity processes read; what it can run is git, hardened, and those
+  tools. git there runs with hooks, the file-system monitor, the pager, the editor, automatic housekeeping and
+  the `ext` transport switched off in its environment, which outranks the repository's configuration.
+- *A ref-changing git inside a larger command* (`npm test && git commit`) is stopped before git, with a sentence
+  that says to run it as a command of its own. Nothing is changed.
+- The user's branches, tags, configuration and hooks stay out of reach of both: Windows refuses the write
+  (`tests/scenarios/v8-isolated-git.test.ts`, `v8-containment.test.ts`).
+- NEXUS's own git commands name the worktree's Git directory and, since this revision, the repository's common
+  directory themselves (`GIT_COMMON_DIR`): the `commondir` file in a worktree's entry, which contained code can
+  write, redirects nothing.
+- Under RESTRICTED there is no grant: the command is the user, and reads the repository. To let git commit,
+  the same three places are labeled low.
+
+Not contained here: the object store can be added to by contained code (never rewritten under ISOLATED; under
+RESTRICTED an existing object can be damaged, which git then reports). Reading the worktree's own `.git` entry
+is no longer a boundary request; anything below a `.git` directory still is.
 
 **Junctions and links.** A low-integrity process cannot create a junction or a symbolic link to a directory it
 cannot write (tested); a link that exists is followed by Windows with the caller's own rights, so it gives
