@@ -30,6 +30,8 @@ export interface AutonomyServiceDeps {
    * session starts. False means the broker treats what the policy cannot inspect as uncontained.
    */
   contained?: (projectId: string) => boolean
+  /** Whether they run inside any containment that was verified, RESTRICTED included. */
+  confined?: (projectId: string) => boolean
   /** The inbox changed: a request was created or decided, a grant given or taken back, a project enrolled. */
   onChange?: (change: { kind: 'request' | 'grant' | 'enrollment'; request?: BoundaryRequest; created?: boolean }) => void
   now?: () => number
@@ -95,7 +97,7 @@ export class AutonomyService {
    */
   gateFor(session: { projectId: string; runId: string | null; taskId: string | null; role: AgentRole; provider: string | null; cwd: string | null }): AutonomyGate | undefined {
     if (this.enrollment(session.projectId) === null) return undefined
-    return createAutonomyGate({ broker: this.broker, ...session, contained: this.deps.contained?.(session.projectId) === true })
+    return createAutonomyGate({ broker: this.broker, ...session, contained: this.deps.contained?.(session.projectId) === true, confined: this.deps.confined?.(session.projectId) === true })
   }
 
   private view(request: BoundaryRequest): BoundaryRequestView {

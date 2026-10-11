@@ -317,6 +317,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     recordShellWrites(command, shell, agentId)
 
     const contained = ctx.autonomy?.contained === true
+    const confined = ctx.autonomy?.confined === true
     const baseNeed = shellBaseNeed(cls)
     // git alone, or git with nothing but text filters around it: such a command runs where the repository is readable.
     // Decided by its own strict reading of the command, never by the absence of findings alone: what qualifies
@@ -331,8 +332,8 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       ]
       const needs = [
         baseNeed,
-        ...needsForFindings(findings, { contained }),
-        ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons.map((r) => needForExecutionReason(r, verdict.trust, { contained })) : []),
+        ...needsForFindings(findings, { contained, confined }),
+        ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons.map((r) => needForExecutionReason(r, verdict.trust, { contained, confined })) : []),
       ]
       const reasons = [...(base.behavior === 'ask' ? [base.reason] : []), ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons : [])]
       const reason = [...new Set(reasons)].join('; ')

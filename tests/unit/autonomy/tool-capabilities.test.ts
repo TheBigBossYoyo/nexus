@@ -71,3 +71,21 @@ describe('from classifier findings to capabilities', () => {
     expect(needForExecutionReason('script written by an agent', 'UNTRUSTED_AGENT_AUTHORED', { contained: false }).capability).toBe('UNCONTAINED_EXECUTION')
   })
 })
+
+describe('RESTRICTED is a containment, not the isolated profile', () => {
+  // Under RESTRICTED a command runs as the user at low integrity: its writes are held to the task's directories
+  // and its environment is the allowlist, but it reads the user's unprotected files and has the network.
+  const restricted = { contained: false, confined: true }
+  it('what NEXUS cannot read into is still a question there', () => {
+    expect(needForExecutionReason('script written by an agent', 'UNTRUSTED_AGENT_AUTHORED', restricted).capability).toBe('UNCONTAINED_EXECUTION')
+    for (const command of ['powershell -EncodedCommand ZQBjAGgAbwAgAGgAaQA=', '$x = "ls"; & $x']) {
+      const cls = classifyCommand(command, 'powershell', { roots: [ROOT] })
+      expect(needsForFindings(cls.findings, restricted).map((n) => n.capability), command).toContain('UNCONTAINED_EXECUTION')
+      expect(needsForFindings(cls.findings, { contained: true }).map((n) => n.capability), command).not.toContain('UNCONTAINED_EXECUTION')
+    }
+  })
+  it('a write the containment holds to the worktree is not', () => {
+    const cls = classifyCommand('rm -rf build', 'bash', { roots: [ROOT] })
+    expect(needsForFindings(cls.findings, restricted).every((n) => n.capability !== 'UNCONTAINED_EXECUTION')).toBe(true)
+  })
+})

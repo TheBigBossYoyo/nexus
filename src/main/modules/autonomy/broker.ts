@@ -119,6 +119,10 @@ export class CapabilityBroker {
       .sort((a, b) => order.indexOf(a.scope) - order.indexOf(b.scope))
     for (const grant of candidates) {
       if (grant.scope !== 'ONCE') return grant
+      // "Once" is for the action the user was shown, and for no other that happens to need the same capability:
+      // a push to another remote, a request to another host. A different action is a new question.
+      const shown = grant.requestId !== null ? this.deps.requests.get(grant.requestId) : null
+      if (shown !== null && shown.action !== request.action) continue
       if (this.deps.grants.consume(grant.id, this.iso())) return grant
     }
     return null

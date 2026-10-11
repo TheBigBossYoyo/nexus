@@ -589,7 +589,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // again changes nothing the user sees but its count.
   const autonomy = new AutonomyService({
     repos,
-    contained: (projectId) => isolation.contained(projectId),
+    contained: (projectId) => isolation.isolated(projectId),
+    confined: (projectId) => isolation.contained(projectId),
     runActive: (runId) => {
       const run = repos.runs.get(runId)
       return run !== null && !TERMINAL_RUN_STATES.includes(run.state)

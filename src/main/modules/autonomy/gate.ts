@@ -14,6 +14,8 @@ import type { CapabilityNeed } from './tool-capabilities'
 export interface AutonomyGate {
   /** Whether this session's shell commands run inside the ISOLATED execution profile. */
   readonly contained: boolean
+  /** Whether they run inside any containment (RESTRICTED included): writes held to the task's directories, environment an allowlist. */
+  readonly confined: boolean
   resolve(request: ToolRequest, action: string, needs: CapabilityNeed[], trust?: TrustClass): ToolDecision
 }
 
@@ -26,6 +28,7 @@ export interface AutonomyGateContext {
   provider: string | null
   cwd: string | null
   contained: boolean
+  confined?: boolean
 }
 
 const ACTOR_OF_ROLE: Record<AgentRole, ActorKind> = {
@@ -52,6 +55,7 @@ export function boundaryMessage(decisions: Extract<BrokerDecision, { outcome: 'B
 export function createAutonomyGate(ctx: AutonomyGateContext): AutonomyGate {
   return {
     contained: ctx.contained,
+    confined: ctx.confined === true || ctx.contained,
     resolve(request, action, needs, trust = 'UNTRUSTED_AGENT_AUTHORED') {
       const decisions: BrokerDecision[] = []
       for (const need of needs) {

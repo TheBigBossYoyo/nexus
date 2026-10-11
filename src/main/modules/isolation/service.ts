@@ -73,6 +73,11 @@ export class IsolationService {
     return profile !== 'STANDARD' && this.deps.broker.usable(profile).usable
   }
 
+  /** Whether a session of this project runs its commands as the sandbox account, verified. The only profile under which what NEXUS cannot read into is run without a question. */
+  isolated(projectId: string): boolean {
+    return this.profileFor(projectId) === 'ISOLATED' && this.deps.broker.usable('ISOLATED').usable
+  }
+
   /** The shell containment of a session; undefined for a project that is not enrolled. */
   shellFor(session: { projectId: string; sessionKey: string; worktree: string; cwd: string }): ShellContainment | undefined {
     if (!this.deps.enrolled(session.projectId)) return undefined

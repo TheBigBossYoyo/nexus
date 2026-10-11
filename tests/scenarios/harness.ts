@@ -254,7 +254,8 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       const run = repos.runs.get(runId)
       return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
     },
-    contained: (projectId) => (isolationService ? isolationService.contained(projectId) : options.autonomy?.contained === true),
+    contained: (projectId) => (isolationService ? isolationService.isolated(projectId) : options.autonomy?.contained === true),
+    confined: (projectId) => (isolationService ? isolationService.contained(projectId) : options.autonomy?.contained === true),
     onChange: () => void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }),
   })
   autonomy.watch(bus)
