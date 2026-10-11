@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { FakeScript } from '@main/modules/agent-runtime/fake-runtime'
@@ -49,6 +49,17 @@ const common = cp.execFileSync('git', ['rev-parse', '--git-common-dir']).toStrin
 const own = cp.execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD']).toString().trim();
 const dir = path.join(common, 'refs', 'heads', path.dirname(own));
 for (const name of fs.readdirSync(dir)) if (name !== path.basename(own)) say('sibling-' + (name === 'integration' ? 'integration' : 'task'), () => fs.writeFileSync(path.join(dir, name), '0000000000000000000000000000000000000000\\n'));
+// 6. A repository of its own inside the worktree, whose configuration runs the marker as a filter, a file monitor and a hook.
+say('nested', () => {
+  const sub = path.join(process.cwd(), 'nested'); fs.mkdirSync(path.join(sub, 'hooks'), { recursive: true });
+  const g = (...a) => cp.execFileSync('git', a, { cwd: sub, stdio: 'pipe' });
+  g('init', '-q', '-b', 'main', '.'); g('config', 'user.name', 'x'); g('config', 'user.email', 'x@x');
+  fs.writeFileSync(path.join(sub, 's.txt'), 's\\n'); fs.writeFileSync(path.join(sub, '.gitattributes'), '* filter=evil\\n'); g('add', '-A'); g('commit', '-q', '-m', 'sub');
+  const run = "sh -c 'whoami > \\"" + marker.split(path.sep).join('/') + "\\"; cat'";
+  g('config', 'filter.evil.clean', run); g('config', 'core.fsmonitor', run); g('config', 'core.hooksPath', path.join(sub, 'hooks').split(path.sep).join('/'));
+  for (const h of ['pre-commit', 'post-index-change', 'reference-transaction']) fs.writeFileSync(path.join(sub, 'hooks', h), hook);
+  fs.writeFileSync(path.join(sub, 's.txt'), 's changed\\n');
+});
 // 5. The worktree's pointer, turned to a Git directory of the task's own making, with a hook of its own.
 say('pointer', () => { fs.mkdirSync('evilgit/hooks', { recursive: true }); fs.writeFileSync('evilgit/hooks/pre-commit', hook); fs.writeFileSync('evilgit/HEAD', 'ref: refs/heads/main\\n'); fs.writeFileSync('.git', 'gitdir: ' + path.join(process.cwd(), 'evilgit').split(path.sep).join('/') + '\\n') });
 `
@@ -153,12 +164,16 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     for (const name of ['commondir', 'gitdir', 'config.worktree', 'sibling-integration']) expect(out['plant'], `${name}: ${all}`).toMatch(new RegExp(`${name}:REFUSED:(EPERM|EACCES)`))
     // (Whether the pointer could be rewritten is not a control: where it could, the git that runs as the user is told its Git directory by NEXUS.)
     expect(out['plant'], all).toContain('hooks:PLANTED')
+    expect(out['plant'], all).toContain('nested:PLANTED')
     expect(out['plant'], all).toContain('home:PLANTED')
     // The commit after the plant was made in the real repository, on the task's branch, and no hook ran.
     expect(out['armed-commit'], all).toContain('after the plant')
     expect(out['armed-commit']).not.toMatch(/fatal:|error:/)
-    expect(existsSync(join(h.worktreesDir, run.id.slice(0, 8), 'alpha', 'ran-as-the-user.txt')), all).toBe(false)
-    expect(readdirSync(h.worktreesDir).flatMap((r) => readdirSync(join(h.worktreesDir, r)).flatMap((t) => (existsSync(join(h.worktreesDir, r, t, 'ran-as-the-user.txt')) ? [t] : []))), all).toEqual([])
+    const ranMarker = join(h.worktreesDir, run.id.slice(0, 8), 'alpha', 'ran-as-the-user.txt')
+    // If anything planted ran at all, it ran as the sandbox account (a git of the task's own, inside the containment), never as the user.
+    const ranAs = existsSync(ranMarker) ? readFileSync(ranMarker, 'utf8').trim().toLowerCase() : ''
+    expect(ranAs === '' || ranAs.endsWith((account as { account: string }).account.toLowerCase()), `ran as: ${ranAs}
+${all}`).toBe(true)
     expect(end.state, all).toBe('completed')
     expect(h.autonomy.missionMetrics(run.id).boundaryRequests, all).toBe(0)
   }, 300_000)

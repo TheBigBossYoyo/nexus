@@ -680,6 +680,11 @@ export class ExecutionBroker {
       // The task's work is not what triggers housekeeping of the user's repository.
       ['gc.auto', '0'],
       ['maintenance.auto', 'false'],
+      // A repository the task put inside the worktree is not entered: with its entry in the index a plain status
+      // would start a git in it, under its own configuration (measured; tests/integration/git/hostile-index).
+      ['diff.ignoreSubmodules', 'all'],
+      ['submodule.recurse', 'false'],
+      ['status.submoduleSummary', 'false'],
       // The repository belongs to the user and the command runs as the sandbox account: git is told that this is meant.
       ...(otherAccount ? ([['safe.directory', '*']] as [string, string][]) : []),
     ]

@@ -192,6 +192,42 @@ attempt('stream', () => fs.readFileSync(f + '::$DATA', 'utf8'));
         expect(r.raw).not.toContain(SENTINEL)
       })
 
+      it('what it can do with junctions and links to places that are not its own (recorded as Windows answers)', async () => {
+        // A junction or a link planted in a worktree matters when a process with more rights later walks the
+        // worktree. This records what Windows lets contained code make; NEXUS does not rely on the answer:
+        // whatever reads or writes a worktree for NEXUS runs inside the containment too.
+        const r = await probe(
+          profile,
+          'junctions',
+          `${ATTEMPT}
+const user = process.env.PROBE_USER_DIR; const prot = process.env.PROBE_PROTECTED_DIR; const profileDir = process.env.PROBE_PROFILE_DIR;
+attempt('junction-user', () => { fs.symlinkSync(user, 'j-user', 'junction'); return 'made'; });
+attempt('read-through-user', () => fs.readFileSync(path.join('j-user', 'notes.txt'), 'utf8'));
+attempt('write-through-user', () => { fs.writeFileSync(path.join('j-user', 'planted.txt'), 'x'); return 'wrote'; });
+attempt('junction-protected', () => { fs.symlinkSync(prot, 'j-prot', 'junction'); return 'made'; });
+attempt('read-through-protected', () => fs.readFileSync(path.join('j-prot', 'credentials.json'), 'utf8'));
+attempt('junction-profile', () => { fs.symlinkSync(profileDir, 'j-profile', 'junction'); return 'made'; });
+attempt('read-through-profile', () => fs.readFileSync(path.join('j-profile', 'secret.txt'), 'utf8'));
+attempt('symlink-dir', () => { fs.symlinkSync(user, 's-user', 'dir'); return 'made'; });
+attempt('symlink-file', () => { fs.symlinkSync(path.join(user, 'notes.txt'), 's-file', 'file'); return 'made'; });
+attempt('mklink-j', () => cp.execSync('cmd /c mklink /J j-cmd "' + user + '"', { stdio: 'pipe' }).toString());
+`,
+        )
+        writeFileSync(join(SCRATCH, `junctions-${profile}.txt`), r.raw)
+        // Never, under either profile: nothing protected is read and nothing is written outside through a link.
+        expect(r.lines['read-through-protected'], r.raw).toMatch(/^DENIED:/)
+        expect(r.lines['write-through-user'], r.raw).toMatch(/^DENIED:/)
+        expect(existsSync(join(userDir, 'planted.txt'))).toBe(false)
+        expect(r.raw).not.toContain(`${SENTINEL}-protected`)
+        // The sandbox account reads nothing of the user's through one either.
+        if (profile === 'ISOLATED') {
+          expect(r.lines['read-through-user'], r.raw).toMatch(/^DENIED:/)
+          expect(r.lines['read-through-profile'], r.raw).toMatch(/^DENIED:/)
+          expect(r.raw).not.toContain(SENTINEL)
+        }
+        console.info(`junctions under ${profile}: ${JSON.stringify(r.lines)}`)
+      })
+
       it('cannot leave a process behind: a detached grandchild ends with the command', async () => {
         const s = session(profile, 'orphan')
         const marker = join(s.worktree, 'still-alive.txt')

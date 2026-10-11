@@ -47,6 +47,7 @@ import {
 import { EventBus } from '@main/modules/events'
 import { createIpcHandlers, dispatchIpc } from '@main/modules/ipc/handlers'
 import { GitService, WorktreeManager } from '@main/modules/git'
+import type { CommitEvidence } from '@main/modules/git/git-service'
 import { Orchestrator } from '@main/modules/orchestrator'
 import { attachOutcomeRecording, PolicyService } from '@main/modules/policy'
 import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
@@ -91,6 +92,8 @@ export interface Harness {
   research: WebResearchProvider | null
   /** 0.8: present when the harness was created with `apps`. */
   apps: ApplicationUnderTestManager | null
+  /** 0.8: what NEXUS committed in the worktrees it created, each with what it meant to commit. */
+  commitEvidence: CommitEvidence[]
   /** Every durable event emitted by this app instance (since it started). */
   events: RunEvent[]
   /** Ephemeral main → renderer pushes (streamed agent output) of this app instance. */
@@ -203,6 +206,10 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   })
 
   const gitService = new GitService()
+  // As the runtime does: NEXUS's own index of each worktree, outside the worktrees.
+  gitService.setTrustedIndexDir(join(dir, 'git-index'))
+  const commitEvidence: CommitEvidence[] = []
+  gitService.onCommitEvidence((e) => void commitEvidence.push(e))
   const runtime = new FakeAgentRuntime({ script: options.script, ...(options.cache ? { cache: options.cache } : {}) })
   const policy = options.policy ? new PolicyService({ repos, nexusVersion: '0.3.0-test' }) : null
   if (policy) attachOutcomeRecording(bus, policy)
@@ -372,6 +379,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     autonomy,
     research,
     apps,
+    commitEvidence,
     events,
     pushes,
     async waitForState(runId, states, timeoutMs = 150_000) {

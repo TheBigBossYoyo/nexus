@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
 import { IntelligenceOperations } from '../modules/intelligence/operations'
@@ -315,6 +315,17 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
   // Git directory comes from the repository NEXUS's own record names for the worktree.
   git.setWorktreesRoot(worktreesDir)
+  // 0.8: NEXUS's own index of every worktree it created, where contained code cannot write; and a line of
+  // evidence for every commit NEXUS makes there: what it meant to commit and what the commit holds.
+  git.setTrustedIndexDir(join(dataDir, 'git-index'))
+  git.onCommitEvidence((evidence) => {
+    try {
+      appendFileSync(join(dataDir, 'commit-evidence.jsonl'), `${JSON.stringify(evidence)}
+`)
+    } catch (e) {
+      logger(`git: commit evidence could not be written: ${errorMessage(e)}`)
+    }
+  })
   git.setWorktreeResolver((worktreePath) => {
     const record = repos.worktrees.getByPath(worktreePath)
     const run = record ? repos.runs.get(record.runId) : null
