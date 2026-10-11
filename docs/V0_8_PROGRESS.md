@@ -223,14 +223,13 @@ nothing on the remote. Both missions nevertheless ended paused. Causes, each fix
 Not fixed, noted: reviewer and verifier roles are refused `git reflog`, `git branch -vv`, `od` by the 0.7 role
 policy; `npm ci` as setup fails in a project without a lock file (exit 1, as before 0.8).
 
+### End of the 0.8 session (2026-10-11): PARTIAL
+
+Verdict, gates and what PASS still needs: `V0_8_RELEASE_REPORT.md`. Not merged, not tagged, version 0.7.2.
+Independent security review: 10 findings, in `V0_8_SECURITY_MODEL.md`. Acceptance run 8 passed every gate on
+the final code. Full suite 220 files, 4,461 tests. New-UI e2e 5 of 5, a11y 2 of 2. Soak passed. An unpacked
+package builds with the launcher, the setup scripts and the browser driver in it; it was not started.
+
 ## Next
 
-1. Run 4 of the real acceptance (`test-results/v08/accept-4.log`): read it, fix what it shows.
-2. Run the e2e and accessibility specs of the new UI (`tests/e2e/v8.spec.ts`, the new case of `a11y.spec.ts`;
-   written by a subagent, NEVER RUN). They rebuild `out/`: not while an acceptance runs.
-3. Full suite (`npx vitest run`, about 12 minutes), then fixes.
-4. Independent reviews (security, UX); soak; the search page against the real site.
-5. Version 0.8.0, final regression, package, `V0_8_RELIABILITY.md`, `V0_8_RELEASE_REPORT.md`. Merge and tag
-   only on PASS; never push.
-6. Open, not started: the pipe's DACL; Context Graph nodes for research; a grant resuming a waiting task;
-   unattended rules for enrolled projects; a setting for an application's external network.
+See "To reach PASS" in `V0_8_RELEASE_REPORT.md`.
