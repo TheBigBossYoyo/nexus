@@ -196,7 +196,7 @@ The final source is `be766d7`; the commits after it change documents, evidence a
 | End-to-end (`pnpm test:e2e`, with the visual captures and the accessibility check) | 35 passed, 0 failed, 3 skipped (the capture specs that run on request) |
 | Stress, default (`pnpm stress`) | 11 files, 14 tests passed, 1 skipped |
 | Stress, 1,000 orchestrator seeds | Passed on `ca43de4` (6,654 s) and before that on `8198028`. **Not completed on `be766d7`**: the run was started and was stopped by the machine for lack of memory while this session was idle; it was not started again. `be766d7` differs from `ca43de4` by two sentences in prompts and one test file, none of which the stress reads |
-| Package | PACKAGE_LINE |
+| Package | `release/v72-development/NEXUS-Setup-0.7.2-development.exe`, 208,186,318 bytes, built from `e33edb5` on a clean tree. The packaged application was started by `scripts/v72-packaged-check.mjs`: identity (version, commit, not dirty, schema 16), runtime, worker (claude and codex), a project, every page rendered, no mission, no overnight run, signed out, no renderer error: all true. The installer itself was not run |
 
 Logs of these runs are under `test-results/v072` (`*-final4.log`, and `stress-1000-final3.log` for the seeds).
 
