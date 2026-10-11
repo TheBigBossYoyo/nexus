@@ -77,7 +77,7 @@ export function createAutonomyGate(ctx: AutonomyGateContext): AutonomyGate {
         if (decision.outcome === 'DENIED') return { behavior: 'deny', reason: `Denied: ${decision.reason} This cannot be approved; choose a different approach.` }
       }
       const waiting = decisions.filter((d): d is Extract<BrokerDecision, { outcome: 'BOUNDARY_GRANT_REQUIRED' }> => d.outcome === 'BOUNDARY_GRANT_REQUIRED')
-      if (waiting.length > 0) return { behavior: 'deny', reason: boundaryMessage(waiting) }
+      if (waiting.length > 0) return { behavior: 'deny', reason: boundaryMessage(waiting), boundaryRequests: waiting.map((d) => d.requestId) }
       return { behavior: 'allow' }
     },
   }

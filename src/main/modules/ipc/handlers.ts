@@ -33,6 +33,8 @@ import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
+import { createAutonomyHandlers } from './v8-handlers'
+import { AutonomyService } from '@main/modules/autonomy/service'
 import { createV71Handlers } from './v71-handlers'
 import { createV72Handlers } from './v72-handlers'
 import type { ChatGPTConnection } from '@main/modules/intelligence/connection'
@@ -88,6 +90,10 @@ export interface IpcContext {
   v6?: V6Handlers
   /** v0.7 handlers (the control plane). */
   v7?: V7Handlers
+  /** 0.8: enrolled projects, grants and boundary requests. Absent: one is made over the repositories, with nothing to notify. */
+  autonomy?: AutonomyService
+  /** 0.8: the native confirmation before lasting authority is given (enrolling, allowing for a whole project). Absent: no question. */
+  confirmAutonomy?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
 }
 
 type Handlers = {
@@ -799,6 +805,16 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     ...(ctx.v6 ?? unavailableV6Handlers()),
     ...(ctx.v7 ?? unavailableV7Handlers()),
     ...createSecurityHandlers(repos),
+    ...createAutonomyHandlers({
+      autonomy:
+        ctx.autonomy ??
+        new AutonomyService({ repos, runActive: (runId) => {
+          const run = repos.runs.get(runId)
+          return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
+        } }),
+      projectName: (projectId) => repos.projects.get(projectId)?.name ?? null,
+      ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
+    }),
     ...createV71Handlers({ repos, git: ctx.git }),
   }
 }

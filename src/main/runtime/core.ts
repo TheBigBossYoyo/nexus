@@ -21,7 +21,9 @@ import {
   type UiResponse,
 } from '@shared/runtime-protocol'
 import type { WorkersOverview } from '@shared/workers'
+import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { ArenaService } from '../modules/arena'
+import { AutonomyService } from '../modules/autonomy/service'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
@@ -473,6 +475,25 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   attachOutcomeRecording(bus, policy)
   attachAdviceOutcomes(bus, repos, logger)
 
+  // 0.8: enrolled projects, grants and boundary requests. A new request is one notification; the same need met
+  // again changes nothing the user sees but its count.
+  const autonomy = new AutonomyService({
+    repos,
+    runActive: (runId) => {
+      const run = repos.runs.get(runId)
+      return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
+    },
+    onChange: (change) => {
+      const pending = repos.boundaryRequests.countPending()
+      push({ kind: 'autonomy', pending })
+      if (change.kind === 'request' && change.created === true && change.request) {
+        const text = pending === 1 ? '1 boundary decision required.' : `${pending} boundary decisions required.`
+        announceBoundary?.(change.request.projectId, text)
+      }
+    },
+  })
+  let announceBoundary: ((projectId: string, text: string) => void) | null = null
+  autonomy.watch(bus)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
@@ -486,6 +507,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     logger,
     strategies: policy,
     requireEngineeringAdmission: true,
+    autonomy,
   })
   orchestrator.setDispatchGate(usage)
   // Runs that were active when the runtime last stopped are paused, never judged: what became of their
@@ -828,6 +850,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     repos.programs.listOpen().map((p) => p.id),
     repos.arenaCampaigns.listByState(['completed']).map((c) => c.id),
   )
+  announceBoundary = (projectId, text) => control.announce('boundary_request', projectId, text, 'Open NEXUS to decide. Work that does not depend on it goes on.')
   const securityNotifier = notifier
   repos.securityDecisions.onRecord = (entry) => securityNotifier.onSecurityDecision(entry)
 
@@ -1168,6 +1191,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     // page script: a script in the page cannot click it. Without anyone to ask, the answer is no.
     confirmPower: (message, detail) =>
       confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
+    autonomy,
+    confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
     confirmSettings: (changes) =>
       confirm(
         'NEXUS Settings',

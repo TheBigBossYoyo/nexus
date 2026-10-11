@@ -16,7 +16,8 @@ export interface ToolRequest {
 
 export type ToolDecision =
   | { behavior: 'allow' }
-  | { behavior: 'deny'; reason: string }
+  /** `boundaryRequests`: 0.8, the call was refused because it waits for the user's decision on these requests. */
+  | { behavior: 'deny'; reason: string; boundaryRequests?: string[] }
   /** Requires a human decision. The runtime calls `SessionSpec.requestApproval` and waits. */
   | { behavior: 'ask'; reason: string; risk: 'low' | 'medium' | 'high' }
 

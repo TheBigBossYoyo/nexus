@@ -288,3 +288,48 @@ export function allowedScopes(capability: AutonomyCapability): GrantScope[] {
   if (capability === 'UNCONTAINED_EXECUTION' || capability === 'DEPLOY' || capability === 'PUBLISH_PACKAGE' || capability === 'SEND_MESSAGE') return ['ONCE', 'MISSION']
   return ['ONCE', 'MISSION', 'PROJECT']
 }
+
+/** A boundary request as the window shows it: the row, with the words and the answers that may be given. */
+export interface BoundaryRequestView extends BoundaryRequest {
+  capabilityLabel: string
+  resourceLabel: string
+  projectName: string
+  missionTitle: string | null
+  scopes: GrantScope[]
+}
+
+export interface AutonomyOverview {
+  enrollment: ProjectEnrollment | null
+  /** The sentences of the profile: of the project as it is, or of a profile being considered. */
+  summary: { allowed: string[]; withheld: string[] } | null
+  grants: (CapabilityGrant & { capabilityLabel: string; resourceLabel: string; active: boolean })[]
+  pending: BoundaryRequestView[]
+  recentDenials: AutonomyAuditEvent[]
+  /** Counts per severity over the project's audit log. */
+  counts: Record<string, number>
+  policyVersion: string
+  /** True when the enrollment was made under an older capability table than the current one. */
+  policyChanged: boolean
+}
+
+export const MAX_AUTONOMY_AUDIT_PAGE = 200
+
+export const AutonomyAuditInputSchema = z
+  .object({
+    projectId: z.string().min(1).max(128).optional(),
+    runId: z.string().min(1).max(128).optional(),
+    severities: z.array(z.enum(SECURITY_EVENT_SEVERITIES)).max(SECURITY_EVENT_SEVERITIES.length).optional(),
+    limit: z.number().int().min(1).max(MAX_AUTONOMY_AUDIT_PAGE).optional(),
+    before: z.number().int().min(1).optional(),
+  })
+  .strict()
+
+export interface AutonomyAuditPage {
+  events: AutonomyAuditEvent[]
+  nextBefore: number | null
+}
+
+/** What the status bar shows about autonomy, for every project at once. */
+export interface AutonomyStatus {
+  pendingBoundaryRequests: number
+}

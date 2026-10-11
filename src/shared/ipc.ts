@@ -44,6 +44,17 @@ import {
   type Schedule,
 } from './control-plane'
 import { SecurityDecisionsInputSchema, type SecurityDecisionPage } from './security'
+import {
+  AutonomyAuditInputSchema,
+  AutonomyProfileSchema,
+  BoundaryDecisionSchema,
+  type AutonomyAuditPage,
+  type AutonomyOverview,
+  type AutonomyStatus,
+  type BoundaryRequestState,
+  type BoundaryRequestView,
+  type ProjectEnrollment,
+} from './autonomy'
 import type {
   ContextGraphHealth,
   ContextNode,
@@ -982,6 +993,17 @@ export const ipcInputs = {
   'desktop.reconnect': Empty,
   // v0.7: the execution security decision log (read-only, paged).
   'security.decisions': SecurityDecisionsInputSchema,
+  // 0.8: autonomy. Enrolling a project and answering a boundary request are the user's acts; every other
+  // channel here only reads. No agent session has a way to these channels.
+  'autonomy.status': Empty,
+  'autonomy.overview': z.object({ projectId: Id, considering: AutonomyProfileSchema.optional() }).strict(),
+  'autonomy.enroll': z.object({ projectId: Id, profile: AutonomyProfileSchema }).strict(),
+  'autonomy.unenroll': z.object({ projectId: Id }).strict(),
+  'autonomy.pending': z.object({ projectId: Id.optional() }).strict(),
+  'autonomy.recent': z.object({ projectId: Id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
+  'autonomy.resolve': BoundaryDecisionSchema,
+  'autonomy.revokeGrant': z.object({ grantId: Id }).strict(),
+  'autonomy.audit': AutonomyAuditInputSchema,
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
   'knowledge.tree': z
@@ -1206,6 +1228,15 @@ export interface IpcOutputs {
   'desktop.connection': ConnectionState
   'desktop.reconnect': ConnectionState
   'security.decisions': SecurityDecisionPage
+  'autonomy.status': AutonomyStatus
+  'autonomy.overview': AutonomyOverview
+  'autonomy.enroll': ProjectEnrollment
+  'autonomy.unenroll': { removed: boolean }
+  'autonomy.pending': BoundaryRequestView[]
+  'autonomy.recent': BoundaryRequestView[]
+  'autonomy.resolve': { requestId: string; state: BoundaryRequestState; grantId: string | null; alsoResolved: string[] }
+  'autonomy.revokeGrant': { revoked: boolean }
+  'autonomy.audit': AutonomyAuditPage
   'knowledge.health': {
     spaces: {
       space: ContextSpace

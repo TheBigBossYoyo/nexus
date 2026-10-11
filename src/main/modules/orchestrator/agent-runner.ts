@@ -427,6 +427,8 @@ export class AgentRunner {
         runId: run.id,
         taskId: task?.id ?? null,
       },
+      // 0.8: in an enrolled project the capability broker decides where this policy would ask the user.
+      autonomy: this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }),
     })
 
     const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null

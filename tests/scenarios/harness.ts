@@ -16,6 +16,9 @@ import type {
   Worktree,
 } from '@shared/domain'
 import type { EventType, PushMessage, RunEvent } from '@shared/events'
+import type { AutonomyProfile } from '@shared/autonomy'
+import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { AutonomyService } from '@main/modules/autonomy/service'
 import { newId, nowIso } from '@shared/ids'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
@@ -69,6 +72,8 @@ export interface Harness {
   project: Project
   /** v0.3: present when the harness was created with `policy: true`. */
   policy: PolicyService | null
+  /** 0.8: the autonomy service of this app instance (always present; the project is enrolled only when asked). */
+  autonomy: AutonomyService
   /** Every durable event emitted by this app instance (since it started). */
   events: RunEvent[]
   /** Ephemeral main → renderer pushes (streamed agent output) of this app instance. */
@@ -114,6 +119,11 @@ export interface HarnessOptions {
    * kernel is given.
    */
   capacity?: { maxAgents: number }
+  /**
+   * 0.8: enroll the scenario project with this profile, so its sessions meet the capability broker instead of
+   * approval requests. `contained` says whether their commands count as running in the ISOLATED profile.
+   */
+  autonomy?: { profile: AutonomyProfile; contained?: boolean }
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -184,10 +194,21 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       usage.dispose()
     }
   }
+  const autonomy = new AutonomyService({
+    repos,
+    runActive: (runId) => {
+      const run = repos.runs.get(runId)
+      return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
+    },
+    contained: () => options.autonomy?.contained === true,
+    onChange: () => void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }),
+  })
+  autonomy.watch(bus)
   const orchestrator = new Orchestrator({
     repos,
     bus,
     runtime: admitted,
+    autonomy,
     ...(capacity ? { capacityReady: (taskId: string) => capacity.routing.taskReady(taskId) } : {}),
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
@@ -228,6 +249,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   } else {
     project = repos.projects.list()[0] as Project
   }
+  if (fresh && options.autonomy) autonomy.enroll(project.id, options.autonomy.profile)
 
   const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 150_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs
@@ -251,6 +273,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     capacity,
     project,
     policy,
+    autonomy,
     events,
     pushes,
     async waitForState(runId, states, timeoutMs = 150_000) {
@@ -301,7 +324,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}) })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)

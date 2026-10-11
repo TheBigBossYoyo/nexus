@@ -8,6 +8,8 @@ import type { Preset, Project } from '@shared/domain'
 import type { Repositories } from '@main/modules/persistence'
 import type { StrategyPlan } from '@main/modules/strategy/strategies'
 import type { PolicyDecision, RunStrategyInfo, Strategy, TaskProfile } from '@shared/v3'
+import type { AgentRole } from '@shared/domain'
+import type { AutonomyGate } from '@main/modules/autonomy/gate'
 
 /**
  * v0.3: resolves the strategy of a new run. Implemented by the policy service; absent in processes that
@@ -44,6 +46,11 @@ export interface OrchestratorDeps {
   capacityReady?: (taskId: string) => Promise<boolean>
   /** v0.3. See StrategyResolver. */
   strategies?: StrategyResolver
+  /**
+   * 0.8: the capability gate of a session in an enrolled project; undefined for a project that is not enrolled,
+   * whose sessions ask the user as in 0.7. Absent where no autonomy service exists (older scenario tests).
+   */
+  autonomy?: { gateFor(session: { projectId: string; runId: string | null; taskId: string | null; role: AgentRole; provider: string | null; cwd: string | null }): AutonomyGate | undefined }
   /** v0.7.1. Created from `repos` when absent, so every orchestrator has both. */
   contextGraph?: ContextGraphService
   tokens?: TokenIntelligenceEngine

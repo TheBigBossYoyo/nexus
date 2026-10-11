@@ -538,7 +538,9 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       return { tool: ALLOW, ...(audit !== undefined ? { audit } : {}) }
     }
     const reason = decided.behavior === 'deny' ? decided.reason : 'Denied.'
-    return { tool: deny(reason), audit: { classification: outcome.audit?.classification ?? 'UNTRUSTED_AGENT_AUTHORED', provenance: outcome.audit?.provenance ?? 'not_applicable', decision: 'DENY', reason } }
+    // A call that waits for the user's decision is logged as that, not as a refusal of the policy.
+    const waits = decided.behavior === 'deny' && (decided.boundaryRequests?.length ?? 0) > 0
+    return { tool: decided.behavior === 'deny' ? decided : deny(reason), audit: { classification: outcome.audit?.classification ?? 'UNTRUSTED_AGENT_AUTHORED', provenance: outcome.audit?.provenance ?? 'not_applicable', decision: waits ? 'REQUIRE_APPROVAL' : 'DENY', reason } }
   }
 
   return async (req: ToolRequest): Promise<ToolDecision> => {
