@@ -306,6 +306,8 @@ export class ExecutionBroker {
         LOCALAPPDATA: join(roots.home, 'AppData', 'Local'),
         // Package managers keep their caches where the contained command may write, and read no token from the user's own configuration.
         npm_config_cache: join(roots.cache, 'npm'),
+        // "Global" is the session's: a global install lands in its home, and npm's own launchers look for a newer npm there, not in the user's profile.
+        npm_config_prefix: join(roots.home, 'npm-global'),
         npm_config_store_dir: join(roots.cache, 'pnpm-store'),
         npm_config_update_notifier: 'false',
         npm_config_fund: 'false',

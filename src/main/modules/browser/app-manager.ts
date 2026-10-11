@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as netConnect } from 'node:net'
 import { join } from 'node:path'
@@ -201,6 +201,24 @@ export class ApplicationUnderTestManager {
 
   artifacts(key: string): string[] {
     return [...([...this.apps.values()].filter((a) => a.owner.key === key).pop()?.artifacts ?? [])]
+  }
+
+  /**
+   * What was kept for a task across every launch of its application: how many screenshots, and when the last
+   * one was taken. A session that checks another's work (a reviewer, a verifier) reads it as evidence.
+   */
+  evidence(taskOrKey: { taskId: string | null; key: string }): { launches: number; screenshots: number; lastScreenshotAt: string | null } {
+    const mine = [...this.apps.values()].filter((a) => (taskOrKey.taskId !== null ? a.owner.taskId === taskOrKey.taskId : a.owner.key === taskOrKey.key))
+    const shots = mine.flatMap((a) => a.artifacts)
+    let last: number | null = null
+    for (const path of shots) {
+      try {
+        last = Math.max(last ?? 0, statSync(path).mtimeMs)
+      } catch {
+        // A file that is gone is not evidence.
+      }
+    }
+    return { launches: mine.length, screenshots: shots.length, lastScreenshotAt: last === null ? null : new Date(last).toISOString() }
   }
 
   /**

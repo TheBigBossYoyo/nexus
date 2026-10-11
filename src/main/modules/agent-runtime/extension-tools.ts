@@ -65,7 +65,7 @@ export const APP_TOOLS: ExtensionToolDef[] = [
       "Start the application this project builds (its development server, or its Electron application) inside the project's containment, and open it. Returns its state and a first snapshot. One application per task: launching again restarts it. How to start it is read from .nexus/app.json or package.json.",
     shape: {},
   },
-  { name: 'app_status', group: 'app', description: 'Whether the application of this task is running, where it answers, and the last lines it printed.', shape: {} },
+  { name: 'app_status', group: 'app', description: "Whether the application of this task is running, where it answers, the last lines it printed, and NEXUS's own record of the task's launches and screenshots (evidence when you check another session's work).", shape: {} },
   {
     name: 'app_snapshot',
     group: 'app',

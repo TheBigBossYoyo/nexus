@@ -80,8 +80,11 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
         }
         if (def.name === 'app_status') {
           const status = deps.apps.status(owner.key)
-          if (status === null) return 'No application has been launched for this task.'
-          return [statusText(status), status.output.length > 0 ? enveloped('output', status.output.join('\n')) : 'It has printed nothing.'].join('\n')
+          const kept = deps.apps.evidence({ taskId: owner.taskId, key: owner.key })
+          // On NEXUS's own record, not on anybody's word: what a session that checks the work can rely on.
+          const evidence = `NEXUS's record for this task: the application was launched ${kept.launches} time${kept.launches === 1 ? '' : 's'}; ${kept.screenshots} screenshot${kept.screenshots === 1 ? '' : 's'} kept${kept.lastScreenshotAt ? `, the last at ${kept.lastScreenshotAt}` : ''}.`
+          if (status === null) return ['No application has been launched for this task.', evidence].join('\n')
+          return [statusText(status), evidence, status.output.length > 0 ? enveloped('output', status.output.join('\n')) : 'It has printed nothing.'].join('\n')
         }
         if (def.name === 'app_snapshot') {
           const no = refused(def.name, 'LOCAL_APP_AUTOMATION', 'reads the accessibility tree of the application under test', 'app_snapshot')
@@ -139,7 +142,7 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           if (no !== null) return no
           const shot = await deps.apps.session(owner.key).screenshot({ fullPage: args['full_page'] === true })
           deps.apps.noteArtifact(owner.key, shot.path)
-          return `Screenshot kept as evidence of the task: ${shot.width}x${shot.height}, ${shot.bytes} bytes. It is shown to the user with the task; to see what is on the page yourself, use app_snapshot.`
+          return `Screenshot kept as evidence of the task: ${shot.width}x${shot.height}, ${shot.bytes} bytes. It is shown to the user with the task, and app_status reports it to whoever checks this task; to see what is on the page yourself, use app_snapshot.`
         }
         if (def.name === 'app_logs') {
           const source = String(args['source'])
