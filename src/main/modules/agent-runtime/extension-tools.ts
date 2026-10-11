@@ -55,7 +55,47 @@ export const RESEARCH_TOOLS: ExtensionToolDef[] = [
   },
 ]
 
-export const EXTENSION_TOOLS: readonly ExtensionToolDef[] = [...RESEARCH_TOOLS]
+const ref = z.string().max(40).describe('an element reference from a snapshot, such as e12')
+
+export const APP_TOOLS: ExtensionToolDef[] = [
+  {
+    name: 'app_launch',
+    group: 'app',
+    description:
+      "Start the application this project builds (its development server, or its Electron application) inside the project's containment, and open it. Returns its state and a first snapshot. One application per task: launching again restarts it. How to start it is read from .nexus/app.json or package.json.",
+    shape: {},
+  },
+  { name: 'app_status', group: 'app', description: 'Whether the application of this task is running, where it answers, and the last lines it printed.', shape: {} },
+  {
+    name: 'app_snapshot',
+    group: 'app',
+    description:
+      'The accessibility tree of the page or window that is open: roles, names, values and a ref for each element. This is how you see the application. Give a ref to read one part, a depth to read only the top levels.',
+    shape: { ref: ref.optional(), depth: z.number().int().min(1).max(30).optional(), max_chars: z.number().int().min(500).max(30000).optional() },
+  },
+  { name: 'app_find', group: 'app', description: 'Lines of the snapshot that contain a text, each with its ref. The cheap way to locate a control.', shape: { text: z.string().min(1).max(120), limit: z.number().int().min(1).max(50).optional() } },
+  {
+    name: 'app_act',
+    group: 'app',
+    description:
+      'Act on the application. click, fill (replace the value of a field), type (key by key) and select (options, one per line) take a ref and, except click, a text. key takes a key name in text ("Enter", "Control+A"). wait_for_text and wait_until_gone take a text. navigate takes a path or an address of the application itself. reload takes nothing. window takes a window index.',
+    shape: {
+      action: z.enum(['click', 'fill', 'type', 'select', 'key', 'wait_for_text', 'wait_until_gone', 'navigate', 'reload', 'window']),
+      ref: ref.optional(),
+      text: z.string().max(4000).optional(),
+    },
+  },
+  { name: 'app_screenshot', group: 'app', description: 'Take a screenshot of the application as evidence for the user. It is kept with the task; you see the application through app_snapshot.', shape: { full_page: z.boolean().optional() } },
+  {
+    name: 'app_logs',
+    group: 'app',
+    description: 'What the application logged: its browser console (errors and warnings unless all is set), its network requests (failed ones unless all is set), or the output of its process.',
+    shape: { source: z.enum(['console', 'network', 'process']), last: z.number().int().min(1).max(100).optional(), all: z.boolean().optional(), contains: z.string().max(200).optional() },
+  },
+  { name: 'app_stop', group: 'app', description: 'Stop the application of this task, its browser and everything it started.', shape: {} },
+]
+
+export const EXTENSION_TOOLS: readonly ExtensionToolDef[] = [...RESEARCH_TOOLS, ...APP_TOOLS]
 
 export function extensionToolsFor(groups: readonly string[]): ExtensionToolDef[] {
   return EXTENSION_TOOLS.filter((t) => groups.includes(t.group))

@@ -72,6 +72,11 @@ export type ContainResult =
   | { ok: true; profile: ContainmentProfile; file: string; args: string[]; specPath: string; roots: SessionRoots; withheldEnv: string[] }
   | { ok: false; reason: string }
 
+/** How a long-running program is started inside the containment: the launcher, its arguments, and the environment the launcher itself needs. */
+export type ContainProgramResult =
+  | { ok: true; profile: ContainmentProfile; file: string; args: string[]; specPath: string; roots: SessionRoots; launcherEnv: Record<string, string> }
+  | { ok: false; reason: string }
+
 export interface ContainSession {
   profile: ContainmentProfile
   projectId: string
@@ -373,6 +378,46 @@ export class ExecutionBroker {
     } finally {
       this.deps.launcher.removeSpec(specPath)
     }
+  }
+
+  /**
+   * How a program that stays running (a development server, an application under test) is started inside the
+   * containment. Nothing is started here: the caller spawns what is returned and owns the process; ending the
+   * launcher ends everything below it, because the job dies with it. The spec is the caller's to release.
+   *
+   * `commandLine` is a configured command (a program and its arguments, no shell operators) run through the
+   * command interpreter so that `npm` and `pnpm` resolve; `file` and `args` name a program directly.
+   */
+  async containProgram(
+    input: ContainSession & ({ commandLine: string } | { file: string; args: readonly string[] }) & {
+      cwd?: string
+      set?: Record<string, string>
+      /** The program has a window: it gets a desktop of its own, and a job without UI limits (Windows nests no job under one that has them, and a browser engine makes its own). */
+      window?: { desktop: string }
+    },
+  ): Promise<ContainProgramResult> {
+    const state = this.usable(input.profile)
+    if (!state.usable) return this.fail(input.projectId, input.profile, `The ${input.profile} execution profile is not available, so nothing was started: ${state.detail}`) as ContainProgramResult
+    try {
+      const roots = await this.roots(input)
+      const { env } = this.environment(input, roots, input.set ?? {})
+      let commandLine: string
+      if ('commandLine' in input) {
+        tokenizeCommandLine(input.commandLine)
+        const comspec = this.deps.baseEnv()['ComSpec'] ?? this.deps.baseEnv()['COMSPEC'] ?? 'C:\\Windows\\System32\\cmd.exe'
+        commandLine = `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`
+      } else commandLine = this.commandLineFor(input.file, input.args, env)
+      const cwd = input.cwd !== undefined && within(roots.worktree, input.cwd) && existsSync(input.cwd) ? input.cwd : roots.worktree
+      const specPath = this.deps.launcher.writeSpec({ ...this.spec(input, roots, commandLine, env, input.window ? { window: true, desktop: input.window.desktop, uiLimits: 0 } : {}), cwd })
+      const { file, args } = this.deps.launcher.invocation(specPath)
+      return { ok: true, profile: input.profile, file, args, specPath, roots, launcherEnv: this.launcherEnv() }
+    } catch (e) {
+      return this.fail(input.projectId, input.profile, `The containment could not be set up, so nothing was started: ${e instanceof Error ? e.message : String(e)}`) as ContainProgramResult
+    }
+  }
+
+  releaseSpec(specPath: string): void {
+    this.deps.launcher.removeSpec(specPath)
   }
 
   /**

@@ -30,6 +30,8 @@ using System.Text;
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 struct STARTUPINFO { public uint cb; public string lpReserved; public string lpDesktop; public string lpTitle; public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags; public ushort wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError; }
 [StructLayout(LayoutKind.Sequential)]
+struct SECURITY_ATTRIBUTES { public int nLength; public IntPtr lpSecurityDescriptor; public bool bInheritHandle; }
+[StructLayout(LayoutKind.Sequential)]
 struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId; }
 [StructLayout(LayoutKind.Sequential)]
 struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
@@ -76,6 +78,8 @@ static class N {
     [DllImport(A, SetLastError = true)] public static extern bool GetSecurityDescriptorSacl(IntPtr sd, out bool present, out IntPtr acl, out bool defaulted);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern uint SetNamedSecurityInfoW(string name, int type, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
     [DllImport(K)] public static extern IntPtr LocalFree(IntPtr p);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern IntPtr CreateDesktopW(string name, IntPtr device, IntPtr devmode, uint flags, uint access, ref SECURITY_ATTRIBUTES sa);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool CloseDesktop(IntPtr h);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool CreateProcessWithLogonW(string user, string domain, string password, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
 }
 
@@ -94,6 +98,8 @@ class Spec {
     public uint TimeoutMs = 0;
     public uint UiLimits = 0xFF;
     public bool Window = false;
+    // A desktop made for the command: its windows are on no screen. Letters, digits and '-' only.
+    public string Desktop = null;
     public string Report = null;
     // ISOLATED only: the DPAPI blob with the sandbox account, the launcher copy that account can run, and the
     // directory (in the sandbox root) where the inner spec is written.
@@ -136,6 +142,7 @@ static class Program {
                 else if (key == "timeout-ms") spec.TimeoutMs = uint.Parse(value);
                 else if (key == "ui-limits") spec.UiLimits = uint.Parse(value);
                 else if (key == "window") spec.Window = value == "1";
+                else if (key == "desktop") spec.Desktop = value;
                 else if (key == "report") spec.Report = B64(value);
                 else if (key == "credential") spec.Credential = B64(value);
                 else if (key == "stage2") spec.Stage2 = B64(value);
@@ -150,6 +157,10 @@ static class Program {
         if (string.IsNullOrEmpty(spec.Command)) throw new Fail(EXIT_SPEC, "the spec has no command");
         if (string.IsNullOrEmpty(spec.Cwd) || !Directory.Exists(spec.Cwd)) throw new Fail(EXIT_SPEC, "the working directory does not exist");
         if (spec.MaxProcesses < 1 || spec.MaxProcesses > 4096) throw new Fail(EXIT_SPEC, "max-processes out of range");
+        if (spec.Desktop != null) {
+            if (spec.Desktop.Length < 1 || spec.Desktop.Length > 40) throw new Fail(EXIT_SPEC, "bad desktop name");
+            foreach (char c in spec.Desktop) if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) throw new Fail(EXIT_SPEC, "bad desktop name");
+        }
         return spec;
     }
 
@@ -271,6 +282,7 @@ static class Program {
         if (spec.MaxJobMemory > 0) inner.Append("max-job-memory=" + spec.MaxJobMemory + "\n");
         inner.Append("ui-limits=" + spec.UiLimits + "\n");
         if (spec.Window) inner.Append("window=1\n");
+        if (spec.Desktop != null) inner.Append("desktop=" + spec.Desktop + "\n");
         byte[] name = new byte[12]; using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(name);
         string innerPath = Path.Combine(spec.Stage2Dir, BitConverter.ToString(name).Replace("-", "").ToLowerInvariant() + ".spec");
         try { Directory.CreateDirectory(spec.Stage2Dir); File.WriteAllText(innerPath, inner.ToString(), new UTF8Encoding(false)); }
@@ -325,6 +337,23 @@ static class Program {
         return (int)code;
     }
 
+    /**
+     * A desktop of the command's own on this window station: what the command shows is on no screen and takes no
+     * input of the user's. Labeled low so that the low-integrity command can use it. If it cannot be made, nothing
+     * is started: there is no falling back to the user's desktop.
+     */
+    static IntPtr MakeDesktop(string name) {
+        IntPtr sd; uint size;
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;WD)S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
+        SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
+        sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)); sa.lpSecurityDescriptor = sd; sa.bInheritHandle = false;
+        IntPtr desktop = N.CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000 /* GENERIC_ALL */, ref sa);
+        int e = Marshal.GetLastWin32Error();
+        N.LocalFree(sd);
+        if (desktop == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "a desktop for the command could not be made: " + new Win32Exception(e).Message + " (" + e + ")");
+        return desktop;
+    }
+
     static int Run(Spec spec) {
         if (spec.Profile == "ISOLATED") return RunAsSandboxAccount(spec);
         // The second step of ISOLATED already runs inside the job the first step made, and Windows does not nest a
@@ -340,6 +369,9 @@ static class Program {
         si.hStdInput = StdOrNul(-10, 0x80000000);
         si.hStdOutput = StdOrNul(-11, 0x40000000);
         si.hStdError = StdOrNul(-12, 0x40000000);
+        // Kept open for as long as this launcher lives, which is as long as the command does.
+        IntPtr desktop = IntPtr.Zero;
+        if (spec.Desktop != null) { desktop = MakeDesktop(spec.Desktop); si.lpDesktop = "WinSta0\\" + spec.Desktop; }
 
         uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | (spec.Window ? 0 : CREATE_NO_WINDOW);
         PROCESS_INFORMATION pi;

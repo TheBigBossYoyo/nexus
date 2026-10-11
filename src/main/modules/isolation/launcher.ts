@@ -41,6 +41,11 @@ export interface LaunchSpec {
   window?: boolean
   /** JOB_OBJECT_UILIMIT_* bits. Default: all of them. An application with a window needs fewer. */
   uiLimits?: number
+  /**
+   * A desktop made for the command, by name (letters, digits, '-'). What it shows is on no screen and takes none
+   * of the user's input. For an application with a window that NEXUS looks at through its debugging port.
+   */
+  desktop?: string
   /** Where the launcher writes what the job did (process count, peak memory, exit). */
   reportPath?: string
   /** Required for ISOLATED. */
@@ -63,6 +68,10 @@ export function renderSpec(spec: LaunchSpec): string {
   if (spec.timeoutMs !== undefined && spec.timeoutMs > 0) lines.push(`timeout-ms=${Math.floor(spec.timeoutMs)}`)
   if (spec.uiLimits !== undefined) lines.push(`ui-limits=${spec.uiLimits >>> 0}`)
   if (spec.window === true) lines.push('window=1')
+  if (spec.desktop !== undefined) {
+    if (!/^[a-z0-9-]{1,40}$/.test(spec.desktop)) throw new Error('A desktop name is letters, digits and hyphens.')
+    lines.push(`desktop=${spec.desktop}`)
+  }
   if (spec.reportPath !== undefined) lines.push(`report=${b64(spec.reportPath)}`)
   if (spec.profile === 'ISOLATED') {
     if (spec.sandbox === undefined) throw new Error('The ISOLATED profile needs the sandbox account.')
