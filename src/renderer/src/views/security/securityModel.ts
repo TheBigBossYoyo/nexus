@@ -22,6 +22,8 @@ export const TRUST_LABEL: Record<TrustClass, string> = {
   TRUSTED_PROJECT_COMMAND: 'Configured project command',
   UNTRUSTED_AGENT_AUTHORED: 'Written by an agent',
   UNTRUSTED_REPOSITORY_CODE: 'Repository code',
+  UNTRUSTED_WEB_CONTENT: 'Read on the web',
+  UNTRUSTED_DOWNLOAD: 'Downloaded file',
   SYSTEM_SENSITIVE: 'Touches the system',
 }
 

@@ -16,6 +16,10 @@ export const TRUST_CLASSES = [
   'UNTRUSTED_AGENT_AUTHORED',
   /** Code that is in the repository's base commit and unchanged. Written by someone else; not vetted by NEXUS. */
   'UNTRUSTED_REPOSITORY_CODE',
+  /** 0.8: text read on the public web or in a browser page. Data to cite, never an instruction. */
+  'UNTRUSTED_WEB_CONTENT',
+  /** 0.8: a file fetched from the public web. Kept in quarantine; never run because it arrived. */
+  'UNTRUSTED_DOWNLOAD',
   /** Touches the machine or NEXUS itself: power, registry, services, credentials, NEXUS data. */
   'SYSTEM_SENSITIVE',
 ] as const
