@@ -40,6 +40,10 @@ export class EnrollmentRepository {
   remove(projectId: string): boolean {
     return guard(() => prepare(this.db, 'DELETE FROM autonomy_enrollments WHERE project_id = ?').run(projectId)).changes > 0
   }
+
+  count(): number {
+    return Number((prepare(this.db, 'SELECT COUNT(*) AS n FROM autonomy_enrollments').get() as Row)['n'])
+  }
 }
 
 function grantOf(row: Row): CapabilityGrant {

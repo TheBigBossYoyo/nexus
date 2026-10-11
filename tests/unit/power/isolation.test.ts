@@ -75,7 +75,7 @@ describe('power control isolation', () => {
     expect(offenders).toEqual([])
   })
 
-  it('child processes are spawned only by the process runner, the power controller and the four places that start a NEXUS process', () => {
+  it('child processes are spawned only by the process runners, the power controller and the four places that start a NEXUS process', () => {
     const spawners = files.filter((f) => importsOf(f.text).some((i) => i === 'node:child_process' || i === 'child_process')).map((f) => f.path).sort()
     expect(spawners).toEqual([
       // 0.7: the window starts the runtime; the runtime's host starts the window; the worker manager forks workers;
@@ -83,6 +83,9 @@ describe('power control isolation', () => {
       'src/main/desktop.ts',
       'src/main/modules/power/windows-power-controller.ts',
       'src/main/modules/process/run-process.ts',
+      // 0.8: the runner of a process that stays running (a development server, an application under test). Its
+      // callers hand it the launcher of a containment, as the execution broker returned it.
+      'src/main/modules/process/spawn-process.ts',
       'src/main/modules/runtime/endpoint.ts',
       'src/main/modules/workers/manager.ts',
       'src/main/runtime-electron.ts',

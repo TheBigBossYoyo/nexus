@@ -175,6 +175,8 @@ export async function runRuntime(): Promise<void> {
     version: app.getVersion(),
     isPackaged: app.isPackaged,
     resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    // An installed NEXUS protects the user's credential stores for enrolled projects. A development run does when asked.
+    protectUserStores: app.isPackaged || process.env['NEXUS_PROTECT_USER_STORES'] === '1',
     launcherPath: app.isPackaged ? join(process.resourcesPath, 'bin', 'nexus-launch.exe') : join(app.getAppPath(), 'out', 'native', 'nexus-launch.exe'),
     casesDir: app.isPackaged ? join(process.resourcesPath, 'arena', 'cases') : join(app.getAppPath(), 'arena', 'cases'),
     tempDir: app.getPath('temp'),

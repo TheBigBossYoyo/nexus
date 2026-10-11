@@ -82,6 +82,8 @@ export interface AppManagerDeps {
   /** Ports of NEXUS's own loopback services: never reachable by a session's browser. */
   forbiddenLocalPorts?: () => number[]
   onNetwork?: (owner: AppOwner, event: NetworkEvent) => void
+  /** Where the Electron binary of a project is, when it is not in the project's own node_modules. For tests. */
+  electronBinary?: (cwd: string) => string | undefined
   onChange?: (owner: AppOwner) => void
 }
 
@@ -317,7 +319,7 @@ export class ApplicationUnderTestManager {
   private async launchElectron(app: Running, contain: ContainmentProfile | null): Promise<void> {
     const { manifest, owner } = app
     const cwd = this.cwdOf(app)
-    const electronExe = [join(cwd, 'node_modules', 'electron', 'dist', 'electron.exe'), join(owner.worktree, 'node_modules', 'electron', 'dist', 'electron.exe')].find((p) => existsSync(p))
+    const electronExe = [join(cwd, 'node_modules', 'electron', 'dist', 'electron.exe'), join(owner.worktree, 'node_modules', 'electron', 'dist', 'electron.exe'), this.deps.electronBinary?.(cwd)].find((p): p is string => p !== undefined && existsSync(p))
     if (electronExe === undefined) throw new AppLaunchError("The project's Electron binary was not found (node_modules/electron/dist/electron.exe). Install the dependencies first.")
     if (contain === null) throw new AppLaunchError('The project is not contained; its application is not started by NEXUS.')
     const session = { profile: contain, projectId: owner.projectId, sessionKey: owner.key, worktree: owner.worktree }
@@ -334,7 +336,10 @@ export class ApplicationUnderTestManager {
       ...session,
       cwd,
       file: electronExe,
-      args: [manifest.electron?.entry ?? '.', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${userData}`, ...(manifest.electron?.args ?? [])],
+      // Chromium's own sandbox cannot be set up from a process that is already at low integrity in a job (it ends
+      // at once, measured on Electron 44). The application runs without it: every process of it, renderers
+      // included, is inside the containment NEXUS made, which is the boundary that matters for what it can reach.
+      args: [manifest.electron?.entry ?? '.', '--no-sandbox', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${userData}`, ...(manifest.electron?.args ?? [])],
       window: { desktop: `nexus-app-${app.id}` },
       set: { ...manifest.env, NODE_ENV: manifest.env['NODE_ENV'] ?? 'development', ELECTRON_ENABLE_LOGGING: '1', ELECTRON_NO_ATTACH_CONSOLE: '1' },
     })
@@ -352,17 +357,20 @@ export class ApplicationUnderTestManager {
   }
 
   private async teardown(app: Running, state: 'stopped' | 'exited'): Promise<void> {
-    await app.session?.close().catch(() => undefined)
-    await app.process?.stop().catch(() => undefined)
-    await app.proxy?.close().catch(() => undefined)
+    // Off the registry first: from here on the endpoint is nobody's "local application", whatever is still closing.
+    app.state = state
     if (app.endpoint !== null) {
       const index = this.endpoints.indexOf(app.endpoint)
       if (index >= 0) this.endpoints.splice(index, 1)
     }
-    if (app.specPath !== null) this.deps.broker.releaseSpec(app.specPath)
+    const { session, proxy } = app
     app.session = null
     app.proxy = null
-    app.state = state
+    await session?.close().catch(() => undefined)
+    await app.process?.stop().catch(() => undefined)
+    await proxy?.close().catch(() => undefined)
+    if (app.specPath !== null) this.deps.broker.releaseSpec(app.specPath)
+    app.specPath = null
   }
 
   /** Stops the owner's application, its browser, its proxy, and takes its endpoint off the registry. */

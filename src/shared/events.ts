@@ -226,3 +226,5 @@ export type PushMessage =
   | { kind: 'desktop'; action: 'show'; view: 'control' | null }
   /** 0.8. A project was enrolled, a grant given or taken back, or a boundary request created or decided. */
   | { kind: 'autonomy'; pending: number }
+  /** 0.8: an application under test was started or stopped. */
+  | { kind: 'apps' }

@@ -123,6 +123,8 @@ export interface VerifyPlace {
   /** A directory the sandbox account has no access to at all (inside the user's profile). ISOLATED only. */
   userOnlyRoot?: string
   sandbox?: SandboxAccountRef
+  /** Why the sandbox account's launcher could not be put in place, when that failed. */
+  sandboxError?: string
 }
 
 export class Launcher {
@@ -183,6 +185,7 @@ export class Launcher {
     }
     if (process.platform !== 'win32') return done(false, 'The containment exists on Windows only.')
     if (!existsSync(this.options.executable)) return done(false, `The launcher is missing: ${this.options.executable}`)
+    if (profile === 'ISOLATED' && place.sandboxError !== undefined) return done(false, `The sandbox account is set up, but its launcher could not be put in place: ${place.sandboxError}`)
     if (profile === 'ISOLATED' && (place.sandbox === undefined || !existsSync(place.sandbox.credentialPath))) return done(false, 'The sandbox account is not set up on this machine.')
     const id = randomBytes(6).toString('hex')
     const root = join(place.scratchRoot, `verify-${id}`)

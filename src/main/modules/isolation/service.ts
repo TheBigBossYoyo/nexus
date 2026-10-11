@@ -92,7 +92,7 @@ export class IsolationService {
    * what was marked is kept so that it is not done again at every start and can be undone. Only the integrity
    * label of each path changes. Paths that do not exist are skipped.
    */
-  async protect(): Promise<string[]> {
+  async protect(options: { userStores: boolean } = { userStores: true }): Promise<string[]> {
     const record = join(this.deps.dataDir, 'sandbox', 'protected.json')
     let known: string[]
     try {
@@ -102,7 +102,7 @@ export class IsolationService {
     }
     // One enrolled repository cannot be protected from the code of another with a label: a label says who may
     // read by integrity, not by project. Only the sandbox account keeps projects apart.
-    const wanted = [this.deps.dataDir, ...credentialPaths()].filter((p) => existsSync(p))
+    const wanted = [this.deps.dataDir, ...(options.userStores ? credentialPaths() : [])].filter((p) => existsSync(p))
     const done = new Set(known.map((p) => p.toLowerCase()))
     let changed = false
     for (const path of wanted) {

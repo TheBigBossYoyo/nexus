@@ -26,6 +26,9 @@ import { ArenaService } from '../modules/arena'
 import { AutonomyService } from '../modules/autonomy/service'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
+import { ApplicationUnderTestManager } from '../modules/browser/app-manager'
+import { PlaywrightDirectProvider } from '../modules/browser/provider'
+import { combineExtensions, createAppTools } from '../modules/browser/tools'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
 import { readSandboxAccount } from '../modules/isolation/sandbox-account'
@@ -115,6 +118,12 @@ export interface RuntimeHost {
   isPackaged: boolean
   /** Electron's resources directory in a packaged app. */
   resourcesPath: string | undefined
+  /**
+   * 0.8: whether the user's credential stores (~/.claude, ~/.ssh and the like) are marked unreadable for
+   * contained code when a project is enrolled. The application sets it; a runtime started by a test does not,
+   * so that a test never changes a folder of the person running it. NEXUS's own data is marked either way.
+   */
+  protectUserStores?: boolean
   /** 0.8: where nexus-launch.exe is. Absent or missing: no containment exists, and enrolled projects run nothing until one does. */
   launcherPath?: string
   /** Where the built-in Arena cases are. */
@@ -554,6 +563,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     onChange: (change) => {
       const pending = repos.boundaryRequests.countPending()
       push({ kind: 'autonomy', pending })
+      if (change.kind === 'enrollment') protectStores()
       if (change.kind === 'request' && change.created === true && change.request) {
         const text = pending === 1 ? '1 boundary decision required.' : `${pending} boundary decisions required.`
         announceBoundary?.(change.request.projectId, text)
@@ -561,6 +571,12 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     },
   })
   let announceBoundary: ((projectId: string, text: string) => void) | null = null
+  // What contained code must not read is marked when there is a project whose code is contained, and not before.
+  function protectStores(): void {
+    if (repos.enrollments.count() === 0) return
+    void isolation.protect({ userStores: host.protectUserStores === true }).catch((e: unknown) => logger(`isolation: protection failed: ${errorMessage(e)}`))
+  }
+  protectStores()
   let announceIsolationFailure: ((subject: string, detail: string) => void) | null = null
   autonomy.watch(bus)
   // A containment that was asked for and could not be made: on record, and worth telling the user, because
@@ -587,13 +603,35 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   bus.subscribe((event) => {
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') research.forget(event.runId)
   })
-  const extensionTools = createResearchTools({
+  // 0.8: the application a project builds, started inside its containment and looked at by a browser of
+  // NEXUS's own. The browser of a session reaches the endpoint the session registered and nothing else; the
+  // runtime's own loopback services are named so that no policy ever lets it reach them.
+  const apps = new ApplicationUnderTestManager({
+    broker: executionBroker,
+    browser: new PlaywrightDirectProvider(),
+    profileFor: (projectId) => isolation.profileFor(projectId),
+    artifactsDir: join(dataDir, 'app-sessions'),
+    forbiddenLocalPorts: () => (depsProxy ? [depsProxy.port] : []),
+    onNetwork: (owner, event) => {
+      if (!event.allowed) autonomy.record({ projectId: owner.projectId, runId: owner.runId, taskId: owner.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `app browser ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the network policy of the application under test (${event.denial ?? 'policy'}).` })
+    },
+    onChange: () => push({ kind: 'apps' }),
+  })
+  bus.subscribe((event) => {
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled' || event.type === 'run.paused') void apps.stopForRun(event.runId).catch(() => undefined)
+  })
+  const researchTools = createResearchTools({
     research,
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
     legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
     policy: () => researchPolicy,
     record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
   })
+  const appTools = createAppTools({
+    apps,
+    gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+  })
+  const extensionTools = combineExtensions(researchTools, appTools)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
@@ -1179,6 +1217,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.
       await recovery.idle()
       await orchestrator.shutdown()
+      await apps.stopAll().catch(() => undefined)
       // Session admission closes only now. The orchestrator has given every unit of work its stop reason, so a
       // session refused from here on ends as stopped for shutdown. Closed earlier (it used to be the first step,
       // up to 30 s before), a session a running pipeline started in between ended stopped with no reason, which

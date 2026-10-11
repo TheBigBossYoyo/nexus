@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SandboxAccountRef } from './launcher'
 
@@ -52,9 +52,32 @@ const sha = (path: string): string => createHash('sha256').update(readFileSync(p
  */
 export function prepareSandboxLauncher(account: SandboxAccount, launcherExecutable: string): SandboxAccountRef {
   const bin = join(account.root, 'bin')
-  const stage2Path = join(bin, 'nexus-launch.exe')
+  // Named by its content: two NEXUS builds on one machine (an installed one and a development one, or two test
+  // processes) each find their own launcher there, and none replaces a file another is running.
+  const digest = sha(launcherExecutable).slice(0, 16)
+  const stage2Path = join(bin, `nexus-launch-${digest}.exe`)
   mkdirSync(bin, { recursive: true })
-  if (!existsSync(stage2Path) || sha(stage2Path) !== sha(launcherExecutable)) copyFileSync(launcherExecutable, stage2Path)
+  if (!existsSync(stage2Path)) {
+    const temp = join(bin, `.${digest}-${process.pid}-${Date.now()}.tmp`)
+    copyFileSync(launcherExecutable, temp)
+    try {
+      renameSync(temp, stage2Path)
+    } catch {
+      // Another process put the same content there first.
+      rmSync(temp, { force: true })
+      if (!existsSync(stage2Path)) throw new Error(`The launcher could not be copied to ${bin}.`)
+    }
+  }
+  // Copies of builds long gone are removed; one in use refuses and is left.
+  try {
+    const cutoff = Date.now() - 14 * 86_400_000
+    for (const name of readdirSync(bin)) {
+      const path = join(bin, name)
+      if (path !== stage2Path && /^(nexus-launch(-[0-9a-f]{16})?\.exe|\..*\.tmp)$/.test(name) && statSync(path).mtimeMs < cutoff) rmSync(path, { force: true })
+    }
+  } catch {
+    // Housekeeping only.
+  }
   const stage2Dir = join(account.root, 'specs')
   mkdirSync(stage2Dir, { recursive: true })
   return { credentialPath: account.credentialPath, stage2Path, stage2Dir }

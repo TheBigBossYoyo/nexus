@@ -126,8 +126,7 @@ export class ExecutionBroker {
     try {
       sandbox = this.sandbox()
     } catch (e) {
-      sandbox = null
-      void e
+      return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify'), sandboxError: e instanceof Error ? e.message : String(e) }, force)
     }
     if (sandbox === null) return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify') }, force)
     return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(sandbox.account.root, 'verify'), userOnlyRoot: join(this.deps.sandboxDir, 'verify-user'), sandbox: sandbox.ref }, force)

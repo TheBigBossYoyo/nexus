@@ -24,6 +24,9 @@ import { Launcher } from '@main/modules/isolation/launcher'
 import { IsolationService } from '@main/modules/isolation/service'
 import type { Resolver } from '@main/modules/network/guard'
 import { policyForPurpose } from '@main/modules/network/policy'
+import { ApplicationUnderTestManager } from '@main/modules/browser/app-manager'
+import { PlaywrightDirectProvider } from '@main/modules/browser/provider'
+import { combineExtensions, createAppTools } from '@main/modules/browser/tools'
 import { WebResearchProvider } from '@main/modules/research/provider'
 import { createResearchTools } from '@main/modules/research/tools'
 import { newId, nowIso } from '@shared/ids'
@@ -83,6 +86,8 @@ export interface Harness {
   autonomy: AutonomyService
   /** 0.8: present when the harness was created with `research`. */
   research: WebResearchProvider | null
+  /** 0.8: present when the harness was created with `apps`. */
+  apps: ApplicationUnderTestManager | null
   /** Every durable event emitted by this app instance (since it started). */
   events: RunEvent[]
   /** Ephemeral main → renderer pushes (streamed agent output) of this app instance. */
@@ -145,6 +150,8 @@ export interface HarnessOptions {
    * directory.
    */
   containment?: { profile: 'RESTRICTED'; launcher: string }
+  /** 0.8: give sessions the application tools (needs `containment`): a real headless browser on a real proxy. */
+  apps?: boolean
   baseDir?: string
 }
 
@@ -219,9 +226,11 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   }
   const containmentOptions = options.containment
   let isolation: IsolationService | null = null
+  let executionBroker: ExecutionBroker | null = null
   if (containmentOptions) {
     const launcher = new Launcher({ executable: containmentOptions.launcher, specDir: join(dir, 'sandbox', 'specs') })
     const broker = new ExecutionBroker({ launcher, sandboxDir: join(dir, 'sandbox'), account: () => null, baseEnv: () => process.env, gitIdentity: () => ({ name: 'NEXUS Agent', email: 'nexus-agent@localhost' }) })
+    executionBroker = broker
     isolation = new IsolationService({ broker, launcher, containment: () => containmentOptions.profile, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, gitWritable: async (worktree) => (await gitService.ownedGitLayout(worktree))?.writable ?? [], dataDir: dir })
     await isolation.start()
   }
@@ -247,23 +256,41 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         ...(researchOptions.searchUrl ? { searchUrl: researchOptions.searchUrl } : {}),
       })
     : null
+  const researchTools = research
+    ? createResearchTools({
+        research,
+        gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+        legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
+        policy: () => researchPolicy,
+        record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
+      })
+    : null
+  const apps =
+    options.apps && executionBroker && isolationService
+      ? new ApplicationUnderTestManager({
+          broker: executionBroker,
+          browser: new PlaywrightDirectProvider(),
+          profileFor: (projectId) => isolationService.profileFor(projectId),
+          artifactsDir: join(dir, 'app-sessions'),
+          onNetwork: (owner, event) => {
+            if (!event.allowed) autonomy.record({ projectId: owner.projectId, runId: owner.runId, taskId: owner.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `app browser ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the network policy of the application under test (${event.denial ?? 'policy'}).` })
+          },
+        })
+      : null
+  if (apps) {
+    bus.subscribe((event) => {
+      if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled' || event.type === 'run.paused') void apps.stopForRun(event.runId).catch(() => undefined)
+    })
+  }
+  const appTools = apps ? createAppTools({ apps, gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }) }) : null
+  const extensionMakers = [researchTools, appTools].filter((m): m is NonNullable<typeof m> => m !== null)
   const orchestrator = new Orchestrator({
     repos,
     bus,
     runtime: admitted,
     autonomy,
     ...(isolationService ? { execution: isolationService } : {}),
-    ...(research
-      ? {
-          extensions: createResearchTools({
-            research,
-            gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
-            legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
-            policy: () => researchPolicy,
-            record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
-          }),
-        }
-      : {}),
+    ...(extensionMakers.length > 0 ? { extensions: combineExtensions(...extensionMakers) } : {}),
     ...(capacity ? { capacityReady: (taskId: string) => capacity.routing.taskReady(taskId) } : {}),
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
@@ -330,6 +357,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     policy,
     autonomy,
     research,
+    apps,
     events,
     pushes,
     async waitForState(runId, states, timeoutMs = 150_000) {
@@ -380,10 +408,11 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}), ...(options.research ? { research: options.research } : {}), ...(options.containment ? { containment: options.containment } : {}), ...(options.baseDir ? { baseDir: options.baseDir } : {}) })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}), ...(options.research ? { research: options.research } : {}), ...(options.containment ? { containment: options.containment } : {}), ...(options.apps ? { apps: true } : {}), ...(options.baseDir ? { baseDir: options.baseDir } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)
+      await apps?.stopAll().catch(() => undefined)
       await closeCapacity().catch(() => undefined)
       if (db.open) db.close()
       for (let i = 0; i < 10; i++) {
