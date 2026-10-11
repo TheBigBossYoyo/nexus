@@ -197,6 +197,8 @@ export class IntelligenceStore {
     /** Process ids of the workers an earlier start recorded as alive. Asked once per lease, when it is first seen. */
     childPids: (bootId: string) => number[]
     settleMs: number
+    /** This process. An earlier start's request recorded under the same id cannot be running: the id was given again. */
+    currentPid?: number
     now?: number
   }): number {
     const now = input.now ?? Date.now()
@@ -213,12 +215,22 @@ export class IntelligenceStore {
         }
         let changed = false
         const leases = body.leases.map((lease) => {
-          if (
-            lease.state !== 'QUARANTINED' ||
-            lease.bootId === input.currentBootId ||
-            lease.owner?.kind !== 'HOSTED_SESSION'
-          )
-            return lease
+          if (lease.state !== 'QUARANTINED' || lease.bootId === input.currentBootId) return lease
+          // A request to a hosted provider ran inside the runtime process of that start and ended with it. At
+          // boot that process may not have exited yet; it is asked again here, so the provider's only slot is
+          // not held until the next restart. No worker and no settle interval: nothing outlives the process.
+          if (lease.owner?.kind === 'PROCESS_HTTP') {
+            const pid = lease.owner.pid
+            if (!Number.isInteger(pid) || pid <= 0) return lease
+            const reused = input.currentPid !== undefined && pid === input.currentPid
+            if (!reused && !input.isProcessStopped(pid)) return lease
+            if (!this.checkpoint(`capacity-stop-confirmed:${lease.id}`, null, { leaseId: lease.id, bootId: lease.bootId, source: reused ? 'OWNER_PROCESS_ID_REUSED' : 'OWNER_PROCESS_EXITED', ownerPid: pid, childPids: [], confirmedAt: new Date(now).toISOString() }))
+              return lease
+            changed = true
+            reclaimed++
+            return { ...lease, state: 'INTERRUPTED' }
+          }
+          if (lease.owner?.kind !== 'HOSTED_SESSION') return lease
           const watchKey = `capacity-lease-watch:${lease.id}`
           const savedWatch = this.readCheckpoint(watchKey)
           let watch = savedWatch?.body as { pids: number[]; goneSince: number | null } | undefined

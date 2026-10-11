@@ -40,4 +40,56 @@ describe('capacity facts carry the time they were observed', () => {
       h.close()
     }
   })
+  // Finding 3.5, the other half: two sessions routed at once each read the pool, and the later write used to put
+  // an older copy over the newer one.
+  it('an observation is applied to the pool as saved, and an older one does not replace a newer one', () => {
+    const h = graphHarness()
+    let now = 1_000_000
+    try {
+      const pools = new RuntimeCapacityPools(h.repos.intelligenceArtifacts, 'fact-fixture', () => now)
+      const stale = pools.pool('claude', 'profile')
+      const paused = pools.observe(pools.pool('claude', 'profile'), 'QUOTA_PAUSED', { resetAt: 5_000_000, observedAt: 1_000_000 })
+      // The copy read before the pause still says unknown. A percentage observed after the pause is added to the
+      // pause that is saved, not to the copy.
+      now = 1_100_000
+      const merged = pools.observe(stale, 'QUOTA_PAUSED', { resetAt: 5_000_000, utilization: 100, observedAt: 1_050_000 })
+      expect(merged.state).toBe('QUOTA_PAUSED')
+      expect(merged.utilization.value).toBe(100)
+      // An observation older than what is saved changes nothing.
+      const older = pools.observe(stale, 'AVAILABLE', { observedAt: 900_000 })
+      expect(older).toEqual(merged)
+      expect(pools.pool('claude', 'profile')).toEqual(merged)
+      expect(paused.state).toBe('QUOTA_PAUSED')
+    } finally {
+      h.close()
+    }
+  })
+
+  // Finding 3.4: the usage service watches one Claude installation. After another account is signed in, what
+  // it observed before is the other account's.
+  it('what was observed before a change of account belongs to the other account', () => {
+    const h = graphHarness()
+    let now = 1_000_000
+    const claude = new FakeAgentRuntime({ authStatus: defaultFakeAuthStatus(), script: async () => undefined })
+    const usage = new UsageIntelligenceService({ repos: h.repos, bus: new EventBus(h.repos.events, h.repos.transaction), runtime: claude, push: () => undefined, now: () => now })
+    try {
+      usage.apply({ type: 'report', windows: [{ limitType: 'five_hour', utilizationPercent: 96, resetsAt: new Date(now + 3_600_000).toISOString() }] })
+      // The first account named owns everything observed so far, also what was observed before it was named.
+      expect(usage.observationsSince('account-a')).toBe(0)
+      expect(usage.capacityObservation()!.observedAt).toBeGreaterThanOrEqual(usage.observationsSince('account-a'))
+      now += 60_000
+      const since = usage.observationsSince('account-b')
+      expect(since).toBe(1_060_000)
+      expect(usage.capacityObservation()!.observedAt).toBeLessThan(since)
+      expect(usage.machineState().since).toBeLessThan(since)
+      // Asking again for the same account does not move the line; a new observation is on the right side of it.
+      now += 60_000
+      expect(usage.observationsSince('account-b')).toBe(1_060_000)
+      usage.apply({ type: 'report', windows: [{ limitType: 'five_hour', utilizationPercent: 10, resetsAt: null }] })
+      expect(usage.capacityObservation()!.observedAt).toBeGreaterThanOrEqual(since)
+    } finally {
+      usage.dispose()
+      h.close()
+    }
+  })
 })

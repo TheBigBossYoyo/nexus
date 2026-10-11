@@ -107,12 +107,14 @@ export class WorkerCapacityRouting {
       const profile = createHash('sha256').update(JSON.stringify([account.email, account.organization, account.mode])).digest('hex')
       let pool = this.pools.pool(provider, profile)
       if (provider === 'claude') {
+        // After a change of account, what was observed before belongs to the other account's pool.
+        const since = this.o.usage.observationsSince(profile)
         const observed = this.o.usage.capacityObservation()
-        if (observed && observed.observedAt >= (pool.stateEvidence?.observedAt ?? 0))
+        if (observed && observed.observedAt >= since && observed.observedAt >= (pool.stateEvidence?.observedAt ?? 0))
           pool = this.pools.observe(pool, observed.state, observed)
         if (!this.o.usage.canDispatch()) {
           const machine = this.o.usage.machineState()
-          if (pool.state !== machine.status) pool = this.pools.observe(pool, machine.status, { resetAt: machine.resetAt, utilization: machine.utilizationPercent, observedAt: machine.since })
+          if (pool.state !== machine.status && machine.since >= since) pool = this.pools.observe(pool, machine.status, { resetAt: machine.resetAt, utilization: machine.utilizationPercent, observedAt: machine.since })
         }
       } else if (PAUSED_STATES.has(pool.state)) {
         // Claude's pool follows the usage service. A provider with no observation of its own gets its chance

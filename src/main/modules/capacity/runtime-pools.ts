@@ -115,20 +115,25 @@ export class RuntimeCapacityPools {
             confidence: 'OBSERVED' as const,
             observedAt: at ?? facts?.observedAt ?? this.now(),
           }
+    // The caller's copy may be older than what is saved (two sessions routed at once): the saved pool is what
+    // is changed, and an observation older than the one it holds is not written over it.
+    const saved = this.store.readCheckpoint(pool.id)
+    const current = saved ? Pool.parse(saved.body) : pool
+    const at = facts?.observedAt ?? this.now()
+    if (saved && current.stateEvidence && at < current.stateEvidence.observedAt) return current
     const next: CapacityPool = {
-      ...pool,
+      ...current,
       state,
       stateEvidence: {
         value: state,
         source: 'PROVIDER_RUNTIME',
         confidence: 'OBSERVED',
-        observedAt: facts?.observedAt ?? this.now(),
+        observedAt: at,
       },
       ...(facts
         ? { resetAt: reported(facts.resetAt, facts.resetObservedAt), utilization: reported(facts.utilization, facts.utilizationObservedAt) }
         : {}),
     }
-    const saved = this.store.readCheckpoint(pool.id)
     if (!this.store.checkpoint(pool.id, saved?.revision ?? null, Pool.parse(next)))
       throw new Error('Runtime capacity changed during observation')
     return next

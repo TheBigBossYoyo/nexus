@@ -111,8 +111,10 @@ export function createProductionAdvisoryRouting(input: {
       const evidence = primary ? [`PRIMARY_ROLE_POLICY:${ADVISORY_POLICY}:claude:${model}`] : quality.evidence(scope)
       let pool = pools.pool('claude', profile)
       const machine = input.usage.machineState()
+      // After a change of account, what was observed before belongs to the other account's pool.
+      const since = input.usage.observationsSince(profile)
       const observed = input.usage.capacityObservation()
-      if (observed && observed.observedAt >= (pool.stateEvidence?.observedAt ?? 0))
+      if (observed && observed.observedAt >= since && observed.observedAt >= (pool.stateEvidence?.observedAt ?? 0))
         pool = pools.observe(pool, observed.state, {
           resetAt: observed.resetAt,
           utilization: observed.utilization,
@@ -120,7 +122,7 @@ export function createProductionAdvisoryRouting(input: {
           resetObservedAt: observed.resetObservedAt,
           utilizationObservedAt: observed.utilizationObservedAt,
         })
-      if (!input.usage.canDispatch() && pool.state !== machine.status)
+      if (!input.usage.canDispatch() && pool.state !== machine.status && machine.since >= since)
         pool = pools.observe(pool, machine.status, {
           resetAt: machine.resetAt,
           utilization: machine.utilizationPercent,

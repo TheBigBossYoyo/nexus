@@ -194,6 +194,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       isProcessStopped: processStopped,
       childPids: (bootId) => repos.workers.listLive().flatMap((w) => (w.bootId === bootId && w.pid !== null ? [w.pid] : [])),
       settleMs: 30_000,
+      currentPid: process.pid,
     })
   reclaimHostedLeases()
   const bus = new EventBus(repos.events, repos.transaction)

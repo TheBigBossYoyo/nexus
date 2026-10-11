@@ -114,6 +114,21 @@ export class UsageIntelligenceService {
     resetObservedAt: number | null
     utilizationObservedAt: number | null
   } | null = null
+  private boundProfile: string | null = null
+  private boundSince = 0
+  /**
+   * The time since which this service's observations are those of the given account profile. The service
+   * watches one Claude installation and does not know which account is signed in; whoever routes does, and
+   * says so here. When the profile differs from the last one named, everything observed before now was the
+   * other account's and must not be written to this one's capacity pool.
+   */
+  observationsSince(profile: string): number {
+    if (this.boundProfile !== profile) {
+      if (this.boundProfile !== null) this.boundSince = this.now()
+      this.boundProfile = profile
+    }
+    return this.boundSince
+  }
   /** Only actual runtime signals/report/probe/session results; excludes optimistic startup and wait expiry. */
   capacityObservation(): {
     state: CapacityState

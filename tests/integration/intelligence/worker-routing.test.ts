@@ -95,6 +95,29 @@ describe('production worker capacity admission', () => {
     } finally { await h.close() }
   })
 
+  // Finding 3.6: the request of an earlier start whose process had not exited yet at boot stayed quarantined
+  // until the next restart, and with it the provider's only slot.
+  it('a ChatGPT request of an earlier start is released once its process is gone, or its process id is ours', () => {
+    const h = graphHarness()
+    try {
+      const store = h.repos.intelligenceArtifacts
+      const lease = (id: string, pid: number) => ({ id, bootId: 'old-boot', state: 'QUARANTINED', owner: { kind: 'PROCESS_HTTP', pid } })
+      store.checkpoint('capacity-leases:chatgpt-registration:x', null, { leases: [lease('l1', 7001), lease('l2', 7002), { ...lease('l3', 7003), bootId: 'new-boot' }] })
+      const states = (): string[] => (store.readCheckpoint('capacity-leases:chatgpt-registration:x')!.body as { leases: { state: string }[] }).leases.map((l) => l.state)
+      const reclaim = (stopped: number[], currentPid?: number): number =>
+        store.reclaimHostedLeases({ currentBootId: 'new-boot', isProcessStopped: (pid) => stopped.includes(pid), childPids: () => [], settleMs: 30_000, ...(currentPid !== undefined ? { currentPid } : {}) })
+      expect(reclaim([])).toBe(0)
+      expect(reclaim([7001])).toBe(1)
+      expect(states()).toEqual(['INTERRUPTED', 'QUARANTINED', 'QUARANTINED'])
+      // The id of the old process was given to this one: the old process cannot be running.
+      expect(reclaim([], 7002)).toBe(1)
+      expect(store.readCheckpoint('capacity-stop-confirmed:l2')?.body).toMatchObject({ source: 'OWNER_PROCESS_ID_REUSED', ownerPid: 7002 })
+      // A lease of the current start is never touched, whatever its process id says.
+      expect(reclaim([7003], 7003)).toBe(0)
+      expect(states()).toEqual(['INTERRUPTED', 'INTERRUPTED', 'QUARANTINED'])
+    } finally { h.close() }
+  })
+
   it('after a crash the slots of its sessions stay taken until their processes are proven gone, and are then free again', async () => {
     const waiters: (() => void)[] = []
     const h = await harness(async (_spec, ctx) => { await new Promise<void>((resolve) => { waiters.push(resolve) }); await ctx.completeTurn({ text: 'done' }) })
