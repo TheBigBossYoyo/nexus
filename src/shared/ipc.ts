@@ -113,6 +113,7 @@ import {
 } from './domain'
 import type { AuthStatus, ModelOption } from './auth'
 import type { PushMessage, RunEvent } from './events'
+import type { AppSessionView, IsolationStatusView, SandboxSetupOutcome } from './isolation'
 import type {
   ContextPack,
   GraphProposal,
@@ -1004,6 +1005,13 @@ export const ipcInputs = {
   'autonomy.resolve': BoundaryDecisionSchema,
   'autonomy.revokeGrant': z.object({ grantId: Id }).strict(),
   'autonomy.audit': AutonomyAuditInputSchema,
+  // 0.8: the containment of project code. `setup` starts the one-time elevated setup of the sandbox account,
+  // after a native confirmation; the others read.
+  'isolation.status': Empty,
+  'isolation.setup': Empty,
+  'isolation.apps': z.object({ projectId: Id.optional() }).strict(),
+  /** A screenshot of an application session, as a data URL. `index` counts from the newest (0). */
+  'isolation.appScreenshot': z.object({ appId: z.string().regex(/^[0-9a-f]{12}$/), index: z.number().int().min(0).max(500).optional() }).strict(),
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
   'knowledge.tree': z
@@ -1237,6 +1245,10 @@ export interface IpcOutputs {
   'autonomy.resolve': { requestId: string; state: BoundaryRequestState; grantId: string | null; alsoResolved: string[] }
   'autonomy.revokeGrant': { revoked: boolean }
   'autonomy.audit': AutonomyAuditPage
+  'isolation.status': IsolationStatusView
+  'isolation.setup': SandboxSetupOutcome
+  'isolation.apps': AppSessionView[]
+  'isolation.appScreenshot': { dataUrl: string; takenAt: string } | null
   'knowledge.health': {
     spaces: {
       space: ContextSpace

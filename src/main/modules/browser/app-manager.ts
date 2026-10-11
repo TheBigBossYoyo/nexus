@@ -156,6 +156,11 @@ export class ApplicationUnderTestManager {
     return [...this.apps.values()].map((a) => this.view(a))
   }
 
+  /** Every session of this start with whose it is, newest first, for the window. */
+  sessions(): { owner: AppOwner; status: AppStatus; artifacts: string[] }[] {
+    return [...this.apps.values()].reverse().map((a) => ({ owner: a.owner, status: this.view(a), artifacts: [...a.artifacts] }))
+  }
+
   private view(app: Running): AppStatus {
     const code = app.process?.exitCode()
     return {

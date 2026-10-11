@@ -1,10 +1,64 @@
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { AUTONOMY_CAPABILITIES, profileSummary, type AutonomyProfile } from '@shared/autonomy'
+import type { AppSessionView, IsolationStatusView } from '@shared/isolation'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { NexusError } from '@shared/result'
 import type { AutonomyService } from '@main/modules/autonomy/service'
 import { describeResource } from '@main/modules/autonomy/resource'
 
 type AutonomyChannel = Extract<IpcChannel, `autonomy.${string}`>
+type IsolationChannel = Extract<IpcChannel, `isolation.${string}`>
+export type IsolationHandlers = { [C in IsolationChannel]: (input: IpcInput<C>) => IpcOutputs[C] | Promise<IpcOutputs[C]> }
+
+export interface IsolationHandlerContext {
+  status: () => IsolationStatusView
+  /** Starts the one-time setup. The caller has already asked the user; Windows asks once more for elevation. */
+  setup: () => Promise<{ ok: boolean; detail: string }>
+  confirm?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
+  apps: () => { owner: { projectId: string; runId: string | null; taskId: string | null }; status: Omit<AppSessionView, 'projectId' | 'runId' | 'taskId' | 'screenshots'>; artifacts: string[] }[]
+}
+
+const SETUP_DETAIL = [
+  'This is done once per machine and needs administrator rights: Windows will ask for them next.',
+  '',
+  'It creates:',
+  '  \u2022 a local standard account, NexusSandbox, that is in none of your groups and cannot sign in interactively;',
+  '  \u2022 the folder C:\\ProgramData\\NexusSandbox, where the worktrees of enrolled projects are kept;',
+  '  \u2022 Windows Firewall rules that block all network traffic of that account.',
+  '',
+  'Project code then runs as that account: it cannot read your profile, your credentials or your other projects, and its only network is the filter NEXUS gives it.',
+  'It changes nothing else, and it can be removed again.',
+].join('\n')
+
+/** 0.8 isolation channels. None is reachable from an agent session. */
+export function createIsolationHandlers(ctx: IsolationHandlerContext): IsolationHandlers {
+  return {
+    'isolation.status': () => ctx.status(),
+    'isolation.setup': async () => {
+      if (!ctx.status().setupAvailable) throw new NexusError('invalid_state', 'This build cannot set up the sandbox account.')
+      // The setup changes the machine: it is confirmed natively, and without a way to ask it is not done.
+      if (!ctx.confirm || !(await ctx.confirm('Set up the isolated profile', 'Create the NEXUS sandbox account on this machine?', SETUP_DETAIL, 'Continue'))) {
+        return { ok: false, detail: 'Nothing was changed: the setup was not confirmed.', status: ctx.status() }
+      }
+      const outcome = await ctx.setup()
+      return { ...outcome, status: ctx.status() }
+    },
+    'isolation.apps': ({ projectId }) =>
+      ctx
+        .apps()
+        .filter((a) => projectId === undefined || a.owner.projectId === projectId)
+        .map((a) => ({ ...a.status, projectId: a.owner.projectId, runId: a.owner.runId, taskId: a.owner.taskId, screenshots: a.artifacts.length })),
+    'isolation.appScreenshot': ({ appId, index }) => {
+      const app = ctx.apps().find((a) => a.status.id === appId)
+      const path = app ? app.artifacts[app.artifacts.length - 1 - (index ?? 0)] : undefined
+      // Only a file the manager recorded for that session, read by the runtime: the window names no path.
+      if (path === undefined || !existsSync(path)) return null
+      const stat = statSync(path)
+      if (stat.size > 8 * 1024 * 1024) return null
+      return { dataUrl: `data:image/png;base64,${readFileSync(path).toString('base64')}`, takenAt: stat.mtime.toISOString() }
+    },
+  }
+}
 export type AutonomyHandlers = { [C in AutonomyChannel]: (input: IpcInput<C>) => IpcOutputs[C] | Promise<IpcOutputs[C]> }
 
 export interface AutonomyHandlerContext {

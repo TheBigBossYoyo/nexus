@@ -33,7 +33,7 @@ import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
-import { createAutonomyHandlers } from './v8-handlers'
+import { createAutonomyHandlers, createIsolationHandlers, type IsolationHandlerContext } from './v8-handlers'
 import { AutonomyService } from '@main/modules/autonomy/service'
 import { createV71Handlers } from './v71-handlers'
 import { createV72Handlers } from './v72-handlers'
@@ -94,6 +94,8 @@ export interface IpcContext {
   autonomy?: AutonomyService
   /** 0.8: the native confirmation before lasting authority is given (enrolling, allowing for a whole project). Absent: no question. */
   confirmAutonomy?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
+  /** 0.8: the containment as the runtime holds it. Absent (tests of other handlers): no containment exists and none can be set up. */
+  isolation?: Omit<IsolationHandlerContext, 'confirm'>
 }
 
 type Handlers = {
@@ -813,6 +815,14 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
         } }),
       projectName: (projectId) => repos.projects.get(projectId)?.name ?? null,
+      ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
+    }),
+    ...createIsolationHandlers({
+      ...(ctx.isolation ?? {
+        status: () => ({ requested: repos.settings.get().execution.containment, effective: 'STANDARD' as const, usable: false, detail: 'This runtime has no containment.', isolated: null, restricted: null, sandboxAccount: false, setupAvailable: false, protectedPaths: [] }),
+        setup: () => Promise.resolve({ ok: false, detail: 'This runtime has no containment.' }),
+        apps: () => [],
+      }),
       ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
     }),
     ...createV71Handlers({ repos, git: ctx.git }),

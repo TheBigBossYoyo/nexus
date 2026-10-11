@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
 import { IntelligenceOperations } from '../modules/intelligence/operations'
@@ -32,6 +32,7 @@ import { combineExtensions, createAppTools } from '../modules/browser/tools'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
 import { readSandboxAccount } from '../modules/isolation/sandbox-account'
+import { setupSandboxAccount } from '../modules/isolation/sandbox-setup'
 import { IsolationService } from '../modules/isolation/service'
 import type { ContainmentSetting } from '../modules/isolation/session-containment'
 import { mirrorTools, type ToolMirrorState } from '../modules/isolation/tools'
@@ -124,6 +125,8 @@ export interface RuntimeHost {
    * so that a test never changes a folder of the person running it. NEXUS's own data is marked either way.
    */
   protectUserStores?: boolean
+  /** 0.8: the directory of the sandbox account's setup scripts. Absent: the setup cannot be started from this runtime. */
+  sandboxSetupDir?: string
   /** 0.8: where nexus-launch.exe is. Absent or missing: no containment exists, and enrolled projects run nothing until one does. */
   launcherPath?: string
   /** Where the built-in Arena cases are. */
@@ -1335,6 +1338,17 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
     autonomy,
     confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
+    isolation: {
+      status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
+      setup: async () => {
+        if (host.sandboxSetupDir === undefined || host.launcherPath === undefined) return { ok: false, detail: 'This build cannot set up the sandbox account.' }
+        const outcome = await setupSandboxAccount({ launcher: host.launcherPath, scriptsDir: host.sandboxSetupDir, workDir: join(dataDir, 'sandbox', 'setup'), env })
+        logger(`isolation: sandbox setup ${outcome.ok ? 'completed' : 'not completed'}`)
+        autonomy.record({ projectId: null, runId: null, taskId: null, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action: 'sandbox setup', resource: 'machine', reason: outcome.detail.slice(0, 400) })
+        return outcome
+      },
+      apps: () => apps.sessions(),
+    },
     confirmSettings: (changes) =>
       confirm(
         'NEXUS Settings',
