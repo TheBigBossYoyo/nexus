@@ -126,6 +126,34 @@ export class IsolationService {
     return known
   }
 
+  /**
+   * Takes the marks off again: every path the record names goes back to having no label of its own. Called
+   * when no project is enrolled any more, so that NEXUS leaves nothing changed that serves nobody. A path that
+   * cannot be cleared stays on the record and is tried again the next time.
+   */
+  async unprotect(): Promise<string[]> {
+    const record = join(this.deps.dataDir, 'sandbox', 'protected.json')
+    let known: string[]
+    try {
+      known = (JSON.parse(readFileSync(record, 'utf8')) as { paths?: string[] }).paths ?? []
+    } catch {
+      return []
+    }
+    const left: string[] = []
+    for (const path of known) {
+      if (!existsSync(path)) continue
+      try {
+        await this.deps.launcher.label('clear', path)
+      } catch (e) {
+        left.push(path)
+        this.deps.logger?.(`isolation: the protection of ${path} could not be removed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    writeFileSync(record, JSON.stringify({ paths: left, at: new Date().toISOString() }, null, 2))
+    this.protectedPaths = left
+    return left
+  }
+
   status(): IsolationStatus {
     const requested = this.deps.containment()
     const effective = effectiveProfile(requested, this.deps.broker)

@@ -577,7 +577,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   let announceBoundary: ((projectId: string, text: string) => void) | null = null
   // What contained code must not read is marked when there is a project whose code is contained, and not before.
   function protectStores(): void {
-    if (repos.enrollments.count() === 0) return
+    if (repos.enrollments.count() === 0) {
+      void isolation.unprotect().catch((e: unknown) => logger(`isolation: removing the protection failed: ${errorMessage(e)}`))
+      return
+    }
     void isolation.protect({ userStores: host.protectUserStores === true }).catch((e: unknown) => logger(`isolation: protection failed: ${errorMessage(e)}`))
   }
   protectStores()
