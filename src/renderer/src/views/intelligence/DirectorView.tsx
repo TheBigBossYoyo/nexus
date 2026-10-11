@@ -105,7 +105,8 @@ function Material({ invocation: r }: { invocation: DirectorInvocation }) {
         ) : null}
         {r.challenge ? (
           <section>
-            <h3 className="font-medium">Independent technical challenge</h3>
+            <h3 className="font-medium">Technical challenge of the memo</h3>
+            <p className="text-small text-text-muted">Written by the other provider after reading the memo above: it challenges that proposal and is not an assessment formed without it.</p>
             <Claims
               groups={[
                 ['Agreements', r.challenge.agreements],

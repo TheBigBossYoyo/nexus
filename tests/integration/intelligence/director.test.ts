@@ -61,6 +61,38 @@ describe('durable Director gateway', () => {
       h.close()
     }
   })
+  // Finding 5.4: a stage that cited one piece of evidence it had not been given was thrown away whole, paid for.
+  it('keeps a stage that cites evidence outside what was supplied, without the reference', async () => {
+    const h = graphHarness()
+    try {
+      const result = await new DirectorGateway(h.repos.intelligenceArtifacts).invoke({
+        projectId: h.project.id,
+        objective: 'Scope',
+        level: 3,
+        reasons: [],
+        context: [],
+        provider: 'openai',
+        model: 'test',
+        strategic: {
+          complete: async (instructions) =>
+            instructions.includes('acceptedClaims')
+              ? { decision: 'Proceed', acceptedClaims: [], rejectedClaims: [], unresolvedUnknowns: [], nextActions: [], evidenceRefs: ['never-supplied'] }
+              : { ...memo, evidenceRefs: ['never-supplied'] },
+        },
+        technical: {
+          complete: async () => ({ agreements: [], disagreements: ['Kept disagreement'], missingEvidence: [], proposedChanges: [], evidenceRefs: ['also-not-supplied'] }),
+        },
+      })
+      expect(result.state).not.toBe('FAILED')
+      expect(result.memo?.recommendation).toBe('Verify the evidence')
+      expect(result.memo?.evidenceRefs).toEqual([])
+      expect(result.challenge?.disagreements).toEqual(['Kept disagreement'])
+      expect(result.challenge?.evidenceRefs).toEqual([])
+      expect(result.synthesis?.evidenceRefs).toEqual([])
+    } finally {
+      h.close()
+    }
+  })
   it('records waiting council without spending strategic capacity or downgrading', async () => {
     const h = graphHarness()
     try {

@@ -11,6 +11,7 @@ import { defaultIntentMetadata, UserIntentMetadataSchema } from '@shared/intelli
 import { NexusError } from '@shared/result'
 import { ContextGraphService } from '@main/modules/context-graph'
 import { TRUST_WORD } from '@main/modules/context-graph/render'
+import { techniqueEnabled } from '@shared/token'
 import { redactAction } from '@main/modules/policies/security-log'
 import type { GitService } from '@main/modules/git'
 import type { Repositories } from '@main/modules/persistence'
@@ -78,6 +79,9 @@ export class TaskAdmissionService {
   }
 
   retrieve(projectId: string, raw: string, workspaceId?: string): IntelligenceContext[] {
+    // The Context Graph switched off means off here too: a user who took the project's knowledge out of the
+    // agents' context did not leave it in what is sent to an advisory provider. The request is compiled alone.
+    if (!techniqueEnabled(this.repos.settings.get().tokens, 'contextGraph')) return []
     const spaces = this.graph
       .spacesForProject(projectId)
       .filter(

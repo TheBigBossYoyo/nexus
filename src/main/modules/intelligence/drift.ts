@@ -19,16 +19,46 @@ const expansions = [
   ],
 ] as const
 
+/**
+ * Additions of consequence that the model's own report of drift has nothing to do with: a new dependency, a
+ * secret or credential touched, verification weakened, data sent outside, published history rewritten. Each is
+ * looked for in the items that add work, one item at a time, and an item that forbids the thing ("do not
+ * disable the tests") is not a proposal to do it. A match means the user decides; it proves nothing either way.
+ */
+const additions = [
+  ['NEW_DEPENDENCY', /\b(add|install|introduce|adopt|pull in|bring in)\s+(?:(?:a|an|the|new|another|external|third[- ]party|runtime|dev)\s+){0,3}(dependency|dependencies|library|libraries|npm package)\b/i],
+  ['SECRET_OR_CREDENTIAL_ACCESS', /\b(read|write|commit|store|save|print|log|expose|embed|hard-?code|copy)\b.{0,60}\b(secrets?|credentials?|api keys?|access tokens?|passwords?|private keys?|\.env)\b/i],
+  ['VERIFICATION_WEAKENED', /\b(disable|skip|remove|delete|comment out|weaken|loosen|bypass|turn off)\b.{0,40}\b(tests?|test suite|lint(ing)?|typecheck(ing)?|assertions?|verification|ci)\b/i],
+  ['EXTERNAL_DATA_TRANSFER', /\b(send|upload|post|transmit|report|sync)\b.{0,60}\b(external|third[- ]party|remote|outside)\b.{0,40}\b(api|service|server|endpoint|provider|host)\b/i],
+  ['HISTORY_REWRITE', /\b(force[- ]push|rewrite|rebase|squash|amend)\b.{0,40}\b(history|published|main branch|master branch|released)\b/i],
+] as const
+const FORBIDS = /\b(do not|don't|does not|never|without|avoid|must not|should not|shall not|cannot|no need to|not to|refrain from|instead of)\b/i
+const ADDS_WORK: ReadonlySet<Recommendation['kind']> = new Set(['REQUIREMENT', 'ACCEPTANCE', 'VERIFICATION', 'ASSUMPTION', 'UNKNOWN'])
+
+/** The flags that code alone raises, with no model asked. */
+export function structuredDriftFlags(raw: string, recommendations: readonly Recommendation[]): string[] {
+  const proposed = recommendations.map((r) => r.text).join('\n')
+  const flags: string[] = expansions.filter(([, pattern]) => pattern.test(proposed) && !pattern.test(raw)).map(([reason]) => reason)
+  for (const [reason, pattern] of additions) {
+    // What the user asked for in their own words is theirs to ask.
+    if (pattern.test(raw)) continue
+    const proposes = recommendations.some((r) => {
+      if (!ADDS_WORK.has(r.kind)) return false
+      const match = pattern.exec(r.text)
+      return match !== null && !FORBIDS.test(r.text.slice(0, match.index + match[0].length))
+    })
+    if (proposes) flags.push(reason)
+  }
+  return flags
+}
+
 /** Structured impact checks plus a separately prompted comparison of meaning. Neither is a proof. */
 export async function checkIntentDrift(
   raw: string,
   recommendations: Recommendation[],
   provider: AdvisoryProvider,
 ) {
-  const proposed = recommendations.map((r) => r.text).join('\n')
-  const structuredFlags = expansions
-    .filter(([, pattern]) => pattern.test(proposed) && !pattern.test(raw))
-    .map(([reason]) => reason)
+  const structuredFlags = structuredDriftFlags(raw, recommendations)
   const semantic = parseAdvisoryArtifact(
     IntentDriftSchema,
     await provider.complete(

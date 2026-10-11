@@ -44,6 +44,10 @@ describe('compiled task admission', () => {
       const again = new TaskAdmissionService(h.repos).retrieve(h.project.id, 'Change the telemetry parser staging').map((c) => c.text).join('\n')
       expect(again).toContain('staging server')
       expect(again).not.toContain('Zx81kQ7pLm22vTt9')
+      // Finding 8.3: with the Context Graph switched off, none of the project's knowledge is gathered for the compiler.
+      const settings = h.repos.settings.get()
+      h.repos.settings.set({ ...settings, tokens: { ...settings.tokens, contextGraph: 'off' } })
+      expect(new TaskAdmissionService(h.repos).retrieve(h.project.id, 'Change the telemetry parser')).toEqual([])
     } finally {
       h.close()
     }
