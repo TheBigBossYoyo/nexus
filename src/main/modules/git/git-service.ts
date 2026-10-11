@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, rmdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { NexusError } from '@shared/result'
@@ -284,7 +284,15 @@ function subcommandOf(args: readonly string[]): string {
  * untracked cache and the split index are the two index extensions that make git believe a file it did not
  * look at; neither is used.
  */
-const SAFE_CONFIG = ['-c', 'diff.ignoreSubmodules=all', '-c', 'submodule.recurse=false', '-c', 'status.submoduleSummary=false', '-c', 'core.untrackedCache=false', '-c', 'core.splitIndex=false', '-c', 'index.sparse=false', '-c', 'core.sparseCheckout=false', '-c', 'core.sparseCheckoutCone=false']
+const SAFE_CONFIG = ['-c', 'diff.ignoreSubmodules=all', '-c', 'submodule.recurse=false', '-c', 'status.submoduleSummary=false', '-c', 'core.untrackedCache=false', '-c', 'core.splitIndex=false', '-c', 'index.sparse=false', '-c', 'core.sparseCheckout=false', '-c', 'core.sparseCheckoutCone=false', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false']
+
+/**
+ * Subcommands that look at the files of the worktree. A `.gitmodules` in the worktree can say, per nested
+ * repository, `ignore = none`, and that outranks `diff.ignoreSubmodules` given as configuration (measured by
+ * the independent audit of 2026-10-11: the nested repository's filter then runs). Given on the command line it
+ * cannot be outranked, so these get it on the command line.
+ */
+const IGNORES_SUBMODULES_ON_COMMAND_LINE = new Set(['status', 'diff', 'diff-index', 'diff-files', 'diff-tree'])
 
 /** Subcommands that read or write the index: in a worktree NEXUS created they use NEXUS's own index, never the worktree's. */
 const USES_INDEX = new Set(['status', 'diff', 'add', 'commit', 'reset', 'clean', 'merge', 'write-tree', 'read-tree', 'checkout', 'rm', 'ls-files', 'update-index', 'stash', 'cherry-pick', 'rebase', 'revert', 'am', 'checkout-index', 'restore', 'switch'])
@@ -306,6 +314,40 @@ export interface CommitEvidence {
   /** Nested repositories found in the worktree, which are never committed. */
   skippedNestedRepositories: string[]
   at: string
+}
+
+/**
+ * Removes every junction and symbolic link below `root`, without going through any: the entry itself is
+ * removed, never what it names. Directories are walked only when they are real directories.
+ */
+export async function removeLinksUnder(root: string): Promise<number> {
+  let removed = 0
+  const walk = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name)
+      let info
+      try {
+        info = await lstat(path)
+      } catch {
+        continue
+      }
+      if (info.isSymbolicLink()) {
+        // `rm` without `recursive` unlinks a link to a directory and a link to a file alike.
+        await rm(path, { force: true, recursive: false }).catch(async () => {
+          await rmdir(path).catch(() => undefined)
+        })
+        removed += 1
+      } else if (info.isDirectory()) await walk(path)
+    }
+  }
+  await walk(root)
+  return removed
 }
 
 /** Subcommands of NEXUS's own that add to or rewrite the branch a working tree is on. */
@@ -349,6 +391,7 @@ export class GitService {
   /** The commit each private index was last made to match, by index file. */
   private readonly indexBase = new Map<string, string>()
   private commitEvidenceSink: ((evidence: CommitEvidence) => void) | null = null
+  private worktreeCreatedHook: ((gitDir: string) => Promise<void>) | null = null
   private repositoryOf: ((worktreePath: string) => WorktreeOrigin | string | null | Promise<WorktreeOrigin | string | null>) | null = null
 
   constructor(private readonly gitPath: string = 'git') {
@@ -375,6 +418,15 @@ export class GitService {
   setTrustedIndexDir(dir: string): void {
     this.trustedIndexDir = resolve(dir)
     mkdirSync(this.trustedIndexDir, { recursive: true })
+  }
+
+  /**
+   * Called with the Git directory of a worktree NEXUS just created, before anything runs there, and awaited:
+   * the runtime uses it to make the files of that directory that say where the repository is unwritable for
+   * the code of the project. A failure of the callback fails the creation.
+   */
+  onWorktreeCreated(hook: (gitDir: string) => Promise<void>): void {
+    this.worktreeCreatedHook = hook
   }
 
   /** Told of every commit NEXUS makes in a worktree it created, with what it meant to commit and what it did. */
@@ -421,7 +473,10 @@ export class GitService {
   private async exec(own: TrustedWorktree | null, args: readonly string[], opts: RunGitOptions, index: string | null, cwd?: string): Promise<ProcessResult> {
     this.noHooksDir ??= emptyHooksDir()
     const scope = own ? [`--git-dir=${own.gitDir}`, `--work-tree=${own.root}`] : []
-    const fullArgs = ['--no-replace-objects', ...scope, '-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...SAFE_CONFIG, ...args]
+    const sub = subcommandOf(args)
+    const at = args.indexOf(sub)
+    const own_args = IGNORES_SUBMODULES_ON_COMMAND_LINE.has(sub) && at >= 0 && !args.some((a) => a.startsWith('--ignore-submodules')) ? [...args.slice(0, at + 1), '--ignore-submodules=all', ...args.slice(at + 1)] : args
+    const fullArgs = ['--no-replace-objects', ...scope, '-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...SAFE_CONFIG, ...own_args]
     const where = cwd ?? own?.root ?? process.cwd()
     const ceiling = this.worktreesRoot && isWithin(this.worktreesRoot, where) ? { GIT_CEILING_DIRECTORIES: this.worktreesRoot } : {}
     const common = own ? { GIT_COMMON_DIR: dirname(dirname(own.gitDir)) } : {}
@@ -624,7 +679,15 @@ export class GitService {
     // Anywhere else a linked worktree's pointer is verified before every command, not only before a write: a
     // read runs the filters and drivers of whatever repository the pointer names.
     if (!own) await this.assertOwnGitDir(cwd)
-    else if (WRITES_BRANCH.has(sub)) await this.assertOnOwnBranch(own)
+    else {
+      // A worktree NEXUS created has no configuration of its own. In a repository that reads per-worktree
+      // configuration (`extensions.worktreeConfig`, the user's setting), a `config.worktree` in the worktree's
+      // entry would name filters, drivers and hooks for NEXUS's own git. The runtime makes that file empty and
+      // unwritable for project code when the worktree is created; a file with something in it is not read past.
+      const planted = await stat(join(own.gitDir, 'config.worktree')).then((info) => info.size > 0, () => false)
+      if (planted) throw new NexusError('invalid_state', `The working tree at ${own.root} has a configuration of its own (config.worktree in its Git directory), which NEXUS did not write. NEXUS will not run git there.`, { cwd: own.root })
+      if (WRITES_BRANCH.has(sub)) await this.assertOnOwnBranch(own)
+    }
     // The index: NEXUS's own, made to match the branch before it is used. A caller that names an index of its
     // own (a throwaway one for a diff) keeps it.
     const callerIndex = opts.env?.['GIT_INDEX_FILE'] !== undefined
@@ -813,6 +876,8 @@ export class GitService {
     }
     // From here on NEXUS's git commands in this worktree use the Git directory the repository has for it.
     if (!(await this.trustWorktree(abs, repo, branch))) throw new NexusError('git_failed', `git created the worktree at ${abs} but the repository has no entry for it`, { path: abs })
+    const own = await this.trustedFor(abs)
+    if (own && this.worktreeCreatedHook) await this.worktreeCreatedHook(own.gitDir)
     return sha
   }
 
@@ -840,6 +905,10 @@ export class GitService {
       return
     }
     if (!force) await this.assertClean(abs)
+    // What contained code left in the worktree may include a link to another directory. git's removal empties
+    // what such a link leads to (measured by the independent audit: `worktree remove --force` deleted the files
+    // of a junction's target). Every link is removed first, as a link, by NEXUS: its target is not opened.
+    await removeLinksUnder(abs)
     // Always forced: whether the worktree is clean was just established by NEXUS's own status. git's check before
     // a removal looks into nested repositories with their own configuration, whatever it is told.
     const args = ['worktree', 'remove', '--force', '--', abs]

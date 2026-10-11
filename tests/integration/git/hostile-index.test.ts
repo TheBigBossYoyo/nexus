@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { GitService, type CommitEvidence } from '@main/modules/git/git-service'
@@ -163,6 +163,61 @@ describe('hostile index and worktree state against the git commands NEXUS runs i
     expect(evidence[0]?.skippedNestedRepositories).toEqual(['vendor/lib'])
   }, 120_000)
 
+  it('a nested repository already in the branch, with a .gitmodules that says "ignore = none" (audit finding A1)', async () => {
+    // The task commits the link itself, with its own git, and says in .gitmodules that the nested repository is
+    // to be looked into. Configuration given to git does not outrank that; the command line does.
+    const subHead = plantNestedRepository('nested')
+    raw(worktree, 'update-index', '--add', '--cacheinfo', `160000,${subHead},nested`)
+    writeFileSync(join(worktree, '.gitmodules'), '[submodule "nested"]\n\tpath = nested\n\turl = ./nested\n\tignore = none\n')
+    raw(worktree, 'add', '.gitmodules')
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'the task commits a link'], { cwd: worktree, windowsHide: true, stdio: 'ignore' })
+    for (const m of markers()) rmSync(marker(m))
+    execFileSync('git', ['-c', 'diff.ignoreSubmodules=all', 'status', '--porcelain'], { cwd: worktree, windowsHide: true, stdio: 'ignore' })
+    console.info(`stock: status with diff.ignoreSubmodules=all as configuration and "ignore = none" in .gitmodules ran: ${markers().join(', ') || 'nothing'}`)
+    for (const m of markers()) rmSync(marker(m))
+    writeFileSync(join(worktree, 'a.txt'), 'a\nmore work\n')
+    const commit = await everythingNexusDoes()
+    expect(markers(), 'nothing the nested repository configured was run').toEqual([])
+    expect(commit).not.toBeNull()
+    await git.removeWorktree(repo, worktree, { force: true })
+    expect(markers()).toEqual([])
+  }, 120_000)
+
+  it('a configuration file in the worktree entry, in a repository that reads such files (audit finding A2)', async () => {
+    // `extensions.worktreeConfig` is the user's own setting (git's sparse-checkout switches it on). With it, git
+    // reads `config.worktree` from the worktree's entry, which the task can write unless it was made unwritable.
+    raw(repo, 'config', 'extensions.worktreeConfig', 'true')
+    const entry = join(repo, '.git', 'worktrees', 'task')
+    const sh = `sh -c 'echo ran > "${marker('filter').replace(/\\/g, '/')}"; cat'`
+    writeFileSync(join(entry, 'config.worktree'), `[filter "evil"]\n\tclean = ${sh}\n\tsmudge = ${sh}\n[core]\n\tfsmonitor = ${sh}\n\thooksPath = ${join(entry, 'hooks').replace(/\\/g, '/')}\n[merge "evil"]\n\tdriver = ${sh}\n[diff]\n\texternal = ${sh}\n`)
+    mkdirSync(join(entry, 'hooks'), { recursive: true })
+    for (const hook of ['pre-commit', 'post-checkout', 'post-merge', 'reference-transaction', 'post-index-change']) writeFileSync(join(entry, 'hooks', hook), `#!/bin/sh\necho ran > "${marker('hook').replace(/\\/g, '/')}"\n`)
+    writeFileSync(join(worktree, '.gitattributes'), '* filter=evil merge=evil\n')
+    writeFileSync(join(worktree, 'a.txt'), 'a\nchanged\n')
+    execFileSync('git', ['status', '--porcelain'], { cwd: worktree, windowsHide: true, stdio: 'ignore' })
+    console.info(`stock: status with a planted config.worktree ran: ${markers().join(', ') || 'nothing'}`)
+    for (const m of markers()) rmSync(marker(m))
+    await expect(everythingNexusDoes()).rejects.toThrow(/configuration of its own|config\.worktree/)
+    expect(markers(), 'nothing the planted configuration names was run').toEqual([])
+  }, 120_000)
+
+  it('a link in the worktree to a directory elsewhere: removing the worktree removes the link, not what it leads to (audit finding A5)', async () => {
+    const victim = join(SCRATCH, `case-${n}`, 'victim')
+    mkdirSync(join(victim, 'deep'), { recursive: true })
+    writeFileSync(join(victim, 'keep.txt'), 'keep\n')
+    writeFileSync(join(victim, 'deep', 'also.txt'), 'also\n')
+    mkdirSync(join(worktree, 'src'), { recursive: true })
+    symlinkSync(victim, join(worktree, 'src', 'jn'), 'junction')
+    symlinkSync(victim, join(worktree, 'top-jn'), 'junction')
+    await git.resetClean(worktree)
+    expect(existsSync(join(victim, 'keep.txt')), 'after a reset and clean').toBe(true)
+    symlinkSync(victim, join(worktree, 'again'), 'junction')
+    await git.removeWorktree(repo, worktree, { force: true })
+    expect(existsSync(worktree)).toBe(false)
+    expect(readFileSync(join(victim, 'keep.txt'), 'utf8')).toBe('keep\n')
+    expect(existsSync(join(victim, 'deep', 'also.txt'))).toBe(true)
+  }, 60_000)
+
   it('the index stages content that is not in the file: the commit holds the file', async () => {
     const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: worktree, input: 'STAGED AND NOT VISIBLE\n', encoding: 'utf8', windowsHide: true }).trim()
     raw(worktree, 'update-index', '--cacheinfo', `100644,${blob},a.txt`)
@@ -229,16 +284,15 @@ describe('hostile index and worktree state against the git commands NEXUS runs i
     expect(files['keep.txt']).toBe('keep')
   }, 120_000)
 
-  it('a sparse checkout that says no file belongs: the commit still follows the files that are there', async () => {
-    // Stock git removes the files from disk when it is told this, and then refuses to stage the ones put back.
+  it('a sparse checkout set up from inside the worktree: it writes a configuration into the entry, and NEXUS stops', async () => {
+    // Stock git removes the files from disk when it is told this, and writes `config.worktree` to remember it.
+    // In the product that file is empty and unwritable for project code from the moment the worktree exists;
+    // where it was written all the same, NEXUS does not read past it.
     tryRaw(worktree, 'sparse-checkout', 'set', '--no-cone', '/nothing-at-all')
     console.info(`stock: after a sparse checkout of nothing, on disk: ${['a.txt', 'keep.txt'].filter((f) => existsSync(join(worktree, f))).join(', ') || 'no file'}`)
     writeFileSync(join(worktree, 'a.txt'), 'a\nput back by the task\n')
-    writeFileSync(join(worktree, 'keep.txt'), 'keep\n')
-    writeFileSync(join(worktree, 'extra.txt'), 'extra\n')
-    console.info(`stock: add -A under that sparse checkout: ${tryRaw(worktree, 'add', '-A').slice(0, 80) || 'accepted'}`)
-    const files = committedFiles((await git.commitAll(worktree, 'task: work', AUTHOR)) as string)
-    expect(files).toEqual({ 'a.txt': 'a\nput back by the task', 'keep.txt': 'keep', 'extra.txt': 'extra' })
+    await expect(git.commitAll(worktree, 'task: work', AUTHOR)).rejects.toThrow(/configuration of its own/)
+    await expect(git.status(worktree)).rejects.toThrow(/configuration of its own/)
   }, 60_000)
 
   it('an index that is garbage, cut short, or has a wrong checksum', async () => {

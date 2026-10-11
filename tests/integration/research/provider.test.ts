@@ -267,7 +267,8 @@ describe('search', () => {
     const h = setup()
     const caps = h.provider.capabilities()
     expect(caps.backends).toEqual(['NEXUS_HTTP_FETCH', 'NEXUS_HTML_SEARCH'])
-    expect(caps.unavailable.map((u) => u.backend)).toEqual(['PROVIDER_NATIVE_SEARCH', 'PROVIDER_NATIVE_FETCH'])
+    // No browser was given to this provider: the research browser is named among what is not there.
+    expect(caps.unavailable.map((u) => u.backend)).toEqual(['NEXUS_RESEARCH_BROWSER', 'PROVIDER_NATIVE_SEARCH', 'PROVIDER_NATIVE_FETCH'])
   })
 })
 

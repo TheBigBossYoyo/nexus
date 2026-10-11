@@ -302,6 +302,18 @@ export class ExecutionBroker {
     this.granted.add(mark)
   }
 
+  /**
+   * Pins a worktree's entry and its repository's object store (see pinWorktreeEntry, pinObjectStore). Called
+   * when NEXUS creates a worktree in an enrolled project, before any code of the project runs there, and again
+   * before every contained command.
+   */
+  async pinGit(gitDir: string): Promise<void> {
+    if (!existsSync(gitDir)) return
+    await this.pinWorktreeEntry(gitDir)
+    const objects = join(resolve(gitDir, '..', '..'), 'objects')
+    if (existsSync(objects)) await this.pinObjectStore(objects)
+  }
+
   /** Takes back the access to every repository on record that is not one of `keep` (the Git directories of the projects still enrolled). */
   async revokeGitExcept(keep: readonly string[]): Promise<void> {
     const kept = new Set(keep.map((dir) => resolve(dir).toLowerCase()))
@@ -534,14 +546,14 @@ export class ExecutionBroker {
           () => false,
         )
       } else if (input.gitOnly === true) {
-        const common = input.gitDir !== undefined ? resolve(input.gitDir, '..', '..').toLowerCase() : null
         for (const dir of input.gitWritable ?? []) {
           if (!existsSync(dir) || !statSync(dir).isDirectory()) continue
           await this.ensureLow(dir)
-          if (common !== null && resolve(dir).toLowerCase() === resolve(input.gitDir as string).toLowerCase()) await this.pinWorktreeEntry(dir)
-          if (basename(dir).toLowerCase() === 'objects') await this.pinObjectStore(dir)
         }
       }
+      // Whatever the command is: the files of the worktree's entry that say where the repository is and what
+      // configuration applies, and the places git takes whole sets of objects from, are not the task's to write.
+      if (input.gitDir !== undefined) await this.pinGit(input.gitDir)
       const shells = await this.findShells()
       const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
       // git is hardened wherever it can reach the repository: in a command that is git alone, and in every command of a session whose account was given access.

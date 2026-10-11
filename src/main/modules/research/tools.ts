@@ -89,6 +89,7 @@ export function createResearchTools(deps: ResearchToolsDeps): (session: Extensio
             ...(typeof args['question'] === 'string' ? { question: args['question'] } : {}),
             ...(typeof args['max_chars'] === 'number' ? { maxChars: args['max_chars'] } : {}),
             ...(args['refresh'] === true ? { refresh: true } : {}),
+            ...(args['render'] === true ? { render: true } : {}),
           })
           if (envelope.screening.status === 'flagged' && !envelope.source.fromMemory) {
             const removed = Object.entries(envelope.screening.quarantined).map(([pattern, n]) => `${pattern} x${n}`).join(', ')

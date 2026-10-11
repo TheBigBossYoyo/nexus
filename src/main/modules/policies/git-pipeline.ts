@@ -1,262 +1,372 @@
-import { existsSync, realpathSync } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
-
 /**
  * 0.8: which shell commands may run where git can change a ref of the user's repository: as the user, at low
  * integrity, instead of as the sandbox account. That place has the user's network and reads what the user's
  * low-integrity processes read, so what runs there must be git doing a known thing, and nothing else.
  *
- * A command qualifies when all of this holds, and only then:
- *  - every program in it is git, or (bash only) one of a few tools that read their input and the files they
- *    are named and write only to standard output;
- *  - every git names, as its first word, a subcommand from a fixed list; nothing stands between `git` and the
- *    subcommand (no `-c`, `-C`, `--git-dir`, `--exec-path`, no pager switch);
- *  - no git argument is one that makes git run a program, read or write a file somebody names, or look at
- *    another repository (`-O`, `--open-files-in-pager`, `--exec`, `--output`, `--ext-diff`, `--textconv`,
- *    `--no-index`, `-F`, `--template` and their kin);
- *  - every file a filter is named is inside the worktree, links resolved;
- *  - the shell is given nothing to expand, substitute, redirect or group. The one substitution accepted is
- *    the commit message written as a quoted here-document, `-m "$(cat <<'EOF' … EOF)"`, whose text the shell
- *    takes literally.
+ * Two decisions shape this file, both taken after independent reviews found the earlier versions wanting
+ * (2026-10-11: first the command classifier's "no finding" was taken for "git alone"; then a validator that
+ * read the command as text let through a command substitution hidden by an odd pairing of quotes, and a
+ * here-document that ended earlier for the shell than for the validator):
  *
- * The answer is "no" for anything not understood. "No" is not a refusal: the command then runs under the
- * session's own profile, where a ref-changing git is told to be run as a command of its own.
+ *  1. The agent's text is never what runs. It is parsed here into git invocations, each a list of arguments,
+ *     joined by `&&`, `||` or `;`. NEXUS then writes the script itself, quoting every argument. If the text
+ *     cannot be parsed into exactly that, it does not qualify. So there is no second reading of the text by a
+ *     shell that could differ from this one.
+ *  2. What an invocation may be is a list, not a list of exceptions: a subcommand from a fixed set, and for
+ *     each subcommand the options it may take, spelled out in full. Anything else does not qualify: an
+ *     unknown subcommand, an unknown option, a shortened option, an option with a value where none is listed.
  *
- * This list is the whole of what an agent's text can make run as the user. Review of 2026-10-11 (independent):
- * before it, the verdict "git alone" came from the command classifier, which let through `git grep -Ocmd`,
- * `git --exec-path=.`, `git --git-dir=<dir with an alias>` and others. What git is pointed at and what it reads
- * as configuration is pinned separately, in the environment the execution broker gives it.
+ * Nothing but git qualifies: no pipe, no filter program, no redirection except the two that merge or discard
+ * the error stream. `git log | head -3` runs as the sandbox account, which can read the repository.
+ *
+ * "Does not qualify" is not a refusal: the command then runs under the session's own profile, where a
+ * ref-changing git is told to be run as a command of its own.
  */
 
-/** Tools that read standard input or the files named to them and write only to standard output. */
-const FILTERS = new Set(['head', 'tail', 'grep', 'wc', 'sort', 'uniq', 'cut', 'tr', 'cat', 'ls', 'nl', 'echo', 'pwd', 'true', 'cd'])
-/** Filters whose first plain argument is a pattern or a set, not a file. */
-const FIRST_ARG_IS_NOT_A_FILE = new Set(['grep', 'tr'])
-/** Arguments that are never files. */
-const NO_FILE_ARGS = new Set(['echo', 'tr', 'pwd', 'true'])
-/** Options that make a filter write a file, read a list of files from one, or run a program. */
-const REFUSED_LONG = /^--(output|file|files0-from|compress-program|temporary-directory|include-from|exclude-from)\b/
-/** Redirections that send output nowhere or merge the two streams: taken out before anything else is read. */
-const HARMLESS_REDIRECT = /(^|\s)(2>&1|2>\s?\/dev\/null|>\s?\/dev\/null|&>\s?\/dev\/null)(?=\s|$|[;|&])/g
+export interface UserGitInvocation {
+  /** The arguments after `git`, exactly as git will get them. */
+  args: string[]
+  /** What joins this invocation to the next. */
+  then: '&&' | '||' | ';' | null
+  /** `2>&1` or `2>/dev/null` after the invocation. */
+  stderr: 'merge' | 'discard' | null
+}
+
+/** Words that may stand unquoted: letters, digits and the marks git's revisions and paths use. No shell mark is among them. */
+const BARE = /^[A-Za-z0-9_@%+=:,./^~-]$/
+/** Control characters other than tab and newline. */
+const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/
 
 /**
- * The git subcommands that may run as the user. Each works on the worktree, its index and its own branch;
- * none takes a program to run once the options below are refused. Not here on purpose: grep (a pager option
- * runs a program), rebase (it carries out a list of instructions kept in the worktree's own Git directory, which
- * the task can write, and one instruction is `exec`), config, worktree, submodule, clone, fetch, pull, push, remote, archive, bundle, bisect,
- * difftool, mergetool, filter-branch, gc, init, daemon, and everything unknown.
+ * Reads the command as a sequence of git invocations, or null when it is anything else. Quoting is read the
+ * way bash reads it, for the subset accepted: a single-quoted string is literal; a double-quoted string is
+ * literal too because nothing bash would expand in it is accepted (`$`, a backtick, a backslash, `!`);
+ * outside quotes only the characters of BARE make a word.
  */
-const GIT_SUBCOMMANDS = new Set([
-  'status', 'log', 'diff', 'show', 'add', 'commit', 'ls-files', 'rev-parse', 'blame', 'branch', 'restore', 'reset', 'checkout', 'switch', 'rm', 'mv',
-  'merge-base', 'describe', 'shortlog', 'cat-file', 'ls-tree', 'rev-list', 'for-each-ref', 'reflog', 'cherry-pick', 'revert', 'merge', 'stash', 'clean', 'tag',
-])
-/** Long options refused in any git command: they run a program, name a file to read or write, or point git elsewhere. */
-const GIT_REFUSED_LONG = /^--(exec|exec-path|output|output-directory|open-files-in-pager|ext-diff|textconv|template|upload-pack|receive-pack|git-dir|work-tree|no-index|file|pathspec-from-file|patterns-from-file|config|config-env|attr-source|super-prefix|namespace|separate-git-dir|gpg-sign|show-signature|paginate|edit|interactive|patch-with-raw|strategy|strategy-option|contents|ignore-revs-file|reference|filter|to-stdin|stdin|batch|batch-check|batch-command|rebase-merges|autosquash|reschedule-failed-exec)(=|$)/
-/** The same names, for the test of beginnings. */
-const REFUSED_LONG_NAMES = ['exec', 'exec-path', 'output', 'output-directory', 'open-files-in-pager', 'ext-diff', 'textconv', 'template', 'upload-pack', 'receive-pack', 'git-dir', 'work-tree', 'no-index', 'file', 'pathspec-from-file', 'patterns-from-file', 'config', 'config-env', 'attr-source', 'super-prefix', 'namespace', 'separate-git-dir', 'gpg-sign', 'show-signature', 'paginate', 'edit', 'interactive', 'strategy', 'strategy-option', 'contents', 'ignore-revs-file', 'reference', 'filter', 'to-stdin', 'stdin', 'batch', 'batch-check', 'batch-command', 'recurse-submodules', 'pathspec-file-nul', 'trailer', 'cleanup', 'reuse-message', 'reedit-message', 'fixup', 'squash', 'signoff', 'autostash', 'rerere-autoupdate', 'conflict', 'filters', 'with-tree']
-/** Short option letters refused per subcommand: `-x` of rebase runs a command, `-F` reads a file, `-S` runs the signing program, `-i`/`-p`/`-e` open an editor or a prompt. */
-const GIT_REFUSED_SHORT: Record<string, RegExp> = {
-  rebase: /[xiSs]/,
-  commit: /[FSepi]/,
-  merge: /[FSes]/,
-  tag: /[FSsue]/,
-  'cherry-pick': /[Se]/,
-  revert: /[Se]/,
-  add: /[epi]/,
-  checkout: /[p]/,
-  restore: /[p]/,
-  reset: /[p]/,
-  stash: /[p]/,
-  clean: /[i]/,
-  blame: /[S]/,
-}
-
-function insideOf(root: string, path: string): boolean {
-  const r = resolve(root).toLowerCase()
-  const p = resolve(path).toLowerCase()
-  return p === r || p.startsWith(`${r}\\`)
-}
-
-/** Splits into segments at `&&`, `||`, `;` and `|`, and each segment into words, honouring quotes. Null when it cannot. */
-function parse(command: string): string[][] | null {
-  const segments: string[][] = []
+export function parseUserGit(command: string): UserGitInvocation[] | null {
+  if (command.length > 8000) return null
+  const text = command.replace(/\r\n/g, '\n')
+  const out: UserGitInvocation[] = []
   let words: string[] = []
   let word = ''
   let has = false
-  let quote: '"' | "'" | null = null
+  let stderr: UserGitInvocation['stderr'] = null
+  let i = 0
   const endWord = (): void => {
     if (has) words.push(word)
     word = ''
     has = false
   }
-  const endSegment = (): boolean => {
+  const endInvocation = (then: UserGitInvocation['then']): boolean => {
     endWord()
-    if (words.length === 0) return false
-    segments.push(words)
+    if (words.length < 2 || words[0] !== 'git') return false
+    out.push({ args: words.slice(1), then, stderr })
     words = []
+    stderr = null
     return true
   }
-  for (let i = 0; i < command.length; i += 1) {
-    const ch = command[i] as string
-    if (quote !== null) {
-      if (ch === quote) quote = null
-      // Inside double quotes a backslash still escapes; none is accepted there.
-      else if (quote === '"' && ch === '\\') return null
-      else word += ch
+  while (i < text.length) {
+    const ch = text[i] as string
+    // Nothing follows a redirection but the end of the invocation.
+    if (stderr !== null && ch !== ' ' && ch !== '\t' && ch !== ';' && ch !== '&' && ch !== '|') return null
+    if (ch === "'") {
+      const end = text.indexOf("'", i + 1)
+      if (end < 0) return null
+      const inner = text.slice(i + 1, end)
+      if (CONTROL.test(inner)) return null
+      word += inner
+      has = true
+      i = end + 1
       continue
     }
-    if (ch === '"' || ch === "'") {
-      quote = ch
+    if (ch === '"') {
+      // The commit message as a quoted here-document: `"$(cat <<'EOF'` newline, the text, a line that is the
+      // word alone, `)"`. bash ends such a document at the FIRST line that is the word alone, and so does this.
+      const here = /^"\$\(cat <<'([A-Za-z_][A-Za-z0-9_]*)'\n/.exec(text.slice(i))
+      if (here !== null) {
+        if (has) return null
+        const start = i + here[0].length
+        const closing = `\n${here[1]}\n`
+        // The text may be empty: then the closing line follows the opening one directly.
+        const empty = text.startsWith(`${here[1]}\n`, start)
+        const bodyEnd = empty ? start - 1 : text.indexOf(closing, start)
+        if (bodyEnd < 0) return null
+        const after = bodyEnd + closing.length
+        const tail = /^[ \t]*\)"/.exec(text.slice(after))
+        if (tail === null) return null
+        const body = empty ? '' : text.slice(start, bodyEnd)
+        if (CONTROL.test(body)) return null
+        // Only as the message: the word right after `-m` or `--message`.
+        const before = words[words.length - 1]
+        if (before !== '-m' && before !== '--message') return null
+        word = body
+        has = true
+        i = after + tail[0].length
+        continue
+      }
+      const end = text.indexOf('"', i + 1)
+      if (end < 0) return null
+      const inner = text.slice(i + 1, end)
+      if (/[$`\\!]/.test(inner) || CONTROL.test(inner)) return null
+      word += inner
       has = true
-    } else if (ch === ' ' || ch === '\t') endWord()
-    else if (ch === ';' || ch === '|' || ch === '&') {
-      if (ch === '&' && command[i + 1] !== '&') return null
-      if ((ch === '&' || ch === '|') && command[i + 1] === ch) i += 1
-      if (!endSegment()) return null
-    } else if (ch === '\\') return null
-    else {
-      word += ch
-      has = true
+      i = end + 1
+      continue
     }
+    if (ch === ' ' || ch === '\t') {
+      endWord()
+      i += 1
+      continue
+    }
+    if (ch === '2' && !has && (text.startsWith('2>&1', i) || text.startsWith('2>/dev/null', i))) {
+      endWord()
+      const merge = text.startsWith('2>&1', i)
+      stderr = merge ? 'merge' : 'discard'
+      i += merge ? 4 : 11
+      continue
+    }
+    if (ch === ';') {
+      if (!endInvocation(';')) return null
+      i += 1
+      continue
+    }
+    if (ch === '&' || ch === '|') {
+      if (text[i + 1] !== ch) return null
+      if (!endInvocation(ch === '&' ? '&&' : '||')) return null
+      i += 2
+      continue
+    }
+    if (!BARE.test(ch)) return null
+    // `~` begins a home directory only where a word begins; `HEAD~1` is a commit.
+    if (ch === '~' && !has) return null
+    word += ch
+    has = true
+    i += 1
   }
-  if (quote !== null) return null
   endWord()
-  if (words.length > 0) segments.push(words)
-  return segments
+  if (words.length > 0 && !endInvocation(null)) return null
+  if (out.length === 0 || out.length > 12) return null
+  // A trailing operator leaves the last invocation open.
+  if ((out[out.length - 1] as UserGitInvocation).then !== null) return null
+  return out
 }
 
-/** Whether the words after `git` are a listed subcommand with no argument that runs a program, names a file to read or write, or points git elsewhere. */
+/** How an option is taken: alone, or with a value that must pass a test (given as `--opt=value` or as the next word). */
+type OptionRule = true | ((value: string) => boolean)
+interface SubcommandRule {
+  options: Record<string, OptionRule>
+  /** Options listed as taking no value that may also be given one: `--porcelain`, `--porcelain=v2`. */
+  optional?: Record<string, (value: string) => boolean>
+  /** Clusters of single letters, each of which is a listed short option without a value. */
+  letters?: string
+  /** How many words that are not options (revisions, paths, a branch name) are taken at most. */
+  operands: number
+  /** A test every operand must pass, in place of the general one. */
+  operand?: (value: string, index: number) => boolean
+}
+
+/** A revision, a branch name or a path of the worktree: not an option, no pathspec magic, no step out of the worktree, nothing absolute. */
+function plainOperand(v: string): boolean {
+  if (v === '' || v.length > 500) return false
+  if (v.startsWith('-') || v.startsWith(':') || v.startsWith('/') || v.startsWith('\\')) return false
+  if (/^[A-Za-z]:[\\/]/.test(v)) return false
+  // `a..b` is a range of revisions; a path segment that is `..` leaves the directory.
+  if (v.split(/[\\/:]/).some((part) => part === '..')) return false
+  if (CONTROL.test(v) || /[\t\n*?[\]{}!$`\\]/.test(v)) return false
+  return true
+}
+
+const number = (v: string): boolean => /^[0-9]{1,6}$/.test(v)
+/** A format string: text and placeholders, but none that makes git call a program (`%G…` runs gpg) and none in the `%(…)` form. */
+const format = (v: string): boolean => v.length <= 300 && !/%G|%\(/.test(v) && /^[\w %:|,.()[\]<>{}#*=@'"/+-]*$/.test(v)
+const message = (v: string): boolean => v.length <= 20_000
+const untracked = (v: string): boolean => /^(no|normal|all)$/.test(v)
+
+const LOG_OPTIONS: Record<string, OptionRule> = {
+  '--oneline': true, '--stat': true, '--shortstat': true, '--name-only': true, '--name-status': true, '--graph': true, '--decorate': true, '--all': true, '--no-merges': true, '--merges': true,
+  '--first-parent': true, '--reverse': true, '--abbrev-commit': true, '--no-color': true, '--patch': true, '-p': true, '--follow': true, '--no-patch': true, '-s': true,
+  '-n': number, '--max-count': number, '--format': format, '--pretty': format, '--author': message, '--grep': message, '--since': message, '--until': message, '--date': (v) => /^[a-z0-9:-]{1,30}$/.test(v),
+}
+const DIFF_OPTIONS: Record<string, OptionRule> = {
+  '--stat': true, '--shortstat': true, '--numstat': true, '--name-only': true, '--name-status': true, '--cached': true, '--staged': true, '--no-color': true, '--summary': true, '--check': true,
+  '--word-diff': true, '-w': true, '--ignore-all-space': true, '-b': true, '--ignore-space-change': true, '--patch': true, '-p': true, '--quiet': true, '-q': true, '--exit-code': true,
+}
+
+/**
+ * Every git subcommand that may run as the user, with every option it may take. Not here on purpose: grep (a
+ * pager option runs a program), rebase (it carries out instructions saved in the worktree's own Git directory,
+ * and one instruction is `exec`), config, worktree, submodule, everything that reaches a remote, archive,
+ * bundle, bisect, difftool, mergetool, filter-branch, gc. And no option that takes up a saved operation again
+ * (`--continue`, `--skip`, `--abort`), reads or writes a file somebody names (`-F`, `--output`, `--no-index`),
+ * runs a program (`--exec`, `-O`, `--ext-diff`, `--textconv`, `-S` of commit), or looks into a nested
+ * repository (`--ignore-submodules`, `--recurse-submodules`).
+ */
+const SUBCOMMANDS: Record<string, SubcommandRule> = {
+  status: { options: { '--short': true, '-s': true, '--porcelain': true, '--branch': true, '-b': true, '--untracked-files': true, '-uall': true, '-uno': true, '-unormal': true, '--long': true, '--ignored': true }, optional: { '--porcelain': (v) => /^(v1|v2|1|2)$/.test(v), '--untracked-files': untracked }, letters: 'sb', operands: 20 },
+  log: { options: LOG_OPTIONS, operands: 20 },
+  show: { options: { ...LOG_OPTIONS, '--quiet': true, '-q': true }, operands: 20 },
+  diff: { options: { ...DIFF_OPTIONS, '-U': number, '--unified': number }, operands: 20 },
+  add: { options: { '-A': true, '--all': true, '-u': true, '--update': true, '-f': true, '--force': true, '-v': true, '--verbose': true, '-n': true, '--dry-run': true }, letters: 'Aufvn', operands: 200 },
+  commit: {
+    options: { '-m': message, '--message': message, '-a': true, '--all': true, '--amend': true, '--no-edit': true, '--allow-empty': true, '--allow-empty-message': true, '-q': true, '--quiet': true, '-v': true, '--verbose': true, '-n': true, '--no-verify': true, '--no-status': true },
+    letters: 'aqvn',
+    operands: 200,
+  },
+  'rev-parse': { options: { '--abbrev-ref': true, '--short': true, '--verify': true, '-q': true, '--quiet': true, '--show-toplevel': true, '--is-inside-work-tree': true, '--symbolic-full-name': true, '--show-prefix': true }, operands: 5 },
+  branch: { options: { '--show-current': true, '-a': true, '--all': true, '-v': true, '-vv': true, '--list': true, '-l': true, '--no-color': true, '-r': true }, operands: 0 },
+  'ls-files': { options: { '-m': true, '--modified': true, '-o': true, '--others': true, '-s': true, '--stage': true, '-d': true, '--deleted': true, '--exclude-standard': true, '-c': true, '--cached': true }, operands: 50 },
+  checkout: { options: { '-b': plainOperand, '-B': plainOperand, '-q': true, '--quiet': true, '-f': true, '--force': true }, operands: 200 },
+  switch: { options: { '-c': plainOperand, '--create': plainOperand, '-q': true, '--quiet': true }, operands: 1 },
+  restore: { options: { '--staged': true, '-S': true, '--worktree': true, '-W': true, '--source': plainOperand, '-s': plainOperand, '-q': true, '--quiet': true }, operands: 200 },
+  reset: { options: { '--hard': true, '--soft': true, '--mixed': true, '-q': true, '--quiet': true }, operands: 200 },
+  rm: { options: { '--cached': true, '-r': true, '-f': true, '--force': true, '-q': true, '--quiet': true }, letters: 'rfq', operands: 200 },
+  mv: { options: { '-f': true, '--force': true, '-k': true, '-v': true, '--verbose': true }, operands: 2 },
+  clean: { options: { '-f': true, '--force': true, '-d': true, '-n': true, '--dry-run': true, '-q': true, '--quiet': true, '-x': true, '-X': true }, letters: 'fdnqxX', operands: 50 },
+  stash: {
+    options: { '-u': true, '--include-untracked': true, '-m': message, '--message': message, '-q': true, '--quiet': true, '-k': true, '--keep-index': true },
+    operands: 2,
+    operand: (v, i) => (i === 0 ? /^(push|pop|apply|list|drop|show)$/.test(v) : /^stash@\{[0-9]{1,3}\}$/.test(v) || /^[0-9]{1,3}$/.test(v)),
+  },
+  merge: { options: { '--no-ff': true, '--ff-only': true, '--ff': true, '--no-edit': true, '--squash': true, '--no-commit': true, '-m': message, '--message': message, '-q': true, '--quiet': true }, operands: 3 },
+  'cherry-pick': { options: { '-n': true, '--no-commit': true, '-x': true, '--allow-empty': true }, operands: 20 },
+  revert: { options: { '-n': true, '--no-commit': true, '--no-edit': true }, operands: 20 },
+  'merge-base': { options: { '--is-ancestor': true, '--all': true }, operands: 3 },
+  describe: { options: { '--tags': true, '--always': true, '--abbrev': number, '--all': true }, operands: 1 },
+  'rev-list': { options: { '--count': true, '-n': number, '--max-count': number, '--all': true, '--no-merges': true, '--reverse': true }, operands: 5 },
+  tag: { options: { '-l': true, '--list': true }, operands: 0 },
+}
+
+/** Subcommands for which `.` (the directory the command is in) is an operand. */
+const TAKES_DOT = new Set(['add', 'checkout', 'restore', 'reset', 'clean', 'status', 'diff', 'rm'])
+
+/** Whether the words after `git` are a listed subcommand taking only listed options, each spelled in full, and plain operands. */
 export function isSafeUserGit(args: readonly string[]): boolean {
   const sub = args[0]
-  if (sub === undefined || !GIT_SUBCOMMANDS.has(sub)) return false
-  const refusedShort = GIT_REFUSED_SHORT[sub]
-  let options = true
-  for (const arg of args.slice(1)) {
-    if (!options) continue
-    if (arg === '--') {
-      options = false
+  if (sub === undefined || !Object.hasOwn(SUBCOMMANDS, sub)) return false
+  const rule = SUBCOMMANDS[sub] as SubcommandRule
+  let operands = 0
+  let onlyOperands = false
+  for (let i = 1; i < args.length; i += 1) {
+    const arg = args[i] as string
+    if (!onlyOperands && arg === '--') {
+      onlyOperands = true
       continue
     }
-    if (arg.startsWith('--')) {
-      if (GIT_REFUSED_LONG.test(arg)) return false
-      continue
-    }
-    if (arg.startsWith('-') && arg.length > 1) {
-      // `-O` (a pager, or an order file) and `-c`/`-C` where they would be read as configuration or as another directory.
-      if (/^-O/.test(arg)) return false
-      const letters = arg.slice(1).replace(/[0-9=].*$/, '')
-      if (refusedShort !== undefined && refusedShort.test(letters)) return false
-    }
-  }
-  // Taking up an operation again reads its saved state from the worktree's own Git directory, which the task can
-  // write: a sequence of instructions, a message, the commits to pick. That is not done as the user.
-  if (args.slice(1).some((a) => a.startsWith('--') && a.length >= 4 && ['continue', 'skip', 'abort', 'quit', 'edit-todo'].some((word) => word.startsWith(a.slice(2))))) return false
-  // git takes any unambiguous beginning of a long option for the option. An argument that begins one of the
-  // refused ones is refused: `--exe`, `--out`, `--no-ind`, `--ext`, `--open`.
-  for (const arg of args.slice(1)) {
-    if (arg === '--') break
-    if (!arg.startsWith('--') || arg.length < 4) continue
-    const name = arg.slice(2).split('=')[0] as string
-    if (REFUSED_LONG_NAMES.some((refused) => refused.startsWith(name))) return false
-  }
-  // Listing only: creating, moving or deleting a tag or a branch that is not the task's own is not this path's work.
-  if (sub === 'tag' && args.slice(1).some((a) => !a.startsWith('-'))) return false
-  return true
-}
-
-const HEREDOC_MESSAGE = /"\$\(cat <<'([A-Za-z_][A-Za-z0-9_]*)'\n[\s\S]*?\n\1\n[ \t]*\)"/g
-
-/**
- * True when a bash `command` is made of listed git subcommands and read-only filters only, with at least one
- * git, and may therefore run where git can change a ref. `worktree` is the session's worktree and `cwd` where
- * the shell is.
- */
-export function isGitWithFilters(command: string, worktree: string, cwd: string): boolean {
-  if (command.length > 8000) return false
-  // A commit message as a quoted here-document is literal text for the shell: it counts as one word.
-  const flat = command.replace(HEREDOC_MESSAGE, "'message'")
-  if (/[\r\n]/.test(flat)) return false
-  const stripped = flat.replace(HARMLESS_REDIRECT, '$1')
-  // Nothing for the shell to expand, substitute, redirect or group: no variable, no glob, no home, no subshell.
-  const bare = stripped.replace(/'[^']*'/g, "''")
-  if (/[$`<>(){}*?[\]!#]/.test(bare)) return false
-  // `~` is the home directory only where a word begins; `HEAD~1` is a commit.
-  if (/(^|[\s=:])~/.test(bare)) return false
-  if (/[`]/.test(stripped)) return false
-  const segments = parse(stripped)
-  if (segments === null || segments.length === 0 || segments.length > 12) return false
-  let here = insideOf(worktree, cwd) ? resolve(cwd) : resolve(worktree)
-  let git = 0
-  const fileInside = (arg: string): boolean => {
-    if (arg === '-') return true
-    if (/^[A-Za-z]:/.test(arg) || arg.startsWith('/') || arg.startsWith('\\')) {
-      // An absolute path in the form bash takes (`/c/x`) is not followed here: only what resolves plainly.
-      if (!isAbsolute(arg) || arg.startsWith('/') || arg.startsWith('\\')) return false
-    }
-    const target = resolve(here, arg)
-    if (!insideOf(worktree, target)) return false
-    // A link or a junction inside the worktree that leads out of it is a file outside it.
-    try {
-      if (existsSync(target) && !insideOf(realpathSync(worktree), realpathSync(target))) return false
-    } catch {
+    if (!onlyOperands && arg.startsWith('-') && arg !== '-') {
+      const eq = arg.startsWith('--') ? arg.indexOf('=') : -1
+      const name = eq > 0 ? arg.slice(0, eq) : arg
+      const optionRule = Object.hasOwn(rule.options, name) ? rule.options[name] : undefined
+      if (optionRule !== undefined) {
+        if (optionRule === true) {
+          if (eq > 0 && !(rule.optional !== undefined && Object.hasOwn(rule.optional, name) && (rule.optional[name] as (v: string) => boolean)(arg.slice(eq + 1)))) return false
+          continue
+        }
+        // The value: after `=`, or the next word.
+        const value = eq > 0 ? arg.slice(eq + 1) : args[i + 1]
+        if (value === undefined || !optionRule(value)) return false
+        if (eq <= 0) i += 1
+        continue
+      }
+      // `-n3`, `-U5`: a short option and its number in one word.
+      const attached = /^(-[A-Za-z])([0-9]{1,6})$/.exec(arg)
+      if (attached !== null && Object.hasOwn(rule.options, attached[1] as string) && rule.options[attached[1] as string] === number) continue
+      // `-3` for log and show: the number of commits.
+      if ((sub === 'log' || sub === 'show') && /^-[0-9]{1,4}$/.test(arg)) continue
+      // A cluster of letters, each a listed short option that takes no value: `-fd`, `-sb`.
+      if (rule.letters !== undefined && /^-[A-Za-z]{2,6}$/.test(arg) && [...arg.slice(1)].every((letter) => (rule.letters as string).includes(letter))) continue
+      // `-am "message"`: all, and the message.
+      if (sub === 'commit' && arg === '-am') {
+        const value = args[i + 1]
+        if (value === undefined || !message(value)) return false
+        i += 1
+        continue
+      }
       return false
     }
-    return true
-  }
-  for (const words of segments) {
-    const program = words[0] as string
-    if (program === 'git') {
-      if (!isSafeUserGit(words.slice(1))) return false
-      git += 1
+    operands += 1
+    if (operands > rule.operands) return false
+    if (arg === '.' && TAKES_DOT.has(sub)) continue
+    if (rule.operand !== undefined) {
+      if (!rule.operand(arg, operands - 1)) return false
       continue
     }
-    if (!FILTERS.has(program)) return false
-    let plain = 0
-    for (const arg of words.slice(1)) {
-      if (arg.startsWith('--')) {
-        if (arg !== '--' && (REFUSED_LONG.test(arg) || !/^--[a-z][a-z0-9-]*(=[\w.,:+-]*)?$/.test(arg))) return false
-        continue
-      }
-      if (arg.startsWith('-') && arg !== '-') {
-        if (!/^-[A-Za-z0-9]+$/.test(arg)) return false
-        // `sort -o` writes a file and `-T` names a directory; `grep -f` reads patterns from a file; `tail -f` never ends.
-        if (program === 'sort' && /[oT]/.test(arg)) return false
-        if (program === 'grep' && /f/.test(arg)) return false
-        if (program === 'tail' && /[fF]/.test(arg)) return false
-        continue
-      }
-      plain += 1
-      if (NO_FILE_ARGS.has(program)) continue
-      if (FIRST_ARG_IS_NOT_A_FILE.has(program) && plain === 1) continue
-      // `uniq in out` writes its second argument.
-      if (program === 'uniq' && plain > 1) return false
-      if (program === 'cd') {
-        if (plain > 1 || !fileInside(arg)) return false
-        here = resolve(here, arg)
-        continue
-      }
-      if (!fileInside(arg)) return false
-    }
-    if (program === 'cd' && plain === 0) return false
+    if (!plainOperand(arg)) return false
   }
-  return git > 0
+  return true
+}
+
+/** Subcommands that compare against the worktree or print differences: they are told on their own command line to stay out of nested repositories. */
+const LOOKS_AT_WORKTREE = new Set(['status', 'diff', 'log', 'show'])
+
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
+
+/**
+ * The invocations of a bash command that is git and nothing else, or null. Every invocation passed
+ * `isSafeUserGit`. The caller runs `renderUserGitScript` of the result, never the command.
+ */
+export function userGitOf(command: string): UserGitInvocation[] | null {
+  const parsed = parseUserGit(command)
+  if (parsed === null) return null
+  for (const invocation of parsed) if (!isSafeUserGit(invocation.args)) return null
+  return parsed
 }
 
 /**
- * The same question for PowerShell, where the tools around git are cmdlets of another kind: only git itself,
- * one command or several separated by `;`, in words PowerShell takes as they are written.
+ * The bash script NEXUS runs for a qualifying command: each invocation with every argument quoted by NEXUS,
+ * joined as the command joined them. A setting the worktree's own `.gitmodules` can switch back on is given
+ * on the command line, where it cannot (measured: `submodule.<name>.ignore = none` in `.gitmodules` outranks
+ * `diff.ignoreSubmodules=all` from the environment, and a status then runs a nested repository's filter).
  */
-export function isPlainGitPowerShell(command: string): boolean {
-  if (command.length > 4000 || /[\r\n]/.test(command)) return false
-  // Nothing PowerShell would expand or run: no variable, subexpression, backtick, pipe, call operator, redirect, brace or splat.
-  if (/[$`|&<>(){}@#%!*?[\]~\\]/.test(command.replace(/'[^']*'/g, "''")) || command.includes('"')) return false
-  const segments = command.split(';').map((s) => s.trim()).filter((s) => s !== '')
-  if (segments.length === 0 || segments.length > 8) return false
-  for (const segment of segments) {
-    const words = parse(segment)
-    if (words === null || words.length !== 1) return false
-    const [program, ...args] = words[0] as string[]
-    if (program !== 'git' || !isSafeUserGit(args)) return false
+export function renderUserGitScript(invocations: readonly UserGitInvocation[]): string {
+  const lines = invocations.map((invocation) => {
+    const [sub, ...rest] = invocation.args as [string, ...string[]]
+    const extra = LOOKS_AT_WORKTREE.has(sub) ? ['--ignore-submodules=all'] : []
+    const words = ['git', ...[sub, ...extra, ...rest].map(shellQuote)]
+    const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
+    // An operator at the end of a line continues on the next one; `;` is the end of the line itself.
+    const join = invocation.then === '&&' || invocation.then === '||' ? ` ${invocation.then}` : ''
+    return `${words.join(' ')}${stderr}${join}`
+  })
+  return `${lines.join('\n')}\n`
+}
+
+/** True when a bash `command` is one or more listed git invocations and nothing else. */
+export function isGitWithFilters(command: string): boolean {
+  return userGitOf(command) !== null
+}
+
+/**
+ * The same question for PowerShell. The words accepted are those PowerShell 5.1 reads exactly as bash does:
+ * printable ASCII only, no quote but the apostrophe, nothing PowerShell would expand, one git per `;`.
+ */
+export function userGitOfPowerShell(command: string): UserGitInvocation[] | null {
+  if (command.length > 4000 || /[^\x20-\x7e]/.test(command)) return null
+  if (/["`$|&<>(){}@#%!*?[\]~\\]/.test(command.replace(/'[^']*'/g, "''"))) return null
+  // A doubled apostrophe is an apostrophe inside a PowerShell string and the end and start of two strings for this parser.
+  if (command.includes("''")) return null
+  const parsed = parseUserGit(command)
+  if (parsed === null) return null
+  for (const invocation of parsed) {
+    if (invocation.then !== null && invocation.then !== ';') return null
+    if (invocation.stderr !== null) return null
+    if (!isSafeUserGit(invocation.args)) return null
   }
-  return true
+  return parsed
+}
+
+export function isPlainGitPowerShell(command: string): boolean {
+  return userGitOfPowerShell(command) !== null
+}
+
+const powershellQuote = (value: string): string => `'${value.replace(/'/g, "''")}'`
+
+/** The PowerShell script NEXUS runs for a qualifying PowerShell command: `git.exe` by name, every argument quoted by NEXUS. */
+export function renderUserGitPowerShell(invocations: readonly UserGitInvocation[]): string {
+  return `${invocations
+    .map((invocation) => {
+      const [sub, ...rest] = invocation.args as [string, ...string[]]
+      const extra = LOOKS_AT_WORKTREE.has(sub) ? ['--ignore-submodules=all'] : []
+      return `& git.exe ${[sub, ...extra, ...rest].map(powershellQuote).join(' ')}`
+    })
+    .join('\n')}\n`
 }

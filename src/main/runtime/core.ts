@@ -29,6 +29,8 @@ import { homedir } from 'node:os'
 import { ApplicationUnderTestManager } from '../modules/browser/app-manager'
 import { PlaywrightDirectProvider } from '../modules/browser/provider'
 import { combineExtensions, createAppTools } from '../modules/browser/tools'
+import type { GuardOptions } from '../modules/network/guard'
+import { renderPublicPage } from '../modules/research/browser'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
 import { readSandboxAccount, sandboxStateDir } from '../modules/isolation/sandbox-account'
@@ -336,6 +338,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // 0.8: NEXUS's own index of every worktree it created, where contained code cannot write; and a line of
   // evidence for every commit NEXUS makes there: what it meant to commit and what the commit holds.
   git.setTrustedIndexDir(join(dataDir, 'git-index'))
+  // A worktree's entry in the repository holds three files that say where the repository is and what
+  // configuration applies. They are made unwritable for project code when the worktree is created, before the
+  // first command of the project (its dependency setup) runs there.
+  if (process.platform === 'win32' && host.launcherPath !== undefined && existsSync(host.launcherPath)) git.onWorktreeCreated((gitDir) => executionBroker.pinGit(gitDir))
   git.onCommitEvidence((evidence) => {
     try {
       appendFileSync(join(dataDir, 'commit-evidence.jsonl'), `${JSON.stringify(evidence)}
@@ -662,12 +668,16 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // or private address, every redirect judged again. The texts and the quarantine are under the data directory,
   // which no worktree is in.
   const researchPolicy = policyForPurpose('PUBLIC_RESEARCH', {})
+  const browserProvider = new PlaywrightDirectProvider()
   const research = new WebResearchProvider({
     artifacts: repos.researchArtifacts,
     downloads: repos.researchDownloads,
     dir: join(dataDir, 'research'),
     guard: () => ({ policy: researchPolicy }),
     searchUrl: DEFAULT_SEARCH_URL,
+    // 0.8: pages that show nothing until their script has run are rendered in a browser of NEXUS's own, behind the
+    // same public-only filter, with a profile made for the page and thrown away.
+    ...(browserProvider.availability().browser !== null ? { render: (url: string, guard: GuardOptions) => renderPublicPage(browserProvider, url, guard, { artifactsDir: join(dataDir, 'research', 'browser') }) } : {}),
     onNetwork: (context, event) => {
       // What was refused is a denial worth keeping; what was reached is in the artifact that came of it.
       if (!event.allowed) autonomy.record({ projectId: context.projectId, runId: context.runId, taskId: context.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `${event.via} ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the research network policy (${event.denial ?? 'policy'}).` })
@@ -681,7 +691,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // runtime's own loopback services are named so that no policy ever lets it reach them.
   const apps = new ApplicationUnderTestManager({
     broker: executionBroker,
-    browser: new PlaywrightDirectProvider(),
+    browser: browserProvider,
     profileFor: (projectId) => isolation.profileFor(projectId),
     artifactsDir: join(dataDir, 'app-sessions'),
     forbiddenLocalPorts: () => (depsProxy ? [depsProxy.port] : []),

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
@@ -209,6 +210,10 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   // As the runtime does: NEXUS's own index of each worktree, outside the worktrees.
   gitService.setTrustedIndexDir(join(dir, 'git-index'))
   const commitEvidence: CommitEvidence[] = []
+  let pinGit: ((gitDir: string) => Promise<void>) | null = null
+  gitService.onWorktreeCreated(async (gitDir) => {
+    if (pinGit) await pinGit(gitDir)
+  })
   gitService.onCommitEvidence((e) => void commitEvidence.push(e))
   const runtime = new FakeAgentRuntime({ script: options.script, ...(options.cache ? { cache: options.cache } : {}) })
   const policy = options.policy ? new PolicyService({ repos, nexusVersion: '0.3.0-test' }) : null
@@ -251,6 +256,8 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       toolPath: (profile, path) => (profile === 'ISOLATED' && mirrored ? mirrored.path : path),
     })
     executionBroker = broker
+    // As the runtime does: only where there is a launcher to do it with.
+    if (existsSync(containmentOptions.launcher)) pinGit = (gitDir) => broker.pinGit(gitDir)
     isolation = new IsolationService({ broker, launcher, containment: () => containmentOptions.profile, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, gitWritable: async (worktree) => (await gitService.ownedGitLayout(worktree))?.writable ?? [], dataDir: dir })
     await isolation.start()
   }

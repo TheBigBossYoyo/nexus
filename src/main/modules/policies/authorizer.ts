@@ -1,4 +1,4 @@
-import { isGitWithFilters, isPlainGitPowerShell } from './git-pipeline'
+import { renderUserGitPowerShell, renderUserGitScript, userGitOf, userGitOfPowerShell } from './git-pipeline'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -73,7 +73,7 @@ interface Outcome {
   /** 0.8: what the call needs of the capability broker. Read only when the project is enrolled. */
   needs?: CapabilityNeed[]
   /** 0.8: set for a shell call: whether the command is git and nothing else, with no finding. */
-  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean }
+  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean; gitScript?: string }
 }
 
 /** A decision of the file tools with the capability a grant would have to cover, when there is one. */
@@ -322,8 +322,10 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     // git alone, or git with nothing but text filters around it: such a command runs where the repository is readable.
     // Decided by its own strict reading of the command, never by the absence of findings alone: what qualifies
     // runs as the user.
-    const gitOnly = cls.findings.length === 0 && shellRoots[0] !== undefined && (shell === 'bash' ? isGitWithFilters(command, shellRoots[0], shellRoots[0]) : isPlainGitPowerShell(command))
-    const shellInfo = { kind: shell, command, gitOnly } as const
+    const userGit = cls.findings.length === 0 ? (shell === 'bash' ? userGitOf(command) : userGitOfPowerShell(command)) : null
+    const gitOnly = userGit !== null
+    // What runs for such a command is a script NEXUS writes from the parsed invocations, never the command's text.
+    const shellInfo = { kind: shell, command, gitOnly, ...(userGit !== null ? { gitScript: shell === 'bash' ? renderUserGitScript(userGit) : renderUserGitPowerShell(userGit) } : {}) } as const
     if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
       const findings = [
         ...cls.findings,
@@ -341,10 +343,10 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       const risk: Risk = baseRisk === 'high' || (verdict.decision === 'REQUIRE_APPROVAL' && verdict.trust === 'SYSTEM_SENSITIVE') ? 'high' : verdict.decision === 'REQUIRE_APPROVAL' ? 'medium' : baseRisk
       const classification: TrustClass =
         verdict.decision === 'REQUIRE_APPROVAL' ? verdict.trust : cls.commandClass === 'SYSTEM_CHANGE' || cls.commandClass === 'DESTRUCTIVE' ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED'
-      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs, shell: { ...shellInfo, gitOnly: false } }
+      return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs, shell: { kind: shell, command, gitOnly: false } }
     }
     if (verdict.decision === 'ALLOW_WITH_AUDIT') {
-      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') }, needs: [baseNeed], shell: { ...shellInfo, gitOnly: false } }
+      return { tool: ALLOW, audit: { classification: verdict.trust, provenance: verdict.provenance, decision: 'ALLOW_WITH_AUDIT', reason: verdict.reasons.join('; ') }, needs: [baseNeed], shell: { kind: shell, command, gitOnly: false } }
     }
     return { tool: base, needs: [baseNeed], shell: shellInfo }
   }
@@ -572,7 +574,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }
     }
     if (containment.unavailable !== null) return refuse(`the ${containment.profile} execution profile is not available (${containment.unavailable}).`)
-    const wrapped = await containment.wrap(outcome.shell.kind, outcome.shell.command, { gitOnly: outcome.shell.gitOnly })
+    const wrapped = await containment.wrap(outcome.shell.kind, outcome.shell.command, { gitOnly: outcome.shell.gitOnly, ...(outcome.shell.gitOnly && outcome.shell.gitScript !== undefined ? { gitScript: outcome.shell.gitScript } : {}) })
     if (!wrapped.ok) return refuse(wrapped.reason)
     // The tool's other inputs (its time limit, running in the background) stay the agent's; a request to leave the tool's own sandbox is dropped.
     const { dangerouslyDisableSandbox: _dropped, ...rest } = req.input

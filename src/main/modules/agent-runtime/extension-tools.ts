@@ -38,6 +38,7 @@ export const RESEARCH_TOOLS: ExtensionToolDef[] = [
       question: z.string().max(400).optional().describe('what you want to know from the page; narrows what is returned'),
       max_chars: z.number().int().min(500).max(20000).optional(),
       refresh: z.boolean().optional().describe('fetch again even if the page was read recently'),
+      render: z.boolean().optional().describe('load the page in the research browser and read it after its script has run; for pages that show nothing without script (NEXUS does this by itself when a page comes back empty)'),
     },
   },
   {

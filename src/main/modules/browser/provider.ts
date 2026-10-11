@@ -76,6 +76,8 @@ export interface BrowserSession {
   navigate(url: string): Promise<PageState>
   reload(): Promise<PageState>
   state(): Promise<PageState>
+  /** The document as its script left it, once the page has been quiet for `settleMs` (or `timeoutMs` passed). */
+  rendered(options?: { settleMs?: number; timeoutMs?: number }): Promise<PageState & { html: string }>
   snapshot(options?: { depth?: number; maxChars?: number; ref?: string }): Promise<SnapshotResult>
   /** Lines of the snapshot that contain the text, each with its ref: the cheap way to find a control. */
   find(text: string, limit?: number): Promise<{ matches: string[]; total: number }>
@@ -150,7 +152,15 @@ class PlaywrightSession implements BrowserSession {
     this.context.setDefaultTimeout(ACTION_TIMEOUT_MS)
     this.context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS)
     for (const existing of this.context.pages()) this.watch(existing)
-    this.context.on('page', (p) => this.watch(p))
+    this.context.on('page', (p) => {
+      // A page that is read for research has one window: what it opens is closed, and noted.
+      if (this.purpose === 'PUBLIC_RESEARCH' && p !== this.page) {
+        this.push(this.consoleLog, { at: new Date().toISOString(), level: 'warning', text: 'A window the page opened was closed.', location: '' })
+        void p.close().catch(() => undefined)
+        return
+      }
+      this.watch(p)
+    })
   }
 
   private watch(page: Page): void {
@@ -204,6 +214,16 @@ class PlaywrightSession implements BrowserSession {
   async state(): Promise<PageState> {
     const page = this.ensure()
     return { url: page.url(), title: (await page.title().catch(() => '')).slice(0, 200) }
+  }
+
+  async rendered(options: { settleMs?: number; timeoutMs?: number } = {}): Promise<PageState & { html: string }> {
+    const page = this.ensure()
+    const timeout = Math.min(Math.max(options.timeoutMs ?? 20_000, 1000), 60_000)
+    // Quiet on the network, or the time is up: a page that never stops asking is read as it is then.
+    await page.waitForLoadState('networkidle', { timeout }).catch(() => undefined)
+    await page.waitForTimeout(Math.min(Math.max(options.settleMs ?? 500, 0), 10_000))
+    const html = await page.content()
+    return { ...(await this.state()), html }
   }
 
   async navigate(url: string): Promise<PageState> {

@@ -1,4 +1,5 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import type { RenderedPage } from './browser'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { newId } from '@shared/ids'
@@ -43,6 +44,11 @@ export interface WebResearchDeps {
   budget?: Partial<ResearchBudget>
   /** The HTML search page: `{q}` is replaced by the encoded query. Absent: no NEXUS search backend. */
   searchUrl?: string
+  /**
+   * Renders a public page in the research browser and returns its document, or absent when no browser can be
+   * started here. Used for a page that shows nothing until its script has run.
+   */
+  render?: (url: string, guard: GuardOptions) => Promise<RenderedPage>
   /** Backends the provider route offers in this session, as found at run time (the runtime's tool list). */
   providerBackends?: () => ResearchBackend[]
   now?: () => number
@@ -171,8 +177,9 @@ export class WebResearchProvider {
 
   capabilities(): ResearchCapabilities {
     const provider = this.deps.providerBackends?.() ?? []
-    const backends: ResearchBackend[] = ['NEXUS_HTTP_FETCH', ...(this.deps.searchUrl ? (['NEXUS_HTML_SEARCH'] as const) : []), ...provider]
+    const backends: ResearchBackend[] = ['NEXUS_HTTP_FETCH', ...(this.deps.searchUrl ? (['NEXUS_HTML_SEARCH'] as const) : []), ...(this.deps.render ? (['NEXUS_RESEARCH_BROWSER'] as const) : []), ...provider]
     const unavailable: ResearchCapabilities['unavailable'] = []
+    if (!this.deps.render) unavailable.push({ backend: 'NEXUS_RESEARCH_BROWSER', reason: 'No browser is available to render pages that need script.' })
     if (!this.deps.searchUrl) unavailable.push({ backend: 'NEXUS_HTML_SEARCH', reason: 'No search page is configured.' })
     for (const backend of ['PROVIDER_NATIVE_SEARCH', 'PROVIDER_NATIVE_FETCH'] as const) {
       if (!provider.includes(backend)) unavailable.push({ backend, reason: 'The provider session of this route does not list the tool, or NEXUS does not offer it to this role.' })
@@ -278,7 +285,7 @@ export class WebResearchProvider {
    * Reads one public page and returns the passages that bear on the question. A page read recently enough is
    * answered from research memory without a request. The whole text is kept as an artifact either way.
    */
-  async read(context: ResearchContext, rawUrl: string, options: { question?: string | null; maxChars?: number; refresh?: boolean } = {}): Promise<ResearchEnvelope> {
+  async read(context: ResearchContext, rawUrl: string, options: { question?: string | null; maxChars?: number; refresh?: boolean; render?: boolean } = {}): Promise<ResearchEnvelope> {
     const question = options.question?.trim() || null
     const maxChars = Math.min(Math.max(500, options.maxChars ?? DEFAULT_SHOWN_CHARS), 20_000)
     const canonical = canonicalUrl(rawUrl)
@@ -296,11 +303,38 @@ export class WebResearchProvider {
     if (fetched.dispositionFilename !== null || (type !== '' && !TEXT_TYPES.test(type))) {
       throw new ResearchRefused('NOT_TEXT', `That address serves a file (${type || 'unknown type'}), not a page. A file is not read as text; it can be fetched into quarantine as a download.`)
     }
-    const raw = fetched.body.toString('utf8')
+    let raw = fetched.body.toString('utf8')
     const isHtml = /html/.test(type) || (type === '' && /<html|<!doctype html|<body/i.test(raw.slice(0, 2000)))
-    const page = isHtml ? extractHtml(raw, fetched.finalUrl, MAX_TEXT_CHARS) : { ...extractPlain(raw, MAX_TEXT_CHARS), title: null, links: [], hiddenChars: 0, commentChars: 0 }
+    let page = isHtml ? extractHtml(raw, fetched.finalUrl, MAX_TEXT_CHARS) : { ...extractPlain(raw, MAX_TEXT_CHARS), title: null, links: [], hiddenChars: 0, commentChars: 0 }
+    // A page that is all script and no text: the browser is asked, when there is one, and when the caller did
+    // not already say so. The plain fetch came first, so what the browser is given is a public page that answered.
+    let backend: ResearchBackend = 'NEXUS_HTTP_FETCH'
+    let finalUrl = fetched.finalUrl
+    let chain = fetched.chain
+    let sha256 = fetched.sha256
+    let bytes = fetched.body.length
+    const needsScript = isHtml && /<script\b/i.test(raw) && page.text.replace(/\s+/g, ' ').trim().length < 400
+    if (isHtml && this.deps.render && (options.render === true || needsScript)) {
+      try {
+        const rendered = await this.deps.render(fetched.finalUrl, this.guardFor(context))
+        raw = rendered.html
+        page = extractHtml(raw, rendered.finalUrl, MAX_TEXT_CHARS)
+        if (!page.title && rendered.title) page = { ...page, title: rendered.title }
+        backend = 'NEXUS_RESEARCH_BROWSER'
+        finalUrl = rendered.finalUrl
+        chain = chain.includes(rendered.finalUrl) ? chain : [...chain, rendered.finalUrl]
+        sha256 = createHash('sha256').update(raw).digest('hex')
+        bytes = Buffer.byteLength(raw)
+        this.account(context).bytes += bytes
+      } catch (e) {
+        // Asked for by the caller: the refusal is the answer. Tried on NEXUS's own account: the plain text stands.
+        if (options.render === true) throw new ResearchRefused('FETCH', e instanceof Error ? e.message : 'The page could not be rendered.')
+      }
+    } else if (options.render === true && !this.deps.render) {
+      throw new ResearchRefused('NO_BACKEND', 'No browser is available in this session to render the page. It was not read; read it without render to get its plain text.')
+    }
     const screened = screenUntrustedText(page.text)
-    const source = classifySource(fetched.finalUrl)
+    const source = classifySource(finalUrl)
     const id = newId()
     const textPath = join('text', `${id}.txt`)
     writeFileSync(join(this.deps.dir, textPath), screened.text, { flag: 'wx' })
@@ -311,14 +345,14 @@ export class WebResearchProvider {
       runId: context.runId,
       taskId: context.taskId,
       url: rawUrl,
-      canonicalUrl: canonicalUrl(fetched.finalUrl),
-      redirectChain: fetched.chain,
+      canonicalUrl: canonicalUrl(finalUrl),
+      redirectChain: chain,
       title: page.title ? screenUntrustedText(page.title).text.slice(0, 300) : null,
       retrievedAt,
-      contentHash: fetched.sha256,
+      contentHash: sha256,
       contentType: fetched.contentType,
-      bytes: fetched.body.length,
-      backend: 'NEXUS_HTTP_FETCH',
+      bytes,
+      backend,
       sourceType: source.sourceType,
       authority: source.authority,
       publisher: source.publisher,
