@@ -106,14 +106,63 @@ root outside the profile (reads), and job network rate control (network). The on
 the in-box .NET Framework `csc.exe`; the launcher will be a C# executable. A probe put an error dialog on the
 user's screen (a .NET target that could not start under a restricted token); launchers now set the error mode.
 
+### Decisions of the user (2026-10-11)
+
+Asked after the third probe round, because no mechanism without administrator rights blocks the network, the
+credential vault, DPAPI or reads of unlabeled files for code running as the user:
+
+1. **Yes to an admin-once sandbox account**, built into 0.8 and set up on this machine (one elevation prompt,
+   announced first). `node scripts/sandbox-setup.mjs`; `--remove` undoes it.
+2. **Folders that may be labeled no-read-up on this machine: credentials and NEXUS data only.** Not browser
+   profiles, not Documents, Desktop or Downloads.
+
+### Phases 8 to 12: execution broker, job, token, roots (2026-10-11)
+
+- `native/nexus-launch/nexus-launch.cs`, built by the C# compiler that ships with Windows
+  (`scripts/build-launcher.mjs`, part of `pnpm build`): job object, a privilege-free low-integrity token,
+  suspended start, fail closed; integrity labels (`low`, `medium`, `protect`, `clear`); the sandbox account's
+  credential as a DPAPI blob; and the two-step start as the sandbox account.
+- `native/sandbox-setup/`: the elevated setup and removal. Set up on this machine on 2026-10-11: account
+  `NexusSandbox`, firewall rules in both directions, root under ProgramData. The first attempt failed before
+  changing anything (an account description may have 48 characters).
+- `src/main/modules/isolation/`: `launcher.ts` (specs, labels, verification by running), `execution-broker.ts`
+  (profiles, session roots, environment, shells, git hardening, project commands), `sandbox-account.ts`,
+  `tools.ts` (copies of tools and of Git's MSYS runtime for contained code), `session-containment.ts`,
+  `service.ts` (profile per project, protected labels, status).
+- Profiles named for what they are: **ISOLATED** is the sandbox account; **RESTRICTED** is the user at low
+  integrity; **STANDARD** is none. Setting `execution.containment`, default `STRONGEST`.
+- Wired: the authorizer hands an allowed shell command to the tool as its contained launch (`updatedInput`);
+  NEXUS's own setup and check commands go through the broker; `contained` in the capability gate is true only
+  when the profile was verified at this start; worktrees move to the sandbox root when the effective profile is
+  ISOLATED; a dependency proxy with the registry policy is given to contained code.
+- Found on the way: Windows does not nest a job under one with UI limits (the inner step makes none); the MSYS
+  runtime of the user's Git cannot be used at low integrity (a private copy has its own kernel object name);
+  a deny-only user token breaks Node's piped child processes (so RESTRICTED keeps the user SID and relies on
+  integrity); job network rate control throttles nothing.
+- Tests: `tests/integration/isolation/containment.test.ts` (22, against Windows, both profiles),
+  `tests/scenarios/v8-containment.test.ts` (4: a mission whose commands really run through the launcher),
+  `tests/unit/process/contained-env.test.ts`.
+- NOT YET VERIFIED: a real Claude session with wrapped commands; the application under test as the sandbox
+  account; `pnpm install` through the proxy under ISOLATED; the tool copies for anything but Node; existing
+  paused runs across a change of the worktrees root.
+
+### Research and its tools (2026-10-11)
+
+`src/main/modules/research/` (extraction of visible text, screening, sources and their authority, artifacts and
+memory, budgets, quarantine, the provider, the tools), migration 18, `agent-runtime/extension-tools.ts` (a
+generic channel for tool groups through the worker protocol). Search backend: an HTML results page
+(`NEXUS_HTML_SEARCH`), not yet run against the real web. Context Graph nodes for artifacts: not built.
+
+### Documents
+
+docs/V0_8_SECURITY_MODEL.md, docs/AUTONOMY_MODEL.md.
+
 ## Next
 
-1. Second isolation probe round, then the launcher and `contained: true`: job object, token, ACL roots outside
-   the profile, the pipe DACL. Fail closed when ISOLATED cannot be set up.
-2. WebResearchProvider over the fetch (and a search backend), ResearchArtifact with provenance, screening,
-   the envelope, download quarantine, Context Graph nodes; the research tool for agents.
-3. BrowserAutomationProvider (Playwright direct), ApplicationUnderTestManager, the local endpoint registry,
-   the agent tools, Electron.
-4. RoleCapabilityContract in planning; unattended rules (overnight, Arena) for enrolled projects.
-5. End-to-end and accessibility runs of the new UI; the task inspector's research and application panels.
-6. Hostile corpora, fault injection, soak, reviews, final regression, package, report.
+1. BrowserAutomationProvider (Playwright direct), ApplicationUnderTestManager, the local endpoint registry,
+   the agent tools (`app` group), Electron; the application under test inside the containment.
+2. Real acceptance, bounded: a Claude session in an enrolled project (wrapped commands, research, app use).
+3. RoleCapabilityContract in planning; unattended rules for enrolled projects; a grant resumes a waiting task.
+4. UI: isolation status and setup, research and application panels; end-to-end and accessibility runs.
+5. The pipe's DACL; Context Graph nodes for research; removal of labels on unenroll.
+6. Hostile corpora as permanent suites, fault injection, soak, reviews, final regression, package, report.
