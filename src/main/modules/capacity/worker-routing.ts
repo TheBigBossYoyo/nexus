@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AgentRole } from '@shared/domain'
 import type { CapacityPool, CapacityRoutingRecord, IntelligenceRole, ProviderCapacityLease, ProviderUsageReceipt, RoutingCandidate } from '@shared/capacity'
-import { READ_ONLY_ROLES, routeSession, unusableReason, type ProviderId } from '@shared/provider'
+import { capabilitiesAdmit, routeSession, unusableReason, type ProviderId } from '@shared/provider'
 import type { AgentEvent, AgentRuntime, AgentSessionHandle, SessionSpec, UsageInfo } from '../agent-runtime/types'
 import { AsyncQueue } from '../agent-runtime/async-queue'
 import type { Repositories } from '../persistence'
@@ -156,8 +156,7 @@ export class WorkerCapacityRouting {
           && unusableReason(provider, policy, status, spec.role) === null
           // Something must confine the agent: the NEXUS policy on every tool call, or the provider's own sandbox
           // (Codex, read-only roles). A provider with neither is never admitted.
-          && (status.capabilities.toolAuthorization || status.capabilities.confinement === 'provider_sandbox')
-          && (READ_ONLY_ROLES.includes(spec.role) || status.capabilities.writes)
+          && capabilitiesAdmit(status.capabilities, spec.role)
           && (provider !== 'claude' || this.o.usage.canDispatch()),
         qualityApproved: evidence.length > 0, qualityEvidence: evidence, reserve: 'NONE', paid: false,
       })
