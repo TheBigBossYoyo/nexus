@@ -34,6 +34,7 @@ import { renderPublicPage } from '../modules/research/browser'
 import { ExecutionBroker } from '../modules/isolation/execution-broker'
 import { Launcher } from '../modules/isolation/launcher'
 import { readSandboxAccount, sandboxStateDir } from '../modules/isolation/sandbox-account'
+import { BoundaryResumer } from '../modules/autonomy/resume'
 import { setupSandboxAccount, verifySandboxSetup } from '../modules/isolation/sandbox-setup'
 import { IsolationService } from '../modules/isolation/service'
 import type { ContainmentSetting } from '../modules/isolation/session-containment'
@@ -634,6 +635,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       const pending = repos.boundaryRequests.countPending()
       push({ kind: 'autonomy', pending })
       if (change.kind === 'enrollment') protectStores()
+      // 0.8: the user's answer restarts what waited for it. After the decision is stored, not inside its transaction.
+      if (change.kind === 'request' && change.created !== true && change.request && (change.request.state === 'GRANTED' || change.request.state === 'DENIED')) {
+        const decided = change.request
+        setImmediate(() => void boundaryResumer?.decided(decided).catch((e: unknown) => logger(`autonomy: auto-resume failed: ${errorMessage(e)}`)))
+      }
       if (change.kind === 'request' && change.created === true && change.request) {
         // On the task's own record too, where whoever checks the task finds it: that the action was put to the
         // user and did not happen is a fact of the task, not something to take from the session that asked.
@@ -644,6 +650,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     },
   })
   let announceBoundary: ((projectId: string, text: string) => void) | null = null
+  let boundaryResumer: BoundaryResumer | null = null
   // What contained code must not read is marked when there is a project whose code is contained, and not before.
   function protectStores(): void {
     // The sandbox account keeps its access to the Git data of the projects that are enrolled, and of no other.
@@ -737,6 +744,13 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     execution: isolation,
   })
   orchestrator.setDispatchGate(usage)
+  boundaryResumer = new BoundaryResumer({
+    repos,
+    orchestrator,
+    enrolled: (projectId) => repos.enrollments.get(projectId) !== null,
+    record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: `boundary request ${request.id}`, reason: reason.slice(0, 600) }),
+    logger,
+  })
   // Runs that were active when the runtime last stopped are paused, never judged: what became of their
   // sessions is read from the worktrees when they are resumed.
   recoveryRecord.workloads = orchestrator.recoverOnStartup().length

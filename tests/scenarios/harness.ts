@@ -20,6 +20,7 @@ import type {
 import type { EventType, PushMessage, RunEvent } from '@shared/events'
 import type { AutonomyProfile } from '@shared/autonomy'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { BoundaryResumer, type BoundaryResumeOutcome } from '@main/modules/autonomy/resume'
 import { AutonomyService } from '@main/modules/autonomy/service'
 import { ExecutionBroker } from '@main/modules/isolation/execution-broker'
 import { Launcher } from '@main/modules/isolation/launcher'
@@ -89,6 +90,8 @@ export interface Harness {
   policy: PolicyService | null
   /** 0.8: the autonomy service of this app instance (always present; the project is enrolled only when asked). */
   autonomy: AutonomyService
+  /** 0.8: what the auto-resume did after each boundary decision, in order. */
+  resumeOutcomes: BoundaryResumeOutcome[]
   /** 0.8: present when the harness was created with `research`. */
   research: WebResearchProvider | null
   /** 0.8: present when the harness was created with `apps`. */
@@ -262,6 +265,8 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     await isolation.start()
   }
   const isolationService = isolation
+  let resumer: BoundaryResumer | null = null
+  const resumeOutcomes: BoundaryResumeOutcome[] = []
   const autonomy = new AutonomyService({
     repos,
     runActive: (runId) => {
@@ -270,7 +275,14 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     },
     contained: (projectId) => (isolationService ? isolationService.isolated(projectId) : options.autonomy?.contained === true),
     confined: (projectId) => (isolationService ? isolationService.contained(projectId) : options.autonomy?.contained === true),
-    onChange: () => void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }),
+    onChange: (change) => {
+      void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() })
+      // As the runtime does: the user's answer restarts what waited for it.
+      if (change.kind === 'request' && change.created !== true && change.request && (change.request.state === 'GRANTED' || change.request.state === 'DENIED')) {
+        const decided = change.request
+        setImmediate(() => void resumer?.decided(decided).then((outcome) => void resumeOutcomes.push(outcome)))
+      }
+    },
   })
   autonomy.watch(bus)
   const researchPolicy = policyForPurpose('PUBLIC_RESEARCH', {})
@@ -325,6 +337,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     push: (message) => void pushes.push(message),
     ...(policy ? { strategies: policy } : {}),
   })
+  resumer = new BoundaryResumer({ repos, orchestrator, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: `boundary request ${request.id}`, reason }) })
 
   let project: Project
   if (fresh) {
@@ -384,6 +397,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     project,
     policy,
     autonomy,
+    resumeOutcomes,
     research,
     apps,
     commitEvidence,

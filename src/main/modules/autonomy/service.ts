@@ -3,6 +3,7 @@ import {
   AUTONOMY_POLICY_VERSION,
   allowedScopes,
   profileSummary,
+  unattendedPolicy,
   type AutonomyAuditEvent,
   type AutonomyOverview,
   type AutonomyProfile,
@@ -167,6 +168,7 @@ export class AutonomyService {
     return {
       enrollment,
       summary: profile === null ? null : profileSummary(profile),
+      unattended: profile === null ? null : unattendedPolicy(profile),
       grants,
       pending: this.pending(projectId),
       recentDenials: repos.autonomyAudit.list({ projectId, severities: denials, limit: 30 }).events,

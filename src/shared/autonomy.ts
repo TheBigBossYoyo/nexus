@@ -116,6 +116,43 @@ export function profileSummary(profile: AutonomyProfile): { allowed: string[]; w
   return { allowed, withheld }
 }
 
+/**
+ * 0.8: what holds while nobody is there. A mission runs in the runtime, not in a window: a closed window, a
+ * locked screen or a night changes nothing about what NEXUS may do in an enrolled project. The authority is
+ * the stored enrollment and the stored grants, read by the runtime; no window is consulted and none can widen it.
+ *
+ *  - What the profile allows goes on unattended exactly as it does attended.
+ *  - What needs a grant and has none becomes ONE stored boundary request. The task that met it stops; work
+ *    that does not depend on it goes on; the same need met again is the same request. Nothing is retried
+ *    against a refusal and nothing waits on a dialog.
+ *  - When the user answers (whenever that is), the work that waited is started again by NEXUS.
+ *  - Three things need the user present, because they give lasting authority or change the machine: enrolling
+ *    a project, allowing something for a whole project, and the one-time setup of the sandbox account. Each is
+ *    confirmed by the runtime itself, natively. Unattended, none of them happens.
+ */
+export interface UnattendedPolicy {
+  /** Done without anyone present, under this profile. */
+  proceeds: string[]
+  /** Becomes one boundary request and waits. */
+  waits: string[]
+  /** Never done by an agent, attended or not. */
+  never: string[]
+  /** Needs the user at the machine. */
+  needsPresence: string[]
+}
+
+export const UNATTENDED_NEEDS_PRESENCE = ['Enrolling a project, or widening its profile', 'Allowing something for a whole project', 'The one-time setup of the sandbox account (a Windows administrator prompt)'] as const
+
+export function unattendedPolicy(profile: AutonomyProfile): UnattendedPolicy {
+  const granted = profileCapabilities(profile)
+  return {
+    proceeds: PROFILE_CAPABILITIES.filter((c) => granted.has(c)).map((c) => AUTONOMY_CAPABILITIES[c].label),
+    waits: AUTONOMY_CAPABILITY_NAMES.filter((c) => !granted.has(c) && AUTONOMY_CAPABILITIES[c].kind !== 'NEVER').map((c) => AUTONOMY_CAPABILITIES[c].label),
+    never: AUTONOMY_CAPABILITY_NAMES.filter((c) => AUTONOMY_CAPABILITIES[c].kind === 'NEVER').map((c) => AUTONOMY_CAPABILITIES[c].label),
+    needsPresence: [...UNATTENDED_NEEDS_PRESENCE],
+  }
+}
+
 /** What a grant or a request is about. `ANY` is every resource of the capability inside the project. */
 export const RESOURCE_KINDS = ['ANY', 'PATH', 'HOST', 'GIT_REMOTE', 'COMMAND', 'PACKAGE', 'ENDPOINT', 'ACCOUNT'] as const
 export const ResourceKindSchema = z.enum(RESOURCE_KINDS)
@@ -302,6 +339,8 @@ export interface AutonomyOverview {
   enrollment: ProjectEnrollment | null
   /** The sentences of the profile: of the project as it is, or of a profile being considered. */
   summary: { allowed: string[]; withheld: string[] } | null
+  /** What holds for this profile while nobody is there. Null when the project is not enrolled and no profile is being considered. */
+  unattended: UnattendedPolicy | null
   grants: (CapabilityGrant & { capabilityLabel: string; resourceLabel: string; active: boolean })[]
   pending: BoundaryRequestView[]
   recentDenials: AutonomyAuditEvent[]
