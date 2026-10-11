@@ -2,9 +2,17 @@
 //
 // NEXUS never runs project code itself and never lets an agent's shell run it bare: the command is handed to
 // this program in a spec file, and this program is the only place where the containment is made. It creates a
-// job object (the whole process tree dies with the job; no child can leave it), a token with every privilege
-// removed and, for the ISOLATED profile, low integrity, starts the command suspended, puts it in the job, and
-// only then lets it run. If any step fails nothing runs: there is no path from here to an uncontained start.
+// job object (the whole process tree dies with the job; no child can leave it) and a token with every privilege
+// removed and low integrity, starts the command suspended, puts it in the job, and only then lets it run. If
+// any step fails nothing runs: there is no path from here to an uncontained start.
+//
+// Two profiles. RESTRICTED runs the command as the user, at low integrity: it can write only where a directory
+// was labeled for it and cannot read what was labeled protected; it still has the user's network, credential
+// vault and unprotected files. ISOLATED runs it as the machine's sandbox account (created once, elevated, by
+// native/sandbox-setup), also at low integrity: that account has no access to the user's profile, vault or
+// keys, and Windows Firewall lets none of its traffic out, so its only way to the network is the loopback
+// proxy NEXUS gives it. ISOLATED is made in two steps: this program, as the user, logs the account on and
+// starts a copy of itself as that account inside the job; the copy lowers its own token and starts the command.
 //
 // Build (C# 5, the compiler that ships with Windows):
 //   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /optimize+ /platform:x64 /target:exe
@@ -68,6 +76,7 @@ static class N {
     [DllImport(A, SetLastError = true)] public static extern bool GetSecurityDescriptorSacl(IntPtr sd, out bool present, out IntPtr acl, out bool defaulted);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern uint SetNamedSecurityInfoW(string name, int type, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
     [DllImport(K)] public static extern IntPtr LocalFree(IntPtr p);
+    [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool CreateProcessWithLogonW(string user, string domain, string password, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
 }
 
 class Fail : Exception {
@@ -86,6 +95,11 @@ class Spec {
     public uint UiLimits = 0xFF;
     public bool Window = false;
     public string Report = null;
+    // ISOLATED only: the DPAPI blob with the sandbox account, the launcher copy that account can run, and the
+    // directory (in the sandbox root) where the inner spec is written.
+    public string Credential = null;
+    public string Stage2 = null;
+    public string Stage2Dir = null;
 }
 
 static class Program {
@@ -123,12 +137,16 @@ static class Program {
                 else if (key == "ui-limits") spec.UiLimits = uint.Parse(value);
                 else if (key == "window") spec.Window = value == "1";
                 else if (key == "report") spec.Report = B64(value);
+                else if (key == "credential") spec.Credential = B64(value);
+                else if (key == "stage2") spec.Stage2 = B64(value);
+                else if (key == "stage2-dir") spec.Stage2Dir = B64(value);
                 // An unknown key is refused: a spec this launcher does not fully understand is not run.
                 else throw new Fail(EXIT_SPEC, "unknown spec key: " + key);
             } catch (Fail) { throw; } catch (Exception) { throw new Fail(EXIT_SPEC, "bad value for " + key); }
         }
         if (!version) throw new Fail(EXIT_SPEC, "the spec has no version");
-        if (spec.Profile != "ISOLATED" && spec.Profile != "RESTRICTED") throw new Fail(EXIT_SPEC, "the spec names no known profile");
+        if (spec.Profile != "ISOLATED" && spec.Profile != "RESTRICTED" && spec.Profile != "STAGE2") throw new Fail(EXIT_SPEC, "the spec names no known profile");
+        if (spec.Profile == "ISOLATED" && (string.IsNullOrEmpty(spec.Credential) || string.IsNullOrEmpty(spec.Stage2) || string.IsNullOrEmpty(spec.Stage2Dir))) throw new Fail(EXIT_SPEC, "the ISOLATED profile needs the sandbox account's credential and launcher");
         if (string.IsNullOrEmpty(spec.Command)) throw new Fail(EXIT_SPEC, "the spec has no command");
         if (string.IsNullOrEmpty(spec.Cwd) || !Directory.Exists(spec.Cwd)) throw new Fail(EXIT_SPEC, "the working directory does not exist");
         if (spec.MaxProcesses < 1 || spec.MaxProcesses > 4096) throw new Fail(EXIT_SPEC, "max-processes out of range");
@@ -152,7 +170,7 @@ static class Program {
         } finally { Marshal.FreeHGlobal(buf); }
     }
 
-    /** A copy of this process's token with every privilege but "bypass traverse checking" removed and, for ISOLATED, low integrity. */
+    /** A copy of this process's token with every privilege but "bypass traverse checking" removed, at low integrity. */
     static IntPtr BuildToken(Spec spec) {
         IntPtr current;
         if (!N.OpenProcessToken(N.GetCurrentProcess(), 0xF01FF, out current)) throw new Fail(EXIT_CONTAINMENT, "OpenProcessToken failed: " + Marshal.GetLastWin32Error());
@@ -163,7 +181,7 @@ static class Program {
         IntPtr token;
         if (!N.DuplicateTokenEx(stripped, 0xF01FF, IntPtr.Zero, 2, 1 /* primary */, out token)) throw new Fail(EXIT_CONTAINMENT, "DuplicateTokenEx failed: " + Marshal.GetLastWin32Error());
         N.CloseHandle(stripped); N.CloseHandle(current);
-        if (spec.Profile == "ISOLATED") {
+        {
             TOKEN_MANDATORY_LABEL label = new TOKEN_MANDATORY_LABEL();
             label.Label.Sid = Sid("S-1-16-4096"); label.Label.Attributes = 0x20;
             IntPtr b = Marshal.AllocHGlobal(Marshal.SizeOf(label)); Marshal.StructureToPtr(label, b, false);
@@ -233,8 +251,86 @@ static class Program {
         } catch (Exception) { }
     }
 
-    static int Run(Spec spec) {
+    static string SpecLine(string key, string value) { return key + "=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "\n"; }
+
+    /**
+     * ISOLATED, first step, as the user: log the sandbox account on and start this program's copy as that
+     * account, suspended, in the job. The copy gets an inner spec (profile STAGE2) and does the rest. The
+     * account's password is read from the user's protected blob here and goes nowhere else.
+     */
+    static int RunAsSandboxAccount(Spec spec) {
+        if (!File.Exists(spec.Stage2)) throw new Fail(EXIT_CONTAINMENT, "the launcher for the sandbox account is missing: " + spec.Stage2);
+        string[] credential = CredentialRead(spec.Credential);
         IntPtr job = BuildJob(spec);
+
+        StringBuilder inner = new StringBuilder();
+        inner.Append("version=1\nprofile=STAGE2\n");
+        inner.Append(SpecLine("cwd", spec.Cwd)).Append(SpecLine("command", spec.Command));
+        foreach (string entry in spec.Env) inner.Append(SpecLine("env", entry));
+        inner.Append("max-processes=" + spec.MaxProcesses + "\n");
+        if (spec.MaxJobMemory > 0) inner.Append("max-job-memory=" + spec.MaxJobMemory + "\n");
+        inner.Append("ui-limits=" + spec.UiLimits + "\n");
+        if (spec.Window) inner.Append("window=1\n");
+        byte[] name = new byte[12]; using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(name);
+        string innerPath = Path.Combine(spec.Stage2Dir, BitConverter.ToString(name).Replace("-", "").ToLowerInvariant() + ".spec");
+        try { Directory.CreateDirectory(spec.Stage2Dir); File.WriteAllText(innerPath, inner.ToString(), new UTF8Encoding(false)); }
+        catch (Exception e) { throw new Fail(EXIT_CONTAINMENT, "the inner spec could not be written: " + e.Message); }
+
+        // The copy itself needs only what Windows needs; the command's environment is in the inner spec.
+        StringBuilder envBlock = new StringBuilder();
+        foreach (string key in new string[] { "ComSpec", "PATHEXT", "SystemDrive", "SystemRoot", "windir" }) {
+            string value = Environment.GetEnvironmentVariable(key);
+            if (!string.IsNullOrEmpty(value)) envBlock.Append(key).Append('=').Append(value).Append('\0');
+        }
+        envBlock.Append('\0');
+        IntPtr env = Marshal.StringToHGlobalUni(envBlock.ToString());
+
+        STARTUPINFO si = new STARTUPINFO();
+        si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = StdOrNul(-10, 0x80000000);
+        si.hStdOutput = StdOrNul(-11, 0x40000000);
+        si.hStdError = StdOrNul(-12, 0x40000000);
+        StringBuilder commandLine = new StringBuilder("\"" + spec.Stage2 + "\" --spec \"" + innerPath + "\"");
+        PROCESS_INFORMATION pi;
+        uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | (spec.Window ? 0 : CREATE_NO_WINDOW);
+        // Logon flags 0: no profile is loaded for the account; its home is a directory of the session.
+        bool started = N.CreateProcessWithLogonW(credential[0], ".", credential[1], 0, null, commandLine, flags, env, spec.Cwd, ref si, out pi);
+        int startError = Marshal.GetLastWin32Error();
+        credential[1] = null;
+        if (!started) {
+            try { File.Delete(innerPath); } catch (Exception) { }
+            throw new Fail(EXIT_CONTAINMENT, "the sandbox account could not start a process: " + new Win32Exception(startError).Message + " (" + startError + ")");
+        }
+        bool inJob = false;
+        if (!N.AssignProcessToJobObject(job, pi.hProcess) || !N.IsProcessInJob(pi.hProcess, job, out inJob) || !inJob) {
+            int e = Marshal.GetLastWin32Error();
+            N.TerminateProcess(pi.hProcess, 1);
+            try { File.Delete(innerPath); } catch (Exception) { }
+            throw new Fail(EXIT_CONTAINMENT, "the sandbox account's process could not be put in its job: " + e);
+        }
+        N.ResumeThread(pi.hThread);
+        N.CloseHandle(pi.hThread);
+        uint waited = N.WaitForSingleObject(pi.hProcess, spec.TimeoutMs == 0 ? 0xFFFFFFFF : spec.TimeoutMs);
+        try { File.Delete(innerPath); } catch (Exception) { }
+        if (waited != 0) {
+            N.TerminateJobObject(job, (uint)EXIT_TIMEOUT);
+            WriteReport(spec, job, pi.dwProcessId, "timeout");
+            return EXIT_TIMEOUT;
+        }
+        uint code; N.GetExitCodeProcess(pi.hProcess, out code);
+        WriteReport(spec, job, pi.dwProcessId, code.ToString());
+        N.TerminateJobObject(job, 0);
+        N.CloseHandle(job);
+        return (int)code;
+    }
+
+    static int Run(Spec spec) {
+        if (spec.Profile == "ISOLATED") return RunAsSandboxAccount(spec);
+        // The second step of ISOLATED already runs inside the job the first step made, and Windows does not nest a
+        // job under one that sets UI limits. The command inherits that job; none is made here.
+        bool inner = spec.Profile == "STAGE2";
+        IntPtr job = inner ? IntPtr.Zero : BuildJob(spec);
         IntPtr token = BuildToken(spec);
         IntPtr env = BuildEnvironment(spec);
 
@@ -254,7 +350,13 @@ static class Program {
             throw new Fail(EXIT_START, "the command could not be started: " + new Win32Exception(e).Message + " (" + e + ")");
         }
         bool inJob = false;
-        if (!N.AssignProcessToJobObject(job, pi.hProcess) || !N.IsProcessInJob(pi.hProcess, job, out inJob) || !inJob) {
+        if (inner) {
+            // Some job must hold this process already: if none does, the first step did not do its part.
+            if (!N.IsProcessInJob(pi.hProcess, IntPtr.Zero, out inJob) || !inJob) {
+                N.TerminateProcess(pi.hProcess, 1);
+                throw new Fail(EXIT_CONTAINMENT, "the command is in no job: the inner step was started outside the containment");
+            }
+        } else if (!N.AssignProcessToJobObject(job, pi.hProcess) || !N.IsProcessInJob(pi.hProcess, job, out inJob) || !inJob) {
             int e = Marshal.GetLastWin32Error();
             N.TerminateProcess(pi.hProcess, 1);
             throw new Fail(EXIT_CONTAINMENT, "the process could not be put in its job: " + e);
@@ -264,11 +366,12 @@ static class Program {
 
         uint waited = N.WaitForSingleObject(pi.hProcess, spec.TimeoutMs == 0 ? 0xFFFFFFFF : spec.TimeoutMs);
         if (waited != 0) {
-            N.TerminateJobObject(job, (uint)EXIT_TIMEOUT);
-            WriteReport(spec, job, pi.dwProcessId, "timeout");
+            if (inner) N.TerminateProcess(pi.hProcess, (uint)EXIT_TIMEOUT); else N.TerminateJobObject(job, (uint)EXIT_TIMEOUT);
+            if (!inner) WriteReport(spec, job, pi.dwProcessId, "timeout");
             return EXIT_TIMEOUT;
         }
         uint code; N.GetExitCodeProcess(pi.hProcess, out code);
+        if (inner) return (int)code;
         WriteReport(spec, job, pi.dwProcessId, code.ToString());
         // The command has ended: whatever it left running ends with it. A long-lived process is its own launch.
         N.TerminateJobObject(job, 0);
