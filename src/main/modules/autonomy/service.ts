@@ -1,7 +1,9 @@
 import {
   AUTONOMY_CAPABILITIES,
   AUTONOMY_POLICY_VERSION,
+  BOUNDARY_RESUME_ACTION,
   allowedScopes,
+  boundaryResumeResource,
   profileSummary,
   unattendedPolicy,
   type AutonomyAuditEvent,
@@ -113,6 +115,7 @@ export class AutonomyService {
       missionTitle: run ? (run.prompt.split(/\r?\n/, 1)[0] ?? '').trim().slice(0, 100) || null : null,
       // A request that belongs to no mission can only be answered for the project.
       scopes: allowedScopes(request.capability).filter((scope) => scope === 'PROJECT' || request.runId !== null),
+      followUp: request.state === 'GRANTED' || request.state === 'DENIED' ? repos.autonomyAudit.latestReason(BOUNDARY_RESUME_ACTION, boundaryResumeResource(request.id)) : null,
     }
   }
 

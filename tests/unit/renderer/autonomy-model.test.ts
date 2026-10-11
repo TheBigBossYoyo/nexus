@@ -42,6 +42,7 @@ function req(id: string, extra: Partial<BoundaryRequestView> = {}): BoundaryRequ
     projectName: 'Alpha',
     missionTitle: 'Fix login',
     scopes: ['ONCE', 'MISSION', 'PROJECT'],
+    followUp: null,
     ...extra,
   }
 }

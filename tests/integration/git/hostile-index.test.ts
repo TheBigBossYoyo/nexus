@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { GitService, type CommitEvidence } from '@main/modules/git/git-service'
@@ -217,6 +217,65 @@ describe('hostile index and worktree state against the git commands NEXUS runs i
     expect(readFileSync(join(victim, 'keep.txt'), 'utf8')).toBe('keep\n')
     expect(existsSync(join(victim, 'deep', 'also.txt'))).toBe(true)
   }, 60_000)
+
+  it('second audit, finding 5: a junction where a tracked directory was is removed before a reset or a merge writes below it', async () => {
+    // The branch has a tracked directory; main gets another file in the same directory, for the merge to write.
+    mkdirSync(join(worktree, 'dir'), { recursive: true })
+    writeFileSync(join(worktree, 'dir', 'tracked.txt'), 'tracked\n')
+    await git.commitAll(worktree, 'task: a directory', AUTHOR)
+    mkdirSync(join(repo, 'dir'), { recursive: true })
+    writeFileSync(join(repo, 'dir', 'from-main.txt'), 'from main\n')
+    raw(repo, 'add', '-A')
+    raw(repo, 'commit', '-q', '-m', 'main: another file in dir')
+    const victim = join(SCRATCH, `case-${n}`, 'victim')
+    const swap = (): void => {
+      rmSync(victim, { recursive: true, force: true })
+      mkdirSync(victim, { recursive: true })
+      writeFileSync(join(victim, 'precious.txt'), 'precious\n')
+      rmSync(join(worktree, 'dir'), { recursive: true, force: true })
+      symlinkSync(victim, join(worktree, 'dir'), 'junction')
+    }
+    const victimFiles = (): string[] => readdirSync(victim).sort()
+
+    // What stock git does: the tracked file is written into what the junction leads to.
+    swap()
+    tryRaw(worktree, 'reset', '--hard', '--quiet', 'HEAD')
+    console.info(`stock: reset --hard with a junction in place of a tracked directory wrote into its target: ${victimFiles().join(', ')}`)
+    expect(victimFiles(), 'stock git writes through the junction (the reason for the measure)').toContain('tracked.txt')
+
+    swap()
+    await git.resetClean(worktree)
+    expect(victimFiles(), 'after NEXUS reset').toEqual(['precious.txt'])
+    expect(readFileSync(join(worktree, 'dir', 'tracked.txt'), 'utf8')).toBe('tracked\n')
+    expect(lstatSync(join(worktree, 'dir')).isSymbolicLink(), 'the directory is a directory again').toBe(false)
+
+    swap()
+    // The junction makes the tree look changed; NEXUS commits what is there (the directory's files are gone from the tree) and merges.
+    await git.merge(worktree, 'main', { message: 'merge main', author: AUTHOR }).catch(() => undefined)
+    await git.resetClean(worktree)
+    expect(victimFiles(), 'after NEXUS merge and reset').toEqual(['precious.txt'])
+  }, 120_000)
+
+  it('second audit, finding 6: a nested repository already in the branch is left out by the add NEXUS itself runs', async () => {
+    // The branch tip names a nested repository (as a project with a submodule does), and the task fills that path.
+    const head = plantNestedRepository()
+    raw(worktree, 'update-index', '--add', '--cacheinfo', `160000,${head},sub`)
+    raw(worktree, 'commit', '-q', '-m', 'the entry is in the branch')
+    for (const m of ['filter', 'smudge', 'fsmonitor', 'hook', 'textconv']) rmSync(marker(m), { force: true })
+    writeFileSync(join(worktree, 'sub', 's.txt'), 't changed\n')
+    writeFileSync(join(worktree, 'beside.txt'), 'beside\n')
+    const stock = tryRaw(worktree, '-c', 'diff.ignoreSubmodules=all', 'add', '-A')
+    void stock
+    console.info(`stock: add -A with the nested repository in the branch ran: ${markers().join(', ') || 'nothing'}`)
+    const stockRan = markers()
+    for (const m of ['filter', 'smudge', 'fsmonitor', 'hook', 'textconv']) rmSync(marker(m), { force: true })
+    writeFileSync(join(worktree, 'sub', 's.txt'), 'u changed\n')
+    const commit = await everythingNexusDoes()
+    expect(markers(), 'nothing of the nested repository ran').toEqual([])
+    expect(commit).not.toBeNull()
+    expect(committedFiles(commit as string)['beside.txt']).toBe('beside')
+    expect(stockRan.length, 'stock git enters it').toBeGreaterThan(0)
+  }, 120_000)
 
   it('the index stages content that is not in the file: the commit holds the file', async () => {
     const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: worktree, input: 'STAGED AND NOT VISIBLE\n', encoding: 'utf8', windowsHide: true }).trim()

@@ -12,6 +12,8 @@ import {
 } from '../../components/ui'
 import {
   AUTHORITY_LABEL,
+  BACKEND_LABEL,
+  RESEARCH_BROWSER_LINE,
   DOWNLOADS_EMPTY,
   DOWNLOAD_STATE_LABEL,
   RESEARCH_EMPTY,
@@ -39,6 +41,7 @@ function Artifact({ artifact }: { artifact: ResearchArtifact }) {
         <span>{artifact.publisher}</span>
         <span>{SOURCE_TYPE_LABEL[artifact.sourceType]}</span>
         <span>{AUTHORITY_LABEL[artifact.authority]}</span>
+        <span data-testid="research-backend">{BACKEND_LABEL[artifact.backend]}</span>
         <span>Retrieved {formatDateTime(artifact.retrievedAt)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -107,6 +110,9 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
             <h3 id="research-sources-title" className="m-0 text-body font-semibold">
               Sources read
             </h3>
+            <p className="m-0 text-small text-text-secondary" data-testid="research-browser-line">
+              {RESEARCH_BROWSER_LINE}
+            </p>
             {data.artifacts.length === 0 ? (
               <EmptyState title="Nothing read" className="py-6">
                 {RESEARCH_EMPTY}

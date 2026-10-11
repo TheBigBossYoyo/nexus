@@ -48,18 +48,22 @@ export function createShellContainment(input: {
     unavailable: state.usable ? null : state.detail,
     async wrap(shell, command, options) {
       if (profile === 'STANDARD') return { ok: true, command }
-      // Only with NEXUS's own script: without one the command is not treated as git alone.
-      const gitOnly = options.gitOnly && options.gitScript !== undefined
       const gitWritable = input.gitWritable ? await input.gitWritable().catch(() => []) : []
+      const objects = gitWritable.find((dir) => basename(dir).toLowerCase() === 'objects')
+      const gitDir = objects !== undefined ? gitWritable.find((dir) => basename(dirname(dir)).toLowerCase() === 'worktrees' && dirname(dirname(dir)).toLowerCase() === dirname(objects).toLowerCase()) : undefined
+      // Treated as git alone only with all three: NEXUS's own script (what runs is never the command's text), the
+      // Git directory NEXUS recorded for the worktree (without it git would take the repository from the `.git`
+      // file in the worktree, which the task writes), and a bash to run the script (it is a bash script whichever
+      // shell the command was written for). Otherwise the command runs under the session's own profile, as any other.
+      const asUser: ContainmentProfile = profile === 'ISOLATED' && broker.usable('RESTRICTED').usable ? 'RESTRICTED' : profile
+      const gitOnly = options.gitOnly && options.gitScript !== undefined && gitDir !== undefined && (await broker.hasBash(asUser))
       // A command that is git and nothing else (or git and text filters) runs as the user at low integrity even
       // in an ISOLATED session: only there can git change a ref of a repository that is in the user's profile.
       // Every other command runs as the sandbox account, which is given what git needs to read the repository
       // and to stage. The repository's Git directory is the one above the `objects` directory NEXUS recorded.
-      const use: ContainmentProfile = gitOnly && profile === 'ISOLATED' && broker.usable('RESTRICTED').usable ? 'RESTRICTED' : profile
-      const objects = gitWritable.find((dir) => basename(dir).toLowerCase() === 'objects')
+      const use: ContainmentProfile = gitOnly ? asUser : profile
       const gitCommonDir = use === 'ISOLATED' && objects !== undefined ? dirname(objects) : undefined
-      const gitDir = objects !== undefined ? gitWritable.find((dir) => basename(dirname(dir)).toLowerCase() === 'worktrees' && dirname(dirname(dir)).toLowerCase() === dirname(objects).toLowerCase()) : undefined
-      const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell, command: gitOnly ? (options.gitScript as string) : command, gitOnly, gitWritable, ...(gitCommonDir !== undefined ? { gitCommonDir } : {}), ...(gitDir !== undefined ? { gitDir } : {}) })
+      const contained = await broker.containShell({ profile: use, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell: gitOnly ? 'bash' : shell, command: gitOnly ? (options.gitScript as string) : command, gitOnly, gitWritable, ...(gitCommonDir !== undefined ? { gitCommonDir } : {}), ...(gitDir !== undefined ? { gitDir } : {}) })
       if (!contained.ok) return { ok: false, reason: contained.reason }
       const [spec] = contained.args.slice(-1)
       const text = shell === 'bash' ? `${singleQuoted(contained.file)} --spec ${singleQuoted(spec as string)}` : `& ${psQuoted(contained.file)} --spec ${psQuoted(spec as string)}; exit $LASTEXITCODE`

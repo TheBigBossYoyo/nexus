@@ -327,12 +327,18 @@ export function allowedScopes(capability: AutonomyCapability): GrantScope[] {
 }
 
 /** A boundary request as the window shows it: the row, with the words and the answers that may be given. */
+/** How the audit names what was done with waiting work after a decision: the action, and the resource for one request. */
+export const BOUNDARY_RESUME_ACTION = 'boundary auto-resume'
+export const boundaryResumeResource = (requestId: string): string => `boundary request ${requestId}`
+
 export interface BoundaryRequestView extends BoundaryRequest {
   capabilityLabel: string
   resourceLabel: string
   projectName: string
   missionTitle: string | null
   scopes: GrantScope[]
+  /** What NEXUS did with the waiting work once the request was decided, in a sentence. Null while pending, and when nothing waited. */
+  followUp: string | null
 }
 
 export interface AutonomyOverview {

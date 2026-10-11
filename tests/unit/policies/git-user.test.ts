@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { isSafeUserGit, parseUserGit, renderUserGitPowerShell, renderUserGitScript, userGitOf, userGitOfPowerShell } from '@main/modules/policies/git-pipeline'
+import { isSafeUserGit, parseUserGit, renderUserGitScript, userGitOf, userGitOfPowerShell } from '@main/modules/policies/git-pipeline'
 
 // What an agent's text can make run AS THE USER (at low integrity) in a project whose code otherwise runs as
 // the sandbox account. The text is parsed into git invocations with exact arguments; each must be a listed
@@ -138,7 +138,7 @@ describe('git as the user: the text is parsed, and what does not parse to git al
     for (const command of [
       'git status', 'git status --short', 'git status -sb', 'git status --porcelain', 'git status --porcelain=v2', 'git add -A', 'git add --all', 'git add -u', 'git commit -m "a message"', "git commit -m 'a message'",
       'git commit -am "x"', 'git commit -a -m "x"', 'git commit --amend --no-edit', 'git commit -q -m "x"', 'git commit --allow-empty -m "x"', 'git log --oneline -5', 'git log --oneline -n 5', 'git log -n5 --stat',
-      'git log --format=%H -1', 'git log --pretty=format:"%h %s" -3', 'git log -S needle --oneline'.replace(' -S needle', ''), 'git diff', 'git diff --stat', 'git diff --cached', 'git diff --staged --name-only', 'git diff HEAD',
+      'git log --format=%H -1', 'git log --pretty=format:"%h %s" -3', 'git log --max-count=3', 'git log --date=short -1', 'git diff -U5', 'git describe --abbrev=7', 'git restore --source=HEAD~1 a.txt', 'git restore -s HEAD~1 a.txt', 'git switch -c feature/y', 'git log -S needle --oneline'.replace(' -S needle', ''), 'git diff', 'git diff --stat', 'git diff --cached', 'git diff --staged --name-only', 'git diff HEAD',
       'git show --stat HEAD', 'git show HEAD', 'git rev-parse HEAD', 'git rev-parse --abbrev-ref HEAD', 'git rev-parse --short HEAD', 'git branch --show-current', 'git branch -a', 'git ls-files', 'git ls-files -m',
       'git reset --hard HEAD', 'git reset --hard', 'git clean -fd', 'git stash', 'git stash push -u', 'git stash list', 'git merge other --no-edit', 'git rm --cached a.txt', 'git mv a.txt b.txt', 'git tag -l', 'git describe --tags --always',
       'git add -A && git commit -q -m "agent commit" 2>&1 && git status --short && git log --oneline -1',
@@ -158,6 +158,28 @@ describe('git as the user: the text is parsed, and what does not parse to git al
     expect(isSafeUserGit(['log', '-n', 'abc'])).toBe(false)
   })
 
+  it('second audit, finding 1: a long option takes its value after "=" only, so no word after it can become an option of git', () => {
+    // git reads `--format --output=x` as two options, and the second writes a file wherever it names.
+    for (const command of [
+      'git log --format --output=C:/x/pwn.txt', 'git log --pretty --output=../pwn.txt', 'git show --format -p', 'git log --format --ext-diff', 'git log --format --no-index', 'git log --date --output=x',
+      'git log --format %H', 'git log --pretty oneline', 'git log --max-count 3', 'git log --author me', 'git log --grep x', 'git log --since yesterday', 'git commit --message x', 'git switch --create x',
+      'git restore --source HEAD a.txt', 'git describe --abbrev 7', 'git diff --unified 3', 'git diff -U 3', 'git diff -U',
+    ])
+      no(command)
+    // The value itself may look like anything: it is one word with its option.
+    for (const command of ['git log --format=--output=x -1', 'git log --grep=--output=x', 'git log --author=me --since=yesterday', 'git commit -m --output=x']) yes(command)
+    // A here-document is the message after `-m` only.
+    expect(userGitOf(`git commit --message ${heredoc('x')}`)).toBeNull()
+  })
+
+  it('second audit, finding 2: a double quote or a backslash anywhere in a PowerShell command, an empty word, and --% do not qualify', () => {
+    // PowerShell 5.1 hands 'a"b' to a program with the quote bare: the program then reads other words than were written.
+    for (const command of ["git diff '\"--output=C:/x/pwn.txt'", "git log '--grep=a\"' '-p' 'b\"'", "git add 'a\"b.txt'", "git commit -m 'say \"hi\"'", "git commit -m 'ends with a backslash\\'", "git add 'src\\a.ts'", "git commit -m '--%'", "git log '--%' -1"]) expect(userGitOfPowerShell(command), command).toBeNull()
+    // In bash a double quote inside single quotes is a character of the argument, and is not a path NEXUS accepts.
+    no("git add 'a\"b.txt'")
+    yes("git commit -m 'say \"hi\"'")
+  })
+
   it('finding B7: in PowerShell only printable ASCII, apostrophes, and one git per statement', () => {
     for (const command of ['git status --short; git log --oneline -1', "git commit -m 'a message'", 'git add -A']) expect(userGitOfPowerShell(command), command).not.toBeNull()
     for (const command of [
@@ -171,10 +193,38 @@ describe('git as the user: the text is parsed, and what does not parse to git al
 })
 
 describe('git as the user: what runs is written by NEXUS', () => {
-  it('quotes every argument and adds what keeps git out of nested repositories', () => {
-    expect(renderUserGitScript(userGitOf('git add -A && git commit -m "it\'s done" 2>&1; git status --short') ?? [])).toBe("git 'add' '-A' &&\ngit 'commit' '-m' 'it'\\''s done' 2>&1\ngit 'status' '--ignore-submodules=all' '--short'\n")
-    expect(renderUserGitScript(userGitOf('git diff --stat || git log -1') ?? [])).toBe("git 'diff' '--ignore-submodules=all' '--stat' ||\ngit 'log' '--ignore-submodules=all' '-1'\n")
-    expect(renderUserGitPowerShell(userGitOfPowerShell("git commit -m 'a b'; git status") ?? [])).toBe("& git.exe 'commit' '-m' 'a b'\n& git.exe 'status' '--ignore-submodules=all'\n")
+  const body = (command: string, powershell = false): string => {
+    const script = renderUserGitScript((powershell ? userGitOfPowerShell(command) : userGitOf(command)) ?? [])
+    // Two lines of functions first, the same in every script.
+    const lines = script.split('\n')
+    expect(lines[0]).toMatch(/^nx_links\(\) \{/)
+    expect(lines[1]).toMatch(/^nx_nolinks\(\) \{/)
+    return lines.slice(2).join('\n')
+  }
+
+  it('quotes every argument and adds what keeps git out of nested repositories and away from programs', () => {
+    expect(body('git commit -m "it\'s done" 2>&1; git status --short')).toBe("git 'commit' '-m' 'it'\\''s done' 2>&1\ngit 'status' '--ignore-submodules=all' '--short'\n")
+    expect(body('git diff --stat || git log -1')).toBe("git 'diff' '--ignore-submodules=all' '--no-ext-diff' '--no-textconv' '--stat' ||\ngit 'log' '--ignore-submodules=all' '--no-ext-diff' '--no-textconv' '-1'\n")
+    expect(body('git show HEAD')).toBe("git 'show' '--ignore-submodules=all' '--no-ext-diff' '--no-textconv' 'HEAD'\n")
+  })
+
+  it('a command written for PowerShell runs as the same bash script', () => {
+    expect(body("git commit -m 'a b'; git status", true)).toBe("git 'commit' '-m' 'a b'\ngit 'status' '--ignore-submodules=all'\n")
+  })
+
+  it('second audit, finding 6: add, rm and stash leave nested repositories named in the index alone', () => {
+    expect(body('git add -A && git commit -m x')).toBe(`{ nx_links; git 'add' '-A' ':(top)' "\${nx_ex[@]}"; } &&\ngit 'commit' '-m' 'x'\n`)
+    expect(body('git add -u')).toBe(`{ nx_links; git 'add' '-u' ':(top)' "\${nx_ex[@]}"; }\n`)
+    expect(body('git add -Av')).toBe(`{ nx_links; git 'add' '-Av' ':(top)' "\${nx_ex[@]}"; }\n`)
+    expect(body('git add . src/a.ts')).toBe(`{ nx_links; git 'add' '.' 'src/a.ts' "\${nx_ex[@]}"; }\n`)
+    expect(body('git add -A -- src')).toBe(`{ nx_links; git 'add' '-A' '--' 'src' "\${nx_ex[@]}"; }\n`)
+    // Bare `git add` names nothing: it stays as it is, and adds nothing.
+    expect(body('git add -v')).toBe("git 'add' '-v'\n")
+    expect(body('git rm -r src')).toBe(`{ nx_links; git 'rm' '-r' 'src' "\${nx_ex[@]}"; }\n`)
+    expect(body('git stash')).toBe("{ nx_nolinks && git 'stash'; }\n")
+    expect(body('git stash push -u 2>&1')).toBe("{ nx_nolinks && git 'stash' 'push' '-u'; } 2>&1\n")
+    expect(body('git stash pop')).toBe("{ nx_nolinks && git 'stash' 'pop'; }\n")
+    expect(body('git stash list')).toBe("git 'stash' 'list'\n")
   })
 
   const d = process.platform === 'win32' && existsSync(BASH) ? it : it.skip
@@ -186,18 +236,21 @@ describe('git as the user: what runs is written by NEXUS', () => {
       'git log --pretty=format:"%h %s (%an) <%ae>" -3',
       'git checkout -b feature/x-1 && git add src/a.ts "with space.txt" || git status',
       "git stash drop 'stash@{2}'",
+      'git rm -r --cached old && git diff --cached --stat',
     ]
     for (const command of commands) {
       const parsed = userGitOf(command)
       expect(parsed, command).not.toBeNull()
       // `git` stands for a function that prints each argument between marks, with its newlines made visible.
+      // The index the script's own listing reads is an empty one: no nested repository, so nothing is left out.
       const script = `git() { for a in "$@"; do printf '<%s>' "\${a//$'\\n'/@NL@}"; done; echo; }\n${renderUserGitScript(parsed ?? [])}`
       const printed = execFileSync(BASH, ['-c', script], { encoding: 'utf8', windowsHide: true }).trimEnd().split('\n')
       // `||` after a success does not run the next invocation: compare those that ran, in order.
       const expected = (parsed ?? []).map((invocation) => {
         const [sub, ...rest] = invocation.args as [string, ...string[]]
-        const extra = ['status', 'diff', 'log', 'show'].includes(sub) ? ['--ignore-submodules=all'] : []
-        return [sub, ...extra, ...rest].map((a) => `<${a.replace(/\n/g, '@NL@')}>`).join('')
+        const fixed = sub === 'status' ? ['--ignore-submodules=all'] : ['diff', 'log', 'show'].includes(sub) ? ['--ignore-submodules=all', '--no-ext-diff', '--no-textconv'] : []
+        const whole = sub === 'add' && rest.includes('-A') && rest.every((a) => a.startsWith('-')) ? [':(top)'] : []
+        return [sub, ...fixed, ...rest, ...whole].map((a) => `<${a.replace(/\n/g, '@NL@')}>`).join('')
       })
       const ran = expected.filter((_line, index) => index === 0 || (parsed ?? [])[index - 1]?.then !== '||')
       expect(printed, command).toEqual(ran)

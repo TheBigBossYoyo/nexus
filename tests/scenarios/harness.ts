@@ -18,7 +18,7 @@ import type {
   Worktree,
 } from '@shared/domain'
 import type { EventType, PushMessage, RunEvent } from '@shared/events'
-import type { AutonomyProfile } from '@shared/autonomy'
+import { boundaryResumeResource, type AutonomyProfile } from '@shared/autonomy'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { BoundaryResumer, type BoundaryResumeOutcome } from '@main/modules/autonomy/resume'
 import { AutonomyService } from '@main/modules/autonomy/service'
@@ -337,7 +337,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     push: (message) => void pushes.push(message),
     ...(policy ? { strategies: policy } : {}),
   })
-  resumer = new BoundaryResumer({ repos, orchestrator, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: `boundary request ${request.id}`, reason }) })
+  resumer = new BoundaryResumer({ repos, orchestrator, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: boundaryResumeResource(request.id), reason }) })
 
   let project: Project
   if (fresh) {

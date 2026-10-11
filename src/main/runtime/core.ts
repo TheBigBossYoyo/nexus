@@ -73,7 +73,7 @@ import {
   WorkspaceMissionWorkload,
 } from '../modules/overnight'
 import { buildTrayModel, type TrayAction } from '../modules/overnight/tray-model'
-import { AUTONOMY_CAPABILITIES } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, boundaryResumeResource } from '@shared/autonomy'
 import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
 import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
@@ -502,6 +502,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
           logger,
         }),
         config: workerConfig,
+        workingState: (cwd) => git.workingState(cwd),
         // One worker per agent session the queue may run, and one more for probes and reasoning sessions.
         maxWorkers: () => control.limits().maxAgents + 1,
         context: (agentId) => {
@@ -638,7 +639,14 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       // 0.8: the user's answer restarts what waited for it. After the decision is stored, not inside its transaction.
       if (change.kind === 'request' && change.created !== true && change.request && (change.request.state === 'GRANTED' || change.request.state === 'DENIED')) {
         const decided = change.request
-        setImmediate(() => void boundaryResumer?.decided(decided).catch((e: unknown) => logger(`autonomy: auto-resume failed: ${errorMessage(e)}`)))
+        setImmediate(
+          () =>
+            void boundaryResumer
+              ?.decided(decided)
+              // What was done is part of what the inbox shows: the window reads it again.
+              .then(() => push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }))
+              .catch((e: unknown) => logger(`autonomy: auto-resume failed: ${errorMessage(e)}`)),
+        )
       }
       if (change.kind === 'request' && change.created === true && change.request) {
         // On the task's own record too, where whoever checks the task finds it: that the action was put to the
@@ -748,7 +756,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     repos,
     orchestrator,
     enrolled: (projectId) => repos.enrollments.get(projectId) !== null,
-    record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: `boundary request ${request.id}`, reason: reason.slice(0, 600) }),
+    record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: boundaryResumeResource(request.id), reason: reason.slice(0, 600) }),
     logger,
   })
   // Runs that were active when the runtime last stopped are paused, never judged: what became of their

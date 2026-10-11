@@ -286,4 +286,46 @@ test.describe('NEXUS 0.8 autonomy and isolation', () => {
       await closeApp(app)
     }
   })
+
+  test('answering a request restarts the task that waited and resumes the mission, and the inbox says so', async () => {
+    test.setTimeout(300_000)
+    const repo = createRepo()
+    const dataDir = tempDir('data')
+    dirs.push(repo, dataDir)
+    const { app, page } = await launchApp(dataDir, repo)
+    try {
+      const projectId = await openProject(page)
+      await invoke(page, 'autonomy.enroll', { projectId, profile: 'AUTONOMOUS_PROJECT' })
+      const run = await invoke(page, 'runs.create', { projectId, mode: 'build', preset: 'balanced', prompt: 'Add an API module and a UI module. [demo:boundary-block]', compilationMode: 'EXACT', requirePlanApproval: false })
+      // The task stops at the boundary; the rest of the mission is done; the mission waits, paused.
+      await expect.poll(async () => (await invoke(page, 'autonomy.pending', { projectId })).length, { timeout: 90_000, intervals: [250] }).toBe(1)
+      await expect.poll(async () => (await invoke(page, 'runs.get', { runId: run.id })).run.state, { timeout: 120_000, intervals: [500] }).toBe('paused')
+      const requestId = (await invoke(page, 'autonomy.pending', { projectId }))[0]?.id ?? ''
+
+      // The settings say what holds while nobody is there, from the profile itself.
+      await openAutonomySettings(page)
+      const overview = await invoke(page, 'autonomy.overview', { projectId })
+      if (!overview.unattended) throw new Error('No unattended policy')
+      await expect(page.getByTestId('autonomy-unattended')).toContainText('While you are away')
+      await expect(page.getByTestId('autonomy-unattended')).toContainText('NEXUS starts the waiting work again by itself')
+      await page.getByTestId('autonomy-unattended-details').locator('summary').click()
+      await expect(page.getByTestId('autonomy-unattended-proceeds').locator('li')).toHaveText(overview.unattended.proceeds)
+      await expect(page.getByTestId('autonomy-unattended-waits').locator('li')).toHaveText(overview.unattended.waits)
+      await expect(page.getByTestId('autonomy-unattended-never').locator('li')).toHaveText(overview.unattended.never)
+      await expect(page.getByTestId('autonomy-unattended-presence').locator('li')).toHaveText(overview.unattended.needsPresence)
+      await screenshot(page, 'v8-unattended')
+
+      // One answer. Nothing else is clicked: no retry, no resume.
+      await page.getByTestId('boundary-badge').click()
+      await page.getByTestId('boundary-request').getByTestId('boundary-allow-mission').click()
+      await expect(page.getByTestId('boundary-request')).toHaveCount(0)
+      await expect(page.getByTestId('boundary-follow-up')).toContainText('Allowed: 1 task started again, mission resumed.', { timeout: 30_000 })
+      await screenshot(page, 'v8-boundary-resumed')
+      await expect.poll(async () => (await invoke(page, 'runs.get', { runId: run.id })).run.state, { timeout: 180_000, intervals: [500] }).toBe('completed')
+      expect((await invoke(page, 'autonomy.recent', {})).find((r) => r.id === requestId)?.followUp).toBe('Allowed: 1 task started again, mission resumed.')
+      expect(await invoke(page, 'autonomy.pending', {})).toEqual([])
+    } finally {
+      await closeApp(app)
+    }
+  })
 })

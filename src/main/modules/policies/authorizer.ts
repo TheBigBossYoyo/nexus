@@ -1,4 +1,4 @@
-import { renderUserGitPowerShell, renderUserGitScript, userGitOf, userGitOfPowerShell } from './git-pipeline'
+import { renderUserGitScript, userGitOf, userGitOfPowerShell } from './git-pipeline'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -324,8 +324,9 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     // runs as the user.
     const userGit = cls.findings.length === 0 ? (shell === 'bash' ? userGitOf(command) : userGitOfPowerShell(command)) : null
     const gitOnly = userGit !== null
-    // What runs for such a command is a script NEXUS writes from the parsed invocations, never the command's text.
-    const shellInfo = { kind: shell, command, gitOnly, ...(userGit !== null ? { gitScript: shell === 'bash' ? renderUserGitScript(userGit) : renderUserGitPowerShell(userGit) } : {}) } as const
+    // What runs for such a command is a bash script NEXUS writes from the parsed invocations, never the command's
+    // text, and whichever shell the command was written for.
+    const shellInfo = { kind: shell, command, gitOnly, ...(userGit !== null ? { gitScript: renderUserGitScript(userGit) } : {}) } as const
     if (base.behavior === 'ask' || verdict.decision === 'REQUIRE_APPROVAL') {
       const findings = [
         ...cls.findings,

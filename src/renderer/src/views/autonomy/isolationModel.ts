@@ -1,6 +1,7 @@
 import type { AppSessionView, IsolationStatusView } from '@shared/isolation'
 import type {
   ResearchArtifact,
+  ResearchBackend,
   ResearchDownloadView,
   ResearchScreening,
   SourceAuthority,
@@ -119,6 +120,18 @@ export const SOURCE_TYPE_LABEL: Record<SourceType, string> = {
   COMMUNITY: 'Community',
   UNKNOWN: 'Unknown source',
 }
+
+/** How a source was read. A page that needs script is rendered in NEXUS's own throwaway browser, never in yours. */
+export const BACKEND_LABEL: Record<ResearchBackend, string> = {
+  PROVIDER_NATIVE_SEARCH: 'Found by the provider search',
+  PROVIDER_NATIVE_FETCH: 'Read by the provider',
+  NEXUS_HTTP_FETCH: 'Read as a plain page',
+  NEXUS_HTML_SEARCH: 'Found by the NEXUS search',
+  NEXUS_RESEARCH_BROWSER: 'Rendered in the research browser',
+}
+
+export const RESEARCH_BROWSER_LINE =
+  'A page that shows nothing without script is rendered in a separate, throwaway browser that NEXUS starts for that page: no profile of yours, no sign-in, read-only requests to the public web.'
 
 export const AUTHORITY_LABEL: Record<SourceAuthority, string> = {
   PRIMARY: 'Primary source',

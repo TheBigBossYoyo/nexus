@@ -105,6 +105,11 @@ function RecentRow({ request }: { request: BoundaryRequestView }) {
         {': '}
         {request.resourceLabel}
       </div>
+      {request.followUp ? (
+        <div className="break-words text-small text-text-secondary" data-testid="boundary-follow-up">
+          {request.followUp}
+        </div>
+      ) : null}
     </li>
   )
 }
@@ -128,7 +133,8 @@ export function BoundaryInbox() {
     >
       <p className="m-0 border-b px-4 py-2 text-small text-text-muted">
         Work that needs one of these keeps waiting while other work goes on. Each question is asked
-        once, however often it comes up.
+        once, however often it comes up. When you answer, NEXUS starts the waiting work again by
+        itself.
       </p>
       {pending.isPending ? (
         <Loading label="Loading boundary decisions" />

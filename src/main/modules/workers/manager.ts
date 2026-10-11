@@ -65,6 +65,8 @@ export interface WorkerManagerDeps {
   bootId: string
   launcher: WorkerLauncher
   config: () => WorkerConfig
+  /** A fingerprint of a session's working directory (see GitService.workingState), or null. */
+  workingState?: (cwd: string) => Promise<string | null>
   /** The most worker processes at once; a session beyond it waits for a worker. */
   maxWorkers: () => number
   /** The run and task an agent session belongs to, for the lease and the worker view. */
@@ -425,6 +427,9 @@ export class WorkerManager {
       const spec = session.spec
       if (method === 'authorize') return reply(true, await spec.authorize(args[0] as ToolRequest))
       if (method === 'requestApproval') return reply(true, await spec.requestApproval(args[0] as ToolRequest, String(args[1]), args[2] as 'low' | 'medium' | 'high'))
+      // The fingerprint of the session's own working directory, taken by the runtime: its git knows the worktree's
+      // Git directory from the repository, and a worker's git would have to believe the `.git` file in it.
+      if (method === 'workingState') return reply(true, this.deps.workingState ? await this.deps.workingState(spec.cwd) : null)
       const tools = spec.nexusTools
       // Only the NEXUS tools by name, and only what the session's own object defines: no inherited property is callable.
       const handler = tools && NEXUS_TOOL_METHODS.includes(method) && Object.hasOwn(tools, method) ? (tools[method as keyof typeof tools] as ((input: unknown) => Promise<string>) | undefined) : undefined
@@ -645,7 +650,7 @@ export class WorkerManager {
 }
 
 const NEXUS_TOOL_METHODS: readonly string[] = ['sendMessage', 'reportBlocker', 'recordDecision', 'proposeMemory', 'proposeGraphChange', 'contextTool', 'extensionTool']
-const CALL_METHODS: readonly string[] = ['authorize', 'requestApproval', ...NEXUS_TOOL_METHODS]
+const CALL_METHODS: readonly string[] = ['authorize', 'requestApproval', 'workingState', ...NEXUS_TOOL_METHODS]
 const isText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max
 
 /** The message if it has the shape the protocol gives its kind, else null. */

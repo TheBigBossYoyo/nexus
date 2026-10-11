@@ -47,6 +47,13 @@ export const PROFILE_ORDER: readonly AutonomyProfile[] = [
 export const NEVER_POSSIBLE_LINE =
   'Whatever the profile, no agent can read provider credentials, reach the NEXUS runtime and its keys, use your own browser profile, change this policy, or shut down or suspend the machine. A profile is a set of permissions NEXUS checks; it is not a sandbox.'
 
+/** The heading and the lead of what holds while nobody is there. */
+export const UNATTENDED_TITLE = 'While you are away'
+export const UNATTENDED_LEAD =
+  'A mission runs in the NEXUS runtime, not in this window. Closing the window, locking the screen or leaving it overnight changes nothing about what NEXUS may do in this project.'
+export const UNATTENDED_ANSWER_LINE =
+  'When you answer a request, allowed or denied, NEXUS starts the waiting work again by itself and resumes a mission that was paused only for it.'
+
 /** The compact line on the project page. */
 export function enrollmentLine(profile: AutonomyProfile | null): string {
   return profile === null

@@ -63,6 +63,9 @@ describe('scenario: a boundary decision resumes the work that waited for it (0.8
     expect(h.repos.approvals.listByRun(run.id).filter((a) => a.kind === 'tool')).toEqual([])
     expect(h.repos.artifacts.listByTask(h.task(run.id, 'publish').id).map((a) => a.title)).toContain('The user allowed: Push to a Git remote')
     expect(h.eventsOfType(run.id, 'run.resumed')).toHaveLength(1)
+    // What was done is said where the user answered: the inbox shows it under the decision.
+    expect(h.autonomy.recent().find((r) => r.id === request?.id)?.followUp).toBe('Allowed: 1 task started again, mission resumed.')
+    expect(h.autonomy.pending().every((r) => r.followUp === null)).toBe(true)
   }, 180_000)
 
   it('denied: the task is started again to finish without it, the mission completes, and the same thing is not asked again', async () => {

@@ -97,9 +97,9 @@ export function parseUserGit(command: string): UserGitInvocation[] | null {
         if (tail === null) return null
         const body = empty ? '' : text.slice(start, bodyEnd)
         if (CONTROL.test(body)) return null
-        // Only as the message: the word right after `-m` or `--message`.
+        // Only as the message: the word right after `-m`.
         const before = words[words.length - 1]
-        if (before !== '-m' && before !== '--message') return null
+        if (before !== '-m') return null
         word = body
         has = true
         i = after + tail[0].length
@@ -152,7 +152,14 @@ export function parseUserGit(command: string): UserGitInvocation[] | null {
   return out
 }
 
-/** How an option is taken: alone, or with a value that must pass a test (given as `--opt=value` or as the next word). */
+/**
+ * How an option is taken: alone, or with a value that must pass a test. Where the value stands is fixed, because
+ * git and this file must agree on it: a long option takes its value after `=` and never as the next word (git
+ * reads `--format --output=x` as two options, the second of which writes a file; found by the second audit); a
+ * short option takes the next word, which git always consumes for the ones listed here (`-m`, `-n`, `-b`, `-B`,
+ * `-c`, `-s` of restore). `-U` takes its number attached only (`-U5`): alone it has a default, and git would
+ * read the next word as a revision.
+ */
 type OptionRule = true | ((value: string) => boolean)
 interface SubcommandRule {
   options: Record<string, OptionRule>
@@ -173,7 +180,7 @@ function plainOperand(v: string): boolean {
   if (/^[A-Za-z]:[\\/]/.test(v)) return false
   // `a..b` is a range of revisions; a path segment that is `..` leaves the directory.
   if (v.split(/[\\/:]/).some((part) => part === '..')) return false
-  if (CONTROL.test(v) || /[\t\n*?[\]{}!$`\\]/.test(v)) return false
+  if (CONTROL.test(v) || /[\t\n*?[\]{}!$`\\"]/.test(v)) return false
   return true
 }
 
@@ -237,6 +244,9 @@ const SUBCOMMANDS: Record<string, SubcommandRule> = {
   tag: { options: { '-l': true, '--list': true }, operands: 0 },
 }
 
+/** Short options whose value is part of the same word and never the next one. */
+const ATTACHED_ONLY = new Set(['-U'])
+
 /** Subcommands for which `.` (the directory the command is in) is an operand. */
 const TAKES_DOT = new Set(['add', 'checkout', 'restore', 'reset', 'clean', 'status', 'diff', 'rm'])
 
@@ -262,10 +272,16 @@ export function isSafeUserGit(args: readonly string[]): boolean {
           if (eq > 0 && !(rule.optional !== undefined && Object.hasOwn(rule.optional, name) && (rule.optional[name] as (v: string) => boolean)(arg.slice(eq + 1)))) return false
           continue
         }
-        // The value: after `=`, or the next word.
-        const value = eq > 0 ? arg.slice(eq + 1) : args[i + 1]
+        if (name.startsWith('--')) {
+          // A long option: the value after `=`, in the same word.
+          if (eq <= 0 || !optionRule(arg.slice(eq + 1))) return false
+          continue
+        }
+        if (ATTACHED_ONLY.has(name)) return false
+        // A short option: the next word, whatever it looks like, is its value for git too.
+        const value = args[i + 1]
         if (value === undefined || !optionRule(value)) return false
-        if (eq <= 0) i += 1
+        i += 1
         continue
       }
       // `-n3`, `-U5`: a short option and its number in one word.
@@ -296,10 +312,42 @@ export function isSafeUserGit(args: readonly string[]): boolean {
   return true
 }
 
-/** Subcommands that compare against the worktree or print differences: they are told on their own command line to stay out of nested repositories. */
-const LOOKS_AT_WORKTREE = new Set(['status', 'diff', 'log', 'show'])
+/** What git is told on its own command line, after the subcommand, whatever the worktree's files say. */
+const FIXED: Record<string, readonly string[]> = {
+  // Nothing inside a nested repository is looked at (a `.gitmodules` in the worktree outranks the same setting given as configuration).
+  status: ['--ignore-submodules=all'],
+  // And no program stands in for the comparison or converts a file for it: `.gitattributes` in the worktree can
+  // name any driver the machine's own git configuration defines (measured by the second audit: `diff=astextplain`).
+  diff: ['--ignore-submodules=all', '--no-ext-diff', '--no-textconv'],
+  log: ['--ignore-submodules=all', '--no-ext-diff', '--no-textconv'],
+  show: ['--ignore-submodules=all', '--no-ext-diff', '--no-textconv'],
+}
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
+
+/**
+ * Two functions every script starts with. A nested repository whose entry is in the index is entered by
+ * `git add`, `git rm` and `git stash`: they start a second git inside it, under its own configuration, and a
+ * filter defined there then runs as the user (measured by the second audit; no setting stops it, a pathspec
+ * that leaves the entry out does). `nx_links` lists those entries from the index as pathspecs that exclude
+ * them; it is run right before each such command, so an entry made by the command before it is seen.
+ */
+const SCRIPT_FUNCTIONS = [
+  `nx_links() { nx_ex=(); local e; while IFS= read -r -d '' e; do case "$e" in 160000*) nx_ex+=(":(top,exclude,literal)\${e#*$'\\t'}");; esac; done < <(command git ls-files -s -z --full-name -- ':(top)' 2>/dev/null); return 0; }`,
+  `nx_nolinks() { nx_links; [ \${#nx_ex[@]} -eq 0 ] && return 0; echo 'NEXUS: the index of this worktree names a nested repository, so git stash is not run here. Commit the work instead.' >&2; return 1; }`,
+].join('\n')
+
+/** Whether an `add` names what to add: an operand, or the whole tree by `-A` or `-u`. Bare `git add` adds nothing and scans nothing. */
+function addScope(rest: readonly string[]): 'operands' | 'all' | 'none' {
+  let all = false
+  let after = false
+  for (const arg of rest) {
+    if (after || !arg.startsWith('-')) return 'operands'
+    if (arg === '--') after = true
+    else if (arg === '--all' || arg === '--update' || (/^-[A-Za-z]+$/.test(arg) && /[Au]/.test(arg))) all = true
+  }
+  return all ? 'all' : 'none'
+}
 
 /**
  * The invocations of a bash command that is git and nothing else, or null. Every invocation passed
@@ -313,22 +361,28 @@ export function userGitOf(command: string): UserGitInvocation[] | null {
 }
 
 /**
- * The bash script NEXUS runs for a qualifying command: each invocation with every argument quoted by NEXUS,
- * joined as the command joined them. A setting the worktree's own `.gitmodules` can switch back on is given
- * on the command line, where it cannot (measured: `submodule.<name>.ignore = none` in `.gitmodules` outranks
- * `diff.ignoreSubmodules=all` from the environment, and a status then runs a nested repository's filter).
+ * The bash script NEXUS runs for a qualifying command, whichever shell the command was written for: each
+ * invocation with every argument quoted by NEXUS, joined as the command joined them. bash is the one shell
+ * used because its quoting of an argument is exact; Windows PowerShell 5.1 hands a quoted argument that
+ * contains a double quote to a program as something else (measured by the second audit).
  */
 export function renderUserGitScript(invocations: readonly UserGitInvocation[]): string {
   const lines = invocations.map((invocation) => {
     const [sub, ...rest] = invocation.args as [string, ...string[]]
-    const extra = LOOKS_AT_WORKTREE.has(sub) ? ['--ignore-submodules=all'] : []
-    const words = ['git', ...[sub, ...extra, ...rest].map(shellQuote)]
+    const words = ['git', ...[sub, ...(FIXED[sub] ?? []), ...rest].map(shellQuote)].join(' ')
+    let call = words
+    if (sub === 'add') {
+      const scope = addScope(rest)
+      if (scope === 'all') call = `{ nx_links; ${words} ':(top)' "\${nx_ex[@]}"; }`
+      else if (scope === 'operands') call = `{ nx_links; ${words} "\${nx_ex[@]}"; }`
+    } else if (sub === 'rm') call = `{ nx_links; ${words} "\${nx_ex[@]}"; }`
+    else if (sub === 'stash' && rest.find((arg) => !arg.startsWith('-')) !== 'list' && rest.find((arg) => !arg.startsWith('-')) !== 'drop') call = `{ nx_nolinks && ${words}; }`
     const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
     // An operator at the end of a line continues on the next one; `;` is the end of the line itself.
     const join = invocation.then === '&&' || invocation.then === '||' ? ` ${invocation.then}` : ''
-    return `${words.join(' ')}${stderr}${join}`
+    return `${call}${stderr}${join}`
   })
-  return `${lines.join('\n')}\n`
+  return `${SCRIPT_FUNCTIONS}\n${lines.join('\n')}\n`
 }
 
 /** True when a bash `command` is one or more listed git invocations and nothing else. */
@@ -337,12 +391,17 @@ export function isGitWithFilters(command: string): boolean {
 }
 
 /**
- * The same question for PowerShell. The words accepted are those PowerShell 5.1 reads exactly as bash does:
- * printable ASCII only, no quote but the apostrophe, nothing PowerShell would expand, one git per `;`.
+ * The same question for a command written for PowerShell. The words accepted are those PowerShell 5.1 reads
+ * exactly as bash does: printable ASCII only, no quote but the apostrophe, nothing PowerShell would expand, one
+ * git per `;`. What then runs is the same bash script as for a bash command: PowerShell is never the one that
+ * hands the arguments to git, so the way it re-quotes them (a double quote or a trailing backslash inside an
+ * argument changes where the argument ends) cannot matter. A double quote and a backslash are refused all the
+ * same, anywhere in the command, so that the text reads the same to whoever compares it with what ran.
  */
 export function userGitOfPowerShell(command: string): UserGitInvocation[] | null {
   if (command.length > 4000 || /[^\x20-\x7e]/.test(command)) return null
-  if (/["`$|&<>(){}@#%!*?[\]~\\]/.test(command.replace(/'[^']*'/g, "''"))) return null
+  if (/["\\]/.test(command)) return null
+  if (/[`$|&<>(){}@#%!*?[\]~]/.test(command.replace(/'[^']*'/g, "''"))) return null
   // A doubled apostrophe is an apostrophe inside a PowerShell string and the end and start of two strings for this parser.
   if (command.includes("''")) return null
   const parsed = parseUserGit(command)
@@ -350,6 +409,8 @@ export function userGitOfPowerShell(command: string): UserGitInvocation[] | null
   for (const invocation of parsed) {
     if (invocation.then !== null && invocation.then !== ';') return null
     if (invocation.stderr !== null) return null
+    // `--%` stops PowerShell's own reading of the line; an empty word is dropped by it.
+    if (invocation.args.some((arg) => arg === '' || arg === '--%')) return null
     if (!isSafeUserGit(invocation.args)) return null
   }
   return parsed
@@ -357,17 +418,4 @@ export function userGitOfPowerShell(command: string): UserGitInvocation[] | null
 
 export function isPlainGitPowerShell(command: string): boolean {
   return userGitOfPowerShell(command) !== null
-}
-
-const powershellQuote = (value: string): string => `'${value.replace(/'/g, "''")}'`
-
-/** The PowerShell script NEXUS runs for a qualifying PowerShell command: `git.exe` by name, every argument quoted by NEXUS. */
-export function renderUserGitPowerShell(invocations: readonly UserGitInvocation[]): string {
-  return `${invocations
-    .map((invocation) => {
-      const [sub, ...rest] = invocation.args as [string, ...string[]]
-      const extra = LOOKS_AT_WORKTREE.has(sub) ? ['--ignore-submodules=all'] : []
-      return `& git.exe ${[sub, ...extra, ...rest].map(powershellQuote).join(' ')}`
-    })
-    .join('\n')}\n`
 }

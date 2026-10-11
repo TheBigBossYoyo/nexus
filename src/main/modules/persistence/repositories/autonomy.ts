@@ -251,6 +251,12 @@ export class AutonomyAuditRepository {
   }
 
   /** Counts per severity for a mission or a project: the autonomy metrics. */
+  /** The newest reason recorded for this action on this resource, or null. */
+  latestReason(action: string, resource: string): string | null {
+    const row = prepare(this.db, 'SELECT reason FROM autonomy_audit WHERE action = ? AND resource = ? ORDER BY seq DESC LIMIT 1').get(action, resource) as { reason: string } | undefined
+    return row ? String(row.reason) : null
+  }
+
   counts(opts: { runId?: string; projectId?: string }): Record<string, number> {
     const rows = (opts.runId !== undefined
       ? prepare(this.db, 'SELECT severity, COUNT(*) AS n FROM autonomy_audit WHERE run_id = ? GROUP BY severity').all(opts.runId)

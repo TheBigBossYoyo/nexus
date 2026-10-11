@@ -33,6 +33,9 @@ import {
   PROFILE_ORDER,
   PROFILE_SENTENCE,
   SCOPE_WORDS,
+  UNATTENDED_ANSWER_LINE,
+  UNATTENDED_LEAD,
+  UNATTENDED_TITLE,
   boundaryCountLabel,
   grantEndedWords,
   resolveErrorText,
@@ -139,6 +142,48 @@ function SummaryLists({
         {NEVER_POSSIBLE_LINE}
       </p>
     </div>
+  )
+}
+
+function UnattendedLists({ policy }: { policy: NonNullable<AutonomyOverview['unattended']> }) {
+  const list = (title: string, items: string[], testId: string) => (
+    <div>
+      <h4 className="m-0 mb-1 text-small font-semibold text-text-secondary">{title}</h4>
+      <ul
+        className="m-0 flex list-disc flex-col gap-0.5 pl-5"
+        aria-label={title}
+        data-testid={testId}
+      >
+        {items.map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ul>
+    </div>
+  )
+  return (
+    <section
+      className="flex flex-col gap-2"
+      aria-labelledby="autonomy-unattended-title"
+      data-testid="autonomy-unattended"
+    >
+      <h3 id="autonomy-unattended-title" className="m-0 text-body font-semibold">
+        {UNATTENDED_TITLE}
+      </h3>
+      <p className="m-0 text-text-secondary">{UNATTENDED_LEAD}</p>
+      <details data-testid="autonomy-unattended-details">
+        <summary className="cursor-pointer text-text-secondary">
+          {policy.proceeds.length} kinds of work go on, {policy.waits.length} wait for your answer,{' '}
+          {policy.never.length} never happen
+        </summary>
+        <div className="mt-2 grid gap-4 md:grid-cols-2">
+          {list('Goes on without you', policy.proceeds, 'autonomy-unattended-proceeds')}
+          {list('Waits as one request', policy.waits, 'autonomy-unattended-waits')}
+          {list('Never done by an agent', policy.never, 'autonomy-unattended-never')}
+          {list('Needs you at the machine', policy.needsPresence, 'autonomy-unattended-presence')}
+        </div>
+      </details>
+      <p className="m-0 text-text-secondary">{UNATTENDED_ANSWER_LINE}</p>
+    </section>
   )
 }
 
@@ -275,6 +320,9 @@ export function AutonomySettings() {
   const preview = useAutonomyOverview(considering ? selected : null, considering)
   const overview = base.data
   const summary = considering ? (preview.data?.summary ?? null) : (overview?.summary ?? null)
+  const unattended = considering
+    ? (preview.data?.unattended ?? null)
+    : (overview?.unattended ?? null)
 
   const enroll = useEnrollProject()
   const unenroll = useUnenrollProject()
@@ -396,6 +444,8 @@ export function AutonomySettings() {
           ) : considering && preview.isPending ? (
             <Loading label="Loading the summary" />
           ) : null}
+
+          {unattended ? <UnattendedLists policy={unattended} /> : null}
 
           <div className="flex flex-wrap items-center gap-2">
             {overview.enrollment ? (

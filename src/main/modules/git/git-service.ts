@@ -350,6 +350,15 @@ export async function removeLinksUnder(root: string): Promise<number> {
   return removed
 }
 
+/**
+ * Subcommands of NEXUS's own that write files into the working tree from commits. Git for Windows follows a
+ * junction when it writes a tracked file below it (measured by the second audit of 0.8: `reset --hard` put the
+ * tracked files of a directory into the directory a junction of that name led to). Before one of these runs in
+ * a worktree NEXUS created, every directory on the way to a file it may write is looked at, and one that is a
+ * link is removed as a link.
+ */
+const WRITES_FILES = new Set(['reset', 'merge', 'checkout', 'switch', 'cherry-pick', 'revert', 'stash', 'restore', 'am', 'rebase', 'read-tree', 'checkout-index'])
+
 /** Subcommands of NEXUS's own that add to or rewrite the branch a working tree is on. */
 const WRITES_BRANCH = new Set(['commit', 'merge', 'reset', 'cherry-pick', 'rebase', 'revert', 'am', 'stash', 'checkout', 'switch'])
 
@@ -397,7 +406,10 @@ export class GitService {
   constructor(private readonly gitPath: string = 'git') {
     // Git needs none of the credentials NEXUS withholds from project commands, and a program that a
     // repository's configuration makes git run must not find them in its environment.
-    const env: NodeJS.ProcessEnv = { ...projectCommandEnv(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GIT_MERGE_AUTOEDIT: 'no' }
+    // GIT_LFS_SKIP_SMUDGE: where Git LFS is installed its filter is in the machine's git configuration, any
+    // `.gitattributes` selects it, and it downloads from the address a `.lfsconfig` in the worktree names
+    // (measured by the second audit of 0.8). NEXUS's git never downloads: LFS files stay pointers in its worktrees.
+    const env: NodeJS.ProcessEnv = { ...projectCommandEnv(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GIT_MERGE_AUTOEDIT: 'no', GIT_LFS_SKIP_SMUDGE: '1' }
     // Inherited repo-scoping variables (e.g. when launched from a git hook) would redirect every call.
     for (const key of Object.keys(env)) {
       if (['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX'].includes(key.toUpperCase())) {
@@ -697,7 +709,12 @@ export class GitService {
     // Made to match the branch before a command that compares against it or builds on it. Not before the two
     // that consume what was just staged.
     if (own && index !== null && USES_INDEX.has(sub) && sub !== 'read-tree' && sub !== 'commit' && sub !== 'write-tree') await this.freshIndex(own, index)
-    const result = await this.exec(own, args, opts, index, cwd)
+    if (own && WRITES_FILES.has(sub)) await this.unlinkTrackedDirectories(own, args, index)
+    // `git add` starts a git inside every nested repository the index names, under that repository's own
+    // configuration, and no setting stops it (measured by the second audit of 0.8). A pathspec that leaves the
+    // entry out does: the entries are read from the index the command will use, and left out.
+    const finalArgs = sub === 'add' ? await this.leavingOutNestedRepositories(own, args, opts, index, cwd) : args
+    const result = await this.exec(own, finalArgs, opts, index, cwd)
     if (own && index !== null && CHANGES_INDEX.has(sub) && result.exitCode === 0) await this.publishIndex(own, index)
     const okCodes = opts.okCodes ?? [0]
     if (result.exitCode !== null && okCodes.includes(result.exitCode) && !result.timedOut) return result
@@ -708,6 +725,60 @@ export class GitService {
     }
     const why = result.timedOut ? 'timed out' : `failed (exit ${result.exitCode})`
     throw new NexusError('git_failed', `git ${args[0] ?? ''} ${why}: ${text}`, detail)
+  }
+
+  /**
+   * Removes, as links, the junctions and symbolic links that stand where a directory of tracked files is: of
+   * the files in NEXUS's index, in the branch's commit, and in every commit the command names. Returns how many.
+   * What the links lead to is not opened. A link made after this and before git writes is not seen: what limits
+   * that is Windows, which lets code at low integrity make a junction only to a directory it can write itself
+   * (tests/integration/isolation/containment.test.ts).
+   */
+  private async unlinkTrackedDirectories(own: TrustedWorktree, args: readonly string[], index: string | null): Promise<number> {
+    const directories = new Set<string>()
+    const take = (listing: string): void => {
+      for (const path of listing.split('\0')) {
+        const parts = path.split('/')
+        for (let depth = 1; depth < parts.length; depth += 1) directories.add(parts.slice(0, depth).join('/'))
+      }
+    }
+    const listed = await this.exec(own, ['ls-files', '-z', '--full-name'], { maxOutputBytes: 256 * 1024 * 1024 }, index)
+    if (listed.exitCode === 0) take(listed.stdout)
+    const sub = subcommandOf(args)
+    const revisions = new Set<string>(['HEAD'])
+    for (const arg of args.slice(args.indexOf(sub) + 1)) if (!arg.startsWith('-') && arg !== '.' && arg.length <= 300) revisions.add(arg)
+    let looked = 0
+    for (const revision of revisions) {
+      if (looked >= 6) break
+      const commit = await this.exec(own, ['rev-parse', '--verify', '-q', `${revision}^{commit}`], {}, index)
+      if (commit.exitCode !== 0) continue
+      looked += 1
+      const tree = await this.exec(own, ['ls-tree', '-r', '-z', '--name-only', '--full-tree', commit.stdout.trim()], { maxOutputBytes: 256 * 1024 * 1024 }, index)
+      if (tree.exitCode === 0) take(tree.stdout)
+    }
+    let removed = 0
+    // Shallowest first: below a link that was removed there is nothing left to look at.
+    for (const directory of [...directories].sort((a, b) => a.length - b.length)) {
+      const path = join(own.root, directory)
+      const info = await lstat(path).catch(() => null)
+      if (info === null || !info.isSymbolicLink()) continue
+      await rm(path, { force: true, recursive: false }).catch(async () => {
+        await rmdir(path).catch(() => undefined)
+      })
+      removed += 1
+    }
+    return removed
+  }
+
+  /** The arguments of an `add` with every nested repository the index names excluded. `add -A` with no path means the whole tree, and still does. */
+  private async leavingOutNestedRepositories(own: TrustedWorktree | null, args: readonly string[], opts: RunGitOptions, index: string | null, cwd?: string): Promise<readonly string[]> {
+    const listed = await this.exec(own, ['ls-files', '-s', '-z', '--full-name', '--', ':(top)'], { ...(opts.env ? { env: opts.env } : {}), maxOutputBytes: 256 * 1024 * 1024 }, index, cwd)
+    if (listed.exitCode !== 0) return args
+    const nested = listed.stdout.split('\0').filter((line) => line.startsWith('160000 ')).map((line) => line.slice(line.indexOf('\t') + 1))
+    if (nested.length === 0) return args
+    const at = args.indexOf('add')
+    const named = args.slice(at + 1).some((arg) => arg === '--' || !arg.startsWith('-'))
+    return [...args, ...(named ? [] : [':(top)']), ...nested.map((path) => `:(top,exclude,literal)${path}`)]
   }
 
   private async out(cwd: string, args: readonly string[], opts?: RunGitOptions): Promise<string> {
@@ -773,7 +844,7 @@ export class GitService {
       const head = await this.run(cwd, ['rev-parse', '--verify', '-q', 'HEAD'], { okCodes: [0, 1, 128] })
       const status = await this.run(cwd, ['--no-optional-locks', 'status', '--porcelain=v2', '-z', '--untracked-files=all'], { okCodes: [0, 128] })
       if (status.exitCode !== 0) return null
-      const diff = await this.run(cwd, ['--no-optional-locks', 'diff', '--no-ext-diff', '--binary', 'HEAD'], { okCodes: [0, 1, 128], maxOutputBytes: 64 * 1024 * 1024 })
+      const diff = await this.run(cwd, ['--no-optional-locks', 'diff', '--no-ext-diff', '--no-textconv', '--binary', 'HEAD'], { okCodes: [0, 1, 128], maxOutputBytes: 64 * 1024 * 1024 })
       return createHash('sha256').update(head.stdout).update('\0').update(status.stdout).update('\0').update(diff.stdout).digest('hex')
     } catch {
       return null
@@ -1093,7 +1164,7 @@ export class GitService {
   }
 
   private async diffTrees(cwd: string, a: string, b: string, maxPatchBytes = DEFAULT_PATCH_BYTES): Promise<DiffResult> {
-    const common = ['diff', '--no-ext-diff', '--no-color', '-M']
+    const common = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '-M']
     const [nameStatus, numstat, patch] = await Promise.all([
       this.run(cwd, [...common, '--name-status', '-z', a, b, '--']),
       this.run(cwd, [...common, '--numstat', '-z', a, b, '--']),
@@ -1109,7 +1180,7 @@ export class GitService {
   /** Paths (new names for renames) that differ between base and head. */
   async changedFiles(repo: string, base: string, head: string): Promise<string[]> {
     const [b, h] = await Promise.all([this.resolveCommit(repo, base), this.resolveCommit(repo, head)])
-    const r = await this.run(repo, ['diff', '--no-ext-diff', '-M', '--name-only', '-z', b, h, '--'])
+    const r = await this.run(repo, ['diff', '--no-ext-diff', '--no-textconv', '-M', '--name-only', '-z', b, h, '--'])
     return r.stdout.split('\0').filter((p) => p !== '')
   }
 

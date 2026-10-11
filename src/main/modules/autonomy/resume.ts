@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { AUTONOMY_CAPABILITIES, type BoundaryRequest } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, BOUNDARY_RESUME_ACTION, type BoundaryRequest } from '@shared/autonomy'
 import { TERMINAL_RUN_STATES, type Run, type Task } from '@shared/domain'
 import { newId } from '@shared/ids'
 import type { Repositories } from '@main/modules/persistence'
@@ -72,7 +72,7 @@ export class BoundaryResumer {
     const outcome: BoundaryResumeOutcome = { retried: [], resumed: false, notes: [] }
     const stop = (note: string): BoundaryResumeOutcome => {
       outcome.notes.push(note)
-      this.deps.record(request, 'boundary auto-resume', note)
+      this.deps.record(request, BOUNDARY_RESUME_ACTION, note)
       return outcome
     }
     if (request.state !== 'GRANTED' && request.state !== 'DENIED') return outcome
@@ -138,7 +138,7 @@ export class BoundaryResumer {
       }
     }
     const what = `${granted ? 'Allowed' : 'Denied'}: ${outcome.retried.length} task${outcome.retried.length === 1 ? '' : 's'} started again${outcome.resumed ? ', mission resumed' : ''}${outcome.notes.length > 0 ? `. ${outcome.notes.join(' ')}` : '.'}`
-    this.deps.record(request, 'boundary auto-resume', what)
+    this.deps.record(request, BOUNDARY_RESUME_ACTION, what)
     this.deps.logger?.(`autonomy: request ${request.id} ${request.state.toLowerCase()}: ${what}`)
     return outcome
   }

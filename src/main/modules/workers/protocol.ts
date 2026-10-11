@@ -62,7 +62,7 @@ export interface WorkerConfig {
   heartbeatMs: number
 }
 
-export type WorkerCallMethod = 'authorize' | 'requestApproval' | 'sendMessage' | 'reportBlocker' | 'recordDecision' | 'proposeMemory' | 'proposeGraphChange' | 'contextTool' | 'extensionTool'
+export type WorkerCallMethod = 'authorize' | 'requestApproval' | 'workingState' | 'sendMessage' | 'reportBlocker' | 'recordDecision' | 'proposeMemory' | 'proposeGraphChange' | 'contextTool' | 'extensionTool'
 
 export type RuntimeToWorker =
   | { t: 'init'; workerId: string; config: WorkerConfig }

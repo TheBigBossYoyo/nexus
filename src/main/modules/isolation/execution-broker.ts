@@ -114,6 +114,20 @@ const REF_CHANGING = ['commit', 'merge', 'rebase', 'reset', 'checkout', 'switch'
  */
 const BASH_GIT_QUIET_LOCK = `git() { command git "$@" 2> >(grep -v "packed-refs.lock': Permission denied" >&2); local rc=$?; wait $! 2>/dev/null; return $rc; }\n`
 
+/**
+ * Around the script of a git-only command that has an index of its own (see gitPins): the index is made from
+ * the branch's commit when it is not there yet, the invocations run as one function, and afterwards the
+ * worktree's own index file is replaced by a copy, so that a git the task runs as the sandbox account sees
+ * what was staged. The copy is for reading only: nothing of the user's git reads it back.
+ */
+const BASH_OWN_INDEX_BEFORE = `if [ -n "$GIT_INDEX_FILE" ] && [ ! -s "$GIT_INDEX_FILE" ]; then command git read-tree HEAD || { echo 'NEXUS: the index for this command could not be made, so it was not run.' >&2; exit 128; }; fi\nnx_main() {\n`
+const BASH_OWN_INDEX_AFTER = `}\nnx_main\nnx_rc=$?\nif [ -n "$GIT_INDEX_FILE" ] && [ -s "$GIT_INDEX_FILE" ] && [ -n "$GIT_DIR" ]; then cp -f "$GIT_INDEX_FILE" "$GIT_DIR/index" 2>/dev/null; fi\nexit $nx_rc\n`
+
+/** The whole bash script of a git-only command: `invocations` is what NEXUS rendered from the parsed command. */
+export function gitOnlyScript(invocations: string): string {
+  return `${BASH_GIT_QUIET_LOCK}${BASH_OWN_INDEX_BEFORE}${invocations}\n${BASH_OWN_INDEX_AFTER}`
+}
+
 /** A `git` function for the command's script: it stops the subcommands that cannot work here and says what to do, and passes the rest to git. */
 function bashGitGuard(kind: 'all' | 'refs'): string {
   const refuse = `echo ${JSON.stringify(GIT_HINT)} >&2; return 128`
@@ -427,6 +441,11 @@ export class ExecutionBroker {
    * Bash for a profile: a copy of Git's MSYS runtime of the profile's own (see mirrorMsys), in a directory the
    * contained process can read. Null when Git for Windows is not installed.
    */
+  /** Whether a bash script can run under this profile: Git Bash was found and its copy for the profile could be made. */
+  async hasBash(profile: ContainmentProfile): Promise<boolean> {
+    return (await this.bashFor(profile).catch(() => null)) !== null
+  }
+
   private async bashFor(profile: ContainmentProfile): Promise<{ bash: string; binDir: string; gitRoot: string } | null> {
     const { gitRoot } = await this.findShells()
     if (gitRoot === null) return null
@@ -535,6 +554,7 @@ export class ExecutionBroker {
       // The directories of the profile the command runs under. A git that runs as the user in an ISOLATED
       // session gets its home, its temporary directory, its empty hooks directory and its script where the
       // sandbox account cannot write: nothing contained code left there is read by a process of the user.
+      if (input.gitOnly === true && (input.gitDir === undefined || input.shell !== 'bash')) return this.fail(input.projectId, input.profile, 'A command that is git alone runs only as the bash script NEXUS wrote, with the Git directory NEXUS recorded for the worktree. One of the two is missing, so it was not run.')
       const roots = await this.roots(input)
       // Whether git can read this repository from inside the command. Under ISOLATED that is so once the sandbox
       // account was given its access; a command that runs as the user (RESTRICTED) reads it anyway.
@@ -557,7 +577,7 @@ export class ExecutionBroker {
       const shells = await this.findShells()
       const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
       // git is hardened wherever it can reach the repository: in a command that is git alone, and in every command of a session whose account was given access.
-      const { env, withheld } = this.environment(input, roots, input.gitOnly === true || (input.profile === 'ISOLATED' && gitReadable) ? { ...this.gitHardening(roots, input.profile === 'ISOLATED'), ...(input.gitOnly === true ? this.gitPins(roots, input.gitDir) : {}) } : {})
+      const { env, withheld } = this.environment(input, roots, input.gitOnly === true || (input.profile === 'ISOLATED' && gitReadable) ? { ...this.gitHardening(roots, input.profile === 'ISOLATED'), ...(input.gitOnly === true ? this.gitPins(roots, input.gitDir, input.sessionProfile === 'ISOLATED' && input.profile !== 'ISOLATED') : {}) } : {})
       if (bash !== null) {
         // The copy's own tools first, then Git itself, so that `git`, `ls` and `grep` are what a Git Bash user expects.
         const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
@@ -573,7 +593,8 @@ export class ExecutionBroker {
       if (input.shell === 'bash') {
         if (bash === null) return this.fail(input.projectId, input.profile, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
         const script = join(roots.temp, `nx-${id}.sh`)
-        writeFileSync(script, `${gitHint !== null ? bashGitGuard(gitHint) : input.gitOnly === true ? BASH_GIT_QUIET_LOCK : ''}${input.command}\n`, { flag: 'wx' })
+        const body = input.gitOnly === true ? gitOnlyScript(input.command) :`${gitHint !== null ? bashGitGuard(gitHint) : ''}${input.command}\n`
+        writeFileSync(script, body, { flag: 'wx' })
         commandLine = `${quoteArg(bash.bash)} --noprofile --norc ${quoteArg(script)}`
       } else {
         const script = join(roots.temp, `nx-${id}.ps1`)
@@ -727,7 +748,10 @@ export class ExecutionBroker {
       // The repository belongs to the user and the command runs as the sandbox account: git is told that this is meant.
       ...(otherAccount ? ([['safe.directory', '*']] as [string, string][]) : []),
     ]
-    const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length), GIT_EDITOR: 'true', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
+    // Git LFS, where it is installed, is a filter the machine's own git configuration defines and a `.gitattributes`
+    // in the worktree selects; where it downloads from is read from a `.lfsconfig` in the worktree (measured by the
+    // second audit: a request to an address the worktree named). It is told not to download: files stay pointers.
+    const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length), GIT_EDITOR: 'true', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1' }
     config.forEach(([key, value], i) => {
       env[`GIT_CONFIG_KEY_${i}`] = key
       env[`GIT_CONFIG_VALUE_${i}`] = value
@@ -740,7 +764,7 @@ export class ExecutionBroker {
    * the repository above it, said in its environment, so that the `.git` file of the worktree (which the task
    * can rewrite) decides nothing; and an empty file as the user-level configuration.
    */
-  private gitPins(roots: SessionRoots, gitDir: string | undefined): Record<string, string> {
+  private gitPins(roots: SessionRoots, gitDir: string | undefined, ownIndex = false): Record<string, string> {
     const empty = join(roots.home, 'gitconfig-empty')
     if (!existsSync(empty)) writeFileSync(empty, '')
     const pins: Record<string, string> = { GIT_CONFIG_GLOBAL: empty, GIT_ATTR_NOSYSTEM: '1' }
@@ -748,6 +772,13 @@ export class ExecutionBroker {
       pins['GIT_DIR'] = gitDir
       pins['GIT_COMMON_DIR'] = resolve(gitDir, '..', '..')
       pins['GIT_WORK_TREE'] = roots.worktree
+      // The index in the worktree's entry is written by the sandbox account: an entry there can name a file
+      // outside the worktree, and a git that runs as the user would then read it out (`git diff`) or write it
+      // (`git restore .`), both measured by the second audit. So the user's git in an ISOLATED session never
+      // reads that index. It keeps one of its own beside its home, where the sandbox account has no access;
+      // what gets into it comes from commits (git refuses a tree entry that steps out, measured) and from
+      // the files of the worktree.
+      if (ownIndex) pins['GIT_INDEX_FILE'] = join(dirname(roots.home), 'git-index')
     }
     return pins
   }
