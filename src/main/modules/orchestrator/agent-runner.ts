@@ -1,3 +1,4 @@
+import { extensionToolNames } from '@main/modules/agent-runtime/extension-tools'
 import {
   AgentMessageTypeSchema,
   emptyMetrics,
@@ -432,6 +433,7 @@ export class AgentRunner {
     })
 
     const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null
+    const extensions = this.deps.extensions?.({ run, task, agentId: agent.id, role, cwd: input.cwd }) ?? null
     const systemPromptAppend = rolePrompt(role, input.purpose)
     const builtinTools = toolsForRole(role, { allowNetworkTools })
     const mayPropose = !!task && canProposeGraphChange(role, input.purpose)
@@ -445,7 +447,7 @@ export class AgentRunner {
       cwd: input.cwd,
       systemText: systemPromptAppend,
       tools: builtinTools,
-      nexusToolNames: [...BASE_NEXUS_TOOLS, ...(mayPropose ? ['propose_graph_change'] : []), ...(contextTool ? CONTEXT_TOOLS : [])],
+      nexusToolNames: [...BASE_NEXUS_TOOLS, ...(mayPropose ? ['propose_graph_change'] : []), ...(contextTool ? CONTEXT_TOOLS : []), ...(extensions ? extensionToolNames(extensions.groups) : [])],
       externalServers: servers.map((s) => s.name),
       loadProjectSettings: run.config.respectProjectClaudeConfig,
       structuredOutput: input.outputSchema !== undefined,
@@ -537,6 +539,7 @@ export class AgentRunner {
           }
         : {}),
       ...(contextTool ? { contextTool } : {}),
+      ...(extensions && extensions.groups.length > 0 ? { extensionGroups: extensions.groups, extensionTool: extensions.call } : {}),
     }
 
     return {

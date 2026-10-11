@@ -644,7 +644,7 @@ export class WorkerManager {
   }
 }
 
-const NEXUS_TOOL_METHODS: readonly string[] = ['sendMessage', 'reportBlocker', 'recordDecision', 'proposeMemory', 'proposeGraphChange', 'contextTool']
+const NEXUS_TOOL_METHODS: readonly string[] = ['sendMessage', 'reportBlocker', 'recordDecision', 'proposeMemory', 'proposeGraphChange', 'contextTool', 'extensionTool']
 const CALL_METHODS: readonly string[] = ['authorize', 'requestApproval', ...NEXUS_TOOL_METHODS]
 const isText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max
 

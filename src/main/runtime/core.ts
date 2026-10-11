@@ -24,6 +24,9 @@ import type { WorkersOverview } from '@shared/workers'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { ArenaService } from '../modules/arena'
 import { AutonomyService } from '../modules/autonomy/service'
+import { policyForPurpose } from '../modules/network/policy'
+import { DEFAULT_SEARCH_URL, WebResearchProvider } from '../modules/research/provider'
+import { createResearchTools } from '../modules/research/tools'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
@@ -494,6 +497,31 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
   let announceBoundary: ((projectId: string, text: string) => void) | null = null
   autonomy.watch(bus)
+  // 0.8: web research. NEXUS's own fetch under the public-research policy: no credential, no body, no local
+  // or private address, every redirect judged again. The texts and the quarantine are under the data directory,
+  // which no worktree is in.
+  const researchPolicy = policyForPurpose('PUBLIC_RESEARCH', {})
+  const research = new WebResearchProvider({
+    artifacts: repos.researchArtifacts,
+    downloads: repos.researchDownloads,
+    dir: join(dataDir, 'research'),
+    guard: () => ({ policy: researchPolicy }),
+    searchUrl: DEFAULT_SEARCH_URL,
+    onNetwork: (context, event) => {
+      // What was refused is a denial worth keeping; what was reached is in the artifact that came of it.
+      if (!event.allowed) autonomy.record({ projectId: context.projectId, runId: context.runId, taskId: context.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `${event.via} ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the research network policy (${event.denial ?? 'policy'}).` })
+    },
+  })
+  bus.subscribe((event) => {
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') research.forget(event.runId)
+  })
+  const extensionTools = createResearchTools({
+    research,
+    gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+    legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
+    policy: () => researchPolicy,
+    record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
+  })
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
@@ -508,6 +536,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     strategies: policy,
     requireEngineeringAdmission: true,
     autonomy,
+    extensions: extensionTools,
   })
   orchestrator.setDispatchGate(usage)
   // Runs that were active when the runtime last stopped are paused, never judged: what became of their

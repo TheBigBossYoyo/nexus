@@ -8,7 +8,7 @@ import type { Preset, Project } from '@shared/domain'
 import type { Repositories } from '@main/modules/persistence'
 import type { StrategyPlan } from '@main/modules/strategy/strategies'
 import type { PolicyDecision, RunStrategyInfo, Strategy, TaskProfile } from '@shared/v3'
-import type { AgentRole } from '@shared/domain'
+import type { AgentRole, Run, Task } from '@shared/domain'
 import type { AutonomyGate } from '@main/modules/autonomy/gate'
 
 /**
@@ -46,6 +46,12 @@ export interface OrchestratorDeps {
   capacityReady?: (taskId: string) => Promise<boolean>
   /** v0.3. See StrategyResolver. */
   strategies?: StrategyResolver
+  /**
+   * 0.8: the extension tools of a session (web research; the application and browser tools): which groups it
+   * gets and the handler that carries a call out. Null when the session gets none. Absent where no such
+   * service exists.
+   */
+  extensions?: (session: { run: Run; task: Task | null; agentId: string; role: AgentRole; cwd: string }) => { groups: string[]; call: (input: unknown) => Promise<string> } | null
   /**
    * 0.8: the capability gate of a session in an enrolled project; undefined for a project that is not enrolled,
    * whose sessions ask the user as in 0.7. Absent where no autonomy service exists (older scenario tests).

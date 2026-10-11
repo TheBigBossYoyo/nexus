@@ -19,6 +19,10 @@ import type { EventType, PushMessage, RunEvent } from '@shared/events'
 import type { AutonomyProfile } from '@shared/autonomy'
 import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { AutonomyService } from '@main/modules/autonomy/service'
+import type { Resolver } from '@main/modules/network/guard'
+import { policyForPurpose } from '@main/modules/network/policy'
+import { WebResearchProvider } from '@main/modules/research/provider'
+import { createResearchTools } from '@main/modules/research/tools'
 import { newId, nowIso } from '@shared/ids'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
@@ -74,6 +78,8 @@ export interface Harness {
   policy: PolicyService | null
   /** 0.8: the autonomy service of this app instance (always present; the project is enrolled only when asked). */
   autonomy: AutonomyService
+  /** 0.8: present when the harness was created with `research`. */
+  research: WebResearchProvider | null
   /** Every durable event emitted by this app instance (since it started). */
   events: RunEvent[]
   /** Ephemeral main → renderer pushes (streamed agent output) of this app instance. */
@@ -124,6 +130,11 @@ export interface HarnessOptions {
    * approval requests. `contained` says whether their commands count as running in the ISOLATED profile.
    */
   autonomy?: { profile: AutonomyProfile; contained?: boolean }
+  /**
+   * 0.8: give sessions the research tools, over a stand-in for the public web: names resolve through
+   * `resolver`, and a connection to an address that passed the policy goes where `dial` says.
+   */
+  research?: { resolver: Resolver; dial: (address: string, port: number) => { host: string; port: number }; searchUrl?: string }
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -204,11 +215,33 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     onChange: () => void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }),
   })
   autonomy.watch(bus)
+  const researchPolicy = policyForPurpose('PUBLIC_RESEARCH', {})
+  const researchOptions = options.research
+  const research = researchOptions
+    ? new WebResearchProvider({
+        artifacts: repos.researchArtifacts,
+        downloads: repos.researchDownloads,
+        dir: join(dir, 'research'),
+        guard: () => ({ policy: researchPolicy, resolver: researchOptions.resolver, dial: researchOptions.dial }),
+        ...(researchOptions.searchUrl ? { searchUrl: researchOptions.searchUrl } : {}),
+      })
+    : null
   const orchestrator = new Orchestrator({
     repos,
     bus,
     runtime: admitted,
     autonomy,
+    ...(research
+      ? {
+          extensions: createResearchTools({
+            research,
+            gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+            legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
+            policy: () => researchPolicy,
+            record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
+          }),
+        }
+      : {}),
     ...(capacity ? { capacityReady: (taskId: string) => capacity.routing.taskReady(taskId) } : {}),
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
@@ -274,6 +307,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     project,
     policy,
     autonomy,
+    research,
     events,
     pushes,
     async waitForState(runId, states, timeoutMs = 150_000) {
@@ -324,7 +358,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}) })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}), ...(options.research ? { research: options.research } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)

@@ -47,6 +47,13 @@ export interface NexusToolHandlers {
    * orchestrator, never trusted; the answer is text for the model. Absent when the session gets no graph tools.
    */
   contextTool?(input: unknown): Promise<string>
+  /**
+   * 0.8: the groups of extension tools this session gets (`research`, `app`), and the one handler that carries
+   * them out. The input is `{ name, args }`; it is validated against the tool's definition and decided by the
+   * capability broker in the runtime, never trusted. Both are absent when the session gets no such tool.
+   */
+  extensionGroups?: string[]
+  extensionTool?(input: unknown): Promise<string>
 }
 
 /**

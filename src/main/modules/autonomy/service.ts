@@ -14,6 +14,7 @@ import {
   type SecurityEventSeverity,
 } from '@shared/autonomy'
 import type { AgentRole } from '@shared/domain'
+import { newId } from '@shared/ids'
 import { NexusError } from '@shared/result'
 import type { Repositories } from '@main/modules/persistence'
 import { CapabilityBroker } from './broker'
@@ -175,6 +176,15 @@ export class AutonomyService {
 
   audit(opts: { projectId?: string; runId?: string; severities?: SecurityEventSeverity[]; limit?: number; before?: number }): { events: AutonomyAuditEvent[]; nextBefore: number | null } {
     return this.deps.repos.autonomyAudit.list(opts)
+  }
+
+  /** A finding that is not a broker decision: an injection taken out of a page, a containment that failed. Never throws. */
+  record(event: { projectId: string | null; runId: string | null; taskId: string | null; agentId: string | null; severity: SecurityEventSeverity; action: string; resource: string; reason: string }): void {
+    try {
+      this.deps.repos.autonomyAudit.record({ id: newId(), timestamp: this.iso(), capability: null, outcome: null, authorizedBy: null, ...event })
+    } catch {
+      // The log is evidence, not a gate.
+    }
   }
 
   /** What a mission cost the user in interruptions: the number the approval-spam gate reads. */
