@@ -79,6 +79,33 @@ In TECHNICAL and COUNCIL depth, and in a Director council, OpenAI's answer is gi
 answer to OpenAI. EXACT and LIGHT depth send nothing to OpenAI. AUTO is the default depth of the composer: with
 the switch on, the next mission started in AUTO sends the data above without a further question.
 
+### The depth AUTO chooses
+
+AUTO gives a request the least depth that is enough for it. The choice is deterministic: it is read from the
+request alone, with the task profile the strategy policy also uses (category, complexity, risk, file scope,
+ambiguity, security sensitivity). The preview says which depth was chosen and why; the code is
+`src/main/modules/intelligence/depth.ts`.
+
+| The request | Depth | Providers asked |
+| --- | --- | --- |
+| Names the one to three files it is about, says exactly what is wanted, low risk; or a typo or a label | LIGHT | none |
+| An ordinary task that leaves things to work out; or something sensitive that is bounded | STANDARD | ChatGPT |
+| Work whose shape depends on the repository: a workspace, an architecture or a migration, a large task, a broad one that is not precisely stated; or something sensitive that is vague | TECHNICAL | ChatGPT, then Claude |
+| A broad or design-level change to something sensitive, or a release to users | COUNCIL | ChatGPT, Claude, then a synthesis |
+
+A word alone decides nothing: a request is not compiled with two providers because it says "refactor", nor with
+a council because it says "security". Anything sensitive is never LIGHT, however exact it is. EXACT is never
+chosen by AUTO; it is the user's own override.
+
+Recorded evidence can raise a depth and never lowers one: where Arena trials or finished missions of the same
+kind of task (same category, complexity and risk) have a low pass rate in this installation on moderate or
+strong evidence, a request that would be LIGHT is developed in STANDARD. No trial compares the depths with each
+other yet, so evidence decides nothing else.
+
+What this costs was measured before this policy, when AUTO read five words: a mission admitted in the depth
+AUTO chose used about 18% more agent turns and input than the same mission admitted as written, with the same
+result. The policy above has not been measured in a campaign; that it uses less is expected and not claimed.
+
 A project can be kept away from OpenAI on its own: the switch "This project may send requests to OpenAI" in the
 compilation panel of its mission composer. Off, nothing of that project is sent to OpenAI whatever the
 connection's switch says; its requests are admitted in EXACT depth unless another is chosen, a depth that needs

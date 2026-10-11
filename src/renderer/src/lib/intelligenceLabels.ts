@@ -10,6 +10,23 @@ export const COMPILATION_MODE_LABEL: Record<CompilationMode, string> = {
   COUNCIL: 'Council: ChatGPT, Claude, then a synthesis (COUNCIL)',
 }
 
+/** Why Automatic chose the depth it chose, in words. Keyed by the reason the depth policy records first. */
+const DEPTH_REASON: Record<string, string> = {
+  LOCAL_MECHANICAL_TASK: 'a small mechanical change: there is nothing to develop.',
+  LOCALIZED_WELL_SPECIFIED_TASK: 'the request names the files it is about and says exactly what is wanted.',
+  ENGINEERING_REQUIREMENT_DEVELOPMENT: 'an ordinary task that leaves things to work out.',
+  HIGH_RISK_BOUNDED: 'it touches something sensitive, and it is bounded.',
+  HIGH_RISK_UNDERSPECIFIED: 'it touches something sensitive and leaves much open.',
+  REPOSITORY_DEPENDENT_BREADTH: 'the shape of the work depends on the repository.',
+  MAJOR_HIGH_RISK_CHANGE: 'a broad change to something sensitive.',
+}
+/** The sentence under the depth when Automatic chose it, or null when the user chose the depth themselves. */
+export function depthReason(reasons: readonly string[]): string | null {
+  const why = reasons.map((r) => DEPTH_REASON[r]).find((text) => text !== undefined)
+  if (!why) return null
+  return `Automatic chose this because ${why}${reasons.includes('RECORDED_EVIDENCE_LOW_PASS_RATE') ? ' Work of this kind has often failed in this project, so it is developed rather than taken as written.' : ''}`
+}
+
 const STATE_LABEL: Record<string, string> = {
   PENDING: 'In progress',
   INVOKING: 'In progress',

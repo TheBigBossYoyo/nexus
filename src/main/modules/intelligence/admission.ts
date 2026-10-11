@@ -366,6 +366,7 @@ export class TaskAdmissionService {
           context,
           policyVersion: POLICY,
           strategy,
+          depthStatistics: this.repos.strategyStatistics.list(),
           ...(strategic ? { strategic } : {}),
           ...(technical ? { technical } : {}),
         })

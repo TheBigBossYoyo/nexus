@@ -21,3 +21,12 @@ describe('toast lifetime (WCAG 2.2.1)', () => {
     expect(toastLifetimeMs('notice')).toBe(8000)
   })
 })
+
+describe('why Automatic chose a depth is said in words', () => {
+  it('names the reason the depth policy recorded, and says nothing when the user chose the depth', async () => {
+    const { depthReason } = await import('../../../src/renderer/src/lib/intelligenceLabels')
+    expect(depthReason(['LOCALIZED_WELL_SPECIFIED_TASK', 'PROFILE:bugfix|medium|low:scope=single:ambiguity=low', 'DEPTH_POLICY:depth-2'])).toBe('Automatic chose this because the request names the files it is about and says exactly what is wanted.')
+    expect(depthReason(['ENGINEERING_REQUIREMENT_DEVELOPMENT', 'RECORDED_EVIDENCE_LOW_PASS_RATE'])).toContain('often failed in this project')
+    expect(depthReason(['USER_SELECTED_MODE'])).toBeNull()
+  })
+})

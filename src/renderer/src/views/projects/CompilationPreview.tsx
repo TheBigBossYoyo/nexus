@@ -1,4 +1,4 @@
-import { COMPILATION_MODE_LABEL, kindLabel, provenanceLabel } from '../../lib/intelligenceLabels'
+import { COMPILATION_MODE_LABEL, depthReason, kindLabel, provenanceLabel } from '../../lib/intelligenceLabels'
 import { useUiStore } from '../../store/ui'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -148,6 +148,7 @@ export function CompilationPreview({
             }
           >
             <p>Depth: {COMPILATION_MODE_LABEL[spec.mode]}</p>
+            {depthReason(spec.reasons) ? <p data-testid="spec-depth-reason">{depthReason(spec.reasons)}</p> : null}
             {spec.status === 'WAITING_FOR_PROVIDER' ? (
               spec.reasons.includes('PROJECT_DOES_NOT_SEND_TO_STRATEGIC_PROVIDER') ? (
                 <p>

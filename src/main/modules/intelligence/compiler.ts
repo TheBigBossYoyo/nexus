@@ -11,6 +11,8 @@ import { CapacityWaitError } from '../capacity/registry'
 import { PlanInferenceError } from './openai'
 import { CapacityRoutingWaitError } from '../capacity/router'
 import { checkIntentDrift } from './drift'
+import { compilationDepth } from './depth'
+import type { StrategyStatistic } from '@shared/v3'
 import { advisoryShape, parseAdvisoryArtifact, withinScope } from './artifact-validation'
 import type { ProviderUsageReceipt } from '@shared/capacity'
 import { ChatGPTBusyError } from './connection'
@@ -32,20 +34,9 @@ export interface AdvisoryProvider {
   stopConfirmed?(): boolean
   dispose?(): Promise<void>
 }
-export const COMPILER_VERSION = '0.7.2.5'
+export const COMPILER_VERSION = '0.7.2.6'
 
-export function compilationDepth(raw: string): {
-  mode: Exclude<CompilationMode, 'AUTO'>
-  reasons: string[]
-} {
-  if (/\b(security|authentication|authorization|encrypt|credential)\b/i.test(raw))
-    return { mode: 'COUNCIL', reasons: ['SECURITY_IMPACT'] }
-  if (/\b(architecture|migration|cross.repo|workspace|refactor)\b/i.test(raw))
-    return { mode: 'TECHNICAL', reasons: ['TECHNICAL_BREADTH'] }
-  if (/\b(typo|spelling|rename label)\b/i.test(raw) && raw.length < 250)
-    return { mode: 'LIGHT', reasons: ['LOCAL_MECHANICAL_TASK'] }
-  return { mode: 'STANDARD', reasons: ['ENGINEERING_REQUIREMENT_DEVELOPMENT'] }
-}
+export { compilationDepth } from './depth'
 
 export function compilerIdentity(
   raw: string,
@@ -93,6 +84,8 @@ export async function compileTask(input: {
   executionScope?: CompilationExecutionScope
   strategic?: AdvisoryProvider
   technical?: AdvisoryProvider
+  /** Recorded Arena and mission evidence per kind of task: it can raise the depth AUTO chooses, never lower it. */
+  depthStatistics?: readonly StrategyStatistic[]
 }): Promise<CompiledTaskSpec> {
   if (!input.raw.trim() || input.raw.length > 32000)
     throw new Error('Intent must contain 1–32000 characters')
@@ -104,7 +97,7 @@ export async function compileTask(input: {
   ].join('\n')
   const selected =
     input.mode === 'AUTO'
-      ? compilationDepth(input.workspaceId ? `workspace\n${policyText}` : policyText)
+      ? compilationDepth(policyText, { workspace: input.workspaceId !== undefined, ...(input.depthStatistics ? { statistics: input.depthStatistics } : {}) })
       : { mode: input.mode, reasons: ['USER_SELECTED_MODE'] }
   const context = selected.mode === 'EXACT' ? [] : input.context
   if (context.length > 30 || context.reduce((n, c) => n + c.text.length, 0) > 32000)
