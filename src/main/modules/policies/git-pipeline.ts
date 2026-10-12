@@ -489,17 +489,28 @@ export function grantedPushOf(command: string, shell: 'bash' | 'powershell' = 'b
 export const PUSH_FORM_HINT =
   'A push runs only as a plain git command: `git push <remote> <branch>` with the remote by its name (options: -u, --force-with-lease, -q), alone or joined to other plain git commands with && or ; and with no pipe and no other program on the line. Write it that way; nothing was run and nothing was asked of the user.'
 
-/** The line of the script for an allowed push. `HEAD` is said as the worktree's own branch, so that the entry's `HEAD` file decides nothing. */
+/**
+ * The lines of the script for an allowed push. `HEAD` is said as the worktree's own branch, so that the entry's
+ * `HEAD` file decides nothing. The remote must be one the repository's own configuration defines: git takes a
+ * word that is no remote for a path, and a push into a directory runs that directory's hooks, as whoever pushes.
+ * A directory in the worktree is the task's to make. So the script asks the configuration first and pushes only
+ * to a remote it finds there; a push that names no remote at all is not made (which remote it would go to is
+ * then read from settings this script does not look at).
+ */
 export function renderGrantedPush(invocation: UserGitInvocation, branch: string): string {
   const [, ...rest] = invocation.args as [string, ...string[]]
   let operand = 0
+  let remote: string | null = null
   const words = rest.map((arg) => {
     if (arg.startsWith('-')) return arg
     operand += 1
+    if (operand === 1) remote = arg
     return operand === 2 && arg === 'HEAD' ? branch : arg
   })
   const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
-  return `command git ${['push', ...words].map(shellQuote).join(' ')}${stderr}`
+  if (remote === null) return `echo 'NEXUS: name the remote and the branch (git push <remote> <branch>); the push was not made.' >&2; exit 128`
+  const known = `if [ -z "$(command git config --get ${shellQuote(`remote.${remote as string}.url`)} 2>/dev/null)" ]; then echo ${shellQuote(`NEXUS: this repository has no remote called ${remote as string}; the push was not made.`)} >&2; exit 128; fi`
+  return `${known}\ncommand git ${['push', ...words].map(shellQuote).join(' ')}${stderr}`
 }
 
 export function isPlainGitPowerShell(command: string): boolean {

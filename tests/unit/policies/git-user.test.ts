@@ -293,13 +293,16 @@ describe('a push the user allowed: one git push, read into arguments, written by
     expect(grantedPushOf('git push origin HEAD && git push --force origin HEAD')).toBeNull()
   })
 
-  it('is written with every argument quoted, and HEAD said as the branch of the worktree', () => {
-    const line = (command: string): string => renderGrantedPush((grantedPushOf(command) ?? [])[0] ?? { args: [], then: null, stderr: null }, 'nexus/run1/task')
-    expect(line('git push origin HEAD')).toBe("command git 'push' 'origin' 'nexus/run1/task'")
-    expect(line('git push -u origin HEAD 2>&1')).toBe("command git 'push' '-u' 'origin' 'nexus/run1/task' 2>&1")
-    expect(line('git push origin main')).toBe("command git 'push' 'origin' 'main'")
-    expect(line('git push')).toBe("command git 'push'")
+  it('is written with every argument quoted, HEAD said as the branch of the worktree, and only to a remote the repository knows', () => {
+    const lines = (command: string): string[] => renderGrantedPush((grantedPushOf(command) ?? [])[0] ?? { args: [], then: null, stderr: null }, 'nexus/run1/task').split('\n')
+    const known = (remote: string): string => `if [ -z "$(command git config --get 'remote.${remote}.url' 2>/dev/null)" ]; then echo 'NEXUS: this repository has no remote called ${remote}; the push was not made.' >&2; exit 128; fi`
+    expect(lines('git push origin HEAD')).toEqual([known('origin'), "command git 'push' 'origin' 'nexus/run1/task'"])
+    expect(lines('git push -u origin HEAD 2>&1')).toEqual([known('origin'), "command git 'push' '-u' 'origin' 'nexus/run1/task' 2>&1"])
+    expect(lines('git push origin main')).toEqual([known('origin'), "command git 'push' 'origin' 'main'"])
     // A remote that happens to be called HEAD stays what it is: only the refspec is the branch.
-    expect(line('git push HEAD HEAD')).toBe("command git 'push' 'HEAD' 'nexus/run1/task'")
+    expect(lines('git push HEAD HEAD')).toEqual([known('HEAD'), "command git 'push' 'HEAD' 'nexus/run1/task'"])
+    // No remote named: not made, and said.
+    expect(lines('git push').join(' ')).toMatch(/name the remote and the branch.*exit 128/)
+    expect(lines('git push -u').join(' ')).not.toContain('command git')
   })
 })

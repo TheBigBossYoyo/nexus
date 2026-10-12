@@ -396,5 +396,23 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     rmSync(join(entry, 'config.worktree'))
     expect(push('git push -u origin HEAD').code).toBe(0)
     expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('more')
+    // A directory in the worktree that is a repository of the task's own making, with a hook that would run on
+    // a push into it. Stock git takes the word for a path and runs the hook as whoever pushes.
+    const planted = join(worktree, 'evil')
+    raw(base, 'init', '-q', '--bare', '-b', 'main', planted)
+    writeFileSync(join(planted, 'hooks', 'post-receive'), `#!/bin/sh\necho ran > "${slash(marker('hook'))}"\n`)
+    writeFileSync(join(planted, 'hooks', 'pre-receive'), `#!/bin/sh\necho ran > "${slash(marker('hook'))}"\n`)
+    const stock = spawnSync('git', ['push', 'evil', 'nexus/run1/task'], { cwd: worktree, env: { ...process.env, GIT_DIR: entry, GIT_COMMON_DIR: join(repo, '.git'), GIT_WORK_TREE: worktree }, encoding: 'utf8', windowsHide: true })
+    void stock
+    console.info(`stock: git push <a directory of the worktree> ran its hook: ${markers().join(', ') || 'nothing'}`)
+    const stockRan = markers()
+    rmSync(marker('hook'), { force: true })
+    const toDirectory = push('git push evil HEAD')
+    expect(toDirectory.code).toBe(128)
+    expect(toDirectory.out).toContain('no remote called evil')
+    expect(markers(), 'the hook of the planted repository did not run').toEqual([])
+    expect(stockRan, 'stock git runs the hook (the reason for the measure)').toEqual(['hook'])
+    // And a push that names no remote is not made.
+    expect(push('git push').code).toBe(128)
   }, 180_000)
 })
