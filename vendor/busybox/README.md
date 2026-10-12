@@ -9,5 +9,17 @@ NEXUS uses it as the POSIX shell of the isolated profile: it is a native Windows
 AppContainer, where Git for Windows' bash cannot. NEXUS runs only a file with this hash
 (`src/main/modules/isolation/shell-adapter.ts`).
 
-License: GNU GPL version 2. Source: https://github.com/rmyorston/busybox-w32 at commit 169694ebd. Whoever
-distributes a NEXUS installer that contains this file must offer that source with it.
+## License and what distributing it requires
+
+busybox-w32 is under the GNU General Public License, version 2 (`COPYING` beside this file). NEXUS starts it as a
+separate program and links nothing of it: the license covers this one file, not NEXUS.
+
+Its source: https://github.com/rmyorston/busybox-w32 at commit 169694ebd (tag FRP-6075).
+
+Using it on your own machine asks nothing of you. **Giving a copy of NEXUS that contains it to anybody else**
+(an installer, a zip) does: section 3 of the license. Either the complete corresponding source goes with it,
+or a written offer, valid for three years, to give that source to anyone who asks. A link to somebody else's
+repository is neither. The simplest way to comply is to put the source archive of that commit beside the
+installer wherever the installer is published. Until one of the two is done, NEXUS builds that contain this
+file are for the machine they were built on. The packaged application carries this file and `COPYING` in
+`resources/bin/busybox-license/`.
