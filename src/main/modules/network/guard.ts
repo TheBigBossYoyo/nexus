@@ -1,6 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns'
 import { isIP, type LookupFunction } from 'node:net'
 import { checkConnect, checkUrl, normalizeHost, type NetworkDenial, type NetworkPolicy, type NetworkVerdict } from './policy'
+import { nat64Embedded } from './address'
 
 /**
  * 0.8: the connect-time half of the network policy. A name is resolved here, once; every address of the answer
@@ -89,6 +90,12 @@ export async function pin(options: GuardOptions, via: string, method: string, ho
     emit(false, 'RESOLUTION', null)
     throw new NetworkDenied('RESOLUTION', `${host} could not be resolved.`, `${host}:${port}`)
   }
+  // An address a DNS64 resolver made up from an IPv4 address of the same answer names no other place than that
+  // IPv4 address does: it is left out, and the IPv4 address is judged and used. Any other translated address is
+  // judged as before (and refused). A real mission (2026-10-12) could not download from github.com on a network
+  // whose resolver answers this way.
+  const v4 = new Set(addresses.filter((a) => isIP(a) === 4))
+  if (v4.size > 0) addresses = addresses.filter((a) => !v4.has(nat64Embedded(a) ?? ''))
   const verdict = checkConnect(options.policy, host, port, addresses)
   if (!verdict.allowed) {
     emit(false, verdict.denial, null)

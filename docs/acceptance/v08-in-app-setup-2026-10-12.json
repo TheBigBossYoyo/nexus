@@ -1,0 +1,52 @@
+{
+  "kind": "v0.8-in-app-setup",
+  "startedAt": "2026-10-12T07:37:39.831Z",
+  "checks": {
+    "before: no sandbox account, the setup is offered, ISOLATED is not available": true,
+    "the button is shown": true,
+    "after: the sandbox account is recorded": true,
+    "after: ISOLATED was verified by running it and is available": true,
+    "after: the panel says the account is set up and offers no button": true,
+    "the window reported no script error": true
+  },
+  "errors": [],
+  "before": {
+    "requested": "STRONGEST",
+    "effective": "RESTRICTED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+    "isolated": {
+      "available": false,
+      "detail": "The sandbox account is not set up on this machine.",
+      "checkedAt": "2026-10-12T07:37:40.947Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+      "checkedAt": "2026-10-12T07:37:40.904Z"
+    },
+    "sandboxAccount": false,
+    "setupAvailable": true
+  },
+  "resultText": "Setting up. Confirm in the NEXUS dialog, then in the Windows prompt.",
+  "after": {
+    "requested": "STRONGEST",
+    "effective": "ISOLATED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.",
+    "isolated": {
+      "available": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.",
+      "checkedAt": "2026-10-12T07:38:27.687Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+      "checkedAt": "2026-10-12T07:37:40.904Z"
+    },
+    "sandboxAccount": true,
+    "setupAvailable": true
+  },
+  "finishedAt": "2026-10-12T07:38:28.540Z",
+  "verdict": "PASS"
+}

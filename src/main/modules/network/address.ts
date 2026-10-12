@@ -133,6 +133,17 @@ export function classifyAddress(address: string): AddressClass {
   return 'INVALID'
 }
 
+/**
+ * The IPv4 address inside an address of the NAT64 well-known prefix (`64:ff9b::/96`), or null for any other
+ * address. A DNS64 resolver makes such an address up from the IPv4 address of a name that has no IPv6 one.
+ */
+export function nat64Embedded(address: string): string | null {
+  if (!address.includes(':')) return null
+  const g = v6Groups(address.replace(/%.*$/, ''))
+  if (g === null || g[0] !== 0x64 || g[1] !== 0xff9b || g.slice(2, 6).some((x) => x !== 0)) return null
+  return embedded(g[6] ?? 0, g[7] ?? 0).join('.')
+}
+
 export function isPublicAddress(address: string): boolean {
   return classifyAddress(address) === 'PUBLIC'
 }
