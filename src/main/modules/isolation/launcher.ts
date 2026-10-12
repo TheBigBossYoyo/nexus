@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { randomBytes } from 'node:crypto'
@@ -56,7 +57,38 @@ export interface LaunchSpec {
   reportPath?: string
   /** Required for ISOLATED. */
   sandbox?: SandboxAccountRef
+  /**
+   * ISOLATED only: the name of the AppContainer the command is started in, with no capability. Windows then
+   * looks up no name for it, shows it nothing of the machine's name cache and lets none of its packets out.
+   */
+  appContainer?: string
 }
+
+/**
+ * The AppContainer every command of the ISOLATED profile is started in. A name: Windows derives the same SID
+ * from it on every machine. It holds one capability, NEXUS's own and of the same name, which Windows gives no
+ * meaning; the elevated setup (native/sandbox-setup) and NEXUS open the sandbox's folders to that capability.
+ * (Not to the AppContainer's own SID: an access list that names an AppContainer keeps every low-integrity
+ * program out of the folder. Measured.) It holds none of Windows' capabilities, so Windows looks up no name for
+ * it, shows it nothing of the machine's name cache and lets none of its packets out; the loopback, where
+ * NEXUS's proxy listens, is all the network it has.
+ */
+export const SANDBOX_APP_CONTAINER = 'NexusSandbox.Contained.1'
+
+/**
+ * Windows rewrites three variables of a process it starts in an AppContainer, from the LOCALAPPDATA it is
+ * given: LOCALAPPDATA itself becomes `<it>\Packages\<name>\AC`, TEMP and TMP `<that>\Temp` (measured). The
+ * directories are not made by Windows. This makes them and returns the temporary directory the command will see.
+ */
+export function appContainerDirs(localAppData: string, name: string = SANDBOX_APP_CONTAINER): { localAppData: string; temp: string } {
+  const local = join(localAppData, 'Packages', name.toLowerCase(), 'AC')
+  const temp = join(local, 'Temp')
+  mkdirSync(temp, { recursive: true })
+  return { localAppData: local, temp }
+}
+
+/** A name every Windows machine asks for by itself (the connectivity check), used to see whether a contained process gets names looked up. */
+const DNS_PROBE_NAME = 'dns.msftncsi.com'
 
 /** Launcher exit codes that are its own, not the command's. */
 export const LAUNCH_EXIT = { usage: 120, spec: 121, timeout: 124, containment: 125, start: 126 } as const
@@ -86,6 +118,12 @@ export function renderSpec(spec: LaunchSpec): string {
       if (!/^S-1-5-21-[0-9-]{5,100}$/.test(spec.sandbox.sid)) throw new Error('The sandbox account has no usable SID.')
       lines.push(`account-sid=${spec.sandbox.sid}`)
     }
+    if (spec.appContainer !== undefined) {
+      if (!/^[A-Za-z0-9.-]{1,64}$/.test(spec.appContainer)) throw new Error('An AppContainer name is letters, digits, dots and hyphens.')
+      lines.push(`appcontainer=${spec.appContainer}`)
+    }
+  } else if (spec.appContainer !== undefined) {
+    throw new Error('An AppContainer is part of the ISOLATED profile only.')
   }
   return `${lines.join('\n')}\n`
 }
@@ -139,6 +177,8 @@ export interface VerifyPlace {
 
 export class Launcher {
   private readonly checks = new Map<ContainmentProfile, ContainmentCheck>()
+  private containerSid: string | null = null
+  private capability: string | null = null
 
   constructor(private readonly options: LauncherOptions) {}
 
@@ -172,6 +212,52 @@ export class Launcher {
     if (result.exitCode !== 0) throw new Error(`The runtime's pipe could not be protected: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
   }
 
+  /** The SID of the AppContainer of the ISOLATED profile, as the launcher itself derives it. */
+  async appContainerSid(): Promise<string> {
+    if (this.containerSid !== null) return this.containerSid
+    const result = await runProcess(this.options.executable, ['appcontainer-sid', SANDBOX_APP_CONTAINER], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
+    const sid = result.stdout.trim()
+    if (result.exitCode !== 0 || !/^S-1-15-2-[0-9-]{10,120}$/.test(sid)) throw new Error(`The AppContainer's identifier could not be derived: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
+    this.containerSid = sid
+    return sid
+  }
+
+  /** The SID of NEXUS's own capability, the one thing the AppContainer holds: what access lists name. */
+  async capabilitySid(): Promise<string> {
+    if (this.capability !== null) return this.capability
+    const result = await runProcess(this.options.executable, ['capability-sid', SANDBOX_APP_CONTAINER], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
+    const sid = result.stdout.trim()
+    if (result.exitCode !== 0 || !/^S-1-15-3-1024-[0-9-]{10,140}$/.test(sid)) throw new Error(`The sandbox's capability could not be derived: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
+    this.capability = sid
+    return sid
+  }
+
+  /**
+   * Lets the AppContainer write in a directory tree of the sandbox, by its capability. Without an entry of its
+   * own an AppContainer writes nowhere, whatever the account may do.
+   */
+  async grantContainer(path: string): Promise<void> {
+    const sid = await this.capabilitySid()
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    const result = await runProcess(join(system32, 'icacls.exe'), [path, '/grant', `*${sid}:(OI)(CI)(M)`, '/Q'], { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
+    if (result.exitCode !== 0) throw new Error(`The AppContainer could not be let into ${path}: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
+  }
+
+  /**
+   * Takes a directory tree of the sandbox away from the AppContainer: its capability has no entry there any
+   * more, inherited or its own. An integrity label does not do this: a process in an AppContainer reads a file
+   * labeled "no read from below" and replaces one labeled "no write from below" (measured). What keeps it out
+   * of a place is that its capability has no entry there, and nothing else.
+   */
+  async closeToContainer(path: string): Promise<void> {
+    const sid = await this.capabilitySid()
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    for (const args of [[path, '/inheritance:d', '/Q'], [path, '/remove', `*${sid}`, '/T', '/Q']]) {
+      const result = await runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
+      if (result.exitCode !== 0) throw new Error(`${path} could not be closed to the AppContainer: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
+    }
+  }
+
   /** The program and arguments that run a spec. */
   invocation(specPath: string): { file: string; args: string[] } {
     return { file: this.options.executable, args: ['--spec', specPath] }
@@ -191,7 +277,8 @@ export class Launcher {
   /**
    * Establishes that a profile works here, by using it. A contained process must be able to write in its own
    * directory and must not be able to write beside it or to read a protected file; under ISOLATED it must also
-   * be a different account, unable to read a directory of the user's, and without a route to the Internet.
+   * be a different account in an AppContainer, unable to read a directory of the user's, without a route to
+   * the Internet, without names looked up for it and without sight of the machine's name cache.
    * The answer is kept for this start. Any doubt is "not available": a profile that was not shown to hold is
    * not reported as holding.
    */
@@ -228,7 +315,11 @@ export class Launcher {
         writeFileSync(join(userOnly, 'sentinel.txt'), 'nexus-verify-user-sentinel')
       }
       await this.label('low', inside)
+      if (profile === 'ISOLATED') await this.grantContainer(inside)
       await this.label('protect', secret)
+      // Under ISOLATED the protected place is one the AppContainer's capability has no entry on: that, and not
+      // a label, is what keeps an AppContainer out, and it is how everything outside the sandbox root is kept.
+      if (profile === 'ISOLATED') await this.closeToContainer(secret)
       const systemRoot = process.env['SystemRoot'] ?? 'C:\\Windows'
       // cmd.exe and tools of System32 only: present on every Windows, no runtime to load, no dialog of their own.
       const lines = [
@@ -241,15 +332,34 @@ export class Launcher {
       // A public address over HTTP: reached means the account has a route out. That the same request fails could
       // also mean that the request cannot be made at all here (no curl, no network), so its counterpart is made
       // first, to an address the account must reach: a listener of this process on the loopback.
+      let namesHere = false
+      const env = minimalEnv(inside)
       if (profile === 'ISOLATED') {
         lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://127.0.0.1:${controlPort}/ && echo reached> "${join(inside, 'loop.txt')}"`)
         lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://1.1.1.1/ && echo reached> "${join(inside, 'net.txt')}"`)
+        // Names. Windows looks a name up for whoever asks, in a service of its own that no firewall rule for an
+        // account sees: an address in the answer means the contained process got a name looked up (or read from
+        // the cache), and a long listing means it was shown the cache. Both in the ways a program would ask:
+        // the resolver every program uses (ping), a query of its own (nslookup), a request by name (curl).
+        lines.push(`("${join(systemRoot, 'System32', 'PING.EXE')}" -4 -n 1 -w 200 ${DNS_PROBE_NAME} > "${join(inside, 'name.txt')}") 2>nul`)
+        lines.push(`("${join(systemRoot, 'System32', 'nslookup.exe')}" -timeout=2 -retry=1 ${DNS_PROBE_NAME} > "${join(inside, 'query.txt')}") 2>nul`)
+        lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://${DNS_PROBE_NAME}/ && echo reached> "${join(inside, 'byname.txt')}"`)
+        lines.push(`("${join(systemRoot, 'System32', 'ipconfig.exe')}" /displaydns > "${join(inside, 'cache.txt')}") 2>nul`)
+        // What the same question gives outside the containment, so that "no answer" inside is not read as more than it is.
+        namesHere = await lookup(DNS_PROBE_NAME).then(() => true, () => false)
+        // An AppContainer is started only with a home to derive its own directories from.
+        const home = join(inside, 'home')
+        env['USERPROFILE'] = home
+        env['APPDATA'] = join(home, 'AppData', 'Roaming')
+        env['LOCALAPPDATA'] = join(home, 'AppData', 'Local')
+        mkdirSync(env['APPDATA'], { recursive: true })
+        appContainerDirs(env['LOCALAPPDATA'])
       }
       lines.push('exit /b 0')
       const comspec = process.env['ComSpec'] ?? 'C:\\Windows\\System32\\cmd.exe'
-      const specPath = this.writeSpec({ profile, cwd: inside, commandLine: `${quoteArg(comspec)} /d /s /c "${lines.join(' & ')}"`, env: minimalEnv(inside), timeoutMs: 30_000, maxProcesses: 16, ...(place.sandbox ? { sandbox: place.sandbox } : {}) })
+      const specPath = this.writeSpec({ profile, cwd: inside, commandLine: `${quoteArg(comspec)} /d /s /c "${lines.join(' & ')}"`, env, timeoutMs: 60_000, maxProcesses: 16, ...(place.sandbox ? { sandbox: place.sandbox } : {}), ...(profile === 'ISOLATED' ? { appContainer: SANDBOX_APP_CONTAINER } : {}) })
       const { file, args } = this.invocation(specPath)
-      const result = await runProcess(file, args, { cwd: inside, timeoutMs: 45_000, env: minimalEnv() })
+      const result = await runProcess(file, args, { cwd: inside, timeoutMs: 75_000, env: minimalEnv() })
       this.removeSpec(specPath)
       const read = (name: string): string => (existsSync(join(inside, name)) ? readFileSync(join(inside, name), 'utf8') : '')
       if (result.exitCode !== 0) return done(false, `The launcher could not run a contained command (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 300)}`)
@@ -264,7 +374,15 @@ export class Launcher {
       if (read('net.txt').includes('reached')) return done(false, 'The sandbox account reached the Internet directly: its firewall rule is missing or not effective.')
       // Without the counterpart the failed request proves nothing: said as it is.
       if (!read('loop.txt').includes('reached')) return done(false, 'Whether the sandbox account has a route to the Internet could not be established: its test request did not even reach NEXUS on this machine.')
-      return done(true, `Verified at this start: a contained process ran as ${who}, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.`)
+      const address = /\b\d{1,3}(\.\d{1,3}){3}\b/
+      if (address.test(read('name.txt'))) return done(false, 'Windows looked up a name for the contained process: it is not in an AppContainer that holds, and a name it asks for can be seen outside.')
+      // nslookup names its server first; an address after the name asked for is an answer.
+      const query = read('query.txt')
+      const asked = query.toLowerCase().lastIndexOf(DNS_PROBE_NAME)
+      if (asked >= 0 && address.test(query.slice(asked))) return done(false, 'The contained process got an answer to a name query of its own: its packets are not kept in.')
+      if (read('byname.txt').includes('reached')) return done(false, 'The contained process reached a server by its name: it has a route out.')
+      if (read('cache.txt').split(/\r?\n/).filter((line) => line.trim() !== '').length > 8) return done(false, "The contained process was shown the machine's cache of looked-up names.")
+      return done(true, `Verified at this start: a contained process ran as ${who} in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.${namesHere ? '' : ' Names could not be looked up from this machine at all at that moment, so the refusal of names was seen only as far as that goes.'}`)
     } catch (e) {
       return done(false, `The containment could not be verified: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

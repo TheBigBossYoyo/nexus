@@ -1,5 +1,7 @@
 # NEXUS sandbox account: removal. Runs elevated. Undoes setup-sandbox.ps1: the firewall rules, the sign-in
-# screen entry, the account, the machine's record, and (with -RemoveRoot) the sandbox root with everything in it.
+# screen entry, the AppContainer's entries on the two folders above the root and its loopback exemption, the
+# account with the Windows profile it got when it first ran a command, the machine's record, and (with
+# -RemoveRoot) the sandbox root with everything in it.
 #
 # It removes what the setup made and nothing else. An account of that name that does not carry the setup's
 # mark is somebody else's and is left where it is; a folder that is a link, or that belongs to somebody else,
@@ -36,9 +38,42 @@ try {
   }
   # The filter an earlier build made, if it is there. It carries NEXUS's own key: nobody else's is touched.
   try { Remove-NexusDnsFilter } catch { $result.left += "the RPC filter $($script:NexusDnsFilterKey) ($($_.Exception.Message))" }
+  # The AppContainer's entries above the root and its loopback exemption. The identifier is the one Windows
+  # derives from NEXUS's own name for it: an entry for it on these folders is nobody else's.
+  try {
+    $containerSid = Get-NexusAppContainerSid
+    foreach ($folder in (Get-NexusAncestorFolders ([IO.Path]::GetFullPath($SandboxRoot)))) {
+      if (-not (Test-Path -LiteralPath $folder) -or (Test-NexusReparsePoint $folder)) { continue }
+      foreach ($entrySid in @((Get-NexusCapabilitySid), $containerSid)) {
+        if (@(Get-NexusOwnEntries $folder $entrySid | Where-Object { $null -ne $_ }).Count -gt 0) {
+          Invoke-NexusIcacls @($folder, '/remove', "*$entrySid", '/Q')
+          $result.steps += "sandbox-entry-removed:$folder"
+        }
+      }
+    }
+    [void](& (Join-Path $env:SystemRoot 'System32\CheckNetIsolation.exe') LoopbackExempt -d "-p=$containerSid" 2>&1 | Out-String)
+  } catch { $result.left += "the AppContainer's entries on the folders above the sandbox root ($($_.Exception.Message))" }
   if ($null -ne $account -and -not $ours) {
     $result.left += "the account $AccountName (it does not carry the mark of NEXUS's setup)"
   } else {
+    # The account's Windows profile, made when it first ran a command in the AppContainer. It is found by the
+    # account's identifier in Windows' own list of profiles, never by a folder's name, and removed by Windows
+    # (folder and registry entry together). Left alone, and said so, when it is in use, is a link, or is not a
+    # folder directly inside the machine's profiles folder.
+    if ($null -ne $account) {
+      try {
+        $profile = Get-CimInstance -ClassName Win32_UserProfile -Filter "SID='$($account.Sid)'" -ErrorAction Stop
+        if ($null -ne $profile) {
+          $profiles = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList').ProfilesDirectory))
+          $path = [IO.Path]::GetFullPath([string]$profile.LocalPath)
+          if ($profile.Loaded) { $result.left += "the profile folder $path (it is in use)" }
+          elseif ($profile.Special) { $result.left += "the profile folder $path (Windows marks it as a system profile)" }
+          elseif ((Split-Path -Parent $path) -ne $profiles) { $result.left += "the profile folder $path (it is not directly inside $profiles)" }
+          elseif ((Test-Path -LiteralPath $path) -and (Test-NexusReparsePoint $path)) { $result.left += "the profile folder $path (it is a link to another place)" }
+          else { Remove-CimInstance -InputObject $profile -ErrorAction Stop; $result.steps += 'profile-removed' }
+        }
+      } catch { $result.left += "the account's profile ($($_.Exception.Message))" }
+    }
     $key = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
     if (Test-Path $key) { Remove-ItemProperty -Path $key -Name $AccountName -ErrorAction SilentlyContinue; $result.steps += 'sign-in-entry-removed' }
     if ($null -ne $account) { Remove-LocalUser -SID $account.Sid; $result.steps += 'account-removed' }

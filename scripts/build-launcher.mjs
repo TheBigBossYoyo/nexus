@@ -4,7 +4,7 @@
 //
 // No toolchain is installed for this: csc.exe is part of Windows. The output is one small executable.
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -19,6 +19,12 @@ export function buildLauncher(outDir = join(here, 'out', 'native')) {
   if (process.platform !== 'win32') throw new Error('The launcher is a Windows program.')
   const source = launcherSource()
   const output = join(outDir, 'nexus-launch.exe')
+  // The POSIX shell of the isolated profile (vendor/busybox) lies beside the launcher in every build.
+  const shell = join(here, 'vendor', 'busybox', 'busybox.exe')
+  if (existsSync(shell)) {
+    mkdirSync(outDir, { recursive: true })
+    if (!existsSync(join(outDir, 'busybox.exe')) || statSync(join(outDir, 'busybox.exe')).size !== statSync(shell).size) copyFileSync(shell, join(outDir, 'busybox.exe'))
+  }
   if (existsSync(output) && statSync(output).mtimeMs >= statSync(source).mtimeMs) return output
   const csc = join(process.env.SystemRoot ?? 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
   if (!existsSync(csc)) throw new Error(`The C# compiler of Windows was not found: ${csc}`)

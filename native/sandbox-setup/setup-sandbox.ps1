@@ -8,7 +8,13 @@
 #      the only way out it is meant to have;
 #   3. creates the sandbox root (default C:\ProgramData\NexusSandbox) readable and writable by the user who
 #      runs NEXUS and by the sandbox account, and by nobody else but SYSTEM and administrators;
-#   4. records, in HKLM where only an administrator writes, which account and which folder are NEXUS's.
+#   4. lets the AppContainer NEXUS starts contained commands in (a fixed name; it holds one capability of
+#      NEXUS's own and none of Windows': Windows looks up no name for it and lets none of its packets out) read
+#      the sandbox root, and gives that capability an entry on the two folders above the root, the drive's root
+#      and ProgramData: to read and list that folder itself, inherited by nothing in it. Without these a program
+#      in the AppContainer cannot find its own working directory. The entries name the capability, not the
+#      AppContainer: an entry for an AppContainer keeps low-integrity programs out of the folder;
+#   5. records, in HKLM where only an administrator writes, which account, folder and AppContainer are NEXUS's.
 #
 # It trusts no name. An account, a folder or a firewall rule that is already there under the expected name is
 # looked at (sandbox-checks.ps1). What this setup made before is repaired to what it should be. What it did not
@@ -31,7 +37,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'sandbox-checks.ps1')
-$result = [ordered]@{ ok = $false; account = $AccountName; sid = $null; root = $SandboxRoot; firewallOutbound = $false; firewallInbound = $false; hidden = $false; steps = @(); error = $null }
+$result = [ordered]@{ ok = $false; account = $AccountName; sid = $null; root = $SandboxRoot; firewallOutbound = $false; firewallInbound = $false; hidden = $false; appContainer = $null; appContainerSid = $null; capabilitySid = $null; loopbackExempt = $null; steps = @(); error = $null }
 
 function Step([string]$name) { $script:result.steps += $name }
 
@@ -56,9 +62,13 @@ try {
     $accountCheck = Test-NexusAccountState $account
     if ($accountCheck.Problems.Count -gt 0) { throw "The account $AccountName cannot be used and was not changed: $($accountCheck.Problems -join '; '). Remove or rename it, or run the setup with another account name." }
   }
+  $containerSid = Get-NexusAppContainerSid
+  $capabilitySid = Get-NexusCapabilitySid
   $root = Get-NexusRootState $full
   if ($null -ne $root) {
-    $rootCheck = Test-NexusRootState $root $MainUserSid $(if ($null -ne $account) { $account.Sid } else { '' })
+    # An entry for the AppContainer itself, which a pre-release build of 0.8 made, is that build's and is replaced below.
+    $root.Rules = @($root.Rules | Where-Object { $_.Sid -ne $containerSid })
+    $rootCheck = Test-NexusRootState $root $MainUserSid $(if ($null -ne $account) { $account.Sid } else { '' }) -AppContainerSid $capabilitySid
     if ($rootCheck.Problems.Count -gt 0) { throw "The folder $full cannot be used and was not changed: $($rootCheck.Problems -join '; '). Move it away, or run the setup with another folder." }
   }
   $record = Get-NexusSandboxRecord
@@ -124,22 +134,58 @@ try {
   $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
   $none = [Security.AccessControl.PropagationFlags]::None
   $allow = [Security.AccessControl.AccessControlType]::Allow
-  foreach ($entry in @(@('S-1-5-18', 'FullControl'), @('S-1-5-32-544', 'FullControl'), @($MainUserSid, 'FullControl'), @($sid, 'Modify'))) {
+  foreach ($entry in @(@('S-1-5-18', 'FullControl'), @('S-1-5-32-544', 'FullControl'), @($MainUserSid, 'FullControl'), @($sid, 'Modify'), @($capabilitySid, 'ReadAndExecute'))) {
     $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($entry[0])), [Security.AccessControl.FileSystemRights]$entry[1], $inherit, $none, $allow)
     $acl.AddAccessRule($rule)
   }
   $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier($MainUserSid)))
   Set-Acl -LiteralPath $full -AclObject $acl
   Step 'root-acl'
-  $rootAfter = Test-NexusRootState (Get-NexusRootState $full) $MainUserSid $sid -Strict
+  $rootAfter = Test-NexusRootState (Get-NexusRootState $full) $MainUserSid $sid -Strict -AppContainerSid $capabilitySid
   if ($rootAfter.Problems.Count -gt 0) { throw "The folder $full is not what the setup makes it: $($rootAfter.Problems -join '; ')." }
 
-  # 4. The record, where only an administrator writes: NEXUS compares what it is told about the account with this.
+  # 4. The capability on the two folders above the root. One entry each, added to the list that is there:
+  # nothing else in those lists is read into a new one or written back, and nothing below inherits it.
+  $result.appContainer = $script:NexusAppContainerName
+  $result.appContainerSid = $containerSid
+  $result.capabilitySid = $capabilitySid
+  foreach ($folder in (Get-NexusAncestorFolders $full)) {
+    if (Test-NexusReparsePoint $folder) { throw "The folder $folder is a link to another place. Nothing more was changed." }
+    # First of all: an entry for the AppContainer itself, which a pre-release build of 0.8 made here, is taken
+    # away. While it is there no low-integrity program can open the folder.
+    if (@(Get-NexusOwnEntries $folder $containerSid | Where-Object { $null -ne $_ }).Count -gt 0) {
+      Invoke-NexusIcacls @($folder, '/remove', "*$containerSid", '/Q')
+      Step "appcontainer-entry-removed:$folder"
+    }
+    if (@(Test-NexusAncestorEntry (Get-NexusOwnEntries $folder $capabilitySid)).Count -gt 0) {
+      Invoke-NexusIcacls @($folder, '/remove', "*$capabilitySid", '/Q')
+      Invoke-NexusIcacls @($folder, '/grant', "*$($capabilitySid):(RX)", '/Q')
+    }
+    $wrong = @(Test-NexusAncestorEntry (Get-NexusOwnEntries $folder $capabilitySid))
+    if ($wrong.Count -gt 0) { throw "The folder $folder could not be opened to the sandbox's capability as intended: $($wrong -join '; ')." }
+    if (@(Get-NexusOwnEntries $folder $containerSid | Where-Object { $null -ne $_ }).Count -gt 0) { throw "The entry for the AppContainer on $folder could not be removed." }
+    Step "capability-entry:$folder"
+  }
+  # The loopback: NEXUS's proxy listens there, and it is the AppContainer's only way to the network. Windows
+  # keeps AppContainers from the loopback on some machines; this is the exemption Windows has for it. Whether
+  # the proxy is reached is established by use, at every start of NEXUS, not by this call's answer.
+  try {
+    $exempt = (& (Join-Path $env:SystemRoot 'System32\CheckNetIsolation.exe') LoopbackExempt -a "-p=$containerSid" 2>&1 | Out-String)
+    $result.loopbackExempt = ($LASTEXITCODE -eq 0)
+    Step $(if ($LASTEXITCODE -eq 0) { 'loopback-exempt' } else { "loopback-exempt-failed: $($exempt.Trim())" })
+  } catch { $result.loopbackExempt = $false; Step "loopback-exempt-failed: $($_.Exception.Message)" }
+
+  # 5. The record, where only an administrator writes: NEXUS compares what it is told about the account with this.
   if (-not (Test-Path $script:NexusSandboxKey)) { New-Item -Path $script:NexusSandboxKey -Force | Out-Null }
   $users = @()
   if ($null -ne $record) { $users = @($record.Users | Where-Object { $_ }) }
   if ($users -notcontains $MainUserSid) { $users += $MainUserSid }
-  New-ItemProperty -Path $script:NexusSandboxKey -Name 'Version' -PropertyType String -Value '1' -Force | Out-Null
+  New-ItemProperty -Path $script:NexusSandboxKey -Name 'Version' -PropertyType String -Value '3' -Force | Out-Null
+  New-ItemProperty -Path $script:NexusSandboxKey -Name 'AppContainerName' -PropertyType String -Value $script:NexusAppContainerName -Force | Out-Null
+  New-ItemProperty -Path $script:NexusSandboxKey -Name 'AppContainerSid' -PropertyType String -Value $containerSid -Force | Out-Null
+  New-ItemProperty -Path $script:NexusSandboxKey -Name 'CapabilitySid' -PropertyType String -Value $capabilitySid -Force | Out-Null
+  # A value a pre-release build wrote for a filter that is not made any more.
+  Remove-ItemProperty -Path $script:NexusSandboxKey -Name 'DnsFilter' -ErrorAction SilentlyContinue
   New-ItemProperty -Path $script:NexusSandboxKey -Name 'AccountName' -PropertyType String -Value $AccountName -Force | Out-Null
   New-ItemProperty -Path $script:NexusSandboxKey -Name 'AccountSid' -PropertyType String -Value $sid -Force | Out-Null
   New-ItemProperty -Path $script:NexusSandboxKey -Name 'Root' -PropertyType String -Value $full -Force | Out-Null

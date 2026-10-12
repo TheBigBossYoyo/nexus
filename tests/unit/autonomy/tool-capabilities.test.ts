@@ -26,6 +26,15 @@ describe('from classifier findings to capabilities', () => {
     }
   })
 
+  it('keeps a raw read of .npmrc a read of project secrets, contained or not (package_config_inspect is the way around it, not a weakening)', () => {
+    for (const contained of [true, false]) {
+      expect(needs('cat .npmrc', contained)).toContain('READ_PROJECT_SECRETS')
+      expect(needs('type .npmrc', contained, 'powershell')).toContain('READ_PROJECT_SECRETS')
+      expect(needs('Get-Content .npmrc', contained, 'powershell')).toContain('READ_PROJECT_SECRETS')
+      expect(needs('Get-Content ./sub/.npmrc', contained, 'powershell')).toContain('READ_PROJECT_SECRETS')
+    }
+  })
+
   it('treats what it cannot inspect as project execution inside the containment and as a question outside it', () => {
     const opaque = ['powershell -EncodedCommand ZQBjAGgAbwAgAGgAaQA=', '$x = "ls"; & $x', 'bash ./scripts/build.sh']
     for (const command of opaque) {

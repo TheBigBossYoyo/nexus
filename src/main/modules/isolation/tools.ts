@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, type Dirent, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, cpSync, existsSync, type Dirent, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 /**
@@ -43,6 +43,46 @@ function findOnPath(name: string, entries: readonly string[]): string | null {
     }
   }
   return null
+}
+
+/**
+ * Node's own library (libuv) names the pipes between a process and its children `\\?\pipe\uv\<n>-<pid>`.
+ * Windows lets a process in an AppContainer make pipes only under `\\?\pipe\LOCAL\`, libuv before 1.53 takes
+ * the refusal for a name that is taken and tries the next one for ever: `spawn`, `exec` and `fork` with a pipe
+ * hang (measured with Node 24; fixed upstream in libuv 1.53.0, 2026-09-24, which no Node release carries yet).
+ * So the copy of node.exe the sandbox uses has that one name pattern replaced by one of the same length under
+ * `LOCAL\`. It no longer carries the process number; two processes that try the same name are told apart by the
+ * loop that was the problem: the second is refused and takes the next number.
+ *
+ * Only NEXUS's own copy in the sandbox root is changed, never the user's Node. The pattern must be there exactly
+ * once; a file where it is not (a Node that has the fix, or another program) is left as it is. Returns what was
+ * done. Programs that bring a libuv of their own (the Node inside Electron, a Node a project installs) are not
+ * reached by this: a child process with a pipe started from them inside the isolated profile still hangs.
+ */
+const LIBUV_PIPE_OLD = Buffer.from('\\\\?\\pipe\\uv\\%llu-%lu\0', 'latin1')
+const LIBUV_PIPE_NEW = Buffer.from('\\\\?\\pipe\\LOCAL\\%llu\0\0', 'latin1')
+
+export function adaptLibuvPipes(file: string): 'adapted' | 'not-needed' | 'ambiguous' {
+  const bytes = readFileSync(file)
+  const first = bytes.indexOf(LIBUV_PIPE_OLD)
+  if (first < 0) return 'not-needed'
+  if (bytes.indexOf(LIBUV_PIPE_OLD, first + 1) >= 0) return 'ambiguous'
+  const fd = openSync(file, 'r+')
+  try {
+    writeSync(fd, LIBUV_PIPE_NEW, 0, LIBUV_PIPE_NEW.length, first)
+  } finally {
+    closeSync(fd)
+  }
+  return 'adapted'
+}
+
+/** Whether a program is a Node whose child processes would hang in an AppContainer (see adaptLibuvPipes). */
+function needsLibuvAdaptation(file: string): boolean {
+  try {
+    return /^node\.exe$/i.test(file.split('\\').pop() ?? '') && readFileSync(file).indexOf(LIBUV_PIPE_OLD) >= 0
+  } catch {
+    return false
+  }
 }
 
 /** Follows a scoop shim (`name.shim` beside `name.exe`, with `path = "..."`) to the program it starts. */
@@ -116,13 +156,15 @@ export function mirrorTools(input: { sandboxRoot: string; userProfile: string; p
     } catch {
       continue
     }
-    if (!inside(input.userProfile, real)) {
+    // A Node installed for all users is copied all the same when its copy has to be adapted (see adaptLibuvPipes).
+    const adapt = needsLibuvAdaptation(real)
+    if (!inside(input.userProfile, real) && !adapt) {
       tools.push({ name, source: real, mirror: null, note: 'installed for all users; used where it is' })
       continue
     }
     const root = installRoot(real)
     // Never the profile itself or a directory just under it: an installation is deeper than that.
-    if (lower(root) === lower(input.userProfile) || lower(dirname(root)) === lower(input.userProfile)) {
+    if (inside(input.userProfile, real) && (lower(root) === lower(input.userProfile) || lower(dirname(root)) === lower(input.userProfile))) {
       tools.push({ name, source: real, mirror: null, note: 'its installation directory could not be told apart from the profile; not copied' })
       continue
     }
@@ -144,6 +186,12 @@ export function mirrorTools(input: { sandboxRoot: string; userProfile: string; p
     }
     const relative = dirname(real).slice(root.length)
     const dir = join(target, relative)
+    // Done once per copy and recorded beside it; a copy made before this was known is adapted the first time it is seen.
+    const adapted = join(target, '.nexus-libuv-pipes')
+    if (adapt && !existsSync(adapted)) {
+      const copy = join(dir, real.split('\\').pop() as string)
+      writeFileSync(adapted, existsSync(copy) ? adaptLibuvPipes(copy) : 'missing')
+    }
     if (!mirrorDirs.some((d) => lower(d) === lower(dir))) mirrorDirs.push(dir)
     tools.push({ name, source: real, mirror: join(dir, real.split('\\').pop() as string), note: null })
   }

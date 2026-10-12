@@ -12,6 +12,10 @@ param(
   [Parameter(Mandatory = $true)][string]$AccountName,
   [Parameter(Mandatory = $true)][string]$AccountSid,
   [Parameter(Mandatory = $true)][string]$SandboxRoot,
+  # The identifiers of the AppContainer the launcher will use and of the capability it holds (derived by the
+  # launcher from the name). Checked against the machine's record, which the elevated setup derived itself.
+  [string]$AppContainerSid = '',
+  [string]$CapabilitySid = '',
   [string]$MainUserSid = ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
 )
 
@@ -38,7 +42,7 @@ try {
   $out.root = if ($null -ne $root) { [pscustomobject]@{ Path = $root.Path; Reparse = $root.Reparse; Owner = $root.Owner; Protected = $root.Protected; Rules = $root.Rules } } else { $null }
   if ($null -eq $root) { $problems += "the folder $full does not exist" }
   else {
-    $check = Test-NexusRootState $root $MainUserSid $AccountSid -Strict
+    $check = Test-NexusRootState $root $MainUserSid $AccountSid -Strict -AppContainerSid $CapabilitySid
     foreach ($problem in $check.Problems) { $problems += "the folder $full`: $problem" }
   }
 
@@ -48,7 +52,25 @@ try {
   else {
     if ($record.AccountSid -ne $AccountSid) { $problems += "the machine's record names another account ($($record.AccountSid))" }
     if ([IO.Path]::GetFullPath($record.Root) -ne $full) { $problems += "the machine's record names another folder ($($record.Root))" }
+    if ($AppContainerSid) {
+      if (-not $record.AppContainerSid) { $problems += 'the setup on this machine was made before contained commands ran in an AppContainer; run the setup again' }
+      elseif ($record.AppContainerSid -ne $AppContainerSid) { $problems += "the machine's record names another AppContainer ($($record.AppContainerSid))" }
+      elseif ($record.CapabilitySid -ne $CapabilitySid) { $problems += 'the setup on this machine was made by a pre-release build; run the setup again' }
+    }
     if ($record.Users -notcontains $MainUserSid) { $out.notes += 'the record does not list this user; running the setup again adds it' }
+  }
+
+  if ($AppContainerSid -and $null -ne $root) {
+    if ($AppContainerSid -notmatch '^S-1-15-2-[0-9-]+$' -or $CapabilitySid -notmatch '^S-1-15-3-1024-[0-9-]+$') { $problems += 'the AppContainer or capability identifier is not one' }
+    else {
+      foreach ($folder in (Get-NexusAncestorFolders $full)) {
+        try {
+          $wrong = @(Test-NexusAncestorEntry (Get-NexusOwnEntries $folder $CapabilitySid))
+          foreach ($problem in $wrong) { $problems += "the folder $folder`: $problem; run the setup again" }
+          if (@(Get-NexusOwnEntries $folder $AppContainerSid | Where-Object { $null -ne $_ }).Count -gt 0) { $problems += "the folder $folder has an entry for the AppContainer itself, which keeps low-integrity programs out of it; run the setup again" }
+        } catch { $problems += "the access list of $folder could not be read: $($_.Exception.Message)" }
+      }
+    }
   }
 
   foreach ($direction in @('Outbound', 'Inbound')) {

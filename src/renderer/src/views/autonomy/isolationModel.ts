@@ -21,7 +21,7 @@ export const EFFECTIVE_LABEL: Record<Effective, string> = {
 
 export const EFFECTIVE_SENTENCE: Record<Effective, string> = {
   ISOLATED:
-    'Project code runs as a separate Windows account with no access to your profile or credentials, on a desktop of its own, and with no network connection of its own but the NEXUS filter. Windows still looks up names for it, so a name it asks for can be seen outside. It needs a one-time administrator setup.',
+    'Project code runs as a separate Windows account with no access to your profile or credentials, on a desktop of its own, in an AppContainer: it has no network connection of its own but the NEXUS filter, and Windows looks up no name for it. Its shell is a POSIX shell (busybox), not bash. It needs a one-time administrator setup.',
   RESTRICTED:
     'Project code runs as you at low integrity. It cannot write outside its task folders or read what NEXUS protected, but it keeps your network, your credential vault, your unprotected files and, being you, what is on your screen.',
   STANDARD: 'No containment. Project code runs as you, with everything you can reach.',

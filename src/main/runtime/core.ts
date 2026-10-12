@@ -8,7 +8,7 @@ import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
 import { WorkerCapacityRouting } from '../modules/capacity/worker-routing'
 import { release } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { PushMessage } from '@shared/events'
 import type { AppInfo } from '@shared/ipc'
 import { newId } from '@shared/ids'
@@ -28,6 +28,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { ApplicationUnderTestManager } from '../modules/browser/app-manager'
 import { PlaywrightDirectProvider } from '../modules/browser/provider'
+import { createPackageConfigTools } from '../modules/agent-runtime/package-config-tool'
 import { combineExtensions, createAppTools } from '../modules/browser/tools'
 import type { GuardOptions } from '../modules/network/guard'
 import { renderPublicPage } from '../modules/research/browser'
@@ -289,7 +290,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     if (recorded !== null) {
       if (host.sandboxSetupDir === undefined) problem = 'this build cannot verify it (the verification script is not part of it)'
       else {
-        const verdict = await verifySandboxSetup(recorded, host.sandboxSetupDir, env)
+        // The AppContainer the launcher will use, by the launcher's own derivation: the machine's record, the
+        // sandbox root and the two folders above it must all be set up for that one.
+        const container = await Promise.all([launcher.appContainerSid(), launcher.capabilitySid()]).then(([sid, capabilitySid]) => ({ sid, capabilitySid }), () => null)
+        const verdict = container === null ? { ok: false, problems: ["the launcher could not derive the AppContainer's identifier"], notes: [] } : await verifySandboxSetup(recorded, host.sandboxSetupDir, env, container)
         if (!verdict.ok) problem = verdict.problems.join('; ').slice(0, 600)
         for (const note of verdict.notes) logger(`isolation: ${note}`)
         logger(`isolation: sandbox account ${verdict.ok ? 'verified' : `NOT usable: ${problem}`}`)
@@ -305,6 +309,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     account: () => sandboxAccount,
     accountProblem: () => sandboxProblem,
     baseEnv: () => env,
+    // The POSIX shell of the isolated profile lies beside the launcher, in every build.
+    posixShell: () => {
+      const candidate = join(dirname(launcher.executable), 'busybox.exe')
+      return existsSync(candidate) ? candidate : null
+    },
     gitIdentity: () => {
       const g = repos.settings.get().git
       return { name: g.commitAuthorName, email: g.commitAuthorEmail }
@@ -755,7 +764,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     },
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
   })
-  const extensionTools = combineExtensions(researchTools, appTools)
+  const packageConfigTools = createPackageConfigTools({
+    gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+  })
+  const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({

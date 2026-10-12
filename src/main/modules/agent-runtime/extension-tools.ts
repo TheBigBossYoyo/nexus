@@ -8,7 +8,7 @@ import { z } from 'zod'
  * automation library's seventy.
  */
 
-export const EXTENSION_GROUPS = ['research', 'app'] as const
+export const EXTENSION_GROUPS = ['research', 'app', 'package'] as const
 export type ExtensionGroup = (typeof EXTENSION_GROUPS)[number]
 
 export interface ExtensionToolDef {
@@ -96,7 +96,17 @@ export const APP_TOOLS: ExtensionToolDef[] = [
   { name: 'app_stop', group: 'app', description: 'Stop the application of this task, its browser and everything it started.', shape: {} },
 ]
 
-export const EXTENSION_TOOLS: readonly ExtensionToolDef[] = [...RESEARCH_TOOLS, ...APP_TOOLS]
+export const PACKAGE_TOOLS: ExtensionToolDef[] = [
+  {
+    name: 'package_config_inspect',
+    group: 'package',
+    description:
+      "The package-manager configuration of this task's worktree as facts, read by NEXUS: ignore-scripts, registries (host only), install behaviour keys, binary download mirrors (Electron, Sass, Puppeteer, Playwright), proxy and cache presence, the pnpm build-script allowlists (onlyBuiltDependencies and the like), the lockfile and packageManager, and which configuration applies to commands run in the task. Credentials and tokens are never shown. Use it, not cat/type/Get-Content on .npmrc, to diagnose dependency installs and install scripts: the raw .npmrc is a credential file and reading it is a boundary the user is asked about.",
+    shape: { directory: z.string().max(260).optional().describe('a directory inside the worktree, such as a workspace package; the worktree root by default') },
+  },
+]
+
+export const EXTENSION_TOOLS: readonly ExtensionToolDef[] = [...RESEARCH_TOOLS, ...APP_TOOLS, ...PACKAGE_TOOLS]
 
 export function extensionToolsFor(groups: readonly string[]): ExtensionToolDef[] {
   return EXTENSION_TOOLS.filter((t) => groups.includes(t.group))

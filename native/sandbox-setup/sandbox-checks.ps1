@@ -29,6 +29,76 @@ function Remove-NexusDnsFilter {
   } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
 }
 
+# The AppContainer contained commands are started in (0.8): a name, from which Windows derives a SID that is the
+# same on every machine, and a capability of NEXUS's own of the same name, which is all the AppContainer holds and
+# which Windows gives no meaning. The launcher derives the same two SIDs from the same name.
+#
+# Folders are opened to the capability, never to the AppContainer itself: an access list that names an
+# AppContainer keeps every low-integrity program out of the folder (measured on the drive's root: nothing at low
+# integrity could open "C:\" any more), and one that names a capability does not. Windows' own entry on the
+# drive's root is for a capability too.
+$script:NexusAppContainerName = 'NexusSandbox.Contained.1'
+
+function Get-NexusAppContainerSid {
+  if (-not ('NexusSandbox.Native' -as [type])) {
+    Add-Type -Namespace NexusSandbox -Name Native -MemberDefinition @'
+[DllImport("userenv.dll", CharSet = CharSet.Unicode)] public static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
+[DllImport("advapi32.dll")] public static extern IntPtr FreeSid(IntPtr sid);
+[DllImport("kernelbase.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool DeriveCapabilitySidsFromName(string name, out IntPtr groupSids, out uint groupCount, out IntPtr capabilitySids, out uint capabilityCount);
+'@
+  }
+  $pointer = [IntPtr]::Zero
+  $hr = [NexusSandbox.Native]::DeriveAppContainerSidFromAppContainerName($script:NexusAppContainerName, [ref]$pointer)
+  if ($hr -ne 0 -or $pointer -eq [IntPtr]::Zero) { throw ("Windows could not derive the AppContainer's identifier (0x{0:x})." -f $hr) }
+  try { $sid = (New-Object Security.Principal.SecurityIdentifier($pointer)).Value } finally { [void][NexusSandbox.Native]::FreeSid($pointer) }
+  if ($sid -notmatch '^S-1-15-2-[0-9-]+$') { throw "The AppContainer's identifier is not one ($sid)." }
+  return $sid
+}
+
+function Get-NexusCapabilitySid {
+  [void](Get-NexusAppContainerSid)
+  $groups = [IntPtr]::Zero; $caps = [IntPtr]::Zero; $groupCount = [uint32]0; $capCount = [uint32]0
+  if (-not [NexusSandbox.Native]::DeriveCapabilitySidsFromName($script:NexusAppContainerName, [ref]$groups, [ref]$groupCount, [ref]$caps, [ref]$capCount) -or $capCount -lt 1) { throw "Windows could not derive the capability's identifier." }
+  $sid = (New-Object Security.Principal.SecurityIdentifier([Runtime.InteropServices.Marshal]::ReadIntPtr($caps))).Value
+  if ($sid -notmatch '^S-1-15-3-1024-[0-9-]+$') { throw "The capability's identifier is not one ($sid)." }
+  return $sid
+}
+
+# The two folders above the sandbox root: the drive's root and ProgramData. A process in an AppContainer is let
+# into a folder only where the AppContainer itself has an entry, whatever the account may do, and Windows gives
+# AppContainers none on these two (the entry is for NEXUS's capability, see above). Without one a contained program cannot even ask whether "C:\" exists, and
+# cmd, Node and git all ask (measured: "access denied", "EPERM lstat 'C:\'", "unable to get current working
+# directory"). The entry is for the folder itself and is inherited by nothing in it: to read and list that one
+# folder, which the sandbox account may do already as a member of Users.
+function Get-NexusAncestorFolders([string]$Root) {
+  $full = [IO.Path]::GetFullPath($Root)
+  $parent = Split-Path -Parent $full
+  $drive = [IO.Path]::GetPathRoot($full)
+  return @($drive, $parent)
+}
+
+# The entries one SID has on a folder itself, as plain values.
+function Get-NexusOwnEntries([string]$Path, [string]$Sid) {
+  $acl = Get-Acl -LiteralPath $Path
+  return @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $Sid } | ForEach-Object { [pscustomobject]@{ Rights = [string]$_.FileSystemRights; Type = [string]$_.AccessControlType; Inheritance = [string]$_.InheritanceFlags } })
+}
+
+# Is the AppContainer's entry on an ancestor folder exactly the one the setup makes: read and list, this folder only?
+function Test-NexusAncestorEntry($Entries) {
+  $list = @($Entries | Where-Object { $null -ne $_ })
+  if ($list.Count -eq 0) { return @("the sandbox's capability has no entry there") }
+  $problems = @()
+  foreach ($entry in $list) {
+    if ($entry.Type -ne 'Allow' -or $entry.Rights -ne 'ReadAndExecute, Synchronize' -or $entry.Inheritance -ne 'None') { $problems += "the capability's entry there is $($entry.Type) $($entry.Rights), inherited by $($entry.Inheritance)" }
+  }
+  return $problems
+}
+
+function Invoke-NexusIcacls([string[]]$Arguments) {
+  $out = (& (Join-Path $env:SystemRoot 'System32\icacls.exe') @Arguments 2>&1 | Out-String)
+  if ($LASTEXITCODE -ne 0) { throw "icacls $($Arguments -join ' '): $($out.Trim())" }
+}
+
 $script:UsersSid = 'S-1-5-32-545'
 $script:AdminsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
@@ -103,7 +173,7 @@ function Get-NexusRootState([string]$Path) {
 # Can this existing folder be taken as the sandbox root? Who may own it: the user NEXUS runs as, the
 # administrators, the system. Another owner means somebody else made it, and it is left alone.
 # With -Strict, the access list must already be exactly the one the setup writes (the verification's question).
-function Test-NexusRootState($State, [string]$MainUserSid, [string]$SandboxSid, [switch]$Strict) {
+function Test-NexusRootState($State, [string]$MainUserSid, [string]$SandboxSid, [switch]$Strict, [string]$AppContainerSid = '') {
   $problems = @(); $repairable = @()
   if ($null -eq $State) { return @{ Problems = @(); Repairable = @('does not exist') } }
   if (-not $State.IsDirectory) { $problems += 'it is not a folder' }
@@ -117,6 +187,11 @@ function Test-NexusRootState($State, [string]$MainUserSid, [string]$SandboxSid, 
   }
   $expected = @{ $script:SystemSid = 'FullControl'; $script:AdminsSid = 'FullControl'; $MainUserSid = 'FullControl' }
   if ($SandboxSid) { $expected[$SandboxSid] = 'Modify, Synchronize' }
+  # In an AppContainer both must be let in: the account and the AppContainer, here by its capability. To read
+  # only: NEXUS gives the capability the right to write on the directories of a session, one by one. (Without a
+  # capability's entry an AppContainer writes nowhere, and where it has one no integrity label is needed for it
+  # to write: so the entry of the root must not be one to write.)
+  if ($AppContainerSid) { $expected[$AppContainerSid] = 'ReadAndExecute, Synchronize' }
   $extra = @($State.Rules | Where-Object { -not $expected.ContainsKey($_.Sid) -or $_.Type -ne 'Allow' })
   $wrong = @($State.Rules | Where-Object { $expected.ContainsKey($_.Sid) -and $_.Type -eq 'Allow' -and ($_.Rights -ne $expected[$_.Sid]) })
   $missing = @($expected.Keys | Where-Object { $sid = $_; @($State.Rules | Where-Object { $_.Sid -eq $sid -and $_.Type -eq 'Allow' }).Count -eq 0 })
@@ -167,5 +242,5 @@ function Test-NexusFirewallRuleState($State, [string]$Direction, [string]$Sandbo
 function Get-NexusSandboxRecord {
   if (-not (Test-Path $script:NexusSandboxKey)) { return $null }
   $values = Get-ItemProperty -Path $script:NexusSandboxKey
-  return [pscustomobject]@{ Version = [string]$values.Version; AccountName = [string]$values.AccountName; AccountSid = [string]$values.AccountSid; Root = [string]$values.Root; Users = @([string[]]$values.Users) }
+  return [pscustomobject]@{ Version = [string]$values.Version; AccountName = [string]$values.AccountName; AccountSid = [string]$values.AccountSid; Root = [string]$values.Root; Users = @([string[]]$values.Users); AppContainerName = [string]$values.AppContainerName; AppContainerSid = [string]$values.AppContainerSid; CapabilitySid = [string]$values.CapabilitySid }
 }

@@ -24,10 +24,13 @@ const SETUP_DETAIL = [
   'It creates:',
   '  \u2022 a local standard account, NexusSandbox, that is in none of your groups and cannot sign in interactively;',
   '  \u2022 the folder C:\\ProgramData\\NexusSandbox, where the worktrees of enrolled projects are kept;',
-  '  \u2022 Windows Firewall rules that block the network traffic of that account itself.',
+  '  \u2022 Windows Firewall rules that block the network traffic of that account itself;',
+  '  \u2022 a Windows profile for that account, the first time it runs a command.',
   '',
-  'Project code then runs as that account, on a desktop of its own: it cannot read your profile, your credentials or your other projects. The firewall rules leave it one connection of its own, the NEXUS filter.',
-  'Two things stay open. Windows still looks up host names for that account, so a name it asks for can be seen outside this machine. And services listening on this machine (loopback) can be reached by it.',
+  'It also changes two access lists that are not NEXUS\'s own: on the root of the drive and on C:\\ProgramData it adds one entry each, for the AppContainer project code runs in, to read and list that folder itself (not what is in it). Without it a program in the AppContainer cannot find its own working directory. And it registers that AppContainer as allowed to reach this machine itself (loopback), which is where the NEXUS filter listens.',
+  '',
+  'Project code then runs as that account, in an AppContainer, on a desktop of its own: it cannot read your profile, your credentials or your other projects, and Windows gives it no network: no connection of its own but the NEXUS filter, and no host name looked up.',
+  'One thing stays open: services listening on this machine (loopback) can be reached by it.',
   'It changes nothing else. It can be removed again with the removal script that ships with NEXUS, remove-sandbox.ps1 in the sandbox-setup folder of the application resources (from a source checkout: node scripts/sandbox-setup.mjs --remove); that also asks for administrator rights. There is no button for it in the app.',
 ].join('\n')
 

@@ -4,8 +4,9 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { containedEnv } from '@main/modules/process/contained-env'
 import { tokenizeCommandLine } from '@main/modules/process/command-line'
 import { runProcess, type ProcessResult, type RunProcessOptions } from '@main/modules/process/run-process'
-import { quoteArg, type ContainmentCheck, type ContainmentProfile, type Launcher, type LaunchSpec, type SandboxAccountRef } from './launcher'
+import { appContainerDirs, quoteArg, SANDBOX_APP_CONTAINER, type ContainmentCheck, type ContainmentProfile, type Launcher, type LaunchSpec, type SandboxAccountRef } from './launcher'
 import { prepareSandboxLauncher, type SandboxAccount } from './sandbox-account'
+import { busyboxAshAdapter, mirrorBusybox, msysBashAdapter, type SandboxShellAdapter } from './shell-adapter'
 import { mirrorMsys } from './tools'
 
 /**
@@ -14,12 +15,13 @@ import { mirrorMsys } from './tools'
  * which directories, with which environment, through the launcher. A caller never gets a bare spawn by asking.
  *
  * Profiles, honestly:
- *  ISOLATED    the command runs as the machine's sandbox account, at low integrity, in a job object its tree
- *              cannot leave. That account has no access to the user's profile, credential vault or keys;
- *              Windows Firewall lets none of its traffic out, so the loopback proxy NEXUS gives it is its only
- *              network. It writes in the directories of its session and reads the system and its own tools.
- *              Needs the one-time elevated setup of the account. Not contained: loopback services other than
- *              the proxy, and whatever every local account may read.
+ *  ISOLATED    the command runs as the machine's sandbox account, in an AppContainer that holds no capability,
+ *              at low integrity, in a job object its tree cannot leave. That account has no access to the
+ *              user's profile, credential vault or keys; Windows lets none of its traffic out and looks up no
+ *              name for it, so the loopback proxy NEXUS gives it is its only network. It writes in the
+ *              directories of its session and reads the system and its own tools. Its shell is a POSIX shell
+ *              that runs inside the AppContainer (busybox ash), not bash. Needs the one-time elevated setup.
+ *              Not contained: loopback services other than the proxy.
  *  RESTRICTED  the command runs as the user, at low integrity, in the same kind of job. It can write only
  *              where NEXUS labeled a directory for it and cannot read what NEXUS marked protected. It keeps the
  *              user's network, credential vault and every file nobody protected.
@@ -69,6 +71,13 @@ export interface ExecutionBrokerDeps {
   onFailure?: (info: { projectId: string | null; profile: ContainmentProfile; detail: string }) => void
   /** Limits of one command's process tree. */
   limits?: { maxProcesses?: number; maxJobMemoryBytes?: number }
+  /**
+   * The busybox-w32 program NEXUS ships: the POSIX shell of the ISOLATED profile, which runs inside the
+   * AppContainer. Null or absent: a bash command cannot run under ISOLATED, and says so.
+   */
+  posixShell?: () => string | null
+  /** For tests: the SHA-256 the shell must have instead of the pinned one; null accepts the file as it is. */
+  posixShellSha256?: string | null
 }
 
 export type ShellKind = 'bash' | 'powershell'
@@ -101,9 +110,9 @@ const DEFAULT_MAX_PROCESSES = 512
 const UI_LIMIT_HANDLES = 0x1
 const WINDOW_UI_LIMITS = 0xff & ~UI_LIMIT_HANDLES
 const GIT_HINT =
-  'nexus: in the isolated profile this git command runs only as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine). Run it separately; nothing was changed.'
-/** git subcommands that change a ref, and so need to run where the directories above the repository can be seen. */
-const REF_CHANGING = ['commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
+  'nexus: in the isolated profile a git command that stages or changes a branch runs only as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine). Run it separately; nothing was changed.'
+/** git subcommands that change a ref or the index: the AppContainer writes nothing in the user's repository, so they run as a command of their own. */
+const REF_CHANGING = ['add', 'rm', 'mv', 'update-index', 'read-tree', 'commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
 
 /**
  * After every commit git removes a leftover of merges (`AUTO_MERGE`), and for that it tries to lock the
@@ -219,6 +228,7 @@ export class ExecutionBroker {
   private readonly labeled = new Set<string>()
   private shells: { gitRoot: string | null; powershell: string } | null = null
   private readonly msys = new Map<ContainmentProfile, { bash: string; binDir: string } | null>()
+  private busybox: { busybox: string; binDir: string } | null | undefined = undefined
   private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
   private readonly counts = { shell: 0, commands: 0, programs: 0, refused: 0 }
   /** Paths of repositories the sandbox account was given access to at this start, by path and kind of access. */
@@ -305,13 +315,19 @@ export class ExecutionBroker {
     const sandbox = this.sandbox()
     if (sandbox === null) throw new Error('The sandbox account is not set up on this machine.')
     const sid = `*${sandbox.account.sid}`
+    // In an AppContainer a file is opened only where the account and the AppContainer (by its capability) both
+    // have an entry. The capability gets one entry in the user's repository: to read its Git data. It gets none
+    // to write, anywhere there: integrity labels do not bind a process in an AppContainer (measured), so the
+    // pins below would not hold against it, and what it cannot write at all needs no pin. A git inside a longer
+    // command reads the repository; what stages or commits runs as a command of its own (see GIT_HINT).
+    const container = `*${await this.deps.launcher.capabilitySid()}`
     const record = this.readGrants()
     const key = resolve(layout.commonDir).toLowerCase()
     const paths = new Set(record[key] ?? [])
     const once = async (path: string, kind: string, grants: string[]): Promise<void> => {
       const mark = `${kind}|${resolve(path).toLowerCase()}`
       if (this.granted.has(mark) || !existsSync(path)) return
-      await this.icacls([path, ...grants.flatMap((g) => ['/grant', g]), '/Q'])
+      await this.icacls([path, ...grants.flatMap((g) => ['/grant', g, ...(kind === 'read' ? ['/grant', g.replace(sid, container)] : [])]), '/Q'])
       this.granted.add(mark)
       paths.add(resolve(path))
     }
@@ -419,6 +435,7 @@ export class ExecutionBroker {
   /** Takes back what `grantGit` gave for a repository (every repository on record when none is named). */
   async revokeGit(commonDir?: string): Promise<void> {
     const account = this.deps.account()
+    const container = await this.deps.launcher.capabilitySid().catch(() => null)
     const record = this.readGrants()
     const keys = commonDir === undefined ? Object.keys(record) : [resolve(commonDir).toLowerCase()]
     for (const key of keys) {
@@ -428,6 +445,7 @@ export class ExecutionBroker {
         if (!existsSync(path)) continue
         try {
           if (account !== null) await this.icacls([path, '/remove', `*${account.sid}`, '/Q'])
+          if (container !== null) await this.icacls([path, '/remove', `*${container}`, '/Q'])
           if (basename(path).toLowerCase() === 'objects') await this.icacls([path, '/remove', '*S-1-3-0', '/Q']).catch(() => undefined)
           await this.deps.launcher.label('clear', path).catch(() => undefined)
           for (const mark of [...this.granted]) if (mark.endsWith(`|${path.toLowerCase()}`)) this.granted.delete(mark)
@@ -447,6 +465,10 @@ export class ExecutionBroker {
     if (this.labeled.has(key)) return
     mkdirSync(dir, { recursive: true })
     await this.deps.launcher.label('low', dir)
+    // In the sandbox root the commands run in an AppContainer, which writes only where its capability has an
+    // entry: the root gives it reading, and the directories a command may write get the entry to write here.
+    const account = this.deps.account()
+    if (account !== null && within(account.root, dir)) await this.deps.launcher.grantContainer(dir)
     this.labeled.add(key)
   }
 
@@ -506,6 +528,13 @@ export class ExecutionBroker {
         ...set,
       },
     })
+    if (session.profile === 'ISOLATED') {
+      // Windows moves an AppContainer's LOCALAPPDATA, TEMP and TMP below the LOCALAPPDATA it is given (see
+      // appContainerDirs): still inside the session's home. The directories are made here, and the variable
+      // Windows does not know (TMPDIR, which Unix tools read) is pointed at the same place.
+      const dirs = appContainerDirs(join(roots.home, 'AppData', 'Local'))
+      built.env['TMPDIR'] = dirs.temp
+    }
     const key = Object.keys(built.env).find((k) => k.toLowerCase() === 'path')
     if (key !== undefined) {
       if (this.deps.toolPath) built.env[key] = this.deps.toolPath(session.profile, built.env[key] as string)
@@ -558,6 +587,30 @@ export class ExecutionBroker {
   /** Whether a bash script can run under this profile: Git Bash was found and its copy for the profile could be made. */
   async hasBash(profile: ContainmentProfile): Promise<boolean> {
     return (await this.bashFor(profile).catch(() => null)) !== null
+  }
+
+  /**
+   * The shell behind the Bash capability under a profile (see shell-adapter). RESTRICTED: Git's bash. ISOLATED:
+   * the POSIX shell that runs inside the AppContainer; Git's bash cannot, and is never used there. Null when
+   * the profile's shell is not on this machine: the command is then not run, under any other shell either.
+   */
+  async shellAdapter(profile: ContainmentProfile): Promise<SandboxShellAdapter | null> {
+    if (profile === 'RESTRICTED') {
+      const copy = await this.bashFor('RESTRICTED')
+      return copy === null ? null : msysBashAdapter(copy)
+    }
+    if (this.busybox === undefined) {
+      const sandbox = this.sandbox()
+      if (sandbox === null) return null
+      const toolsRoot = join(sandbox.account.root, 'tools')
+      const copy = mirrorBusybox({ toolsRoot, source: this.deps.posixShell?.() ?? null, ...(this.deps.posixShellSha256 !== undefined ? { expectedSha256: this.deps.posixShellSha256 } : {}) })
+      // Readable and not writable for contained code: one session must not change the shell of the next.
+      if (copy !== null) await this.deps.launcher.label('medium', toolsRoot)
+      this.busybox = copy
+    }
+    if (this.busybox === null) return null
+    const { gitRoot } = await this.findShells()
+    return busyboxAshAdapter(this.busybox, gitRoot === null ? null : join(gitRoot, 'cmd'))
   }
 
   private async bashFor(profile: ContainmentProfile): Promise<{ bash: string; binDir: string; gitRoot: string } | null> {
@@ -634,7 +687,7 @@ export class ExecutionBroker {
       env,
       maxProcesses: this.deps.limits?.maxProcesses ?? DEFAULT_MAX_PROCESSES,
       ...(this.deps.limits?.maxJobMemoryBytes !== undefined ? { maxJobMemoryBytes: this.deps.limits.maxJobMemoryBytes } : {}),
-      ...(sandbox ? { sandbox: sandbox.ref } : {}),
+      ...(sandbox ? { sandbox: sandbox.ref, appContainer: SANDBOX_APP_CONTAINER } : {}),
       ...extra,
     }
   }
@@ -695,15 +748,15 @@ export class ExecutionBroker {
       // configuration applies, and the places git takes whole sets of objects from, are not the task's to write.
       if (input.gitDir !== undefined) await this.pinGit(input.gitDir)
       const shells = await this.findShells()
-      const bash = input.shell === 'bash' ? await this.bashFor(input.profile) : null
+      const shell = input.shell === 'bash' ? await this.shellAdapter(input.profile) : null
+      // The script NEXUS writes for a command that is git alone is bash (see gitOnlyScript); such a command never runs under ISOLATED.
+      if (input.gitOnly === true && shell !== null && shell.backend !== 'msys-bash') return this.fail(input.projectId, input.profile, 'A command that is git alone runs as the user under the restricted profile; it was asked for under another, so it was not run.')
       // git is hardened wherever it can reach the repository: in a command that is git alone, and in every command of a session whose account was given access.
       const { env, withheld } = this.environment(input, roots, input.gitOnly === true || (input.profile === 'ISOLATED' && gitReadable) ? { ...this.gitHardening(roots, input.profile === 'ISOLATED'), ...(input.gitOnly === true ? this.gitPins(roots, input.gitDir, input.sessionProfile === 'ISOLATED' && input.profile !== 'ISOLATED') : {}) } : {})
-      if (bash !== null) {
-        // The copy's own tools first, then Git itself, so that `git`, `ls` and `grep` are what a Git Bash user expects.
+      if (shell !== null) {
         const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
-        env[key] = [bash.binDir, join(bash.gitRoot, 'mingw64', 'bin'), join(bash.gitRoot, 'cmd'), env[key] ?? ''].filter((e) => e !== '').join(';')
-        env['MSYSTEM'] = 'MINGW64'
-        env['MSYS'] = 'winsymlinks:nativestrict'
+        env[key] = [...shell.pathEntries(), env[key] ?? ''].filter((e) => e !== '').join(';')
+        Object.assign(env, shell.env())
       }
       const id = randomBytes(8).toString('hex')
       // The sandbox account cannot read the user's repository, so git inside a command that is more than git finds
@@ -711,11 +764,9 @@ export class ExecutionBroker {
       const gitHint: 'all' | 'refs' | null = input.profile === 'ISOLATED' && input.gitOnly !== true && /\bgit\b/.test(input.command) ? (gitReadable ? 'refs' : 'all') : null
       let commandLine: string
       if (input.shell === 'bash') {
-        if (bash === null) return this.fail(input.projectId, input.profile, 'Git Bash was not found, so a bash command cannot be run inside the containment.')
-        const script = join(roots.temp, `nx-${id}.sh`)
-        const body = input.gitOnly === true ? gitOnlyScript(input.command, input.gitBranch ?? '') :`${gitHint !== null ? bashGitGuard(gitHint) : ''}${input.command}\n`
-        writeFileSync(script, body, { flag: 'wx' })
-        commandLine = `${quoteArg(bash.bash)} --noprofile --norc ${quoteArg(script)}`
+        // No other shell is tried, inside or outside the containment: a command without its shell is not run.
+        if (shell === null) return this.fail(input.projectId, input.profile, input.profile === 'ISOLATED' ? 'The POSIX shell of the isolated profile (busybox) is not part of this installation or is not the build NEXUS ships, so a shell command cannot be run inside the containment.' : 'Git Bash was not found, so a bash command cannot be run inside the containment.')
+        commandLine = (input.gitOnly === true ? shell.prepare({ dir: roots.temp, id, command: gitOnlyScript(input.command, input.gitBranch ?? '') }) : shell.prepare({ dir: roots.temp, id, command: input.command, ...(gitHint !== null ? { prelude: bashGitGuard(gitHint) } : {}) })).commandLine
       } else {
         const script = join(roots.temp, `nx-${id}.ps1`)
         // A UTF-8 byte order mark: Windows PowerShell reads a script without one in the ANSI code page.

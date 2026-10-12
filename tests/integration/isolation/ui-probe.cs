@@ -39,7 +39,8 @@ static class Probe {
         int inherited = 0; StringBuilder kinds = new StringBuilder();
         for (long value = 4; value < 0x8000; value += 4) {
             uint flags;
-            if (!GetHandleInformation(new IntPtr(value), out flags) || (flags & 1) == 0) continue;
+            // In an AppContainer Windows raises an exception for a value that is no handle instead of returning false.
+            try { if (!GetHandleInformation(new IntPtr(value), out flags) || (flags & 1) == 0) continue; } catch (System.Runtime.InteropServices.SEHException) { continue; }
             inherited++;
             kinds.Append(GetFileType(new IntPtr(value))).Append(',');
         }

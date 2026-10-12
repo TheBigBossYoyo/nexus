@@ -114,11 +114,12 @@ export interface SandboxVerification {
  * user says a name, an identifier and a folder; none of the three is believed until Windows agrees. When the
  * verification cannot be run at all the answer is no, with the reason.
  */
-export async function verifySandboxSetup(account: { account: string; sid: string; root: string }, scriptsDir: string, env: NodeJS.ProcessEnv): Promise<SandboxVerification> {
+export async function verifySandboxSetup(account: { account: string; sid: string; root: string }, scriptsDir: string, env: NodeJS.ProcessEnv, container?: { sid: string; capabilitySid: string }): Promise<SandboxVerification> {
   if (process.platform !== 'win32') return { ok: false, problems: ['the sandbox account exists on Windows only'], notes: [] }
   const script = join(scriptsDir, 'verify-sandbox.ps1')
   if (!existsSync(script) || !existsSync(join(scriptsDir, 'sandbox-checks.ps1'))) return { ok: false, problems: [`the verification script is missing: ${script}`], notes: [] }
   if (!/^[A-Za-z][A-Za-z0-9]{2,19}$/.test(account.account) || !/^S-1-5-21-[0-9-]+$/.test(account.sid)) return { ok: false, problems: ['the record of the sandbox account is not a name and an identifier'], notes: [] }
+  if (container !== undefined && (!/^S-1-15-2-[0-9-]{10,120}$/.test(container.sid) || !/^S-1-15-3-1024-[0-9-]{10,140}$/.test(container.capabilitySid))) return { ok: false, problems: ['the AppContainer identifier is not one'], notes: [] }
   const system32 = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32')
   const minimal: NodeJS.ProcessEnv = {}
   for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERNAME', 'USERDOMAIN', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'ProgramData', 'ProgramFiles']) {
@@ -126,7 +127,7 @@ export async function verifySandboxSetup(account: { account: string; sid: string
   }
   minimal['PATH'] = `${system32};${join(system32, 'WindowsPowerShell', 'v1.0')}`
   try {
-    const result = await runProcess(join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-AccountName', account.account, '-AccountSid', account.sid, '-SandboxRoot', account.root], { cwd: system32, env: minimal, timeoutMs: 60_000, maxOutputBytes: 256 * 1024 })
+    const result = await runProcess(join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-AccountName', account.account, '-AccountSid', account.sid, '-SandboxRoot', account.root, ...(container !== undefined ? ['-AppContainerSid', container.sid, '-CapabilitySid', container.capabilitySid] : [])], { cwd: system32, env: minimal, timeoutMs: 60_000, maxOutputBytes: 256 * 1024 })
     const line = result.stdout.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop()
     if (line === undefined) return { ok: false, problems: [`the verification gave no answer (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 200)}`], notes: [] }
     const parsed = JSON.parse(line) as { ok?: unknown; problems?: unknown; notes?: unknown }

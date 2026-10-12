@@ -46,8 +46,13 @@ const ACTOR_OF_ROLE: Record<AgentRole, ActorKind> = {
 /** What an agent is told when its call met a boundary. It names the request and says what to do meanwhile. */
 export function boundaryMessage(decisions: Extract<BrokerDecision, { outcome: 'BOUNDARY_GRANT_REQUIRED' }>[]): string {
   const list = decisions.map((d) => `${AUTONOMY_CAPABILITIES[d.capability].label} (boundary request ${d.requestId})`).join('; ')
+  // The boundary stays; the hint only points at what answers the usual reason for the read without the secret.
+  const hint = decisions.some((d) => d.capability === 'READ_PROJECT_SECRETS')
+    ? 'If the aim is to diagnose package-manager or dependency behaviour, mcp__nexus__package_config_inspect gives the non-secret settings (registries, ignore-scripts, build-script allowlists, mirrors) without the raw file. '
+    : ''
   return (
     `Not done: this is outside what the project allows without the user's decision. NEXUS has put the question to the user: ${list}. ` +
+    hint +
     'Do not retry it and do not look for another way to the same effect. Go on with the work that does not depend on it. ' +
     'If nothing else is left, report a blocker that names the boundary request; the task is resumed when the user has decided.'
   )

@@ -158,10 +158,18 @@ d('the sandbox setup trusts no name', () => {
     })
   })
 
+  /** What NEXUS passes at start: the AppContainer and its capability, as the launcher derives them. */
+  const containerIds = (): { sid: string; capabilitySid: string } => {
+    const exe = resolve('out', 'native', 'nexus-launch.exe')
+    const derive = (what: string): string => execFileSync(exe, [what, 'NexusSandbox.Contained.1'], { encoding: 'utf8', windowsHide: true }).trim()
+    return { sid: derive('appcontainer-sid'), capabilitySid: derive('capability-sid') }
+  }
+
   it("this machine's own sandbox account, if it has one, passes the verification NEXUS runs at start", async () => {
     const mine = readSandboxAccount()
     if (mine === null) return
-    const verdict = await verifySandboxSetup(mine, resolve('native', 'sandbox-setup'), process.env)
+    const container = containerIds()
+    const verdict = await verifySandboxSetup(mine, resolve('native', 'sandbox-setup'), process.env, container)
     console.info(`sandbox verification on this machine: ok=${verdict.ok}; problems=${JSON.stringify(verdict.problems)}; notes=${JSON.stringify(verdict.notes)}`)
     expect(verdict.problems).toEqual([])
     expect(verdict.ok).toBe(true)
@@ -170,12 +178,13 @@ d('the sandbox setup trusts no name', () => {
   it('a record that names another account or another folder than Windows has is not believed', async () => {
     const mine = readSandboxAccount()
     if (mine === null) return
-    const wrongSid = await verifySandboxSetup({ ...mine, sid: 'S-1-5-21-9-9-9-1234' }, resolve('native', 'sandbox-setup'), process.env)
+    const container = containerIds()
+    const wrongSid = await verifySandboxSetup({ ...mine, sid: 'S-1-5-21-9-9-9-1234' }, resolve('native', 'sandbox-setup'), process.env, container)
     expect(wrongSid.ok).toBe(false)
     expect(wrongSid.problems.join(' ')).toContain('is not the one NEXUS was told of')
-    const wrongRoot = await verifySandboxSetup({ ...mine, root: 'C:\\ProgramData\\NexusSandboxElsewhere' }, resolve('native', 'sandbox-setup'), process.env)
+    const wrongRoot = await verifySandboxSetup({ ...mine, root: 'C:\\ProgramData\\NexusSandboxElsewhere' }, resolve('native', 'sandbox-setup'), process.env, container)
     expect(wrongRoot.ok).toBe(false)
-    const noAccount = await verifySandboxSetup({ ...mine, account: 'NexusNoSuchAccount' }, resolve('native', 'sandbox-setup'), process.env)
+    const noAccount = await verifySandboxSetup({ ...mine, account: 'NexusNoSuchAccount' }, resolve('native', 'sandbox-setup'), process.env, container)
     expect(noAccount.problems.join(' ')).toContain('there is no account named')
   }, 120_000)
 })

@@ -54,6 +54,11 @@ struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION { public long TotalUserTime, Total
 
 static class N {
     const string K = "kernel32.dll"; const string A = "advapi32.dll";
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)] public static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)] public static extern int CreateAppContainerProfile(string name, string display, string description, IntPtr caps, uint count, out IntPtr sid);
+    [DllImport(A, CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr s);
+    [DllImport(A)] public static extern bool EqualSid(IntPtr a, IntPtr b);
+    [DllImport("kernelbase.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool DeriveCapabilitySidsFromName(string name, out IntPtr groupSids, out uint groupCount, out IntPtr capabilitySids, out uint capabilityCount);
     [DllImport(K)] public static extern IntPtr GetCurrentProcess();
     [DllImport(K)] public static extern uint SetErrorMode(uint m);
     [DllImport(K)] public static extern IntPtr GetStdHandle(int n);
@@ -127,6 +132,11 @@ class Spec {
     // ISOLATED: the SID of the sandbox account NEXUS verified. STAGE2: the SID this process must be running as.
     public string AccountSid = null;
     public string ExpectSid = null;
+    // ISOLATED and STAGE2: the name of the AppContainer the command is started in. It holds one capability, of
+    // NEXUS's own making and of the same name, which Windows gives no meaning: it is only what the access lists
+    // of the sandbox's folders name. It holds none of Windows' capabilities, so Windows looks up no name for it,
+    // shows it nothing of the machine's name cache and lets none of its packets out.
+    public string AppContainer = null;
 }
 
 static class Program {
@@ -170,6 +180,7 @@ static class Program {
                 else if (key == "stage2-dir") spec.Stage2Dir = B64(value);
                 else if (key == "account-sid") spec.AccountSid = value;
                 else if (key == "expect-sid") spec.ExpectSid = value;
+                else if (key == "appcontainer") spec.AppContainer = value;
                 // An unknown key is refused: a spec this launcher does not fully understand is not run.
                 else throw new Fail(EXIT_SPEC, "unknown spec key: " + key);
             } catch (Fail) { throw; } catch (Exception) { throw new Fail(EXIT_SPEC, "bad value for " + key); }
@@ -184,6 +195,11 @@ static class Program {
             if (sid == null) continue;
             if (sid.Length < 8 || sid.Length > 120 || !sid.StartsWith("S-1-")) throw new Fail(EXIT_SPEC, "bad SID");
             foreach (char c in sid.Substring(4)) if (!((c >= '0' && c <= '9') || c == '-')) throw new Fail(EXIT_SPEC, "bad SID");
+        }
+        if (spec.AppContainer != null) {
+            if (spec.Profile == "RESTRICTED") throw new Fail(EXIT_SPEC, "an AppContainer is part of the ISOLATED profile only");
+            if (spec.AppContainer.Length < 1 || spec.AppContainer.Length > 64) throw new Fail(EXIT_SPEC, "bad AppContainer name");
+            foreach (char c in spec.AppContainer) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_SPEC, "bad AppContainer name");
         }
         if (spec.Desktop != null) {
             if (spec.Desktop.Length < 1 || spec.Desktop.Length > 40) throw new Fail(EXIT_SPEC, "bad desktop name");
@@ -320,7 +336,8 @@ static class Program {
         // (measured: Git Bash dies at start). So no desktop is named: this thread moves to the new desktop first,
         // and the account's process is started from there. It never is on the desktop the user sees.
         string desktopName = spec.Desktop != null ? spec.Desktop : RandomDesktopName();
-        IntPtr desktop = MakeDesktop(desktopName, accountSid);
+        // In an AppContainer a process opens a desktop only if the account and the AppContainer are both let in.
+        IntPtr desktop = MakeDesktop(desktopName, accountSid, spec.AppContainer != null ? SidText(AppContainerSid(spec.AppContainer)) : null);
         // The identifier would let the account open the user's own desktop too, and read the screen from it
         // (measured). The account itself is refused there, and refused the screen and the clipboard of the window
         // station: a refusal by name outranks what the identifier allows.
@@ -337,6 +354,7 @@ static class Program {
         if (spec.Window) inner.Append("window=1\n");
         inner.Append("expect-sid=" + accountSid + "\n");
         inner.Append("desktop=" + desktopName + "\n");
+        if (spec.AppContainer != null) inner.Append("appcontainer=" + spec.AppContainer + "\n");
         byte[] name = new byte[12]; using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(name);
         string innerPath = Path.Combine(spec.Stage2Dir, BitConverter.ToString(name).Replace("-", "").ToLowerInvariant() + ".spec");
         try { Directory.CreateDirectory(spec.Stage2Dir); File.WriteAllText(innerPath, inner.ToString(), new UTF8Encoding(false)); }
@@ -360,8 +378,11 @@ static class Program {
         StringBuilder commandLine = new StringBuilder("\"" + spec.Stage2 + "\" --spec \"" + innerPath + "\"");
         PROCESS_INFORMATION pi;
         uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | (spec.Window ? 0 : CREATE_NO_WINDOW);
-        // Logon flags 0: no profile is loaded for the account; its home is a directory of the session.
-        bool started = N.CreateProcessWithLogonW(credential[0], ".", credential[1], 0, null, commandLine, flags, env, spec.Cwd, ref si, out pi);
+        // Logon flags 0: no profile is loaded for the account; its home is a directory of the session. With an
+        // AppContainer the account's own profile is loaded (LOGON_WITH_PROFILE): Windows keeps an AppContainer's
+        // record in the registry of the account that uses it, and starts no process in one that has no record
+        // (measured: "file not found"). The command's home is still the session's directory, by its environment.
+        bool started = N.CreateProcessWithLogonW(credential[0], ".", credential[1], spec.AppContainer != null ? 1u : 0u, null, commandLine, flags, env, spec.Cwd, ref si, out pi);
         int startError = Marshal.GetLastWin32Error();
         credential[1] = null;
         if (!started) {
@@ -390,6 +411,59 @@ static class Program {
         N.CloseHandle(job);
         N.CloseDesktop(desktop);
         return (int)code;
+    }
+
+    /** The SID Windows derives from an AppContainer's name. The same name gives the same SID on every machine; no profile is made for it. */
+    static IntPtr AppContainerSid(string name) {
+        IntPtr sid; int hr = N.DeriveAppContainerSidFromAppContainerName(name, out sid);
+        if (hr != 0 || sid == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "the AppContainer's SID could not be derived: 0x" + hr.ToString("x"));
+        return sid;
+    }
+
+    /**
+     * The SID of NEXUS's own capability of that name. The folders of the sandbox are opened to this SID and not to
+     * the AppContainer's own: an access list that names an AppContainer keeps every low-integrity program out of
+     * the folder (measured), and one that names a capability does not.
+     */
+    static IntPtr CapabilitySid(string name) {
+        IntPtr groups, caps; uint groupCount, capCount;
+        if (!N.DeriveCapabilitySidsFromName(name, out groups, out groupCount, out caps, out capCount) || capCount < 1 || caps == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "the capability's SID could not be derived: " + Marshal.GetLastWin32Error());
+        IntPtr sid = Marshal.ReadIntPtr(caps);
+        if (sid == IntPtr.Zero || !SidText(sid).StartsWith("S-1-15-3-1024-")) throw new Fail(EXIT_CONTAINMENT, "the capability's SID is not one of a named capability");
+        return sid;
+    }
+
+    static string SidText(IntPtr sid) {
+        IntPtr s; if (!N.ConvertSidToStringSidW(sid, out s)) throw new Fail(EXIT_CONTAINMENT, "a SID could not be written out: " + Marshal.GetLastWin32Error());
+        string text = Marshal.PtrToStringUni(s); N.LocalFree(s); return text;
+    }
+
+    static IntPtr TokenInfo(IntPtr token, int cls, string what) {
+        int need; N.GetTokenInformation(token, cls, IntPtr.Zero, 0, out need);
+        if (need <= 0) throw new Fail(EXIT_CONTAINMENT, what + " cannot be read from the command's token: " + Marshal.GetLastWin32Error());
+        IntPtr buf = Marshal.AllocHGlobal(need);
+        if (!N.GetTokenInformation(token, cls, buf, need, out need)) throw new Fail(EXIT_CONTAINMENT, what + " cannot be read from the command's token: " + Marshal.GetLastWin32Error());
+        return buf;
+    }
+
+    /**
+     * Reads back from the process that was made (still suspended) that it is in the AppContainer that was asked
+     * for and holds NEXUS's one capability and no other: not the call's word, the token's. A process that is
+     * not, is not let run.
+     */
+    static void RequireAppContainer(IntPtr process, IntPtr expected, IntPtr capability) {
+        IntPtr token;
+        if (!N.OpenProcessToken(process, 0x8 /* TOKEN_QUERY */, out token)) throw new Fail(EXIT_CONTAINMENT, "the command's token could not be opened to check its AppContainer: " + Marshal.GetLastWin32Error());
+        try {
+            IntPtr b = TokenInfo(token, 29 /* TokenIsAppContainer */, "whether it is in an AppContainer");
+            if (Marshal.ReadInt32(b) == 0) throw new Fail(EXIT_CONTAINMENT, "the command was not started in an AppContainer");
+            b = TokenInfo(token, 31 /* TokenAppContainerSid */, "its AppContainer");
+            IntPtr sid = Marshal.ReadIntPtr(b);
+            if (sid == IntPtr.Zero || !N.EqualSid(sid, expected)) throw new Fail(EXIT_CONTAINMENT, "the command is not in the AppContainer that was asked for");
+            b = TokenInfo(token, 30 /* TokenCapabilities */, "its capabilities");
+            // TOKEN_GROUPS { GroupCount, SID_AND_ATTRIBUTES[] }: the array begins at the pointer's alignment.
+            if (Marshal.ReadInt32(b) != 1 || !N.EqualSid(Marshal.ReadIntPtr(b, IntPtr.Size), capability)) throw new Fail(EXIT_CONTAINMENT, "the command's AppContainer does not hold NEXUS's capability alone");
+        } finally { N.CloseHandle(token); }
     }
 
     static string RandomDesktopName() {
@@ -437,9 +511,9 @@ static class Program {
      * (the account that runs the command): no other account and no other session's application reaches it. If it cannot be made, nothing
      * is started: there is no falling back to the user's desktop.
      */
-    static IntPtr MakeDesktop(string name, string alsoFor) {
+    static IntPtr MakeDesktop(string name, string alsoFor, string appContainer) {
         IntPtr sd; uint size;
-        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;OW)(A;;GA;;;SY)" + (alsoFor != null ? "(A;;GA;;;" + alsoFor + ")" : "") + "S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;OW)(A;;GA;;;SY)" + (alsoFor != null ? "(A;;GA;;;" + alsoFor + ")" : "") + (appContainer != null ? "(A;;GA;;;" + appContainer + ")" : "") + "S:(ML;;NW;;;LW)", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the desktop's security could not be built: " + Marshal.GetLastWin32Error());
         SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
         sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)); sa.lpSecurityDescriptor = sd; sa.bInheritHandle = false;
         IntPtr desktop = N.CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000 /* GENERIC_ALL */, ref sa);
@@ -476,7 +550,7 @@ static class Program {
         IntPtr desktop = IntPtr.Zero;
         if (!inner) {
             string desktopName = spec.Desktop != null ? spec.Desktop : RandomDesktopName();
-            desktop = MakeDesktop(desktopName, null);
+            desktop = MakeDesktop(desktopName, null, null);
             six.StartupInfo.lpDesktop = "WinSta0\\" + desktopName;
         } else if (spec.Desktop != null) six.StartupInfo.lpDesktop = "WinSta0\\" + spec.Desktop;
         // The command inherits its three standard handles and no other. This launcher holds whatever its parent
@@ -484,13 +558,32 @@ static class Program {
         // one of them would be the command's too, with the access it was opened with.
         List<IntPtr> handles = new List<IntPtr>();
         foreach (IntPtr h in new IntPtr[] { six.StartupInfo.hStdInput, six.StartupInfo.hStdOutput, six.StartupInfo.hStdError }) if (!handles.Contains(h)) handles.Add(h);
+        // The AppContainer is made here, at the last step: the process that starts the command is the account's own
+        // and is in none. Only the second step of ISOLATED has one.
+        IntPtr appContainer = inner && spec.AppContainer != null ? AppContainerSid(spec.AppContainer) : IntPtr.Zero;
+        if (!inner && spec.AppContainer != null) throw new Fail(EXIT_SPEC, "an AppContainer is part of the ISOLATED profile only");
+        IntPtr capability = appContainer != IntPtr.Zero ? CapabilitySid(spec.AppContainer) : IntPtr.Zero;
+        int attributes = appContainer != IntPtr.Zero ? 2 : 1;
         IntPtr listSize = IntPtr.Zero;
-        N.InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref listSize);
+        N.InitializeProcThreadAttributeList(IntPtr.Zero, attributes, 0, ref listSize);
         six.lpAttributeList = Marshal.AllocHGlobal(listSize);
         IntPtr handleArray = Marshal.AllocHGlobal(IntPtr.Size * handles.Count);
         for (int i = 0; i < handles.Count; i++) Marshal.WriteIntPtr(handleArray, i * IntPtr.Size, handles[i]);
-        if (!N.InitializeProcThreadAttributeList(six.lpAttributeList, 1, 0, ref listSize) || !N.UpdateProcThreadAttribute(six.lpAttributeList, 0, new IntPtr(0x00020002) /* PROC_THREAD_ATTRIBUTE_HANDLE_LIST */, handleArray, new IntPtr(IntPtr.Size * handles.Count), IntPtr.Zero, IntPtr.Zero))
+        if (!N.InitializeProcThreadAttributeList(six.lpAttributeList, attributes, 0, ref listSize) || !N.UpdateProcThreadAttribute(six.lpAttributeList, 0, new IntPtr(0x00020002) /* PROC_THREAD_ATTRIBUTE_HANDLE_LIST */, handleArray, new IntPtr(IntPtr.Size * handles.Count), IntPtr.Zero, IntPtr.Zero))
             throw new Fail(EXIT_CONTAINMENT, "the list of handles the command may inherit could not be made: " + Marshal.GetLastWin32Error());
+        if (appContainer != IntPtr.Zero) {
+            // The AppContainer's record in this account's registry: made the first time, found there afterwards.
+            IntPtr made; int hr = N.CreateAppContainerProfile(spec.AppContainer, spec.AppContainer, "NEXUS: contained project code, no capability", IntPtr.Zero, 0, out made);
+            if (hr != 0 && (uint)hr != 0x800700B7 /* already exists */) throw new Fail(EXIT_CONTAINMENT, "the AppContainer could not be registered for the sandbox account: 0x" + hr.ToString("x"));
+            // SECURITY_CAPABILITIES { AppContainerSid, Capabilities, CapabilityCount, Reserved }: NEXUS's own
+            // capability and nothing of Windows' (no network, no library, no device).
+            SID_AND_ATTRIBUTES own = new SID_AND_ATTRIBUTES(); own.Sid = capability; own.Attributes = 0x4 /* SE_GROUP_ENABLED */;
+            IntPtr list1 = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES))); Marshal.StructureToPtr(own, list1, false);
+            IntPtr caps = Marshal.AllocHGlobal(IntPtr.Size * 2 + 8);
+            Marshal.WriteIntPtr(caps, 0, appContainer); Marshal.WriteIntPtr(caps, IntPtr.Size, list1); Marshal.WriteInt32(caps, IntPtr.Size * 2, 1); Marshal.WriteInt32(caps, IntPtr.Size * 2 + 4, 0);
+            if (!N.UpdateProcThreadAttribute(six.lpAttributeList, 0, new IntPtr(0x00020009) /* PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES */, caps, new IntPtr(IntPtr.Size * 2 + 8), IntPtr.Zero, IntPtr.Zero))
+                throw new Fail(EXIT_CONTAINMENT, "the AppContainer of the command could not be set: " + Marshal.GetLastWin32Error());
+        }
 
         uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | (spec.Window ? 0 : CREATE_NO_WINDOW);
         PROCESS_INFORMATION pi;
@@ -502,6 +595,10 @@ static class Program {
         if (!created) {
             int e = createError;
             throw new Fail(EXIT_START, "the command could not be started: " + new Win32Exception(e).Message + " (" + e + ")");
+        }
+        if (appContainer != IntPtr.Zero) {
+            try { RequireAppContainer(pi.hProcess, appContainer, capability); }
+            catch (Fail) { N.TerminateProcess(pi.hProcess, 1); throw; }
         }
         bool inJob = false;
         if (inner) {
@@ -620,6 +717,8 @@ static class Program {
             if (args.Length == 3 && args[0] == "credential" && args[1] == "write") return CredentialWrite(args[2]);
             if (args.Length == 3 && args[0] == "credential" && args[1] == "check") { Console.Out.WriteLine(CredentialRead(args[2])[0]); return 0; }
             if (args.Length == 2 && args[0] == "pipe-protect") return PipeProtect(args[1]);
+            if (args.Length == 2 && args[0] == "appcontainer-sid") { foreach (char c in args[1]) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_USAGE, "bad AppContainer name"); Console.Out.WriteLine(SidText(AppContainerSid(args[1]))); return 0; }
+            if (args.Length == 2 && args[0] == "capability-sid") { foreach (char c in args[1]) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_USAGE, "bad capability name"); Console.Out.WriteLine(SidText(CapabilitySid(args[1]))); return 0; }
             if (args.Length == 1 && args[0] == "--version") { Console.Out.WriteLine("nexus-launch 1"); return 0; }
             Err("usage: nexus-launch --spec <file> | label low|medium|protect|clear <path> | --version");
             return EXIT_USAGE;

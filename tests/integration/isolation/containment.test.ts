@@ -90,6 +90,7 @@ d('containment against the operating system', () => {
       baseEnv: () => ({ ...process.env, ANTHROPIC_API_KEY: `${SENTINEL}-env`, GITHUB_TOKEN: `${SENTINEL}-env`, NEXUS_DATA_DIR: `${SENTINEL}-env` }),
       toolPath: (profile, path) => (profile === 'ISOLATED' && state ? state.path : path),
       limits: { maxProcesses: 64 },
+      posixShell: () => resolve('vendor', 'busybox', 'busybox.exe'),
     })
     localServer = createServer((_req, res) => {
       localHits += 1
@@ -245,7 +246,7 @@ attempt('mklink-j', () => cp.execSync('cmd /c mklink /J j-cmd "' + user + '"', {
       it("is ended at its time limit with the launcher's own code", async () => {
         const s = session(profile, 'timeout')
         const started = Date.now()
-        const result = await broker.run({ ...s, file: 'cmd', args: ['/c', 'ping -n 30 127.0.0.1 >nul'] }, { timeoutMs: 2000 })
+        const result = await broker.run({ ...s, file: 'node', args: ['-e', 'setTimeout(() => {}, 30000)'] }, { timeoutMs: 2000 })
         expect(Date.now() - started).toBeLessThan(20_000)
         // Either the launcher ended it at its own limit, or the caller's limit ended the launcher and the job with it.
         expect(result.timedOut || result.exitCode === LAUNCH_EXIT.timeout, JSON.stringify({ exit: result.exitCode, timedOut: result.timedOut })).toBe(true)
@@ -364,12 +365,38 @@ setTimeout(() => { for (const n of ['tcp', 'http', 'dns', 'udp', 'lookup']) done
       expect(r.lines['http']).toMatch(/^DENIED:/)
       expect(r.lines['dns']).toMatch(/^DENIED:/)
       expect(r.lines['udp']).toMatch(/^DENIED:/)
-      // Recorded, not asserted: a name looked up through Windows is asked on the network by the DNS Client service,
-      // which the account's firewall rule does not cover. What can leave that way is the name asked for.
-      console.info(`ISOLATED, a name looked up through Windows' resolver: ${r.lines['lookup']}`)
+      // Windows' own resolver asks through the DNS Client service, which no firewall rule for the account covers.
+      // In the AppContainer the service answers nothing for it: this was open until the AppContainer (0.8).
+      expect(r.lines['lookup'], r.raw).toMatch(/^DENIED:/)
     }, 60_000)
 
-    it("in the user's repository it adds and never replaces: objects, other branches and the worktree's own entry stay as they were", async () => {
+    it('gets no name looked up and is not shown the cache of names, whichever way it asks', async () => {
+      const sys = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+      const ps = join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      const name = 'dns.msftncsi.com'
+      // The same questions outside the containment, so that a refusal inside is not an empty network outside.
+      const outside = execFileSync(join(sys, 'ipconfig.exe'), ['/displaydns'], { encoding: 'latin1', windowsHide: true }).split(/\r?\n/).filter((l) => l.trim() !== '').length
+      const r = await probe('ISOLATED', 'names', `
+const cp = require('child_process'); const dns = require('dns');
+function run(name, file, args) { let out = ''; try { out = cp.execFileSync(file, args, { encoding: 'latin1', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000 }); } catch (e) { out = String(e.stdout || '') + String(e.stderr || ''); } return out; }
+const address = /\\b\\d{1,3}(\\.\\d{1,3}){3}\\b/;
+const cache = run('cache', ${JSON.stringify(join(sys, 'ipconfig.exe'))}, ['/displaydns']);
+console.log('cache-lines=' + cache.split(/\\r?\\n/).filter((l) => l.trim() !== '').length);
+console.log('getaddrinfo=' + (address.test(run('ping', ${JSON.stringify(join(sys, 'PING.EXE'))}, ['-4', '-n', '1', '-w', '200', '${name}'])) ? 'ANSWERED' : 'DENIED'));
+console.log('dotnet=' + (address.test(run('dotnet', ${JSON.stringify(ps)}, ['-NoProfile', '-NonInteractive', '-Command', "try { ([Net.Dns]::GetHostAddresses('${name}') | ForEach-Object { $_.ToString() }) -join ',' } catch { 'FAILED' }"])) ? 'ANSWERED' : 'DENIED'));
+console.log('dnsquery=' + (address.test(run('resolve', ${JSON.stringify(ps)}, ['-NoProfile', '-NonInteractive', '-Command', "try { (Resolve-DnsName -Name '${name}' -Type A -ErrorAction Stop | ForEach-Object { $_.IPAddress }) -join ',' } catch { 'FAILED' }"])) ? 'ANSWERED' : 'DENIED'));
+const ns = run('nslookup', ${JSON.stringify(join(sys, 'nslookup.exe'))}, ['-timeout=2', '-retry=1', '${name}']); const at = ns.toLowerCase().lastIndexOf('${name}');
+console.log('nslookup=' + (at >= 0 && address.test(ns.slice(at)) ? 'ANSWERED' : 'DENIED'));
+console.log('curl-name=' + (run('curl', ${JSON.stringify(join(sys, 'curl.exe'))}, ['-s', '-m', '5', '-o', 'NUL', '-w', '%{http_code}', 'http://${name}/']).trim() === '000' ? 'DENIED' : 'ANSWERED'));
+dns.lookup('${name}', (e) => { console.log('node-lookup=' + (e ? 'DENIED:' + e.code : 'ANSWERED')); dns.lookup('fresh-' + Date.now() + '.example.com', (e2) => { console.log('node-fresh=' + (e2 ? 'DENIED:' + e2.code : 'ANSWERED')); process.exit(0); }); });
+`)
+      console.info(`ISOLATED and names: ${JSON.stringify(r.lines)}; the cache outside has ${outside} lines`)
+      for (const way of ['getaddrinfo', 'dotnet', 'dnsquery', 'nslookup', 'curl-name', 'node-lookup', 'node-fresh']) expect(r.lines[way], `${way}: ${r.raw}`).toMatch(/^DENIED/)
+      // The refusal is a few lines; a cache is a listing.
+      expect(Number(r.lines['cache-lines']), r.raw).toBeLessThanOrEqual(8)
+    }, 120_000)
+
+    it("in the user's repository it reads and writes nothing: objects, branches, its own included, and the worktree's entry stay as they were", async () => {
       // A repository's Git directory as NEXUS lets the account into it: laid out by hand, so that every file is known.
       const common = join(SCRATCH, 'grant-repo', '.git')
       const entry = join(common, 'worktrees', 'task')
@@ -400,14 +427,13 @@ attempt('write-config', () => fs.writeFileSync(path.join(entry, 'config.worktree
 attempt('stage-through-lock', () => { fs.writeFileSync(path.join(entry, 'index.lock'), 'STAGED'); fs.renameSync(path.join(entry, 'index.lock'), f.index); return 'staged'; });
 `, { PROBE_FILES: JSON.stringify(files) })
         console.info(`ISOLATED in a granted repository: ${JSON.stringify(r.lines)}`)
-        // What git needs: read, add objects, its own lock files, its own branch, its index.
+        // The AppContainer reads the repository's Git data and writes nothing there: not an object, not a lock, not
+        // its own branch, not its index. (Integrity labels do not bind a process in an AppContainer, so nothing in
+        // the user's repository is left for one to write; what stages or commits runs as a command of its own.)
         expect(r.lines['read-object'], r.raw).toBe('OK:ORIGINAL')
-        expect(r.lines['add-object']).toBe('OK:added')
-        expect(r.lines['replace-own-object']).toBe('OK:own')
-        expect(r.lines['write-own-branch']).toBe('OK:moved')
-        expect(r.lines['stage-through-lock']).toBe('OK:staged')
-        // What is not the account's: nothing that was there is written, deleted, renamed or replaced.
-        for (const name of ['overwrite-object', 'delete-object', 'rename-object', 'overwrite-sibling-branch', 'delete-sibling-branch', 'replace-sibling-branch', 'overwrite-head', 'delete-head', 'replace-head', 'replace-commondir', 'replace-config', 'write-config']) expect(r.lines[name], name).toMatch(/^DENIED:/)
+        for (const name of ['add-object', 'replace-own-object', 'write-own-branch', 'stage-through-lock', 'overwrite-object', 'delete-object', 'rename-object', 'overwrite-sibling-branch', 'delete-sibling-branch', 'replace-sibling-branch', 'overwrite-head', 'delete-head', 'replace-head', 'replace-commondir', 'replace-config', 'write-config']) expect(r.lines[name], name).toMatch(/^DENIED:/)
+        expect(readFileSync(files.own, 'utf8')).toBe('ORIGINAL')
+        expect(readFileSync(files.index, 'utf8')).toBe('ORIGINAL')
         expect(readFileSync(files.object, 'utf8')).toBe('ORIGINAL')
         expect(readFileSync(files.sibling, 'utf8')).toBe('ORIGINAL')
         expect(readFileSync(files.head, 'utf8')).toBe('ORIGINAL')
