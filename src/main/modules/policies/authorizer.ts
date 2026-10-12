@@ -280,6 +280,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
     const cls = classifyCommand(command, shell, {
       roots: shellRoots,
       safeCommandPrefixes: ctx.safeCommandPrefixes,
+      projectRoot: project,
     })
     if (cls.level === 'forbidden') {
       const reason = `Command forbidden: ${cls.reasons.join('; ')}. This cannot be approved; choose a different approach.`

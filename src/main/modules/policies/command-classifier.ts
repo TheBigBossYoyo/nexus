@@ -65,6 +65,11 @@ export interface ClassifyOptions {
   roots?: string[]
   /** Extra commands (word prefixes, e.g. "pnpm test:unit") that count as verification commands. */
   safeCommandPrefixes?: string[]
+  /**
+   * The enrolled repository. A command that does nothing but test whether paths exist may name paths in it
+   * that are outside the worktree (the repository's own `.git` directory, for one).
+   */
+  projectRoot?: string
 }
 
 const MAX_NESTING = 6
@@ -116,6 +121,7 @@ export function classifyCommand(command: string, shell: Shell, opts: ClassifyOpt
   } catch (e) {
     a.add('forbidden', 'high', `command could not be analysed safely: ${e instanceof Error ? e.message : String(e)}`)
   }
+  if (shell === 'powershell' && a.findings.length > 0 && onlyTestsExistence(command)) dropExistenceFindings(a)
   const reasons = [...new Set(a.findings.map((f) => f.reason))]
   const segments = a.segments
   const all = [...a.segments.map((s) => s.class ?? 'UNKNOWN'), ...a.findings.map((f) => f.cls)]
@@ -240,6 +246,109 @@ function commandNameCandidates(word: string): string[] {
  * `shutdown,/s` and `shutdown=/s` run shutdown.exe. Returns the name before such a delimiter when what follows is
  * a short switch (or nothing), which keeps paths and identifiers (`shutdown/index.ts`) out; null otherwise.
  */
+/**
+ * Whether a PowerShell command does nothing but test whether paths exist and print text: `Test-Path`, strings,
+ * variables, `foreach`, `if`. Read strictly, character by character; anything this does not know (a pipe, a
+ * redirection, an assignment, a call of a method, any other command) is a no. A real session (2026-10-12) was
+ * stopped for `foreach ($d in '<the repository's .git>') { "...$(Test-Path "$d/FETCH_HEAD")" }`, which was put
+ * to the user as a change of the Git configuration.
+ */
+export function onlyTestsExistence(command: string): boolean {
+  const n = command.length
+  let i = 0
+  let tested = false
+  const KEYWORDS = new Set(['foreach', 'in', 'if', 'else', 'elseif', '-and', '-or', '-not'])
+  const quoted = (): boolean => {
+    i += 1
+    while (i < n) {
+      const c = command[i]
+      if (c === '`') i += 2
+      else if (c === '"') {
+        if (command[i + 1] !== '"') {
+          i += 1
+          return true
+        }
+        i += 2
+      } else if (c === '$' && command[i + 1] === '(') {
+        i += 2
+        if (!code(true)) return false
+      } else i += 1
+    }
+    return false
+  }
+  const code = (nested: boolean): boolean => {
+    // Inside the arguments of a Test-Path: a bare word there is a path or a parameter, not a command.
+    let args = false
+    while (i < n) {
+      const c = command[i] ?? ''
+      if (c === ';' || c === '{' || c === '}' || c === '\n' || c === '\r') {
+        args = false
+        i += 1
+      } else if (c === ' ' || c === '\t' || c === ',') i += 1
+      else if (c === ')') {
+        if (!nested) return false
+        i += 1
+        return true
+      } else if (c === '(') {
+        i += 1
+        if (!code(true)) return false
+      } else if (c === "'") {
+        const end = command.indexOf("'", i + 1)
+        if (end < 0) return false
+        i = end + 1
+      } else if (c === '"') {
+        if (!quoted()) return false
+      } else if (c === '$') {
+        if (command[i + 1] === '(') {
+          i += 2
+          if (!code(true)) return false
+          continue
+        }
+        const m = /^\$[A-Za-z_]\w*/.exec(command.slice(i, i + 80))
+        if (m === null) return false
+        i += m[0].length
+        // `$x.Delete()`, `$x[0]`, `$env:X`, `$x::y`: more than a value.
+        if (/[.[:]/.test(command[i] ?? '')) return false
+      } else {
+        const m = /^[A-Za-z0-9_./\\:~*-]+/.exec(command.slice(i, i + 400))
+        if (m === null) return false
+        const word = m[0].toLowerCase()
+        i += m[0].length
+        if (args) continue
+        if (word === 'test-path') {
+          args = true
+          tested = true
+        } else if (!KEYWORDS.has(word)) return false
+      }
+    }
+    return !nested
+  }
+  return code(false) && tested
+}
+
+/** Of a command that only tests whether paths exist: naming Git's files changes nothing, and a path in the project is a read of the project. */
+function dropExistenceFindings(a: Analysis): void {
+  const project = a.opts.projectRoot
+  const base = a.roots[0]
+  const inProject = (value: string): boolean => {
+    if (project === undefined || base === undefined) return false
+    return value.split(',').every((part) => {
+      try {
+        return isPathInside(canonicalizePath(project, project), canonicalizePath(part.trim(), base))
+      } catch {
+        return false
+      }
+    })
+  }
+  const kept = a.findings.filter((f) => {
+    if (f.reason.startsWith("touching Git's own files: ")) return false
+    const outside = /^path outside the worktree: (.*)$/.exec(f.reason)
+    return !(outside !== null && inProject(outside[1] ?? ''))
+  })
+  a.findings.length = 0
+  a.findings.push(...kept)
+}
+
 export function cmdCommandName(word: string): string | null {
   const last = word.split('\\').pop() ?? word
   const m = /^([A-Za-z][\w.-]*)(?:[",;=]+|\/(?=[a-z]{1,2}(?:\b|\/|$)))/.exec(last)
