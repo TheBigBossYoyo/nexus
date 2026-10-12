@@ -110,7 +110,7 @@ const DEFAULT_MAX_PROCESSES = 512
 const UI_LIMIT_HANDLES = 0x1
 const WINDOW_UI_LIMITS = 0xff & ~UI_LIMIT_HANDLES
 const GIT_HINT =
-  'nexus: in the isolated profile a git command that stages or changes a branch runs only as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine). Run it separately; nothing was changed.'
+  'nexus: in the isolated profile this git command runs only as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine). Run it separately; nothing was changed.'
 /** git subcommands that change a ref or the index: the AppContainer writes nothing in the user's repository, so they run as a command of their own. */
 const REF_CHANGING = ['add', 'rm', 'mv', 'update-index', 'read-tree', 'commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
 
@@ -727,14 +727,12 @@ export class ExecutionBroker {
       const roots = await this.roots(input)
       // Whether git can read this repository from inside the command. Under ISOLATED that is so once the sandbox
       // account was given its access; a command that runs as the user (RESTRICTED) reads it anyway.
-      let gitReadable = input.profile === 'RESTRICTED'
-      if (input.profile === 'ISOLATED' && input.gitCommonDir !== undefined) {
-        // Without the access the command still runs; git inside it is then told that it cannot work here.
-        gitReadable = await this.grantGit({ commonDir: input.gitCommonDir, writable: input.gitWritable ?? [] }).then(
-          () => true,
-          () => false,
-        )
-      } else if (input.gitOnly === true || input.profile === 'RESTRICTED') {
+      // Under ISOLATED git inside a longer command does not reach the user's repository at all: the command is in
+      // an AppContainer, and git looks at every folder above the repository, in the user's profile, where the
+      // AppContainer has no entry and gets none from NEXUS (measured: "Invalid path 'C:/Users/…': Permission
+      // denied"). Such a git is told so, in the place where it would have answered; git alone runs as the user.
+      const gitReadable = input.profile === 'RESTRICTED'
+      if (input.gitOnly === true || input.profile === 'RESTRICTED') {
         // Under RESTRICTED every command of the session is the user at low integrity, the git inside a longer
         // command too (`git add x && npm test`): what git must write is writable for all of them, not only once
         // a command that is git alone has run (the first real mission under RESTRICTED met "index.lock:

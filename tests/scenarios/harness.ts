@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type {
   CheckCommands,
   MissionPlan,
@@ -257,6 +257,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       baseEnv: () => process.env,
       gitIdentity: () => ({ name: 'NEXUS Agent', email: 'nexus-agent@localhost' }),
       toolPath: (profile, path) => (profile === 'ISOLATED' && mirrored ? mirrored.path : path),
+      posixShell: () => resolve('vendor', 'busybox', 'busybox.exe'),
     })
     executionBroker = broker
     // As the runtime does: only where there is a launcher to do it with.

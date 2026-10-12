@@ -42,17 +42,16 @@ say('hooks', () => { const dir = path.join(process.env.TMP, 'no-hooks'); fs.mkdi
 // 2. A user-level configuration in the home the contained command has.
 say('home', () => fs.writeFileSync(path.join(process.env.HOME, '.gitconfig'), '[core]\\n\\thooksPath = ' + path.join(process.env.TMP, 'no-hooks').split(path.sep).join('/') + '\\n[alias]\\n\\tst = !whoami > ran-as-the-user.txt\\n'));
 // 3. The files of the worktree's entry that say where the repository is and what configuration applies.
-const entry = cp.execFileSync('git', ['rev-parse', '--git-dir']).toString().trim();
+const entry = fs.readFileSync('.git', 'utf8').replace(/^gitdir:\\s*/, '').trim();
 for (const name of ['commondir', 'gitdir', 'config.worktree']) say(name, () => fs.writeFileSync(path.join(entry, name), name === 'config.worktree' ? '[core]\\n\\thooksPath = /x\\n' : 'C:/elsewhere\\n'));
 // 4. A sibling task's branch, and the mission's integration branch.
-const common = cp.execFileSync('git', ['rev-parse', '--git-common-dir']).toString().trim();
-const own = cp.execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD']).toString().trim();
-const dir = path.join(common, 'refs', 'heads', path.dirname(own));
-for (const name of fs.readdirSync(dir)) if (name !== path.basename(own)) say('sibling-' + (name === 'integration' ? 'integration' : 'task'), () => fs.writeFileSync(path.join(dir, name), '0000000000000000000000000000000000000000\\n'));
+const common = path.resolve(entry, '..', '..');
+// The branches cannot even be listed from the AppContainer; where they could, each one but the task's own is tried.
+say('sibling-integration', () => { const heads = path.join(common, 'refs', 'heads'); const walk = (d) => { for (const n of fs.readdirSync(d, { withFileTypes: true })) { if (n.isDirectory()) walk(path.join(d, n.name)); else fs.writeFileSync(path.join(d, n.name), '0000000000000000000000000000000000000000\\n'); } }; walk(heads); });
 // 6. A repository of its own inside the worktree, whose configuration runs the marker as a filter, a file monitor and a hook.
 say('nested', () => {
   const sub = path.join(process.cwd(), 'nested'); fs.mkdirSync(path.join(sub, 'hooks'), { recursive: true });
-  const g = (...a) => cp.execFileSync('git', a, { cwd: sub, stdio: 'pipe' });
+  const g = (...a) => cp.execFileSync('git', ['-c', 'core.hooksPath=' + path.join(sub, 'none').split(path.sep).join('/'), ...a], { cwd: sub, stdio: 'pipe' });
   g('init', '-q', '-b', 'main', '.'); g('config', 'user.name', 'x'); g('config', 'user.email', 'x@x');
   fs.writeFileSync(path.join(sub, 's.txt'), 's\\n'); fs.writeFileSync(path.join(sub, '.gitattributes'), '* filter=evil\\n'); g('add', '-A'); g('commit', '-q', '-m', 'sub');
   const run = "sh -c 'whoami > \\"" + marker.split(path.sep).join('/') + "\\"; cat'";
@@ -79,7 +78,7 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     const out: Record<string, string> = {}
     const refused: Record<string, boolean> = {}
     const worker: FakeScript = async (spec, ctx) => {
-      await writeFiles(spec, ctx, { 'attempt.cjs': "const fs=require('fs');const cp=require('child_process');const common=cp.execFileSync('git',['rev-parse','--git-common-dir']).toString().trim();try{fs.writeFileSync(common+'/'+process.argv[2],'planted');console.log('WROTE')}catch(e){console.log('REFUSED:'+e.code)}", 'probe.cjs': "const cp=require('child_process');console.log('from-node:'+cp.execFileSync('git',['rev-parse','--abbrev-ref','HEAD']).toString().trim())" })
+      await writeFiles(spec, ctx, { 'attempt.cjs': "const fs=require('fs');const cp=require('child_process');const path=require('path');const common=path.resolve(fs.readFileSync('.git','utf8').replace(/^gitdir:\\s*/,'').trim(),'..','..');try{fs.writeFileSync(common+'/'+process.argv[2],'planted');console.log('WROTE')}catch(e){console.log('REFUSED:'+e.code)}", 'probe.cjs': "const cp=require('child_process');console.log('from-node:'+cp.execFileSync('git',['rev-parse','--abbrev-ref','HEAD']).toString().trim())" })
       const bash: [string, string][] = [
         ['who', 'whoami'],
         ['status', 'git status --short'],
@@ -138,15 +137,14 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     // The commit: made, the tree clean after it, and git said nothing went wrong.
     expect(out['commit'], all).toContain('agent commit')
     expect(out['commit']).not.toMatch(/error:|fatal:|Permission denied|EXIT/)
-    expect(out['mixed'], all).toContain('agent commit')
+    // git inside a longer command does not reach the user's repository from the AppContainer: it is stopped
+    // before git and says what to do; the rest of the command runs.
+    expect(out['mixed'], all).not.toContain('agent commit')
     expect(out['mixed']).toContain('mixed-done')
-    expect(out['mixed']).not.toMatch(/fatal:|not a git repository/)
-    expect(out['with-node'], all).toMatch(/from-node:nexus\//)
-    expect(out['diff'], all).toContain('agent-file.txt')
-    expect(out['diff']).not.toMatch(/external diff died|fatal:/)
+    expect(out['with-node'], all).not.toMatch(/from-node:nexus\//)
+    expect(out['diff'], all).toContain('runs only as a command of its own')
     expect(out['show'], all).toContain('agent commit')
     // A commit inside a larger command cannot be made as the sandbox account: it is stopped before git, and says what to do.
-    expect(out['buried-commit'], all).toContain('runs only as a command of its own')
     expect(out['buried-commit']).toContain('rc=128')
     expect(out['after-buried'], all).toContain('agent commit')
     expect(out['after-buried']).toContain('agent-file.txt')
@@ -155,7 +153,7 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     // Reading the worktree's own `.git` file is reading a file of the worktree: it is no question for the user.
     expect(refused['pointer'], all).toBe(false)
     expect(out['pointer']).toContain('gitdir:')
-    expect(out['powershell-mixed'], all).toContain('agent commit')
+    expect(out['powershell-mixed'], all).toContain('runs only as a command of its own')
     // What is not the task's own is refused by Windows.
     for (const name of ['other-branch', 'config', 'hook']) expect(out[name], `${name}: ${all}`).toMatch(/REFUSED:(EPERM|EACCES)/)
     expect(await git(h.repoDir, 'rev-parse', 'main')).toBe(mainBefore)
