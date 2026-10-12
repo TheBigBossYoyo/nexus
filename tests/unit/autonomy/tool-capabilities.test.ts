@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { capabilityKind } from '@shared/autonomy'
-import { needForExecutionReason, needsForFindings } from '@main/modules/autonomy/tool-capabilities'
+import { needForExecutionReason, needsForFinding, needsForFindings } from '@main/modules/autonomy/tool-capabilities'
 import { classifyCommand } from '@main/modules/policies/command-classifier'
 
 const ROOT = process.cwd()
@@ -87,5 +87,15 @@ describe('RESTRICTED is a containment, not the isolated profile', () => {
   it('a write the containment holds to the worktree is not', () => {
     const cls = classifyCommand('rm -rf build', 'bash', { roots: [ROOT] })
     expect(needsForFindings(cls.findings, restricted).every((n) => n.capability !== 'UNCONTAINED_EXECUTION')).toBe(true)
+  })
+
+  it('a write whose path could not be read is work in the worktree inside a containment, and a question outside one', () => {
+    const unreadable = { reason: 'writes through a .NET file API: path uses a variable or expansion and cannot be shown to stay inside the worktree: $p', cls: 'UNKNOWN' as const }
+    expect(needsForFinding(unreadable, { contained: true })).toMatchObject({ capability: 'WRITE_WORKTREE', inBoundary: true })
+    expect(needsForFinding(unreadable, { contained: false, confined: true })).toMatchObject({ capability: 'WRITE_WORKTREE', inBoundary: true })
+    expect(needsForFinding(unreadable, { contained: false })).toMatchObject({ capability: 'WRITE_OUTSIDE_PROJECT', inBoundary: false })
+    // A path that is written out and lies outside stays the question it was, contained or not.
+    const outside = { reason: 'writes through a .NET file API: C:\\Users\\x\\.bashrc', cls: 'UNKNOWN' as const }
+    expect(needsForFinding(outside, { contained: true })).toMatchObject({ capability: 'WRITE_OUTSIDE_PROJECT', inBoundary: false, resource: { kind: 'PATH' } })
   })
 })

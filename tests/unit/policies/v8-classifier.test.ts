@@ -44,4 +44,13 @@ describe('0.8 classifier corrections', () => {
     expect(classifyCommand('cat .git > copy.txt; rm .git', 'bash', { roots: [ROOT] }).level).toBe('forbidden')
     expect(findings('cat .git | tee .git').length).toBeGreaterThan(0)
   })
+
+  it('two backslashes before a word are not a network path; a server and a share still are', () => {
+    const bs = String.fromCharCode(92)
+    expect(findings(`git cat-file -p HEAD:README.md | od -c | grep -c '${bs}${bs}r'; git ls-files --eol README.md`)).toEqual([])
+    expect(findings(`grep -c '${bs}${bs}n' README.md`)).toEqual([])
+    expect(findings(`cat ${bs}${bs}server${bs}share${bs}file.txt`, 'powershell').join(' ')).toMatch(/UNC path/)
+    expect(findings(`type ${bs}${bs}.${bs}pipe${bs}other`, 'powershell').join(' ')).toMatch(/UNC path/)
+    expect(findings('cat //server/share/file.txt').join(' ')).toMatch(/UNC path/)
+  })
 })

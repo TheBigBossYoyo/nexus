@@ -778,7 +778,9 @@ function outsideRoots(v: string, a: Analysis): string | null {
   if (new RegExp(`^(\\$\\{?(env:)?|%)(${pathVars})(\\}|%|\\b)`, 'i').test(v)) {
     return `path from an environment variable may be outside the worktree: ${v}`
   }
-  if (/^[\\/]{2}[^\\/]/.test(v)) return `UNC path outside the worktree: ${v}`
+  // A UNC path names a server and something on it (`\\server\share`, `\\.\pipe\x`). Two backslashes before a
+  // word alone are not one: `'\\r'` is a pattern for grep (a real session, 2026-10-12, was stopped for it).
+  if (/^[\\/]{2}[^\\/]+[\\/]+[^\\/]/.test(v)) return `UNC path outside the worktree: ${v}`
   // A variable is not a directory name. Where a path is written, variablePathRisk expands it or asks.
   if (/\$[\w{(]|`|%\w+%/.test(v)) return null
 

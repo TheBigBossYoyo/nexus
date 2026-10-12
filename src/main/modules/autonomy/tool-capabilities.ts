@@ -72,7 +72,19 @@ const BOUNDARY_RULES: Rule[] = [
   { test: /^requests to run outside the tool sandbox/, to: (r) => need('UNCONTAINED_EXECUTION', r) },
   // The .git entry of the worktree is NEXUS's, not the task's: a write there is a write outside the task's roots.
   { test: /Git's own (files|\.git entry)|^deleting or moving a \.git directory|an archive can carry its own \.git/, to: (r) => need('GIT_REMOTE_CHANGE', r) },
-  { test: /^(writes to a path that is not shown to stay inside the worktree|writes through a \.NET file API): (.*)$/, to: (r, m) => need('WRITE_OUTSIDE_PROJECT', r, pathResource(m[2])) },
+  // A write whose path NEXUS could not read (it is in a variable, or computed) is not a write outside the project:
+  // it is a write NEXUS cannot place. Inside a containment Windows places it: the command can write in the task's
+  // directories and nowhere else, so it is work in the worktree. A path that is written out and lies outside is
+  // still the question it was. (A real session was stopped for `[IO.File]::WriteAllText($p, ...)` with `$p` the
+  // README of its own worktree.)
+  {
+    test: /^(writes to a path that is not shown to stay inside the worktree|writes through a \.NET file API): (.*)$/,
+    to: (r, m, ctx) => {
+      const resource = pathResource(m[2])
+      const unreadable = resource.kind === 'ANY' && /uses a variable or expansion|cannot be shown|not shown to stay/.test(r)
+      return unreadable && (ctx.contained || ctx.confined === true) ? need('WRITE_WORKTREE', r, ANY, true) : need('WRITE_OUTSIDE_PROJECT', r, resource)
+    },
+  },
   { test: /outside the worktree/, to: (r) => need('WRITE_OUTSIDE_PROJECT', r) },
   { test: /^network operation \(git (fetch|pull|clone|submodule)|^network operation \(git /, to: (r) => need('EXTERNAL_HOST_NETWORK', r) },
   { test: /^network (operation|download)/, to: (r) => need('EXTERNAL_HOST_NETWORK', r) },
