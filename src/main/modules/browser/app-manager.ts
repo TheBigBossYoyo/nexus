@@ -55,6 +55,8 @@ export interface AppStatus {
 }
 
 interface Running {
+  /** True once the application came up and a session was opened on it. */
+  launched?: boolean
   id: string
   owner: AppOwner
   manifest: AppManifest
@@ -257,7 +259,10 @@ export class ApplicationUnderTestManager {
         // A file that is gone is not evidence.
       }
     }
-    return { launches: mine.length, screenshots: shots.length, lastScreenshotAt: last === null ? null : new Date(last).toISOString() }
+    // A launch that was refused or did not come up (no Electron binary yet, a port that is not the application's)
+    // started nothing: it is not a launch in the record. A real mission (2026-10-12) could not be accepted because
+    // its record said "2 times" for one launch and one refusal, and no repair can change a record.
+    return { launches: mine.filter((a) => a.launched === true).length, screenshots: shots.length, lastScreenshotAt: last === null ? null : new Date(last).toISOString() }
   }
 
   /**
@@ -304,6 +309,7 @@ export class ApplicationUnderTestManager {
       if (manifest.type === 'web') await this.launchWeb(app, contain)
       else await this.launchElectron(app, contain)
       app.state = 'running'
+      app.launched = true
       this.deps.onChange?.(owner)
       return this.view(app)
     } catch (e) {

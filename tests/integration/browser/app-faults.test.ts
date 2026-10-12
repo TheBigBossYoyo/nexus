@@ -81,6 +81,8 @@ d('an application under test when things go wrong', () => {
     expect((error as AppLaunchError).output.join('\n')).toContain('fixture: cannot start')
     expect(apps.registry()).toEqual([])
     expect(apps.status(o.key)?.state).toBe('stopped')
+    // A launch that did not come up is not a launch in the task's record.
+    expect(apps.evidence({ taskId: null, key: o.key }).launches).toBe(0)
   }, 60_000)
 
   it('an application that names a port it does not hold is not opened: what it prints is not taken on trust', async () => {
@@ -122,6 +124,8 @@ d('an application under test when things go wrong', () => {
     expect(again.state).toBe('running')
     expect((await apps.session(o.key).snapshot()).text).toContain('heading "dies"')
     expect(apps.registry().filter((e) => e.runId === o.runId)).toHaveLength(1)
+    // Two launches that came up are two in the record.
+    expect(apps.evidence({ taskId: null, key: o.key }).launches).toBe(2)
     await apps.stop(o.key)
   }, 120_000)
 

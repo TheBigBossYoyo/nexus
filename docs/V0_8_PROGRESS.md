@@ -461,3 +461,22 @@ closed: a speculative candidate (a clone, not a worktree) whose own `config` nam
   lookups the DNS Client refuses without a network capability), or a filtering driver. Both are a change of
   the containment, not of its setup.
 
+### 2026-10-12, later: the bounded cycle on DNS, the AppContainer evaluation, and a mission's record
+
+- The two experiments the owner allowed are done and negative: an RPC filter on the DNS Client's interface
+  does nothing for local RPC even with no condition at all; untrusted integrity changes nothing. Then the
+  evaluation of AppContainer (conventional, composed with the NexusSandbox account, and the `processmodel.dll`
+  API): `docs/V0_8_DNS_CONTAINMENT_EVALUATION.md`. A no-capability AppContainer closes lookups and the cache
+  across the APIs tried; Git Bash does not start in it. 0.8 stays PARTIAL until that is built.
+- A mistake of the experiment, kept here so that it is not made in the product: an access entry for an
+  AppContainer on the user's window station stopped every Chromium-based application of the session from
+  starting (NEXUS's own end-to-end run failed from that moment) until it was removed.
+- **The unexplained pause of the Electron mission is explained and fixed.** A launch that was refused (the
+  Electron binary was not installed yet) was counted as a launch in the task's record; the plan's criterion
+  said one launch, the verifier read "2 times", and a repair cannot change a record, so the mission stopped
+  for the user. A launch that did not come up is no longer a launch in the record
+  (`tests/integration/browser/app-faults.test.ts`).
+- Runs on `7b48998`: build; `app-electron.test.ts` 10/10; end-to-end 42 passed, 3 skipped; packaged check 16/16;
+  RESTRICTED missions 20/20 (alone); ISOLATED missions 26/28 alone (the Electron mission, for the reason
+  above) and 28/28 in a run that overlapped another suite by accident (not counted).
+
