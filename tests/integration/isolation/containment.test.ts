@@ -225,6 +225,10 @@ attempt('mklink-j', () => cp.execSync('cmd /c mklink /J j-cmd "' + user + '"', {
           expect(r.lines['read-through-user'], r.raw).toMatch(/^DENIED:/)
           expect(r.lines['read-through-profile'], r.raw).toMatch(/^DENIED:/)
           expect(r.raw).not.toContain(SENTINEL)
+          // And it cannot make the junction at all. This is what a git that runs as the user relies on when it stages
+          // a worktree: a junction it does not know of would be walked into, and the files behind it staged
+          // (review of 0.8). Asserted, not only recorded: if Windows ever answers otherwise this fails.
+          for (const made of ['junction-user', 'junction-protected', 'junction-profile']) expect(r.lines[made], `${made}: ${r.raw}`).toMatch(/^DENIED:/)
         }
         console.info(`junctions under ${profile}: ${JSON.stringify(r.lines)}`)
       })

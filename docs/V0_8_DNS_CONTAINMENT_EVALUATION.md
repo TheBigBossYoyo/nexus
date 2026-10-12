@@ -143,3 +143,23 @@ that holds the user's session.
 
 Direct DNS exfiltration under ISOLATED is not closed, and is not closable without the change above. 0.8 stays
 PARTIAL.
+
+## Outcome (2026-10-12, evening): the isolated profile runs in an AppContainer
+
+Built, and measured on this machine. What the evaluation above left open, and how each ended:
+
+| Question | Answer (measured) |
+|---|---|
+| Does the account need its Windows profile? | Yes. Without it no process starts in the AppContainer ("file not found"); the launcher logs the account on with its profile and registers the AppContainer for it once. The removal script takes the profile away again, found by the account's identifier. |
+| The window station | Nothing to do: Windows already lets AppContainers into it (ALL APPLICATION PACKAGES). No entry is added, ever. |
+| Folders above the sandbox root | The AppContainer could not even ask whether `C:\` exists: cmd refused unquoted paths, Node failed with `EPERM lstat 'C:\'`, git with "unable to get current working directory". The setup adds one entry each on the drive's root and on `C:\ProgramData`: read and list that folder itself, inherited by nothing. |
+| An entry for the AppContainer's own SID | **Must not be used on files.** A folder whose access list names an AppContainer is refused to every low-integrity process that is not in one (measured on a scratch folder and, by mistake, on `C:\` for a quarter of an hour). An entry for a capability does not do this, and Windows' own entry on `C:\` is of that kind. The AppContainer therefore holds one capability of NEXUS's own (no meaning to Windows), and every access entry names that capability. |
+| Integrity labels inside an AppContainer | **They do not bind.** A process in the AppContainer read a file labeled "no read from below" and overwrote one labeled "no write from below". Inside the isolated profile only the capability's entries decide: the root gives it reading, NEXUS gives writing per session directory, the user's repository gives it nothing. |
+| Git Bash | Not used. The shell is busybox-w32 (ash), a native program, inside the AppContainer; `tests/integration/isolation/shell-semantics.test.ts` lists what it does and what it refuses. |
+| git on the user's repository | Not from inside: git looks at every folder above the repository, in the user's profile. A git inside a longer command is told to run alone; git alone runs as the user (the restricted mechanics), as before. |
+| Node | `spawn`, `exec` and `fork` with a pipe hung: libuv before 1.53.0 names its pipes outside `\.\pipe\LOCAL\` and retries for ever when refused. Fixed upstream on 2026-09-24; no Node release has it yet. The sandbox's own copy of node.exe has the one name pattern replaced (same length). A program that brings its own libuv is not reached by this. |
+| Electron under test | Starts, loads a page and is captured, with `--no-sandbox` (which NEXUS already passed). |
+| The loopback | Reached, with and without the exemption the setup registers. Whether a machine without the exemption would refuse it could not be measured here. |
+| Names and the cache | Refused in every way tried: the resolver (ping), .NET, DnsQuery (`Resolve-DnsName`), nslookup, curl by name, Node `dns.lookup` and `dns.resolve4`, a fresh name, `ipconfig /displaydns`. Asserted by the containment tests and by NEXUS's own check at every start: an isolated profile for which a name is looked up is reported as not holding. |
+
+The Windows process-security-environment API (`processmodel.dll`) was not needed and is not used.

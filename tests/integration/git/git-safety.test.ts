@@ -385,6 +385,43 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
     expect((await git.run(a.path, ['show', `${baseCommit}:tracked.txt`])).stdout.trim()).toBe('original')
   })
 
+  it('review of 0.8: starts no conversion program on the files of a task, neither the one Git for Windows configures for documents nor one a .gitattributes names', async () => {
+    const repo = await makeRepo()
+    // A document of a kind Git for Windows hands to a converter (astextplain) whenever two versions are compared.
+    await writeFile(join(repo, 'report.pdf'), '%PDF-1.4 first\n')
+    await writeFile(join(repo, 'notes.conv'), 'first\n')
+    await sh(repo, 'add', '-A')
+    await sh(repo, 'commit', '-q', '-m', 'documents')
+    const marker = join(base, `conv-${newId()}.txt`).replace(/\\/g, '/')
+    await sh(repo, 'config', 'diff.planted.textconv', `sh -c 'echo ran >> "${marker}"; cat "$1"' x`)
+    const manager = new WorktreeManager(git, join(base, `wt-${newId()}`))
+    const wt = await manager.createForTask({ repoRoot: repo, runId: newId(), taskKey: 't', startPoint: 'main' })
+    await writeFile(join(wt.path, 'report.pdf'), '%PDF-1.4 second\n')
+    await writeFile(join(wt.path, 'notes.conv'), 'second\n')
+    await writeFile(join(wt.path, '.gitattributes'), '*.conv diff=planted\n*.pdf diff=astextplain\n')
+    const holder = git as unknown as { env: NodeJS.ProcessEnv }
+    const before = holder.env
+    const trace = join(base, `trace-${newId()}.txt`)
+    holder.env = { ...before, GIT_TRACE: trace }
+    try {
+      await git.status(wt.path)
+      expect(await git.commitAll(wt.path, 'documents changed', AUTHOR)).not.toBeNull()
+      await git.run(wt.path, ['diff', 'HEAD~1'])
+      await git.run(wt.path, ['log', '-p', '-1'])
+      await git.run(wt.path, ['show', 'HEAD'])
+    } finally {
+      holder.env = before
+    }
+    const traced = await readFile(trace, 'utf8')
+    expect(traced).toContain('diff')
+    expect(traced, 'no converter was started').not.toMatch(/run_command: .*(astextplain|sh -c 'echo ran)/)
+    await expect(readFile(marker, 'utf8')).rejects.toThrow()
+    // The control, so that the absence above means something: stock git, asked the same question, starts the planted program.
+    await writeFile(join(wt.path, 'notes.conv'), 'third\n')
+    await sh(wt.path, 'diff').catch(() => '')
+    expect(await readFile(marker, 'utf8')).toContain('ran')
+  })
+
   it('runs no hook, no file system monitor and no pager that the repository configures, and hands git no Claude credential', async () => {
     const repo = await makeRepo()
     const marker = join(base, `marker-${newId()}.txt`).replace(/\\/g, '/')

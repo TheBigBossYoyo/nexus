@@ -493,14 +493,24 @@ export class GitService {
     const scope = own ? [`--git-dir=${own.gitDir}`, `--work-tree=${own.root}`] : []
     const sub = subcommandOf(args)
     const at = args.indexOf(sub)
-    const own_args = IGNORES_SUBMODULES_ON_COMMAND_LINE.has(sub) && at >= 0 && !args.some((a) => a.startsWith('--ignore-submodules')) ? [...args.slice(0, at + 1), '--ignore-submodules=all', ...args.slice(at + 1)] : args
+    // A comparison of contents never starts a program on the files compared. Git for Windows ships attributes
+    // and a configuration of its own that hand every changed .pdf, .doc, .docx, .odt and .rtf to a converter
+    // (astextplain: pdftotext, antiword, ...): with a plain `diff --cached --quiet` those ran on a task's files, as
+    // the user, outside any containment (found by the review of 0.8, reproduced with GIT_TRACE). So the three
+    // commands that compare contents always carry the two options, whoever calls them, and the attributes of
+    // the installation are not read at all (GIT_ATTR_NOSYSTEM below).
+    const comparing = (sub === 'diff' || sub === 'log' || sub === 'show') && at >= 0
+    const guarded = comparing ? [...args.slice(0, at + 1), ...['--no-ext-diff', '--no-textconv'].filter((flag) => !args.includes(flag)), ...args.slice(at + 1)] : args
+    const own_args_source = guarded
+    const own_args = IGNORES_SUBMODULES_ON_COMMAND_LINE.has(sub) && at >= 0 && !args.some((a) => a.startsWith('--ignore-submodules')) ? [...own_args_source.slice(0, at + 1), '--ignore-submodules=all', ...own_args_source.slice(at + 1)] : own_args_source
     const fullArgs = ['--no-replace-objects', ...scope, '-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...SAFE_CONFIG, ...own_args]
     const where = cwd ?? own?.root ?? process.cwd()
     const ceiling = this.worktreesRoot && isWithin(this.worktreesRoot, where) ? { GIT_CEILING_DIRECTORIES: this.worktreesRoot } : {}
     const common = own ? { GIT_COMMON_DIR: dirname(dirname(own.gitDir)) } : {}
     return runProcess(this.gitPath, fullArgs, {
       cwd: where,
-      env: { ...this.env, ...ceiling, ...common, ...(index !== null ? { GIT_INDEX_FILE: index } : {}), ...(opts.env ?? {}) },
+      // GIT_NO_LAZY_FETCH: in a repository that is a partial clone, an object that is not there is not fetched for a task.
+      env: { ...this.env, GIT_ATTR_NOSYSTEM: '1', GIT_NO_LAZY_FETCH: '1', ...ceiling, ...common, ...(index !== null ? { GIT_INDEX_FILE: index } : {}), ...(opts.env ?? {}) },
       timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxOutputBytes: opts.maxOutputBytes,
       keep: opts.keep,

@@ -127,9 +127,14 @@ const REF_CHANGING = ['add', 'rm', 'mv', 'update-index', 'read-tree', 'commit', 
  * the branch's commit when it is not there yet, the invocations run as one function, and afterwards the
  * worktree's own index file is replaced by a copy, so that a git the task runs as the sandbox account sees
  * what was staged. The copy is for reading only: nothing of the user's git reads it back.
+ *
+ * The index is made again from the branch's commit whenever the branch is not where this script left it: NEXUS
+ * commits a task's work with an index of its own, and the index kept here then described the commit before
+ * (a real mission of 2026-10-12: `git status` showed every committed file as changed, and a commit from it
+ * would have undone the work).
  */
-const BASH_OWN_INDEX_BEFORE = `if [ -n "$GIT_INDEX_FILE" ] && [ ! -s "$GIT_INDEX_FILE" ]; then nx_guard && command git read-tree HEAD || { echo 'NEXUS: the index for this command could not be made, so it was not run.' >&2; exit 128; }; fi\nnx_main() {\n`
-const BASH_OWN_INDEX_AFTER = `}\nnx_main\nnx_rc=$?\nif [ -n "$GIT_INDEX_FILE" ] && [ -s "$GIT_INDEX_FILE" ] && [ -n "$GIT_DIR" ]; then cp -f "$GIT_INDEX_FILE" "$GIT_DIR/index" 2>/dev/null; fi\nexit $nx_rc\n`
+const BASH_OWN_INDEX_BEFORE = `if [ -n "$GIT_INDEX_FILE" ]; then nx_h=$(command git rev-parse -q --verify HEAD 2>/dev/null); if [ ! -s "$GIT_INDEX_FILE" ] || [ "$(cat "$GIT_INDEX_FILE.head" 2>/dev/null)" != "$nx_h" ]; then nx_guard && command git read-tree HEAD || { echo 'NEXUS: the index for this command could not be made, so it was not run.' >&2; exit 128; }; printf '%s' "$nx_h" > "$GIT_INDEX_FILE.head"; fi; fi\nnx_main() {\n`
+const BASH_OWN_INDEX_AFTER = `}\nnx_main\nnx_rc=$?\nif [ -n "$GIT_INDEX_FILE" ] && [ -s "$GIT_INDEX_FILE" ] && [ -n "$GIT_DIR" ]; then cp -f "$GIT_INDEX_FILE" "$GIT_DIR/index" 2>/dev/null; command git rev-parse -q --verify HEAD > "$GIT_INDEX_FILE.head" 2>/dev/null; fi\nexit $nx_rc\n`
 
 /**
  * Looked at before every git of a git-only script, by the script itself:
@@ -181,10 +186,12 @@ export function grantedPushScript(input: { pushLine: string; gitDir: string; wor
   const lines = [
     // Nothing of git's is taken from the environment of whoever starts the script (a variable there can name a
     // program for git to run: measured by the fourth review), and git is the one NEXUS found, by its full path.
-    'for nx_v in $(compgen -e); do case "$nx_v" in GIT_*) unset "$nx_v";; esac; done',
+    'for nx_v in $(compgen -e); do case "${nx_v^^}" in GIT_*) unset "$nx_v";; esac; done',
     `NX_GIT=${bashQuote(input.git)}`,
     `export GIT_DIR=${bashQuote(input.gitDir)} GIT_COMMON_DIR=${bashQuote(resolve(input.gitDir, '..', '..'))} GIT_WORK_TREE=${bashQuote(input.worktree)}`,
-    `export GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 GIT_LFS_SKIP_SMUDGE=1 GIT_EDITOR=true GIT_PAGER=cat GIT_CONFIG_COUNT=${config.length}`,
+    // From the hooks directory NEXUS made (empty, not the task's): nothing git looks up beside where it stands is the task's.
+    `cd ${bashQuote(input.hooksDir)} || exit 128`,
+    `export GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 GIT_LFS_SKIP_SMUDGE=1 GIT_NO_LAZY_FETCH=1 GIT_EDITOR=true GIT_PAGER=cat GIT_CONFIG_COUNT=${config.length}`,
     ...config.map(([key, value], i) => `export GIT_CONFIG_KEY_${i}=${bashQuote(key)} GIT_CONFIG_VALUE_${i}=${bashQuote(value)}`),
     // A repository that reads per-worktree configuration would take programs from a file in the entry, which the task's code may have put there.
     `if [ -s "$GIT_DIR/config.worktree" ] || [ -L "$GIT_DIR/config.worktree" ] || [ -d "$GIT_DIR/config.worktree" ]; then echo 'NEXUS: the worktree has a configuration of its own that NEXUS did not write, so the push was not made.' >&2; exit 128; fi`,
@@ -920,7 +927,7 @@ export class ExecutionBroker {
     // Git LFS, where it is installed, is a filter the machine's own git configuration defines and a `.gitattributes`
     // in the worktree selects; where it downloads from is read from a `.lfsconfig` in the worktree (measured by the
     // second audit: a request to an address the worktree named). It is told not to download: files stay pointers.
-    const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length), GIT_EDITOR: 'true', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1' }
+    const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length), GIT_EDITOR: 'true', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1', GIT_NO_LAZY_FETCH: '1' }
     config.forEach(([key, value], i) => {
       env[`GIT_CONFIG_KEY_${i}`] = key
       env[`GIT_CONFIG_VALUE_${i}`] = value

@@ -55,6 +55,10 @@ export interface AppStatus {
 }
 
 interface Running {
+  /** What was done with the application through NEXUS's tools, in order: one line each, written by NEXUS. */
+  actions?: string[]
+  /** The beginning of the last snapshot that was read: text of the application, kept as such. */
+  lastSnapshot?: string
   /** True once the application came up and a session was opened on it. */
   launched?: boolean
   id: string
@@ -235,6 +239,20 @@ export class ApplicationUnderTestManager {
   }
 
   /** A file made while looking at the application (a screenshot), kept with the session for the user. */
+  /**
+   * Adds a line to the record of what was done with the application of a task: a search, an action, a reading of
+   * the page. The line is NEXUS's own wording of a tool call that succeeded; whoever checks the task reads the
+   * record instead of taking a session's word for what it did. (A real mission of 2026-10-12 could not be
+   * accepted: the record showed the launch and the screenshot, and not the click its criterion asked for.)
+   */
+  noteAction(key: string, line: string, snapshot?: string): void {
+    const app = this.apps.get(key)
+    if (app === undefined) return
+    const actions = (app.actions ??= [])
+    if (actions.length < 60) actions.push(line.replace(/\s+/g, ' ').slice(0, 160))
+    if (snapshot !== undefined) app.lastSnapshot = snapshot.slice(0, 600)
+  }
+
   noteArtifact(key: string, path: string): void {
     const app = [...this.apps.values()].filter((a) => a.owner.key === key).pop()
     if (app && !app.artifacts.includes(path)) app.artifacts.push(path)
@@ -248,7 +266,7 @@ export class ApplicationUnderTestManager {
    * What was kept for a task across every launch of its application: how many screenshots, and when the last
    * one was taken. A session that checks another's work (a reviewer, a verifier) reads it as evidence.
    */
-  evidence(taskOrKey: { taskId: string | null; key: string }): { launches: number; screenshots: number; lastScreenshotAt: string | null } {
+  evidence(taskOrKey: { taskId: string | null; key: string }): { launches: number; screenshots: number; lastScreenshotAt: string | null; actions: string[]; lastSnapshot: string | null } {
     const mine = [...this.apps.values()].filter((a) => (taskOrKey.taskId !== null ? a.owner.taskId === taskOrKey.taskId : a.owner.key === taskOrKey.key))
     const shots = mine.flatMap((a) => a.artifacts)
     let last: number | null = null
@@ -262,7 +280,8 @@ export class ApplicationUnderTestManager {
     // A launch that was refused or did not come up (no Electron binary yet, a port that is not the application's)
     // started nothing: it is not a launch in the record. A real mission (2026-10-12) could not be accepted because
     // its record said "2 times" for one launch and one refusal, and no repair can change a record.
-    return { launches: mine.filter((a) => a.launched === true).length, screenshots: shots.length, lastScreenshotAt: last === null ? null : new Date(last).toISOString() }
+    const snapshots = mine.map((a) => a.lastSnapshot).filter((t): t is string => t !== undefined)
+    return { launches: mine.filter((a) => a.launched === true).length, screenshots: shots.length, lastScreenshotAt: last === null ? null : new Date(last).toISOString(), actions: mine.flatMap((a) => a.actions ?? []), lastSnapshot: snapshots[snapshots.length - 1] ?? null }
   }
 
   /**

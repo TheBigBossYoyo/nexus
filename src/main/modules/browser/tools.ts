@@ -94,8 +94,13 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           const kept = deps.apps.evidence({ taskId: owner.taskId, key: owner.key })
           // On NEXUS's own record, not on anybody's word: what a session that checks the work can rely on.
           const evidence = `NEXUS's record for this task: the application was launched ${kept.launches} time${kept.launches === 1 ? '' : 's'}; ${kept.screenshots} screenshot${kept.screenshots === 1 ? '' : 's'} kept${kept.lastScreenshotAt ? `, the last at ${kept.lastScreenshotAt}` : ''}. This record is the evidence: the images are kept by NEXUS, not in the worktree and not in any folder a session can read, so there is no file to look for.`
-          if (status === null) return ['No application has been launched for this task.', evidence].join('\n')
-          return [statusText(status), evidence, status.output.length > 0 ? enveloped('output', status.output.join('\n')) : 'It has printed nothing.'].join('\n')
+          // What was done with it, in NEXUS's own words, and the beginning of the last page that was read (the
+          // application's text, marked as such): a criterion that asks for a click or for what the page then
+          // said is checked against this, not against what a session reports of itself.
+          const done = kept.actions.length === 0 ? 'No search, action or reading of the page is on record.' : `On record, in order: ${kept.actions.join('; ')}.`
+          const lastPage = kept.lastSnapshot === null ? '' : `The beginning of the last snapshot that was read:\n${enveloped('snapshot', kept.lastSnapshot)}`
+          if (status === null) return ['No application has been launched for this task.', evidence, done, lastPage].filter((l) => l !== '').join('\n')
+          return [statusText(status), evidence, done, lastPage, status.output.length > 0 ? enveloped('output', status.output.join('\n')) : 'It has printed nothing.'].join('\n')
         }
         if (def.name === 'app_snapshot') {
           const no = refused(def.name, 'LOCAL_APP_AUTOMATION', 'reads the accessibility tree of the application under test', 'app_snapshot')
@@ -105,12 +110,14 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
             ...(typeof args['depth'] === 'number' ? { depth: args['depth'] } : {}),
             ...(typeof args['max_chars'] === 'number' ? { maxChars: args['max_chars'] } : {}),
           })
+          deps.apps.noteAction(owner.key, `snapshot read (${snapshot.totalChars} characters)`, snapshot.text)
           return [page(snapshot), enveloped('snapshot', snapshot.text), snapshot.truncated ? `Cut at ${snapshot.text.length} of ${snapshot.totalChars} characters. Narrow it with a ref or a depth, or use app_find.` : ''].filter((l) => l !== '').join('\n')
         }
         if (def.name === 'app_find') {
           const no = refused(def.name, 'LOCAL_APP_AUTOMATION', 'searches the accessibility tree of the application under test', 'app_find')
           if (no !== null) return no
           const found = await deps.apps.session(owner.key).find(String(args['text']), typeof args['limit'] === 'number' ? args['limit'] : undefined)
+          deps.apps.noteAction(owner.key, `searched for ${JSON.stringify(String(args['text']).slice(0, 60))}: ${found.total} line${found.total === 1 ? '' : 's'}`)
           if (found.total === 0) return 'Nothing on the page contains that text.'
           return [`${found.total} line${found.total === 1 ? '' : 's'} of the snapshot contain it${found.total > found.matches.length ? `; the first ${found.matches.length}` : ''}:`, enveloped('snapshot', found.matches.join('\n'))].join('\n')
         }
@@ -146,6 +153,7 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
             if (target === null) return 'Not done: only an address of the launched application can be opened, as a path ("/settings") or as a full address of its own endpoint.'
             state = await browser.navigate(target)
           } else return 'Not done: no such action.'
+          deps.apps.noteAction(owner.key, `${action}${ref !== null ? ` on ${ref}` : ''}${text !== null && action !== 'fill' && action !== 'type' ? ` ${JSON.stringify(text.slice(0, 60))}` : ''}`)
           return `Done. ${page(state)}`
         }
         if (def.name === 'app_screenshot') {

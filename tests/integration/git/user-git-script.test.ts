@@ -272,6 +272,8 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
       const env = pinnedEnv(true)
       spawnSync('git', ['read-tree', 'HEAD'], { cwd: worktree, env, windowsHide: true })
       spawnSync('git', ['update-index', '--add', '--cacheinfo', `100644,${sha},f.bin`], { cwd: worktree, env, windowsHide: true })
+      // As the script leaves it: the index knows which commit it was made for.
+      writeFileSync(`${env['GIT_INDEX_FILE']}.head`, raw(worktree, 'rev-parse', 'HEAD'))
       const out = await asUserAsync('git add .gitattributes .lfsconfig; git commit -q -m "lfs"; git restore f.bin; git checkout -- .; git reset -q --hard; git status --short')
       expect(hits, `as the user. Output: ${out.slice(-300)}`).toEqual([])
       expect(readFileSync(join(worktree, 'f.bin'), 'utf8'), 'the file stays a pointer').toContain('git-lfs.github.com')
@@ -353,10 +355,107 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     expect(asUser('git stash list').out).not.toContain('NEXUS:')
   }, 120_000)
 
+  it("the index of the command follows the branch: after NEXUS committed the task's work with an index of its own, status is clean and a commit undoes nothing", () => {
+    writeFileSync(join(worktree, 'first.txt'), 'first\n')
+    expect(asUser('git add -A && git commit -q -m "by the agent"').code).toBe(0)
+    // As NEXUS commits: everything in the worktree, through an index that is not the command's.
+    writeFileSync(join(worktree, 'second.txt'), 'second\n')
+    const env = { ...process.env, GIT_INDEX_FILE: join(base, 'nexus-own-index') }
+    execFileSync('git', ['read-tree', 'HEAD'], { cwd: worktree, env, windowsHide: true })
+    execFileSync('git', ['add', '-A'], { cwd: worktree, env, windowsHide: true })
+    execFileSync('git', ['commit', '-q', '-m', 'by NEXUS'], { cwd: worktree, env, windowsHide: true })
+    const status = asUser('git status --short')
+    expect(status.code, status.out).toBe(0)
+    expect(status.out.trim(), 'nothing is shown as changed').toBe('')
+    writeFileSync(join(worktree, 'third.txt'), 'third\n')
+    expect(asUser('git add -A && git commit -q -m "after NEXUS"').code).toBe(0)
+    expect(raw(worktree, 'ls-tree', '--name-only', 'HEAD').split('\n')).toEqual(expect.arrayContaining(['first.txt', 'second.txt', 'third.txt']))
+    // What the agent staged and did not commit is kept while the branch stays where it is.
+    writeFileSync(join(worktree, 'staged.txt'), 'staged\n')
+    expect(asUser('git add staged.txt').code).toBe(0)
+    expect(asUser('git status --short').out).toContain('A  staged.txt')
+  })
+
+  /** Runs the script of an allowed push as the agent's shell would start it. */
+  function allowedPush(command: string): { code: number | null; out: string } {
+    const invocation = (grantedPushOf(command) ?? [])[0]
+    if (invocation === undefined) throw new Error(`does not qualify: ${command}`)
+    const hooksDir = join(base, 'granted-no-hooks')
+    mkdirSync(hooksDir, { recursive: true })
+    const script = join(base, `push-${Math.random().toString(16).slice(2, 10)}.sh`)
+    writeFileSync(script, grantedPushScript({ pushLine: renderGrantedPush(invocation, 'nexus/run1/task'), gitDir: entry, worktree, hooksDir, git: 'git' }))
+    const r = spawnSync(BASH, ['--noprofile', '--norc', script], { cwd: worktree, env: { ...process.env, git_dir: join(base, 'elsewhere') }, encoding: 'utf8', windowsHide: true, timeout: 60_000 })
+    return { code: r.status, out: `${r.stdout}${r.stderr}` }
+  }
+
+  it('review of 0.8: an allowed push goes to a network address only; a remote that is a path, relative or not, is refused and no hook of the target runs', () => {
+    writeFileSync(join(worktree, 'new.txt'), 'new\n')
+    expect(asUser('git add -A && git commit -q -m "work"').code).toBe(0)
+    // Targets the task could have made or reached: beside the worktree, inside it, and by a full path.
+    const targets: [string, string, string][] = [
+      ['rel-up', '../bare-up.git', join(base, 'worktrees', 'bare-up.git')],
+      ['rel-in', './bare-in.git', join(worktree, 'bare-in.git')],
+      ['abs', slash(join(base, 'bare-abs.git')), join(base, 'bare-abs.git')],
+      ['file', `file:///${slash(join(base, 'bare-file.git'))}`, join(base, 'bare-file.git')],
+    ]
+    for (const [name, url, dir] of targets) {
+      raw(base, 'init', '-q', '--bare', '-b', 'main', dir)
+      writeFileSync(join(dir, 'hooks', 'pre-receive'), `#!/bin/sh\necho ran > "${slash(marker('hook'))}"\n`)
+      raw(repo, 'remote', 'add', name, url)
+      const r = allowedPush(`git push ${name} HEAD`)
+      expect(r.code, `${name}: ${r.out}`).toBe(128)
+      expect(r.out, name).toContain('network address only')
+      expect(raw(dir, 'for-each-ref', '--format=%(refname)'), `${name}: nothing arrived`).toBe('')
+    }
+    // A helper as the address, and an address that is an option.
+    raw(repo, 'remote', 'add', 'helper', 'ext::sh -c "echo ran > x"')
+    expect(allowedPush('git push helper HEAD').code).toBe(128)
+    expect(markers(), 'no hook of a target ran').toEqual([])
+    expect(existsSync(join(worktree, 'x'))).toBe(false)
+  })
+
+  it("review of 0.8: an allowed push carries the task's own commits; a branch turned to a private branch of the user's, or merged with one, is not published", () => {
+    const remote = join(base, 'remote.git')
+    raw(base, 'init', '-q', '--bare', '-b', 'main', remote)
+    raw(repo, 'remote', 'add', 'origin', 'https://nexus-test.invalid/remote.git')
+    raw(repo, 'config', `url.${slash(base)}/.insteadOf`, 'https://nexus-test.invalid/')
+    // The mission's integration branch, where the mission started; and a branch of the user's with work that was never published.
+    raw(repo, 'branch', 'nexus/run1/integration', 'main')
+    raw(repo, 'branch', 'private', 'main')
+    const other = join(base, 'private-checkout')
+    raw(repo, 'worktree', 'add', '-q', other, 'private')
+    writeFileSync(join(other, 'secret.txt'), 'PRIVATE-WORK\n')
+    raw(other, 'add', '-A')
+    raw(other, 'commit', '-q', '-m', 'private work')
+    // The task's own work is published.
+    writeFileSync(join(worktree, 'mine.txt'), 'mine\n')
+    expect(asUser('git add -A && git commit -q -m "task work"').code).toBe(0)
+    const own = allowedPush('git push origin HEAD')
+    expect(own.code, own.out).toBe(0)
+    expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('task work')
+    // A second push of the same branch, now that a remote-tracking ref of it may exist, still goes.
+    writeFileSync(join(worktree, 'mine2.txt'), 'mine\n')
+    expect(asUser('git add -A && git commit -q -m "task work 2"').code).toBe(0)
+    expect(allowedPush('git push -u origin HEAD').code).toBe(0)
+    // The branch merged with the private one: refused, and the remote keeps what it had.
+    expect(asUser('git merge -q --no-edit private').code).toBe(0)
+    const merged = allowedPush('git push origin HEAD')
+    expect(merged.code, merged.out).toBe(128)
+    expect(merged.out).toContain("not this task's to publish")
+    // The branch turned to the private one: refused.
+    expect(asUser('git reset -q --hard private').code).toBe(0)
+    const turned = allowedPush('git push origin HEAD')
+    expect(turned.code, turned.out).toBe(128)
+    expect(turned.out).toContain("not this task's to publish")
+    expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('task work 2')
+    expect(raw(remote, 'log', '--all', '--format=%s')).not.toContain('private work')
+  })
+
   it('a push the user allowed: it arrives, on the branch of the worktree, and no hook, forged HEAD or planted configuration has a say', () => {
     const remote = join(base, 'remote.git')
     raw(base, 'init', '-q', '--bare', '-b', 'main', remote)
-    raw(repo, 'remote', 'add', 'origin', remote)
+    raw(repo, 'remote', 'add', 'origin', 'https://nexus-test.invalid/remote.git')
+    raw(repo, 'config', `url.${slash(base)}/.insteadOf`, 'https://nexus-test.invalid/')
     raw(repo, 'branch', 'secret-work', 'main')
     // A hook of the repository that would run before a push, and one in the entry.
     mkdirSync(join(repo, '.git', 'hooks'), { recursive: true })

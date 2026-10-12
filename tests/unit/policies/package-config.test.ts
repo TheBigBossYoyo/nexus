@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { capabilityKind } from '@shared/autonomy'
@@ -191,6 +191,24 @@ describe('package-config files', () => {
       if (e instanceof Error && /EPERM|EACCES/.test(e.message)) return
       throw e
     }
+  })
+
+  it('reads what it checked: a .npmrc that is a second name of a file elsewhere (a hard link) is not read', () => {
+    const dir = project('hardlink', { 'package.json': '{}' })
+    const outside = path.join(root, 'outside-of-the-project.npmrc')
+    writeFileSync(outside, `//registry.example.com/:_authToken=HARDLINK-SENTINEL-7731
+registry=https://elsewhere.example.com/
+`)
+    try {
+      linkSync(outside, path.join(dir, '.npmrc'))
+    } catch {
+      // A file system without hard links: nothing to show here.
+      return
+    }
+    const out = renderPackageConfig(inspectPackageConfig(dir, undefined, none))
+    expect(out).toContain('more than one name')
+    expect(out).not.toContain('elsewhere.example.com')
+    expect(out).not.toContain('HARDLINK-SENTINEL-7731')
   })
 
   it('reports only the presence of the user-level file', () => {

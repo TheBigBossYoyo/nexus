@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -219,24 +219,41 @@ function within(root: string, target: string): boolean {
  * junction, not a path that resolves elsewhere. The refusal never carries any of the file.
  */
 function readPlain(root: string, file: string, cap: number): ReadResult | 'absent' {
-  let st
-  try {
-    st = lstatSync(file)
-  } catch {
-    return 'absent'
-  }
-  if (st.isSymbolicLink()) return { ok: false, reason: 'is a link' }
-  if (!st.isFile()) return { ok: false, reason: 'is not a regular file' }
-  try {
-    // A directory on the way may be a junction even where the file itself is not a link.
-    if (!within(realpathSync.native(root), realpathSync.native(file))) return { ok: false, reason: 'resolves outside the project' }
-  } catch {
-    return { ok: false, reason: 'could not be resolved' }
-  }
-  if (st.size > cap) return { ok: false, reason: `is larger than ${cap / 1024} KiB` }
-  let fd: number | null = null
+  // The file is opened once, and everything that is asked about it is asked of that one open file: what kind it
+  // is, how large, and whether it is the file that lies at this name inside the project. A name can be turned to
+  // another file between a look and a read; an open file cannot.
+  let fd: number
   try {
     fd = openSync(file, 'r')
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : { ok: false, reason: 'could not be opened' }
+  }
+  try {
+    const held = fstatSync(fd, { bigint: true })
+    if (!held.isFile()) return { ok: false, reason: 'is not a regular file' }
+    // More than one name for the same file: it may be a file of another place under a name of the project.
+    if (held.nlink > 1n) return { ok: false, reason: 'has more than one name (a hard link)' }
+    let named
+    let resolved: string
+    let resolvedStat
+    try {
+      named = lstatSync(file, { bigint: true })
+      resolved = realpathSync.native(file)
+      resolvedStat = statSync(resolved, { bigint: true })
+    } catch {
+      return { ok: false, reason: 'could not be resolved' }
+    }
+    if (named.isSymbolicLink()) return { ok: false, reason: 'is a link' }
+    const same = (x: { dev: bigint; ino: bigint }): boolean => x.dev === held.dev && x.ino === held.ino
+    // The open file is the one the name names now, and the one its resolved path names: neither was changed under it.
+    if (!same(named) || !same(resolvedStat)) return { ok: false, reason: 'changed while it was being read' }
+    try {
+      // A directory on the way may be a junction even where the file itself is not a link.
+      if (!within(realpathSync.native(root), resolved)) return { ok: false, reason: 'resolves outside the project' }
+    } catch {
+      return { ok: false, reason: 'could not be resolved' }
+    }
+    if (held.size > BigInt(cap)) return { ok: false, reason: `is larger than ${cap / 1024} KiB` }
     const buf = Buffer.alloc(cap + 1)
     const n = readSync(fd, buf, 0, cap + 1, 0)
     if (n > cap) return { ok: false, reason: `is larger than ${cap / 1024} KiB` }
@@ -246,7 +263,7 @@ function readPlain(root: string, file: string, cap: number): ReadResult | 'absen
   } catch {
     return { ok: false, reason: 'could not be read' }
   } finally {
-    if (fd !== null) closeSync(fd)
+    closeSync(fd)
   }
 }
 

@@ -510,7 +510,32 @@ export function renderGrantedPush(invocation: UserGitInvocation, branch: string)
   if (named !== 'HEAD' && named !== branch) return refuse(`an allowed push publishes the branch of this worktree (${branch}) and no other`)
   const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
   const known = `if [ -z "$("$NX_GIT" config --get ${shellQuote(`remote.${remote}.url`)} 2>/dev/null)" ]; then ${refuse(`this repository has no remote called ${remote}`)}; fi`
-  return `${known}\n"$NX_GIT" ${['push', ...options, remote, `refs/heads/${branch}:refs/heads/${branch}`].map(shellQuote).join(' ')}${stderr}`
+  // Where it goes: an address on the network and nothing else. A remote that is a path is resolved by git from
+  // where it stands, a directory can be the task's own making, and a push into a directory runs that directory's
+  // hooks as whoever pushes (measured by the review of 0.8: a pre-receive hook ran as the user).
+  const network = [
+    `nx_urls=$( { "$NX_GIT" config --get-all ${shellQuote(`remote.${remote}.pushurl`)}; "$NX_GIT" config --get-all ${shellQuote(`remote.${remote}.url`)}; } 2>/dev/null)`,
+    `while IFS= read -r nx_u; do case "$nx_u" in '') ;; https://*|http://*|ssh://*) ;; -*|*::*|/*|./*|../*|[A-Za-z]:*|file:*) ${refuse(`the remote ${remote} is a path or a helper on this machine, and an allowed push goes to a network address only (https or ssh)`)};; *@*:*) ;; *) ${refuse(`the remote ${remote} is not at an https or ssh address`)};; esac; done <<NX_URLS`,
+    '$nx_urls',
+    'NX_URLS',
+  ].join('\n')
+  // What it carries: the task's own commits on top of what the mission started from. A task can turn its branch
+  // to any commit the repository has (a reset, a merge): a branch of the user's that was never published, a
+  // stash. Commits that some other branch, tag, remote or the stash of this repository already holds, and that
+  // the mission's own integration branch does not, are not the task's to publish under its name. (Commits no
+  // ref holds any more are not seen by this.) Where the mission has no integration branch the check is not made.
+  const run = branch.split('/').slice(0, 2).join('/')
+  const own = /^nexus\/[A-Za-z0-9._-]+$/.test(run)
+  const foreign = !own
+    ? ''
+    : [
+        `if "$NX_GIT" rev-parse -q --verify ${shellQuote(`refs/heads/${run}/integration^{commit}`)} >/dev/null 2>&1; then`,
+        `  nx_all=$("$NX_GIT" rev-list --count ${shellQuote(`refs/heads/${branch}`)} --not ${shellQuote(`refs/heads/${run}/integration`)} 2>/dev/null)`,
+        `  nx_own=$("$NX_GIT" rev-list --count ${shellQuote(`refs/heads/${branch}`)} --not ${shellQuote(`refs/heads/${run}/integration`)} ${shellQuote(`--exclude=${run}/*`)} --branches --tags ${shellQuote(`--exclude=*/${run}/*`)} --remotes --glob=refs/stash 2>/dev/null)`,
+        `  if [ -z "$nx_all" ] || [ -z "$nx_own" ] || [ "$nx_all" != "$nx_own" ]; then ${refuse(`the branch of this worktree holds commits that another branch, tag or stash of this repository holds and the mission does not; they are not this task's to publish`)}; fi`,
+        'fi',
+      ].join('\n')
+  return `${known}\n${network}\n${foreign}\n"$NX_GIT" ${['push', ...options, remote, `refs/heads/${branch}:refs/heads/${branch}`].map(shellQuote).join(' ')}${stderr}`
 }
 
 export function isPlainGitPowerShell(command: string): boolean {
