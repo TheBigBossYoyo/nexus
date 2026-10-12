@@ -6,6 +6,7 @@ import {
   PROFILE_SENTENCE,
   SEVERITY_WORDS,
   actionShown,
+  answerCoverage,
   boundaryCountLabel,
   boundaryCountShort,
   decidedWords,
@@ -14,6 +15,10 @@ import {
   grantEndedWords,
   groupRequests,
   occurrencesLabel,
+  recentCommand,
+  recentNotes,
+  unattendedSummary,
+  UNATTENDED_ANSWER_LINE,
   resolveErrorText,
   severityWords,
   sortRecent,
@@ -54,10 +59,11 @@ describe('boundaryCountLabel', () => {
   it('is absent for none and worded for one and many', () => {
     expect(boundaryCountLabel(0)).toBeNull()
     expect(boundaryCountLabel(-1)).toBeNull()
-    expect(boundaryCountLabel(1)).toBe('1 boundary decision required')
-    expect(boundaryCountLabel(3)).toBe('3 boundary decisions required')
+    expect(boundaryCountLabel(1)).toBe('1 boundary request waiting for your decision')
+    expect(boundaryCountLabel(3)).toBe('3 boundary requests waiting for your decision')
     expect(boundaryCountShort(0)).toBeNull()
-    expect(boundaryCountShort(2)).toBe('2 boundary decisions')
+    expect(boundaryCountShort(1)).toBe('1 boundary request')
+    expect(boundaryCountShort(2)).toBe('2 boundary requests')
   })
 })
 
@@ -145,6 +151,55 @@ describe('profile wording', () => {
   it('words the enrollment line for the project page', () => {
     expect(enrollmentLine(null)).toBe('Not enrolled: NEXUS asks before sensitive actions.')
     expect(enrollmentLine('BALANCED')).toMatch(/^Balanced profile/)
+  })
+})
+
+describe('answerCoverage', () => {
+  it('says how far each offered answer reaches, narrow to wide, then Deny', () => {
+    const lines = answerCoverage(req('a')).map((c) => c.text)
+    expect(lines).toEqual([
+      'Allow once: only the command shown above, one time.',
+      'Allow for this mission: push to a Git remote on origin in this mission.',
+      'Always allow for this project: push to a Git remote on origin, in this and every later mission.',
+      'Deny: it is not done, the agent is told so and goes on without it, and it is not asked again in this mission.',
+    ])
+  })
+  it('says "any" when the resource is not narrowed, and lists only the offered answers', () => {
+    const lines = answerCoverage(req('a', { resource: { kind: 'ANY', value: '' }, scopes: ['ONCE', 'MISSION'] })).map((c) => c.text)
+    expect(lines).toEqual([
+      'Allow once: only the command shown above, one time.',
+      'Allow for this mission: any push to a Git remote in this mission.',
+      expect.stringMatching(/^Deny: /),
+    ])
+    expect(answerCoverage(req('a', { scopes: [] })).map((c) => c.decision)).toEqual(['DENY'])
+  })
+})
+
+describe('recent answers', () => {
+  it('shows the cleaned command on one line, cut with an ellipsis', () => {
+    expect(recentCommand(req('a', { action: 'git push\norigin  main' }))).toBe('git push origin main')
+    const cut = recentCommand(req('a', { action: 'x'.repeat(400) }))
+    expect(cut.length).toBe(160)
+    expect(cut.endsWith('…')).toBe(true)
+  })
+  it('says what happened when nothing was restarted, and where a lasting grant is taken back', () => {
+    expect(recentNotes({ state: 'EXPIRED', decidedScope: null, followUp: null })).toEqual(['Expired with the mission: nothing was done.'])
+    expect(recentNotes({ state: 'DENIED', decidedScope: null, followUp: null })).toEqual(['Denied: nothing was done.'])
+    expect(recentNotes({ state: 'DENIED', decidedScope: null, followUp: 'Denied: 1 task started again.' })).toEqual([])
+    expect(recentNotes({ state: 'GRANTED', decidedScope: 'PROJECT', followUp: 'Allowed: 1 task started again.' })).toEqual(['Take it back in Settings > Autonomy.'])
+    expect(recentNotes({ state: 'GRANTED', decidedScope: 'ONCE', followUp: null })).toEqual([])
+  })
+})
+
+describe('while you are away', () => {
+  it('counts all four lists in one line and says what a denial does', () => {
+    expect(unattendedSummary({ proceeds: [1, 2], waits: [1], never: [1, 2, 3], needsPresence: [1] })).toBe('2 go on, 1 wait for your decision, 3 never happen, 1 need you at the machine')
+    expect(UNATTENDED_ANSWER_LINE).toContain('denied, the task finishes without it')
+  })
+  it('qualifies what no agent can do: through NEXUS only', () => {
+    expect(NEVER_POSSIBLE_LINE).toContain('through NEXUS')
+    expect(NEVER_POSSIBLE_LINE).toContain('A profile is a set of permissions NEXUS checks; it is not a sandbox.')
+    expect(NEVER_POSSIBLE_LINE).toContain('only the containment bounds it')
   })
 })
 

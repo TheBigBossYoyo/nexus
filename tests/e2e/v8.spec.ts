@@ -179,7 +179,7 @@ test.describe('NEXUS 0.8 autonomy and isolation', () => {
       expect(pending).toHaveLength(1)
       expect(pending[0]).toMatchObject({ id: requestId, capability: 'GIT_PUSH', state: 'PENDING' })
       expect(pending[0]?.occurrences).toBeGreaterThanOrEqual(3)
-      await expect(page.getByTestId('boundary-badge')).toContainText('1 boundary decision')
+      await expect(page.getByTestId('boundary-badge')).toContainText('1 boundary request')
       await expect(page.getByTestId('approval-count')).toHaveText('0')
 
       // The inbox shows capability, resource, the action as text and every decision the request allows.
@@ -237,7 +237,7 @@ test.describe('NEXUS 0.8 autonomy and isolation', () => {
       const rows = page.locator('[data-testid^="autonomy-grant-"]')
       await expect(rows).toHaveCount(1)
       await expect(rows).toContainText('Push to a Git remote')
-      await expect(rows).toContainText('This mission')
+      await expect(rows).toContainText('For this mission')
       await expect(rows).toContainText('Active')
       const granted = (await invoke(page, 'autonomy.overview', { projectId })).grants
       expect(granted).toHaveLength(1)
@@ -307,8 +307,10 @@ test.describe('NEXUS 0.8 autonomy and isolation', () => {
       const overview = await invoke(page, 'autonomy.overview', { projectId })
       if (!overview.unattended) throw new Error('No unattended policy')
       await expect(page.getByTestId('autonomy-unattended')).toContainText('While you are away')
-      await expect(page.getByTestId('autonomy-unattended')).toContainText('NEXUS starts the waiting work again by itself')
-      await page.getByTestId('autonomy-unattended-details').locator('summary').click()
+      await expect(page.getByTestId('autonomy-unattended')).toContainText('NEXUS starts the waiting work again by itself: allowed, the action is carried out; denied, the task finishes without it.')
+      // The disclosure is open by default in an enrolled project; the summary counts all four lists.
+      await expect(page.getByTestId('autonomy-unattended-details')).toHaveAttribute('open', '')
+      await expect(page.getByTestId('autonomy-unattended-details').locator('summary')).toContainText('wait for your decision')
       await expect(page.getByTestId('autonomy-unattended-proceeds').locator('li')).toHaveText(overview.unattended.proceeds)
       await expect(page.getByTestId('autonomy-unattended-waits').locator('li')).toHaveText(overview.unattended.waits)
       await expect(page.getByTestId('autonomy-unattended-never').locator('li')).toHaveText(overview.unattended.never)

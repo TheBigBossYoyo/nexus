@@ -47,8 +47,22 @@ export function effectiveLine(
 }
 
 /** The error text when the effective profile did not hold. Null when it is usable. */
-export function unusableWarning(status: Pick<IsolationStatusView, 'usable'>): string | null {
-  return status.usable ? null : 'Enrolled projects run no command until this is put right.'
+export function unusableWarning(status: Pick<IsolationStatusView, 'usable'>, setupOffered = false): string | null {
+  // No screen chooses the containment, so only the setup is named, and only when it is on offer.
+  if (status.usable) return null
+  return `Project code cannot run in an enrolled project until its containment is verified.${setupOffered ? ' Run the setup below.' : ''}`
+}
+
+/** The live line of the Autonomy settings: where the code of an enrolled project runs now, or that it runs nowhere. */
+export function projectCodeLine(status: Pick<IsolationStatusView, 'effective' | 'usable'>): { label: string; consequence: string } {
+  return status.usable
+    ? { label: `Project code of an enrolled project currently runs: ${EFFECTIVE_LABEL[status.effective]}`, consequence: EFFECTIVE_SENTENCE[status.effective] }
+    : { label: `Project code of an enrolled project currently runs: ${EFFECTIVE_LABEL[status.effective]}, not verified`, consequence: 'Not verified at this start: enrolled projects run no command.' }
+}
+
+/** What follows a setup that did not finish. The elevated script may have changed things before it stopped, so the sentence says what is true of a second run. */
+export function setupRetryLine(detail: string): string {
+  return /^Nothing was changed/.test(detail.trim()) ? 'You can try again.' : 'The setup can be run again: it repairs what it made before.'
 }
 
 export function availabilityWords(check: { available: boolean } | null): string {

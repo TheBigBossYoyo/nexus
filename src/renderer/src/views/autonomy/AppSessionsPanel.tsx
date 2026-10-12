@@ -18,6 +18,7 @@ import {
   APP_STATE_LABEL,
   APP_TYPE_LABEL,
   EFFECTIVE_LABEL,
+  EFFECTIVE_SENTENCE,
   appStateTone,
   exitCodeWords,
   screenshotAlt,
@@ -47,6 +48,9 @@ function Session({ session }: { session: AppSessionView }) {
         <Badge tone={appStateTone(session.state)}>{APP_STATE_LABEL[session.state]}</Badge>
       </div>
       <KeyValue rows={rows} />
+      <p className="m-0 text-small text-text-secondary" data-testid={`app-session-profile-${session.id}`}>
+        {EFFECTIVE_SENTENCE[session.profile]}
+      </p>
       {session.note ? <p className="m-0 text-text-secondary">{session.note}</p> : null}
       {session.output.length > 0 ? (
         // A scrolling region must be reachable by keyboard.
@@ -105,7 +109,7 @@ export function AppSessionsPanel({ projectId }: { projectId: string }) {
   return (
     <Card
       title="Applications under test"
-      description="Started by NEXUS inside the containment, with a browser of its own."
+      description="Started by NEXUS to test this project, with a browser of its own."
       actions={
         <Button
           size="sm"

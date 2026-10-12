@@ -7,28 +7,33 @@ import type {
   GrantScope,
   SecurityEventSeverity,
 } from '@shared/autonomy'
-import { actionWasShortened, cleanAgentText } from '@shared/autonomy'
+import { PROFILE_LABEL, actionWasShortened, cleanAgentText } from '@shared/autonomy'
 import type { Tone } from '../../lib/status'
 
 /** Wording and grouping for the 0.8 boundary inbox and the Autonomy settings. Pure; unit-tested. No enum name is shown raw. */
 
-/** "1 boundary decision required"; null when there is none, so nothing is shown. */
+/** One term throughout: the item is a boundary request, what the user gives is a decision. "1 boundary request waiting for your decision"; null when there is none, so nothing is shown. */
 export function boundaryCountLabel(count: number): string | null {
   if (!Number.isFinite(count) || count <= 0) return null
-  return `${count} boundary decision${count === 1 ? '' : 's'} required`
+  return `${count} boundary request${count === 1 ? '' : 's'} waiting for your decision`
 }
 
 /** The short form for the status bar. */
 export function boundaryCountShort(count: number): string | null {
   if (!Number.isFinite(count) || count <= 0) return null
-  return `${count} boundary decision${count === 1 ? '' : 's'}`
+  return `${count} boundary request${count === 1 ? '' : 's'}`
 }
 
-export const PROFILE_LABEL: Record<AutonomyProfile, string> = {
-  AUTONOMOUS_PROJECT: 'Autonomous project',
-  BALANCED: 'Balanced',
-  LOCKED_DOWN: 'Locked down',
-}
+/** The same names the runtime writes into a request's reason (one table in the shared code). */
+export { PROFILE_LABEL }
+
+/** What a boundary request is, said once at the top of the Autonomy settings. */
+export const BOUNDARY_REQUEST_DEFINITION =
+  "A boundary request is a question NEXUS asks when an agent needs something outside the project's profile. It waits in the boundary inbox while other work goes on, and you answer when you like."
+
+/** The line under the title of the boundary inbox. */
+export const INBOX_HEADER_LINE =
+  'Answer each one: allow it once, for this mission, always for this project, or deny it. When you answer, NEXUS starts the waiting work again by itself.'
 
 export const PROFILE_SENTENCE: Record<AutonomyProfile, string> = {
   AUTONOMOUS_PROJECT:
@@ -46,14 +51,27 @@ export const PROFILE_ORDER: readonly AutonomyProfile[] = [
 ]
 
 export const NEVER_POSSIBLE_LINE =
-  'Whatever the profile, no agent can read provider credentials, reach the NEXUS runtime and its keys, use your own browser profile, change this policy, or shut down or suspend the machine. A profile is a set of permissions NEXUS checks; it is not a sandbox.'
+  'Whatever the profile, no agent can, through NEXUS, read provider credentials, reach the NEXUS runtime and its keys, use your own browser profile, change this policy, or shut down or suspend the machine. A profile is a set of permissions NEXUS checks; it is not a sandbox. Code that runs as you (Restricted, Standard) is not stopped by this policy; only the containment bounds it.'
 
 /** The heading and the lead of what holds while nobody is there. */
 export const UNATTENDED_TITLE = 'While you are away'
 export const UNATTENDED_LEAD =
   'A mission runs in the NEXUS runtime, not in this window. Closing the window, locking the screen or leaving it overnight changes nothing about what NEXUS may do in this project.'
 export const UNATTENDED_ANSWER_LINE =
-  'When you answer a request, allowed or denied, NEXUS starts the waiting work again by itself and resumes a mission that was paused only for it.'
+  'When you answer a request NEXUS starts the waiting work again by itself: allowed, the action is carried out; denied, the task finishes without it.'
+
+/** The four headings of what holds while nobody is there. */
+export const UNATTENDED_HEADINGS = {
+  proceeds: 'Goes on without you',
+  waits: 'Waits for your decision',
+  never: 'Never done by an agent',
+  presence: 'Only with you at the machine',
+} as const
+
+/** The one line that closes the disclosure: all four lists counted. */
+export function unattendedSummary(policy: { proceeds: readonly unknown[]; waits: readonly unknown[]; never: readonly unknown[]; needsPresence: readonly unknown[] }): string {
+  return `${policy.proceeds.length} go on, ${policy.waits.length} wait for your decision, ${policy.never.length} never happen, ${policy.needsPresence.length} need you at the machine`
+}
 
 /** The compact line on the project page. */
 export function enrollmentLine(profile: AutonomyProfile | null): string {
@@ -64,7 +82,7 @@ export function enrollmentLine(profile: AutonomyProfile | null): string {
 
 export const SCOPE_WORDS: Record<GrantScope, string> = {
   ONCE: 'Once',
-  MISSION: 'This mission',
+  MISSION: 'For this mission',
   PROJECT: 'Always, for this project',
 }
 
@@ -103,6 +121,27 @@ export function decisionButtons(scopes: readonly GrantScope[]): DecisionButton[]
   return buttons
 }
 
+const lowerFirst = (text: string) => (text.length > 0 ? text.charAt(0).toLowerCase() + text.slice(1) : text)
+
+/**
+ * What each answer a request offers reaches, one sentence per answer, in the order of the buttons. Allow once is
+ * bound to the command shown whatever the resource says; the wider answers cover the capability on the resource,
+ * or on any resource when the request names none.
+ */
+export function answerCoverage(
+  request: Pick<BoundaryRequestView, 'scopes' | 'capabilityLabel' | 'resourceLabel' | 'resource'>,
+): { decision: BoundaryDecision['decision']; text: string }[] {
+  const label = lowerFirst(request.capabilityLabel)
+  const anything = request.resource.kind === 'ANY'
+  const what = anything ? `any ${label}` : `${label} on ${request.resourceLabel}`
+  const out: { decision: BoundaryDecision['decision']; text: string }[] = []
+  if (request.scopes.includes('ONCE')) out.push({ decision: 'ALLOW_ONCE', text: 'Allow once: only the command shown above, one time.' })
+  if (request.scopes.includes('MISSION')) out.push({ decision: 'ALLOW_MISSION', text: `Allow for this mission: ${what} in this mission.` })
+  if (request.scopes.includes('PROJECT')) out.push({ decision: 'ALLOW_PROJECT', text: `Always allow for this project: ${what}, in this and every later mission.` })
+  out.push({ decision: 'DENY', text: 'Deny: it is not done, the agent is told so and goes on without it, and it is not asked again in this mission.' })
+  return out
+}
+
 export const REQUEST_STATE_WORDS: Record<BoundaryRequestState, string> = {
   PENDING: 'Waiting for you',
   GRANTED: 'Allowed',
@@ -124,6 +163,26 @@ export const REQUEST_STATE_TONE: Record<BoundaryRequestState, Tone> = {
 export function actionShown(request: Pick<BoundaryRequestView, 'action'> & { actionTruncated?: boolean }): { text: string; note: string | null } {
   const shortened = request.actionTruncated ?? actionWasShortened(request.action)
   return { text: cleanAgentText(request.action), note: shortened ? 'Shortened; allow once covers exactly the command that was attempted.' : null }
+}
+
+/** The longest a decided command is shown in the list of recent answers. */
+export const RECENT_COMMAND_MAX = 160
+
+/** The command of a decided request as one cleaned line, cut with an ellipsis. */
+export function recentCommand(request: Pick<BoundaryRequestView, 'action'> & { actionTruncated?: boolean }): string {
+  const line = actionShown(request).text.replace(/\s+/g, ' ').trim()
+  return line.length > RECENT_COMMAND_MAX ? `${line.slice(0, RECENT_COMMAND_MAX - 1)}…` : line
+}
+
+/** The fixed sentences under a decided request: what happened when nothing was restarted, and where a lasting grant is taken back. */
+export function recentNotes(request: Pick<BoundaryRequestView, 'state' | 'decidedScope' | 'followUp'>): string[] {
+  const notes: string[] = []
+  if (!request.followUp) {
+    if (request.state === 'EXPIRED') notes.push('Expired with the mission: nothing was done.')
+    else if (request.state === 'DENIED') notes.push('Denied: nothing was done.')
+  }
+  if (request.state === 'GRANTED' && request.decidedScope === 'PROJECT') notes.push('Take it back in Settings > Autonomy.')
+  return notes
 }
 
 /** What a decided request ended as, in words: "Allowed once", "Allowed for this mission", "Denied". */

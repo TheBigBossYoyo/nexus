@@ -158,7 +158,7 @@ const bashQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
  * it is where the remote's address and the way of signing in to it are. `pushLine` is what NEXUS rendered from
  * the parsed command.
  */
-export function grantedPushScript(input: { pushLine: string; gitDir: string; worktree: string; hooksDir: string; gitCmdDir?: string }): string {
+export function grantedPushScript(input: { pushLine: string; gitDir: string; worktree: string; hooksDir: string; git: string }): string {
   const config: [string, string][] = [
     ['core.hooksPath', input.hooksDir],
     ['core.fsmonitor', 'false'],
@@ -170,10 +170,12 @@ export function grantedPushScript(input: { pushLine: string; gitDir: string; wor
     ['push.recurseSubmodules', 'no'],
   ]
   const lines = [
-    ...(input.gitCmdDir !== undefined ? [`PATH="$(cygpath -u ${bashQuote(input.gitCmdDir)}):$PATH"`] : []),
+    // Nothing of git's is taken from the environment of whoever starts the script (a variable there can name a
+    // program for git to run: measured by the fourth review), and git is the one NEXUS found, by its full path.
+    'for nx_v in $(compgen -e); do case "$nx_v" in GIT_*) unset "$nx_v";; esac; done',
+    `NX_GIT=${bashQuote(input.git)}`,
     `export GIT_DIR=${bashQuote(input.gitDir)} GIT_COMMON_DIR=${bashQuote(resolve(input.gitDir, '..', '..'))} GIT_WORK_TREE=${bashQuote(input.worktree)}`,
     `export GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 GIT_LFS_SKIP_SMUDGE=1 GIT_EDITOR=true GIT_PAGER=cat GIT_CONFIG_COUNT=${config.length}`,
-    'unset GIT_INDEX_FILE GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS GIT_EXEC_PATH GIT_PROXY_COMMAND',
     ...config.map(([key, value], i) => `export GIT_CONFIG_KEY_${i}=${bashQuote(key)} GIT_CONFIG_VALUE_${i}=${bashQuote(value)}`),
     // A repository that reads per-worktree configuration would take programs from a file in the entry, which the task's code may have put there.
     `if [ -s "$GIT_DIR/config.worktree" ] || [ -L "$GIT_DIR/config.worktree" ] || [ -d "$GIT_DIR/config.worktree" ]; then echo 'NEXUS: the worktree has a configuration of its own that NEXUS did not write, so the push was not made.' >&2; exit 128; fi`,
@@ -546,7 +548,7 @@ export class ExecutionBroker {
         }
       }
       const script = join(dir, `nx-${randomBytes(8).toString('hex')}.sh`)
-      writeFileSync(script, grantedPushScript({ pushLine: input.pushLine, gitDir: input.gitDir, worktree: input.worktree, hooksDir, gitCmdDir: join(gitRoot, 'cmd') }), { flag: 'wx' })
+      writeFileSync(script, grantedPushScript({ pushLine: input.pushLine, gitDir: input.gitDir, worktree: input.worktree, hooksDir, git: join(gitRoot, 'cmd', 'git.exe') }), { flag: 'wx' })
       return { ok: true, bash, script }
     } catch (e) {
       return { ok: false, reason: `The push that was allowed could not be prepared: ${e instanceof Error ? e.message : String(e)}` }

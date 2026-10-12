@@ -368,10 +368,12 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     const push = (command: string): { code: number | null; out: string } => {
       const invocation = (grantedPushOf(command) ?? [])[0]
       if (invocation === undefined) throw new Error(`does not qualify: ${command}`)
+      for (const m of ['filter', 'hook']) rmSync(marker(m), { force: true })
       const script = join(base, `push-${Math.random().toString(16).slice(2, 10)}.sh`)
-      writeFileSync(script, grantedPushScript({ pushLine: renderGrantedPush(invocation, 'nexus/run1/task'), gitDir: entry, worktree, hooksDir }))
+      writeFileSync(script, grantedPushScript({ pushLine: renderGrantedPush(invocation, 'nexus/run1/task'), gitDir: entry, worktree, hooksDir, git: 'git' }))
       // As the agent's shell would start it: with the user's environment, not the contained one.
-      const r = spawnSync(BASH, ['--noprofile', '--norc', script], { cwd: worktree, env: { ...process.env, GIT_CONFIG_GLOBAL: join(base, 'gitconfig-empty') }, encoding: 'utf8', windowsHide: true, timeout: 120_000 })
+      // With variables of git's in it that would make git run a program or write a file: the script takes none of them.
+      const r = spawnSync(BASH, ['--noprofile', '--norc', script], { cwd: worktree, env: { ...process.env, GIT_CONFIG_PARAMETERS: `'remote.origin.receivepack=sh -c "echo ran > ${slash(marker('filter'))}; git-receive-pack \\"$@\\"" x'`, GIT_TRACE: join(base, 'trace.txt'), GIT_DIR: join(base, 'elsewhere') }, encoding: 'utf8', windowsHide: true, timeout: 120_000 })
       return { code: r.status, out: `${r.stdout}${r.stderr}` }
     }
     // The entry's HEAD forged to another branch of the user's: `HEAD` on the line still means the worktree's own branch.
@@ -382,7 +384,8 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     expect(first.code, first.out).toBe(0)
     expect(raw(remote, 'for-each-ref', '--format=%(refname)').split('\n')).toEqual(['refs/heads/nexus/run1/task'])
     expect(raw(remote, 'log', '-1', '--format=%s', 'nexus/run1/task')).toBe('work to publish')
-    expect(markers(), 'no hook ran').toEqual([])
+    expect(markers(), 'no hook ran, and no program named in the environment').toEqual([])
+    expect(existsSync(join(base, 'trace.txt')), 'no trace file was written').toBe(false)
     // A configuration planted in the entry: the push is not made.
     writeFileSync(join(entry, 'config.worktree'), '[core]\n\tsshCommand = calc\n')
     writeFileSync(join(worktree, 'more.txt'), 'more\n')
@@ -412,7 +415,10 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     expect(toDirectory.out).toContain('no remote called evil')
     expect(markers(), 'the hook of the planted repository did not run').toEqual([])
     expect(stockRan, 'stock git runs the hook (the reason for the measure)').toEqual(['hook'])
-    // And a push that names no remote is not made.
-    expect(push('git push').code).toBe(128)
+    // Another branch of the user's is not pushed, whatever the line says; and with HEAD forged the task's branch still is what goes.
+    const other = push('git push origin secret-work')
+    expect(other.code).toBe(128)
+    expect(other.out).toContain('and no other')
+    expect(raw(remote, 'for-each-ref', '--format=%(refname)').split('\n')).toEqual(['refs/heads/nexus/run1/task'])
   }, 180_000)
 })

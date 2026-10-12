@@ -369,3 +369,22 @@ every time:
 - once in four ISOLATED runs the Electron mission paused: the work passed its tests and its reviews, and
   verification failed four times. Its records were overwritten by the next run before they were read, so the
   cause is not established. The three other runs passed every gate.
+
+### Fourth review (independent): the push that leaves the containment
+
+On the code that lets an allowed push run as the user. One HIGH, which NEXUS's own review had found and fixed
+an hour before and the reviewer measured both ways: a word that is no remote is a path to git, and a push into a
+folder of the worktree ran that folder's hooks as the user. Two MEDIUM: forms of `HEAD` and of a refspec let
+the entry's `HEAD` file or the line choose another branch; a standing grant covered any destination. LOW: the
+script inherited `GIT_*` variables (one of which names a program for git to run: measured), relied on the
+inherited PATH, and an option on the list could never be reached. All closed by one narrowing: an allowed push
+publishes the task's own branch under its own name to a configured remote, written in full by NEXUS, with a
+clean git environment and git by its full path. `tests/unit/policies/git-user.test.ts`,
+`tests/integration/git/user-git-script.test.ts` (a real push with a hostile hook, a planted folder, a forged
+`HEAD`, a planted configuration and hostile environment variables).
+
+### Independent UX review
+
+Three blockers (the inbox did not say how far each answer reaches; a raw profile name in the reason line; the
+setup consent said more than the isolated profile gives) and ten majors: see the release report for what was
+changed.

@@ -8,6 +8,7 @@ import { useProjects } from '../../lib/queries'
 import {
   useAutonomyOverview,
   useEnrollProject,
+  useIsolationStatus,
   useRevokeGrant,
   useUnenrollProject,
 } from '../../lib/queries-autonomy'
@@ -27,13 +28,16 @@ import {
   TimeAgo,
   type Column,
 } from '../../components/ui'
+import { projectCodeLine } from './isolationModel'
 import {
+  BOUNDARY_REQUEST_DEFINITION,
   NEVER_POSSIBLE_LINE,
   PROFILE_LABEL,
   PROFILE_ORDER,
   PROFILE_SENTENCE,
   SCOPE_WORDS,
   UNATTENDED_ANSWER_LINE,
+  UNATTENDED_HEADINGS,
   UNATTENDED_LEAD,
   UNATTENDED_TITLE,
   boundaryCountLabel,
@@ -41,6 +45,7 @@ import {
   resolveErrorText,
   severityTone,
   severityWords,
+  unattendedSummary,
 } from './autonomyModel'
 
 type Grant = AutonomyOverview['grants'][number]
@@ -145,7 +150,8 @@ function SummaryLists({
   )
 }
 
-function UnattendedLists({ policy }: { policy: NonNullable<AutonomyOverview['unattended']> }) {
+/** Opens by default when the project is enrolled: that is when what holds while nobody is there matters. */
+function UnattendedLists({ policy, defaultOpen }: { policy: NonNullable<AutonomyOverview['unattended']>; defaultOpen: boolean }) {
   const list = (title: string, items: string[], testId: string) => (
     <div>
       <h4 className="m-0 mb-1 text-small font-semibold text-text-secondary">{title}</h4>
@@ -170,16 +176,13 @@ function UnattendedLists({ policy }: { policy: NonNullable<AutonomyOverview['una
         {UNATTENDED_TITLE}
       </h3>
       <p className="m-0 text-text-secondary">{UNATTENDED_LEAD}</p>
-      <details data-testid="autonomy-unattended-details">
-        <summary className="cursor-pointer text-text-secondary">
-          {policy.proceeds.length} kinds of work go on, {policy.waits.length} wait for your answer,{' '}
-          {policy.never.length} never happen
-        </summary>
+      <details data-testid="autonomy-unattended-details" open={defaultOpen}>
+        <summary className="cursor-pointer text-text-secondary">{unattendedSummary(policy)}</summary>
         <div className="mt-2 grid gap-4 md:grid-cols-2">
-          {list('Goes on without you', policy.proceeds, 'autonomy-unattended-proceeds')}
-          {list('Waits as one request', policy.waits, 'autonomy-unattended-waits')}
-          {list('Never done by an agent', policy.never, 'autonomy-unattended-never')}
-          {list('Needs you at the machine', policy.needsPresence, 'autonomy-unattended-presence')}
+          {list(UNATTENDED_HEADINGS.proceeds, policy.proceeds, 'autonomy-unattended-proceeds')}
+          {list(UNATTENDED_HEADINGS.waits, policy.waits, 'autonomy-unattended-waits')}
+          {list(UNATTENDED_HEADINGS.never, policy.never, 'autonomy-unattended-never')}
+          {list(UNATTENDED_HEADINGS.presence, policy.needsPresence, 'autonomy-unattended-presence')}
         </div>
       </details>
       <p className="m-0 text-text-secondary">{UNATTENDED_ANSWER_LINE}</p>
@@ -324,6 +327,7 @@ export function AutonomySettings() {
     ? (preview.data?.unattended ?? null)
     : (overview?.unattended ?? null)
 
+  const isolation = useIsolationStatus().data
   const enroll = useEnrollProject()
   const unenroll = useUnenrollProject()
   const revoke = useRevokeGrant()
@@ -350,9 +354,8 @@ export function AutonomySettings() {
   return (
     <div className="flex max-w-3xl flex-col gap-6" data-testid="autonomy-settings">
       <p className="m-0 text-text-secondary">
-        Enroll a project once. What its profile allows runs without asking; anything outside it
-        becomes one question that waits in the boundary inbox while other work goes on. Changes here
-        apply at once and are not part of Save.
+        {BOUNDARY_REQUEST_DEFINITION} Enroll a project once: what its profile allows runs without
+        asking. Changes here apply at once and are not part of Save.
       </p>
 
       <Field label="Project">
@@ -388,6 +391,21 @@ export function AutonomySettings() {
                 NEXUS asks before sensitive actions in this project, one approval at a time.
               </p>
             )}
+            {overview.enrollment && isolation ? (
+              <div className="flex flex-col gap-0.5" data-testid="autonomy-code-runs">
+                <p className="m-0 font-medium">{projectCodeLine(isolation).label}</p>
+                <p className="m-0 text-text-secondary">{projectCodeLine(isolation).consequence}</p>
+                <div>
+                  <Button
+                    size="sm"
+                    onClick={() => document.getElementById('isolation-panel')?.scrollIntoView({ block: 'start' })}
+                    data-testid="autonomy-to-isolation"
+                  >
+                    Go to Execution isolation
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {overview.enrollment && overview.policyChanged ? (
@@ -445,7 +463,7 @@ export function AutonomySettings() {
             <Loading label="Loading the summary" />
           ) : null}
 
-          {unattended ? <UnattendedLists policy={unattended} /> : null}
+          {unattended ? <UnattendedLists policy={unattended} defaultOpen={overview.enrollment !== null} /> : null}
 
           <div className="flex flex-wrap items-center gap-2">
             {overview.enrollment ? (
@@ -477,7 +495,7 @@ export function AutonomySettings() {
                 onClick={() => doEnroll(effective)}
                 data-testid="autonomy-enable"
               >
-                Enable
+                Enable autonomous work…
               </Button>
             )}
           </div>
@@ -491,7 +509,7 @@ export function AutonomySettings() {
 
           <section className="flex flex-col gap-2" aria-labelledby="autonomy-grants-title">
             <h3 id="autonomy-grants-title" className="m-0 text-body font-semibold">
-              What you permanently authorized, and other grants
+              Grants you gave in this project
             </h3>
             <GrantsTable
               grants={overview.grants}
@@ -524,6 +542,9 @@ export function AutonomySettings() {
             danger
           >
             The project leaves its profile. Sensitive actions ask for approval one at a time again.
+            Grants you gave are kept but not used while the project is not enrolled; the ones for the
+            whole project apply again if you enroll it again. Requests waiting in the boundary inbox
+            stay there until you answer them or their mission ends.
           </ConfirmDialog>
         </>
       ) : null}

@@ -190,7 +190,7 @@ function BoundaryStatus() {
           type="button"
           data-testid="boundary-badge"
           onClick={() => setDrawer('boundary')}
-          title="Open the boundary decisions that are waiting for you"
+          title="Open the boundary requests that are waiting for your decision"
           className={ITEM_BUTTON}
         >
           <StatusDot tone="waiting" />

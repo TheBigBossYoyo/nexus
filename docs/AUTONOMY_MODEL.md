@@ -214,14 +214,19 @@ NEXUS writes what runs.
 
 - What qualifies is a line of plain git with a push in it (`git push origin HEAD`, or
   `git add -A && git commit -m "x" && git push origin HEAD`): every git on the line is one git as the user
-  accepts, and each push has options from a short list (`-u`, `--set-upstream`, `--force-with-lease`, `-q`,
-  `-v`, `--porcelain`; not `--force`, `--delete`, `--mirror`, `--all`, `--tags`, `--receive-pack`,
-  `--no-verify`), at most a remote and one refspec. The remote is a name your repository's configuration knows,
-  never an address or a path on the line. The line is cut where a push stands: each push runs as you, and the
-  git around it runs as git as the user does, inside the containment.
-- The script names the Git directory and the repository NEXUS recorded, an empty hooks directory (a `pre-push`
-  hook is a program of the repository), and says `HEAD` as the worktree's own branch. It lies in NEXUS's data,
-  where no contained code writes. Your own git configuration applies: it holds the remote and the sign-in.
+  accepts, and each push names a remote and the branch of the worktree (as `HEAD` or by its name), with options
+  from a short list (`-u`, `--set-upstream`, `-q`, `-v`, `--porcelain`). The remote is a name your repository's
+  own configuration defines, never an address or a path on the line: git takes any other word for a path, and
+  a push into a folder runs that folder's hooks as whoever pushes (measured; a folder in the worktree is the
+  task's to make). The line is cut where a push stands: each push runs as you, and the git around it runs as
+  git as the user does, inside the containment.
+- **What an allowed push can do is publish the task's branch under the task's name**, and nothing else:
+  NEXUS writes the push in full, `refs/heads/<the task's branch>` to the same name on the remote. Not another
+  branch of yours, not `main` on the remote, not a tag, no deletion, no forced update. This holds for a grant
+  for the mission and for the project too, which is why such a grant, although it says "any", is narrow. A
+  push that rewrites history on the remote is another capability and never runs this way.
+- The script takes nothing of git's from the environment it is started in, and uses the git NEXUS found by its
+  full path.
 - A push in any other form (piped into another program, joined to a command that is not git, with another
   option) can never run, so it is refused at once with what to write instead, and no question is put to you
   for it. (The second real run under RESTRICTED met this: the agent retried the allowed push inside a longer

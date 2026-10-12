@@ -439,12 +439,15 @@ function parsePowerShellGit(command: string): UserGitInvocation[] | null {
  * of NEXUS has. So it is the one command that runs outside the containment, and it is held to the same rule as
  * git as the user: the text is parsed, and NEXUS writes what runs.
  *
- * What qualifies: one `git push` and nothing else on the line; options from a short list (none that deletes or
- * overwrites without a check on the remote: `--force` is not among them, `--force-with-lease` is); at most a
- * remote and one refspec, the remote by its NAME as the repository's own configuration knows it (never an
- * address or a path given on the line).
+ * What qualifies: a push of the task's own branch and of nothing else. Options from a short list (none that
+ * deletes or overwrites: a push that rewrites history is another capability and never runs this way); exactly
+ * a remote and a branch: the remote by its NAME as the repository's own configuration knows it (never an
+ * address or a path given on the line), the branch as `HEAD` or by its name, which must be the branch NEXUS
+ * made for the worktree. It goes to the branch of the same name on the remote. So a grant to push, even a
+ * standing one, publishes the task's work under the task's name and can do nothing else: not another branch of
+ * the user's, not `main` on the remote (both found possible by the fourth review).
  */
-const PUSH_OPTIONS = new Set(['-u', '--set-upstream', '--force-with-lease', '-q', '--quiet', '--porcelain', '-v', '--verbose'])
+const PUSH_OPTIONS = new Set(['-u', '--set-upstream', '-q', '--quiet', '--porcelain', '-v', '--verbose'])
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
 
 /** Whether the words after `git` are a push in the form described above. */
@@ -458,9 +461,10 @@ export function isGrantablePush(args: readonly string[]): boolean {
     }
     operands.push(arg)
   }
-  if (operands.length > 2) return false
-  if (operands[0] !== undefined && !REMOTE_NAME.test(operands[0])) return false
-  if (operands[1] !== undefined && (!plainOperand(operands[1]) || operands[1].startsWith('+'))) return false
+  // A remote and a branch, both said. Which branch it may be is known where the script is written (renderGrantedPush).
+  if (operands.length !== 2) return false
+  if (!REMOTE_NAME.test(operands[0] as string)) return false
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$/.test(operands[1] as string) || (operands[1] as string).includes('..')) return false
   return true
 }
 
@@ -487,30 +491,26 @@ export function grantedPushOf(command: string, shell: 'bash' | 'powershell' = 'b
 
 /** What an agent is told when it tries to push in a form that cannot run. */
 export const PUSH_FORM_HINT =
-  'A push runs only as a plain git command: `git push <remote> <branch>` with the remote by its name (options: -u, --force-with-lease, -q), alone or joined to other plain git commands with && or ; and with no pipe and no other program on the line. Write it that way; nothing was run and nothing was asked of the user.'
+  'A push runs only as a plain git command that publishes the branch of this worktree: `git push <remote> HEAD` with the remote by its name (options: -u, -q), alone or joined to other plain git commands with && or ; and with no pipe and no other program on the line. Write it that way; nothing was run and nothing was asked of the user.'
 
 /**
- * The lines of the script for an allowed push. `HEAD` is said as the worktree's own branch, so that the entry's
- * `HEAD` file decides nothing. The remote must be one the repository's own configuration defines: git takes a
- * word that is no remote for a path, and a push into a directory runs that directory's hooks, as whoever pushes.
- * A directory in the worktree is the task's to make. So the script asks the configuration first and pushes only
- * to a remote it finds there; a push that names no remote at all is not made (which remote it would go to is
- * then read from settings this script does not look at).
+ * The lines of the script for an allowed push. What is pushed is said in full, `refs/heads/<branch>` to the same
+ * name on the remote, with `<branch>` the branch NEXUS made for the worktree: the entry's `HEAD` file (which the
+ * task's code may be able to replace) decides nothing, and a line that names another branch is not made. The
+ * remote must be one the repository's own configuration defines: git takes a word that is no remote for a path,
+ * and a push into a directory runs that directory's hooks, as whoever pushes; a directory in the worktree is the
+ * task's to make. `$NX_GIT` is the git the script was told to use, by its full path.
  */
 export function renderGrantedPush(invocation: UserGitInvocation, branch: string): string {
   const [, ...rest] = invocation.args as [string, ...string[]]
-  let operand = 0
-  let remote: string | null = null
-  const words = rest.map((arg) => {
-    if (arg.startsWith('-')) return arg
-    operand += 1
-    if (operand === 1) remote = arg
-    return operand === 2 && arg === 'HEAD' ? branch : arg
-  })
+  const options = rest.filter((arg) => arg.startsWith('-'))
+  const [remote, named] = rest.filter((arg) => !arg.startsWith('-')) as [string, string]
+  const refuse = (text: string): string => `echo ${shellQuote(`NEXUS: ${text}; the push was not made.`)} >&2; exit 128`
+  if (remote === undefined || named === undefined) return refuse('name the remote and the branch (git push <remote> HEAD)')
+  if (named !== 'HEAD' && named !== branch) return refuse(`an allowed push publishes the branch of this worktree (${branch}) and no other`)
   const stderr = invocation.stderr === 'merge' ? ' 2>&1' : invocation.stderr === 'discard' ? ' 2>/dev/null' : ''
-  if (remote === null) return `echo 'NEXUS: name the remote and the branch (git push <remote> <branch>); the push was not made.' >&2; exit 128`
-  const known = `if [ -z "$(command git config --get ${shellQuote(`remote.${remote as string}.url`)} 2>/dev/null)" ]; then echo ${shellQuote(`NEXUS: this repository has no remote called ${remote as string}; the push was not made.`)} >&2; exit 128; fi`
-  return `${known}\ncommand git ${['push', ...words].map(shellQuote).join(' ')}${stderr}`
+  const known = `if [ -z "$("$NX_GIT" config --get ${shellQuote(`remote.${remote}.url`)} 2>/dev/null)" ]; then ${refuse(`this repository has no remote called ${remote}`)}; fi`
+  return `${known}\n"$NX_GIT" ${['push', ...options, remote, `refs/heads/${branch}:refs/heads/${branch}`].map(shellQuote).join(' ')}${stderr}`
 }
 
 export function isPlainGitPowerShell(command: string): boolean {

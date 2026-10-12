@@ -13,6 +13,7 @@ import {
   availabilityWords,
   effectiveLine,
   protectedSummary,
+  setupRetryLine,
   setupState,
   unusableWarning,
 } from './isolationModel'
@@ -90,15 +91,15 @@ export function IsolationPanel() {
   }
 
   const s = status.data
-  const warning = s ? unusableWarning(s) : null
   const state = s ? setupState(s) : null
+  const warning = s ? unusableWarning(s, state === 'offer') : null
   const failed = setup.isError || (outcome !== null && !outcome.ok)
   const message = setup.isPending
     ? 'Setting up. Confirm in the NEXUS dialog, then in the Windows prompt.'
     : setup.error
       ? `Setup did not run. ${setup.error.message}`
       : outcome
-        ? `${outcome.ok ? '' : 'Setup did not finish. '}${outcome.detail}`
+        ? `${outcome.ok ? '' : 'Setup did not finish. '}${outcome.detail}${outcome.ok ? '' : ` ${setupRetryLine(outcome.detail)}`}`
         : ''
 
   return (
@@ -106,6 +107,7 @@ export function IsolationPanel() {
       className="flex max-w-3xl flex-col gap-3"
       aria-labelledby="isolation-title"
       data-testid="isolation-panel"
+      id="isolation-panel"
     >
       <h3 id="isolation-title" className="m-0 text-body font-semibold">
         Execution isolation

@@ -32,7 +32,7 @@ export const AUTONOMY_CAPABILITIES = {
   RUN_BUILD: { kind: 'PROFILE', label: 'Run builds' },
   RUN_LINT: { kind: 'PROFILE', label: 'Run linters and type checks' },
   RUN_FORMATTER: { kind: 'PROFILE', label: 'Run formatters' },
-  RUN_PROJECT_COMMAND: { kind: 'PROFILE', label: 'Run project commands and scripts inside the containment' },
+  RUN_PROJECT_COMMAND: { kind: 'PROFILE', label: 'Run project commands and scripts in the task worktree' },
   INSTALL_PROJECT_DEPENDENCIES: { kind: 'PROFILE', label: 'Install project dependencies from the approved registries' },
   START_DEV_SERVER: { kind: 'PROFILE', label: 'Start the project development server' },
   STOP_PROJECT_PROCESS: { kind: 'PROFILE', label: 'Stop processes the task started' },
@@ -88,6 +88,13 @@ export function capabilityKind(capability: AutonomyCapability): CapabilityKind {
 export const AUTONOMY_PROFILES = ['AUTONOMOUS_PROJECT', 'BALANCED', 'LOCKED_DOWN'] as const
 export const AutonomyProfileSchema = z.enum(AUTONOMY_PROFILES)
 export type AutonomyProfile = z.infer<typeof AutonomyProfileSchema>
+
+/** The name of a profile as the user reads it; main and renderer use this one so that no enum name reaches the screen. */
+export const PROFILE_LABEL: Record<AutonomyProfile, string> = {
+  AUTONOMOUS_PROJECT: 'Autonomous project',
+  BALANCED: 'Balanced',
+  LOCKED_DOWN: 'Locked down',
+}
 
 const PROFILE_CAPABILITIES = AUTONOMY_CAPABILITY_NAMES.filter((c) => AUTONOMY_CAPABILITIES[c].kind === 'PROFILE')
 

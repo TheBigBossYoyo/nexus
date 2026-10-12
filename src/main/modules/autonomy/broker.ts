@@ -1,6 +1,7 @@
 import {
   AUTONOMY_CAPABILITIES,
   MAX_BOUNDARY_REQUESTS_PER_CAPABILITY,
+  PROFILE_LABEL,
   allowedScopes,
   capabilityKind,
   cleanAgentText,
@@ -204,7 +205,7 @@ export class CapabilityBroker {
         return deny(`${MAX_BOUNDARY_REQUESTS_PER_CAPABILITY} different boundary requests for "${AUTONOMY_CAPABILITIES[capability].label}" have been put to the user in this mission; the limit was reached and no further question is asked. Finish what does not depend on it.`)
       }
       // GRANTED with nothing usable left (a ONCE grant that was used, a revoked one) or EXPIRED: a new question.
-      const reason = `${AUTONOMY_CAPABILITIES[capability].label} is outside what the ${enrollment.profile} profile of this project allows.`
+      const reason = `${AUTONOMY_CAPABILITIES[capability].label} is not part of the ${PROFILE_LABEL[enrollment.profile]} profile of this project, so it needs your decision.`
       const created: BoundaryRequest = {
         id: newId(),
         projectId: request.projectId,

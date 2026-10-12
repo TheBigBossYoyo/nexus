@@ -667,7 +667,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
         // On the task's own record too, where whoever checks the task finds it: that the action was put to the
         // user and did not happen is a fact of the task, not something to take from the session that asked.
         recordBoundaryEvidence(repos, change.request)
-        const text = pending === 1 ? '1 boundary decision required.' : `${pending} boundary decisions required.`
+        const text = pending === 1 ? '1 boundary request is waiting for your decision.' : `${pending} boundary requests are waiting for your decision.`
         announceBoundary?.(change.request.projectId, text)
       }
     },

@@ -17,6 +17,8 @@ import {
   screeningWords,
   setupState,
   unusableWarning,
+  projectCodeLine,
+  setupRetryLine,
 } from '../../../src/renderer/src/views/autonomy/isolationModel'
 
 const screening = (extra: Partial<ResearchScreening> = {}): ResearchScreening => ({ status: 'clean', layers: [], quarantined: {}, hiddenChars: 0, strippedCharacters: 0, ...extra })
@@ -39,7 +41,20 @@ describe('isolation status wording', () => {
 
   it('warns only when the profile is not usable', () => {
     expect(unusableWarning({ usable: true })).toBeNull()
-    expect(unusableWarning({ usable: false })).toBe('Enrolled projects run no command until this is put right.')
+    expect(unusableWarning({ usable: false })).toBe('Project code cannot run in an enrolled project until its containment is verified.')
+    expect(unusableWarning({ usable: false }, true)).toBe('Project code cannot run in an enrolled project until its containment is verified. Run the setup below.')
+    expect(unusableWarning({ usable: true }, true)).toBeNull()
+  })
+
+  it('ties the profile to the containment that is in effect', () => {
+    expect(projectCodeLine({ effective: 'ISOLATED', usable: true }).label).toBe('Project code of an enrolled project currently runs: Isolated')
+    expect(projectCodeLine({ effective: 'STANDARD', usable: true }).consequence).toBe(EFFECTIVE_SENTENCE.STANDARD)
+    expect(projectCodeLine({ effective: 'RESTRICTED', usable: false }).consequence).toBe('Not verified at this start: enrolled projects run no command.')
+  })
+
+  it('promises nothing about a setup that stopped half way', () => {
+    expect(setupRetryLine('Nothing was changed: the Windows elevation prompt was declined, or the setup did not start.')).toBe('You can try again.')
+    expect(setupRetryLine('The setup did not complete: x')).toBe('The setup can be run again: it repairs what it made before.')
   })
 
   it('words availability, including a profile that was not checked', () => {

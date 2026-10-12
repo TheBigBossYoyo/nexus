@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { AUTONOMY_CAPABILITIES, cleanAgentText, profileSummary, type AutonomyProfile } from '@shared/autonomy'
+import { AUTONOMY_CAPABILITIES, PROFILE_LABEL, cleanAgentText, profileSummary, type AutonomyProfile } from '@shared/autonomy'
 import type { AppSessionView, IsolationStatusView } from '@shared/isolation'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { NexusError } from '@shared/result'
@@ -24,10 +24,11 @@ const SETUP_DETAIL = [
   'It creates:',
   '  \u2022 a local standard account, NexusSandbox, that is in none of your groups and cannot sign in interactively;',
   '  \u2022 the folder C:\\ProgramData\\NexusSandbox, where the worktrees of enrolled projects are kept;',
-  '  \u2022 Windows Firewall rules that block all network traffic of that account.',
+  '  \u2022 Windows Firewall rules that block the network traffic of that account itself.',
   '',
-  'Project code then runs as that account: it cannot read your profile, your credentials or your other projects, and its only network is the filter NEXUS gives it.',
-  'It changes nothing else, and it can be removed again.',
+  'Project code then runs as that account, on a desktop of its own: it cannot read your profile, your credentials or your other projects. The firewall rules leave it one connection of its own, the NEXUS filter.',
+  'Two things stay open. Windows still looks up host names for that account, so a name it asks for can be seen outside this machine. And services listening on this machine (loopback) can be reached by it.',
+  'It changes nothing else. It can be removed again with the removal script that ships with NEXUS, remove-sandbox.ps1 in the sandbox-setup folder of the application resources (from a source checkout: node scripts/sandbox-setup.mjs --remove); that also asks for administrator rights. There is no button for it in the app.',
 ].join('\n')
 
 /** 0.8 isolation channels. None is reachable from an agent session. */
@@ -72,7 +73,7 @@ export interface AutonomyHandlerContext {
   confirm?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
 }
 
-const PROFILE_NAMES: Record<AutonomyProfile, string> = { AUTONOMOUS_PROJECT: 'Autonomous project', BALANCED: 'Balanced', LOCKED_DOWN: 'Locked down' }
+const PROFILE_NAMES = PROFILE_LABEL
 
 /** The text of the one-time enrollment confirmation: what NEXUS will do without asking, and what it will not. */
 export function enrollmentDetail(profile: AutonomyProfile): string {
@@ -83,6 +84,7 @@ export function enrollmentDetail(profile: AutonomyProfile): string {
     '',
     'It will not, without a separate decision of yours:',
     ...withheld.slice(0, 14).map((line) => `  • ${line}`),
+    ...(withheld.length > 14 ? [`  and ${withheld.length - 14} more (see Settings > Autonomy)`] : []),
     '',
     'Where project code runs as the NEXUS sandbox account, that account is given read access to the Git data of this project (its .git folder) and may add to it for the branches of its own missions. This is taken back when you stop autonomous work here.',
     '',
@@ -122,7 +124,7 @@ export function createAutonomyHandlers(ctx: AutonomyHandlerContext): AutonomyHan
         const label = AUTONOMY_CAPABILITIES[request.capability].label
         // When the resource is not narrowed to one thing, the grant covers every action of this kind, not only the one shown.
         const covers = request.resource.kind === 'ANY' ? `This covers EVERY such action in the project, not only the one shown here: any "${label}", to any place, now and in every later mission.` : `This covers ${describeResource(request.resource)} in the project.`
-        const detail = `${label}\n${describeResource(request.resource)}\n\nThe action shown to you:\n${cleanAgentText(request.action).slice(0, 400)}\n\n${covers}\nIt holds for every later mission in the project until you take it back in Settings, Autonomy.`
+        const detail = `${label}\n${describeResource(request.resource)}\n\nThe action shown to you:\n${cleanAgentText(request.action).slice(0, 400)}\n\n${covers}\nIt holds for every later mission in the project until you take it back in Settings > Autonomy.`
         // No way to ask is a no: a project-wide grant that cannot be confirmed is not made.
         if (!ctx.confirm || !(await ctx.confirm('Always allow for this project', `Always allow this in "${request.projectName}"?`, detail, 'Always allow'))) {
           throw new NexusError('invalid_state', 'Nothing was allowed: the confirmation was declined. The request is still pending.')

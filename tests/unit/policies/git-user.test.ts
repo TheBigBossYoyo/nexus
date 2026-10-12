@@ -266,14 +266,16 @@ describe('git as the user: what runs is written by NEXUS', () => {
   })
 })
 
-describe('a push the user allowed: one git push, read into arguments, written by NEXUS', () => {
-  it('qualifies as one push with listed options, a remote by name and at most one refspec', () => {
-    for (const command of ['git push', 'git push origin', 'git push origin HEAD', 'git push -u origin HEAD', 'git push --set-upstream origin nexus/run/task', 'git push origin HEAD 2>&1', 'git push --force-with-lease origin HEAD', 'git push -q origin main', 'git push origin HEAD:refs/heads/review']) expect(grantedPushOf(command), command).not.toBeNull()
+describe('a push the user allowed: the branch of the worktree, to a remote by name, written by NEXUS', () => {
+  it('qualifies as a push with listed options, a remote by name and a branch', () => {
+    for (const command of ['git push origin HEAD', 'git push -u origin HEAD', 'git push --set-upstream origin nexus/run/task', 'git push origin HEAD 2>&1', 'git push -q origin nexus/run/task']) expect(grantedPushOf(command), command).not.toBeNull()
     for (const command of [
-      'git push --force origin HEAD', 'git push -f origin HEAD', 'git push origin +HEAD', 'git push --delete origin main', 'git push origin :main', 'git push --mirror', 'git push --all', 'git push --tags', 'git push --receive-pack=calc origin HEAD',
+      'git push --force origin HEAD', 'git push -f origin HEAD', 'git push --force-with-lease origin HEAD', 'git push origin +HEAD', 'git push --delete origin main', 'git push origin :main', 'git push --mirror', 'git push --all', 'git push --tags', 'git push --receive-pack=calc origin HEAD',
       'git push --exec=calc origin HEAD', 'git push --repo=x', 'git push -o ci.skip origin HEAD', 'git push --push-option=x origin HEAD', 'git push --no-verify origin HEAD', 'git push --signed origin HEAD',
+      // A remote and a branch, both said; the branch is a name, not a mapping and not a revision.
+      'git push', 'git push origin', 'git push origin HEAD:refs/heads/review', 'git push origin HEAD:main', 'git push origin a:b', 'git push origin @', 'git push origin HEAD~1', 'git push origin HEAD^', 'git push origin HEAD main',
       // The remote is a name the repository's own configuration knows: never an address or a path on the line.
-      'git push https://example.com/x.git HEAD', 'git push ../elsewhere HEAD', 'git push C:/x HEAD', 'git push ext::calc HEAD', 'git push file:///c/x HEAD', 'git push git@host:x.git HEAD', 'git push origin HEAD main',
+      'git push https://example.com/x.git HEAD', 'git push ../elsewhere HEAD', 'git push C:/x HEAD', 'git push ext::calc HEAD', 'git push file:///c/x HEAD', 'git push git@host:x.git HEAD',
       // Git and nothing else.
       'git add -A && git push origin HEAD | cat', 'git push origin HEAD; npm test', 'git push origin HEAD | cat', 'git push origin HEAD > out.txt', 'git -c core.sshCommand=calc push origin HEAD', 'git push origin $(calc)', 'git fetch origin', 'git pull', 'git push origin HEAD -u',
     ])
@@ -293,16 +295,19 @@ describe('a push the user allowed: one git push, read into arguments, written by
     expect(grantedPushOf('git push origin HEAD && git push --force origin HEAD')).toBeNull()
   })
 
-  it('is written with every argument quoted, HEAD said as the branch of the worktree, and only to a remote the repository knows', () => {
+  it('is written as the branch of the worktree, in full, to a remote the repository knows; any other branch is not pushed', () => {
     const lines = (command: string): string[] => renderGrantedPush((grantedPushOf(command) ?? [])[0] ?? { args: [], then: null, stderr: null }, 'nexus/run1/task').split('\n')
-    const known = (remote: string): string => `if [ -z "$(command git config --get 'remote.${remote}.url' 2>/dev/null)" ]; then echo 'NEXUS: this repository has no remote called ${remote}; the push was not made.' >&2; exit 128; fi`
-    expect(lines('git push origin HEAD')).toEqual([known('origin'), "command git 'push' 'origin' 'nexus/run1/task'"])
-    expect(lines('git push -u origin HEAD 2>&1')).toEqual([known('origin'), "command git 'push' '-u' 'origin' 'nexus/run1/task' 2>&1"])
-    expect(lines('git push origin main')).toEqual([known('origin'), "command git 'push' 'origin' 'main'"])
-    // A remote that happens to be called HEAD stays what it is: only the refspec is the branch.
-    expect(lines('git push HEAD HEAD')).toEqual([known('HEAD'), "command git 'push' 'HEAD' 'nexus/run1/task'"])
-    // No remote named: not made, and said.
-    expect(lines('git push').join(' ')).toMatch(/name the remote and the branch.*exit 128/)
-    expect(lines('git push -u').join(' ')).not.toContain('command git')
+    const known = (remote: string): string => `if [ -z "$("$NX_GIT" config --get 'remote.${remote}.url' 2>/dev/null)" ]; then echo 'NEXUS: this repository has no remote called ${remote}; the push was not made.' >&2; exit 128; fi`
+    const mapping = "'refs/heads/nexus/run1/task:refs/heads/nexus/run1/task'"
+    expect(lines('git push origin HEAD')).toEqual([known('origin'), `"$NX_GIT" 'push' 'origin' ${mapping}`])
+    expect(lines('git push -u origin HEAD 2>&1')).toEqual([known('origin'), `"$NX_GIT" 'push' '-u' 'origin' ${mapping} 2>&1`])
+    expect(lines('git push origin nexus/run1/task')).toEqual([known('origin'), `"$NX_GIT" 'push' 'origin' ${mapping}`])
+    // A remote that happens to be called HEAD stays what it is.
+    expect(lines('git push HEAD HEAD')).toEqual([known('HEAD'), `"$NX_GIT" 'push' 'HEAD' ${mapping}`])
+    // Another branch, of the user's or of another task: said, and not pushed.
+    for (const command of ['git push origin main', 'git push origin nexus/run1/sibling', 'git push origin release']) {
+      expect(lines(command).join(' '), command).toMatch(/publishes the branch of this worktree \(nexus\/run1\/task\) and no other; the push was not made/)
+      expect(lines(command).join(' '), command).not.toContain("'push'")
+    }
   })
 })
