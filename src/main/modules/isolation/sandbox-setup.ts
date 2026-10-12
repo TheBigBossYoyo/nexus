@@ -38,6 +38,7 @@ interface SetupScriptResult {
   root?: string
   firewallOutbound?: boolean
   firewallInbound?: boolean
+  steps?: string[]
   error?: string
 }
 
@@ -87,11 +88,14 @@ export async function setupSandboxAccount(input: SandboxSetupInput): Promise<San
     rmSync(resultFile, { force: true })
   }
   if (result === null) return { ok: false, detail: 'Nothing was changed: the Windows elevation prompt was declined, or the setup did not start.' }
-  if (result.ok !== true || !result.account || !result.root) return { ok: false, detail: `The setup did not complete: ${String(result.error ?? 'no reason was given').slice(0, 300)}` }
-
   mkdirSync(stateDir, { recursive: true })
   const credentialPath = join(stateDir, 'credential.bin')
-  const stored = await runProcess(input.launcher, ['credential', 'write', credentialPath], { cwd: stateDir, env: minimal, timeoutMs: 30_000, input: `${result.account}\n${password}\n` })
+  // The password is the account's from the moment the script set it, whatever happened afterwards: a setup that
+  // stopped at a later step has still changed it, and the one NEXUS holds must be the one the account has (a
+  // run of 2026-10-12 stopped at its last step and left the isolated profile with a password that was no more).
+  const passwordSet = Array.isArray(result.steps) && result.steps.some((step) => step === 'account-created' || step === 'account-password-reset')
+  const stored = result.account && passwordSet ? await runProcess(input.launcher, ['credential', 'write', credentialPath], { cwd: stateDir, env: minimal, timeoutMs: 30_000, input: `${result.account}\n${password}\n` }) : { exitCode: 1 }
+  if (result.ok !== true || !result.account || !result.root) return { ok: false, detail: `The setup did not complete: ${String(result.error ?? 'no reason was given').slice(0, 300)}` }
   if (stored.exitCode !== 0) return { ok: false, detail: 'The account was created, but its credential could not be stored. Run the setup again.' }
   writeFileSync(join(stateDir, 'sandbox.json'), JSON.stringify({ account: result.account, sid: result.sid, root: result.root, firewallOutbound: result.firewallOutbound === true, firewallInbound: result.firewallInbound === true, setupAt: new Date().toISOString(), credential: credentialPath }, null, 2))
   return {

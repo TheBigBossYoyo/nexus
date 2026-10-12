@@ -209,7 +209,15 @@ try {
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
   Register-ScheduledTask -TaskName $script:NexusBootstrapTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'NEXUS sandbox: restores, once at every start of Windows, the entry that lets the NEXUS AppContainer ask the Mount Manager for the canonical form of a path. One shot; no network; no input.' -Force | Out-Null
   $task = Get-ScheduledTask -TaskName $script:NexusBootstrapTask -ErrorAction Stop
-  if (@($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ne $powershell -or $task.Actions[0].Arguments -notlike "*`"$bootstrap`"" -or $task.Principal.UserId -notin @('SYSTEM', 'S-1-5-18')) { throw 'The startup task is not what was registered.' }
+  # Who it runs as, by identifier: Windows gives the account's name in the language of the machine.
+  $runsAs = [string]$task.Principal.UserId
+  if ($runsAs -ne 'S-1-5-18') { try { $runsAs = (New-Object Security.Principal.NTAccount($runsAs)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { } }
+  $wrong = @()
+  if (@($task.Actions).Count -ne 1) { $wrong += "it has $(@($task.Actions).Count) actions" }
+  elseif ([string]$task.Actions[0].Execute -ne $powershell) { $wrong += "it starts $($task.Actions[0].Execute)" }
+  elseif (-not ([string]$task.Actions[0].Arguments).EndsWith("-File `"$bootstrap`"")) { $wrong += "its arguments are $($task.Actions[0].Arguments)" }
+  if ($runsAs -ne 'S-1-5-18') { $wrong += "it runs as $($task.Principal.UserId)" }
+  if ($wrong.Count -gt 0) { throw "The startup task is not what was registered: $($wrong -join '; ')." }
   $result.startupTask = $true
   Step 'startup-task'
 

@@ -81,6 +81,12 @@ try {
 } finally {
   rmSync(passwordFile, { force: true })
 }
+// The password is the account's from the moment the script set it: it is stored even when a later step failed.
+const passwordSet = Array.isArray(result?.steps) && result.steps.some((step) => step === 'account-created' || step === 'account-password-reset')
+if (!result?.ok && result?.account && passwordSet) {
+  mkdirSync(stateDir, { recursive: true })
+  spawnSync(launcher, ['credential', 'write', credentialPath], { input: `${result.account}\n${password}\n`, encoding: 'utf8', windowsHide: true })
+}
 if (!result?.ok) {
   console.log(JSON.stringify({ exit: run?.status ?? null, result: result ?? 'no result: the elevation was declined or the script did not start', stderr: run?.stderr?.slice(0, 500) }, null, 2))
   process.exit(1)
