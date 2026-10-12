@@ -42,6 +42,8 @@ export interface IsolationServiceDeps {
   dataDir: string
   /** Where the sandbox account's record and protected credential are kept (`%LOCALAPPDATA%\\NexusSandbox`). Protected with the data directory. */
   sandboxStateDir?: string | null
+  /** Whether this machine has a record of the sandbox account, usable or not: the isolated profile was set up here. */
+  sandboxOnRecord?: () => boolean
   logger?: (line: string) => void
 }
 
@@ -64,7 +66,7 @@ export class IsolationService {
 
   profileFor(projectId: string): ExecutionProfileName {
     if (!this.deps.enrolled(projectId)) return 'STANDARD'
-    return effectiveProfile(this.deps.containment(), this.deps.broker)
+    return effectiveProfile(this.deps.containment(), this.deps.broker, this.deps.sandboxOnRecord?.() === true)
   }
 
   /** Whether a session of this project runs its commands inside a containment that was verified. */
@@ -171,7 +173,7 @@ export class IsolationService {
 
   status(): IsolationStatus {
     const requested = this.deps.containment()
-    const effective = effectiveProfile(requested, this.deps.broker)
+    const effective = effectiveProfile(requested, this.deps.broker, this.deps.sandboxOnRecord?.() === true)
     const state = this.deps.broker.usable(effective)
     return {
       requested,

@@ -411,3 +411,53 @@ closed:
 Not closed: the scripts NEXUS runs as the user (the allowed push) keep their own check a moment before use, as
 before; a clone's configuration is read at each command, so a change between the check and git's start is not
 excluded. `tests/integration/git/worktree-pointer-trust.test.ts`.
+
+### The owner's decisions on the stated limits (2026-10-12)
+
+**The in-app setup, from the real button, with the user present.** The existing account was removed (one
+elevation), then `scripts/v08-setup-walkthrough.mjs` opened a visible window and pressed "Set up the isolated
+profile…"; the user answered NEXUS's dialog and the Windows prompt. Before: no account, ISOLATED not available.
+After: account recorded, ISOLATED verified by running it. `docs/acceptance/v08-in-app-setup-2026-10-12.json`.
+
+**github.com and release-assets.githubusercontent.com: accepted, as brokered traffic only.** They are on the
+list of the proxy NEXUS runs for project commands and nowhere else; under ISOLATED that proxy is the only way
+out. New: a connection through that proxy that sends more than 4 MiB towards its destination is cut and
+reported (`maxUploadBytesPerConnection`): inside a tunnel the proxy sees no method, and the volume sent is what
+tells fetching from uploading. It narrows what can be sent to a listed host; it does not make such a host
+read-only (many small connections remain). `tests/integration/network/fetch-proxy.test.ts`.
+
+**RESTRICTED and the user's desktop: accepted as a documented limit.** RESTRICTED is not a tier against hostile
+code. New: (1) no quiet fallback: on a machine where the isolated profile was set up and does not hold at a
+start, "the strongest available" stays the isolated profile, unusable, with its reason and the setup offered
+again; project code does not run as the user instead (`effectiveProfile`, `tests/unit/isolation/
+effective-profile.test.ts`). RESTRICTED is the strongest only where the isolated profile was never set up.
+(2) where a project is enrolled and its code runs Restricted, the Autonomy settings say that it is no
+containment against hostile code and that the isolated profile is the one for work that goes on unattended.
+
+**RESTRICTED and the worktree's git pointer: trusted NEXUS never trusts it.** See the section above this one's
+predecessor ("RESTRICTED: the worktree's git pointer is never trusted"). Measured before the change: with the
+pointer replaced by a planted repository (fsmonitor, filter, textconv, sshCommand, alias, hooks), NEXUS's own
+git ran none of the planted programs (it already named `--git-dir`, `--work-tree` and `GIT_COMMON_DIR` itself);
+stock git on the same state ran two. Now it also refuses and says what was changed. Found on the way and
+closed: a speculative candidate (a clone, not a worktree) whose own `config` named a filter ran it as the user.
+
+**DNS under ISOLATED: NOT closed. To fix before PASS; three ways measured, none holds.**
+- A Windows RPC filter (`netsh rpc filter`, layer um, block, interface `45776b01-5956-4485-9f80-f428f7d60129`
+  of the DNS Client service, condition on the account's token), made by the elevated setup. The filter was
+  created and listed by Windows with both conditions. Measured right after, as the account: `ipconfig
+  /displaydns` printed the service's cache, and `ping dns.msftncsi.com` got its address. The filter does not
+  stop local RPC to that service on this build (26200; `dnsrslvr.dll` 10.0.26100.8875). Not tried: whether it
+  holds after a restart of Windows (the service cannot be restarted otherwise).
+- Groups of the token made deny-only in the launcher's second step (interactive, console logon, authenticated
+  users, this organization, local account, LOCAL, NTLM): lookups still answered. With Everyone deny-only the
+  process does not start.
+- A side finding of the same measurement: the account can read the DNS Client's cache, that is, names the
+  user's own programs looked up recently. It is the same door.
+- What was built and then taken out again: the setup step, the removal step, the record, a verification at
+  each start that measures a lookup as the account, the texts. Kept: the removal of that filter (a machine set
+  up by that build has it), and "Run the setup again" in the panel when the account is there and the isolated
+  profile did not pass. The patch is in `test-results/dns-exp/dns-filter.patch`.
+- What remains possible: a containment of another kind for the contained process (an AppContainer, whose
+  lookups the DNS Client refuses without a network capability), or a filtering driver. Both are a change of
+  the containment, not of its setup.
+

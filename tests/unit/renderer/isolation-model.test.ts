@@ -15,7 +15,7 @@ import {
   quarantinedTotal,
   screenshotAlt,
   screeningWords,
-  setupState,
+  projectCodeAdvice, setupState,
   unusableWarning,
   projectCodeLine,
   setupRetryLine,
@@ -128,5 +128,11 @@ describe('web research', () => {
     expect(downloadTone('REFUSED')).toBe('danger')
     expect(downloadTone('QUARANTINED')).toBe('warning')
     expect(downloadTone('REMOVED')).toBe('neutral')
+  })
+
+  it('says where code runs Restricted that it is no containment against hostile code', () => {
+    expect(projectCodeAdvice({ effective: 'RESTRICTED', usable: true })).toMatch(/not a containment against hostile code/)
+    expect(projectCodeAdvice({ effective: 'ISOLATED', usable: true })).toBeNull()
+    expect(projectCodeAdvice({ effective: 'RESTRICTED', usable: false })).toBeNull()
   })
 })

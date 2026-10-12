@@ -316,4 +316,38 @@ describe('the filtering proxy', () => {
       await app.close()
     }
   })
+
+  it('a tunnel that sends more than fetching does is cut and reported; one that fetches is not', async () => {
+    const g = guard()
+    const limited = await startPolicyProxy({ ...g, maxUploadBytesPerConnection: 2000 })
+    const send = (bytes: number): Promise<{ established: boolean; answered: boolean }> =>
+      new Promise((resolve, reject) => {
+        const socket = netConnect({ host: '127.0.0.1', port: limited.port })
+        let data = ''
+        let sent = false
+        socket.on('connect', () => socket.write(`CONNECT docs.public-site.org:443 HTTP/1.1\r\nHost: docs.public-site.org:443\r\nProxy-Authorization: Basic ${Buffer.from(`${limited.username}:${limited.password}`).toString('base64')}\r\n\r\n`))
+        socket.on('data', (c: Buffer) => {
+          data += c.toString()
+          if (!sent && data.includes(' 200 ')) {
+            sent = true
+            // A request with a body of that size: what an upload looks like from outside the tunnel.
+            socket.write(`POST /page HTTP/1.1\r\nHost: docs.public-site.org\r\nConnection: close\r\nContent-Length: ${bytes}\r\n\r\n${'x'.repeat(bytes)}`)
+          }
+        })
+        socket.on('close', () => resolve({ established: data.includes(' 200 '), answered: data.split('\r\n\r\n').length > 2 || /HTTP\/1\.1 \d+[^]*HTTP\/1\.1 \d+/.test(data) }))
+        socket.on('error', reject)
+      })
+    try {
+      const small = await send(200)
+      expect(small.established).toBe(true)
+      expect(small.answered, 'a small request passes and is answered').toBe(true)
+      expect(g.events.some((e) => e.via === 'proxy-limit')).toBe(false)
+      const large = await send(50_000)
+      expect(large.established).toBe(true)
+      expect(large.answered, 'the connection is cut before the destination answers').toBe(false)
+      expect(g.events.find((e) => e.via === 'proxy-limit')).toMatchObject({ method: 'UPLOAD', host: 'docs.public-site.org', allowed: false })
+    } finally {
+      await limited.close()
+    }
+  })
 })

@@ -27,6 +27,12 @@ export interface PolicyProxyOptions extends GuardOptions {
   maxRequests?: number
   /** The most bytes this proxy relays in all, both directions together; at the limit the open connections are cut and later requests are refused. */
   maxBytes?: number
+  /**
+   * The most bytes one request or tunnel may send towards its destination. Traffic that fetches (an install of
+   * dependencies, a download) sends little and receives much; a connection that sends more than this is
+   * cut and reported. Inside a tunnel the proxy sees no method, so this is what tells fetching from uploading.
+   */
+  maxUploadBytesPerConnection?: number
   /** Time without a byte after which a connection, client side or upstream, is dropped. Default 30 s. */
   idleMs?: number
 }
@@ -110,6 +116,19 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
     exhausted = true
     refuseEvent('proxy-limit', 'BYTES', '', 0)
     for (const socket of sockets) socket.destroy()
+  }
+
+  /** Counts what one connection sends towards its destination and cuts it at the limit. */
+  const uploadMeter = (host: string, port: number, cut: () => void): ((bytes: number) => void) => {
+    let sent = 0
+    let over = false
+    return (bytes) => {
+      sent += bytes
+      if (over || options.maxUploadBytesPerConnection === undefined || sent <= options.maxUploadBytesPerConnection) return
+      over = true
+      guard.onEvent?.({ at: new Date().toISOString(), via: 'proxy-limit', method: 'UPLOAD', host, port, allowed: false, denial: 'HOST_NOT_ALLOWED', address: null })
+      cut()
+    }
   }
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -199,7 +218,15 @@ export async function startPolicyProxy(options: PolicyProxyOptions): Promise<Pol
           upstream.pipe(client)
           client.pipe(upstream)
           upstream.on('data', (chunk: Buffer) => relay(chunk.length))
-          client.on('data', (chunk: Buffer) => relay(chunk.length))
+          const sent = uploadMeter(host, port, () => {
+            upstream.destroy()
+            client.destroy()
+          })
+          sent(head.length)
+          client.on('data', (chunk: Buffer) => {
+            relay(chunk.length)
+            sent(chunk.length)
+          })
         })
         upstream.on('error', () => {
           if (!client.destroyed) reply(502, 'Bad Gateway')

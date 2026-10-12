@@ -28,7 +28,7 @@ import {
   TimeAgo,
   type Column,
 } from '../../components/ui'
-import { projectCodeLine } from './isolationModel'
+import { projectCodeAdvice, projectCodeLine } from './isolationModel'
 import {
   BOUNDARY_REQUEST_DEFINITION,
   NEVER_POSSIBLE_LINE,
@@ -395,6 +395,11 @@ export function AutonomySettings() {
               <div className="flex flex-col gap-0.5" data-testid="autonomy-code-runs">
                 <p className="m-0 font-medium">{projectCodeLine(isolation).label}</p>
                 <p className="m-0 text-text-secondary">{projectCodeLine(isolation).consequence}</p>
+                {projectCodeAdvice(isolation) ? (
+                  <p className="m-0 text-warning" data-testid="autonomy-restricted-advice">
+                    {projectCodeAdvice(isolation)}
+                  </p>
+                ) : null}
                 <div>
                   <Button
                     size="sm"

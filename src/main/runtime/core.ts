@@ -266,7 +266,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const launcher = new Launcher({ executable: host.launcherPath ?? join(dataDir, 'missing', 'nexus-launch.exe'), specDir: join(dataDir, 'sandbox', 'specs') })
   // What project code may reach on the network when it installs dependencies: the approved registries, through
   // a proxy of NEXUS's own. Under ISOLATED it is the only network the code has.
-  const depsProxy = await startPolicyProxy({ policy: policyForProjectCommands({ network: true }) }).catch(() => null)
+  // The hosts on its list are for fetching: a connection that sends more than a few megabytes to one of them is not
+  // an install, and is cut. (The list has registries and github.com's downloads; what goes through is brokered
+  // here, host by host, and is no network of the contained code's own.)
+  const depsProxy = await startPolicyProxy({ policy: policyForProjectCommands({ network: true }), maxUploadBytesPerConnection: 4 * 1024 * 1024 }).catch(() => null)
   const proxyUrl = depsProxy ? `http://${depsProxy.username}:${depsProxy.password}@127.0.0.1:${depsProxy.port}` : null
   let toolState: ToolMirrorState | null = null
   // 0.8: the account on record is looked at before it is used: that Windows has an account of that name with
@@ -274,11 +277,14 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // user's with the access the setup gives and nothing of anybody else's in it. When that does not hold, the
   // isolated profile is not available, and says why.
   let sandboxProblem: string | null = null
+  /** There is a record of the account, whether or not it passed: the isolated profile was set up on this machine. */
+  let sandboxRecorded = false
   // The account that was looked at, and no other: the record is not read again when the account is used, so a
   // record that changes while NEXUS runs changes nothing until it has been verified in its turn.
   let sandboxAccount: SandboxAccount | null = null
   const checkSandboxAccount = async (): Promise<void> => {
     const recorded = readSandboxAccount(env)
+    sandboxRecorded = recorded !== null
     let problem: string | null = null
     if (recorded !== null) {
       if (host.sandboxSetupDir === undefined) problem = 'this build cannot verify it (the verification script is not part of it)'
@@ -327,6 +333,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     gitWritable: async (worktree) => (await git.ownedGitLayout(worktree))?.writable ?? [],
     dataDir,
     sandboxStateDir: sandboxStateDir(env),
+    sandboxOnRecord: () => sandboxRecorded,
     logger,
   })
   const isolationStatus = await isolation.start()

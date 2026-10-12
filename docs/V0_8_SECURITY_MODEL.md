@@ -482,3 +482,21 @@ since this section was first written: application and browser automation (`APP_B
 research browser (`INTERNET_RESEARCH.md`), the pipe's explicit access list and label, a handle list in the
 launcher, fault injection and a soak of the containment, the isolation, application and research panels,
 removal of the labels and of the Git access when no project is enrolled.
+
+## Decided on 2026-10-12
+
+- **Names (DNS) under the isolated profile: open, and to be closed before 0.8 is released.** The account's own
+  traffic is blocked, its own DNS packets included. A name it asks Windows to look up is asked on the network
+  by the DNS Client service, and the account can read that service's cache. An RPC filter for the account and
+  deny-only groups in its token were measured and do not stop it (see the progress notes).
+- **The hosts of the dependency proxy** (the registries, `github.com`, `release-assets.githubusercontent.com`
+  and the others on its list) are reached through NEXUS's proxy only; they are not a network of the contained
+  code's own. A connection through it that sends more than 4 MiB is cut.
+- **RESTRICTED is not a tier against hostile code.** It runs as the user: the user's desktop, network, vault
+  and unprotected files are within its reach. NEXUS does not fall back to it quietly from an isolated profile
+  that was set up and does not hold, and says so where an enrolled project runs Restricted. For work that
+  goes on unattended, the isolated profile is the one to use.
+- **Under RESTRICTED a task can rewrite its worktree's `.git` pointer and its entry.** NEXUS's own git never
+  follows them: it names the git directory, the worktree and the repository itself, from what it recorded, and
+  refuses a worktree whose pointer or entry no longer says what it recorded.
+

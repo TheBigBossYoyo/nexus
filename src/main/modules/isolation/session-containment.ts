@@ -29,9 +29,13 @@ export type ContainmentSetting = 'STRONGEST' | 'ISOLATED' | 'RESTRICTED' | 'STAN
  * The profile a setting means on this machine now. STRONGEST never means STANDARD: when neither containment
  * holds it stays RESTRICTED, which then refuses to run anything, and says why.
  */
-export function effectiveProfile(setting: ContainmentSetting, broker: Pick<ExecutionBroker, 'usable'>): ExecutionProfileName {
+export function effectiveProfile(setting: ContainmentSetting, broker: Pick<ExecutionBroker, 'usable'>, isolatedSetUp = false): ExecutionProfileName {
   if (setting !== 'STRONGEST') return setting
-  return broker.usable('ISOLATED').usable ? 'ISOLATED' : 'RESTRICTED'
+  if (broker.usable('ISOLATED').usable) return 'ISOLATED'
+  // A machine where the isolated profile was set up and does not hold at this start does not quietly run
+  // project code as the user instead: the profile stays the isolated one, which is then not usable, and says
+  // why. RESTRICTED is the strongest only where the isolated profile was never set up.
+  return isolatedSetUp ? 'ISOLATED' : 'RESTRICTED'
 }
 
 const singleQuoted = (text: string): string => `'${text.replace(/'/g, `'\\''`)}'`

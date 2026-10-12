@@ -60,6 +60,17 @@ export function projectCodeLine(status: Pick<IsolationStatusView, 'effective' | 
     : { label: `Project code of an enrolled project currently runs: ${EFFECTIVE_LABEL[status.effective]}, not verified`, consequence: 'Not verified at this start: enrolled projects run no command.' }
 }
 
+/**
+ * Said where a project is enrolled and its code runs Restricted: that profile keeps a task's writes in its
+ * folders, and is no containment against code that means harm.
+ */
+export const RESTRICTED_ADVICE =
+  'Restricted is not a containment against hostile code: it runs as you. For work that goes on while you are away, set up the isolated profile.'
+
+export function projectCodeAdvice(status: Pick<IsolationStatusView, 'effective' | 'usable'>): string | null {
+  return status.usable && status.effective === 'RESTRICTED' ? RESTRICTED_ADVICE : null
+}
+
 /** What follows a setup that did not finish. The elevated script may have changed things before it stopped, so the sentence says what is true of a second run. */
 export function setupRetryLine(detail: string): string {
   return /^Nothing was changed/.test(detail.trim()) ? 'You can try again.' : 'The setup can be run again: it repairs what it made before.'
