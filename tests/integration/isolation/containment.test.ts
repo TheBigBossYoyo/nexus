@@ -374,6 +374,32 @@ setTimeout(() => { for (const n of ['tcp', 'http', 'dns', 'udp', 'lookup']) done
       expect(r.lines['lookup'], r.raw).toMatch(/^DENIED:/)
     }, 60_000)
 
+    it('asks the Mount Manager for the canonical form of a path, and can do nothing else to it: no mount point made or deleted, no drive letter, no database, no access list', async () => {
+      const s = session('ISOLATED', 'mount-probe')
+      const exe = join(s.worktree, 'mount-probe.exe')
+      const csc = join(process.env['SystemRoot'] ?? 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
+      execFileSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:exe', `/out:${exe}`, resolve('tests', 'integration', 'isolation', 'mount-probe.cs')], { windowsHide: true, stdio: 'pipe' })
+      const result = await broker.run({ ...s, file: exe, args: [] }, { timeoutMs: 60_000 })
+      const lines: Record<string, string> = {}
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const m = /^([a-z-]+)=(.*)$/.exec(line.trim())
+        if (m) lines[m[1] as string] = m[2] as string
+      }
+      console.info(`ISOLATED and the Mount Manager: ${JSON.stringify(lines)}`)
+      // What a program needs: Node's native realpath, Rust's canonicalize and the installer of Electron ask this.
+      expect(lines['canonical'], result.stdout).toMatch(/^OK:.*mount-probe$/i)
+      expect(lines['open-to-ask']).toBe('OK:opened')
+      // Every change needs read or write access to the device: the AppContainer's entry gives neither.
+      for (const way of ['open-to-read', 'open-to-write', 'open-to-read-and-write', 'open-to-change-its-access-list']) expect(lines[way], way).toBe('DENIED:5')
+      // Asked for on the handle it does get: Windows refuses each before the Mount Manager sees it.
+      for (const change of ['create-mount-point', 'delete-mount-points', 'delete-from-database', 'next-drive-letter', 'automatic-drive-letters', 'volume-arrival']) expect(lines[change], change).toBe('DENIED:5')
+      // And through the documented calls: no mount point on a directory of its own, no drive letter.
+      for (const call of ['set-volume-mount-point', 'delete-volume-mount-point', 'define-drive-raw', 'define-drive-for-own-directory']) expect(lines[call], call).toMatch(/^DENIED:/)
+      // The same from Node, which is how most tools ask.
+      const r = await probe('ISOLATED', 'mount-probe', `const fs = require('fs'); try { console.log('native=OK:' + fs.realpathSync.native('.')) } catch (e) { console.log('native=DENIED:' + e.code) }`)
+      expect(r.lines['native'], r.raw).toMatch(/^OK:/)
+    }, 120_000)
+
     it('gets no name looked up and is not shown the cache of names, whichever way it asks', async () => {
       const sys = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
       const ps = join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe')

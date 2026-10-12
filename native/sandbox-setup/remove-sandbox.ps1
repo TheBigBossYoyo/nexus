@@ -53,6 +53,22 @@ try {
     }
     [void](& (Join-Path $env:SystemRoot 'System32\CheckNetIsolation.exe') LoopbackExempt -d "-p=$containerSid" 2>&1 | Out-String)
   } catch { $result.left += "the AppContainer's entries on the folders above the sandbox root ($($_.Exception.Message))" }
+  # The startup bootstrap: its task, the entry it keeps on the Mount Manager device, and its script.
+  try {
+    $task = Get-ScheduledTask -TaskName $script:NexusBootstrapTask -ErrorAction SilentlyContinue
+    if ($null -ne $task) { Unregister-ScheduledTask -TaskName $script:NexusBootstrapTask -Confirm:$false; $result.steps += 'startup-task-removed' }
+    $restore = Join-Path $PSScriptRoot 'restore-canonicalization.ps1'
+    if (Test-Path -LiteralPath $restore) {
+      [void](& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $restore -Remove 2>&1 | Out-String)
+      if ($LASTEXITCODE -eq 0) { $result.steps += 'canonicalization-entry-removed' } else { $result.left += 'the entry of the sandbox on the Mount Manager device (it is gone at the next start of Windows)' }
+    }
+    $bootstrapDir = Get-NexusBootstrapDir
+    if ((Test-Path -LiteralPath $bootstrapDir) -and -not (Test-NexusReparsePoint $bootstrapDir)) {
+      Remove-Item -LiteralPath (Join-Path $bootstrapDir 'restore-canonicalization.ps1') -Force -ErrorAction SilentlyContinue
+      # Only if nothing else is in it: the folder is removed when it is empty, and left with what it holds otherwise.
+      if (@(Get-ChildItem -LiteralPath $bootstrapDir -Force).Count -eq 0) { Remove-Item -LiteralPath $bootstrapDir -Force; $result.steps += 'bootstrap-folder-removed' } else { $result.left += "the folder $bootstrapDir (it holds something that is not NEXUS's)" }
+    }
+  } catch { $result.left += "the startup task of the sandbox ($($_.Exception.Message))" }
   if ($null -ne $account -and -not $ours) {
     $result.left += "the account $AccountName (it does not carry the mark of NEXUS's setup)"
   } else {

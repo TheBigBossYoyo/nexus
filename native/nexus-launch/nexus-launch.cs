@@ -59,6 +59,7 @@ static class N {
     [DllImport(A, CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr s);
     [DllImport(A)] public static extern bool EqualSid(IntPtr a, IntPtr b);
     [DllImport("kernelbase.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool DeriveCapabilitySidsFromName(string name, out IntPtr groupSids, out uint groupCount, out IntPtr capabilitySids, out uint capabilityCount);
+    [DllImport(K, SetLastError = true, CharSet = CharSet.Unicode)] public static extern uint GetFinalPathNameByHandleW(IntPtr h, StringBuilder path, uint length, uint flags);
     [DllImport(K)] public static extern IntPtr GetCurrentProcess();
     [DllImport(K)] public static extern uint SetErrorMode(uint m);
     [DllImport(K)] public static extern IntPtr GetStdHandle(int n);
@@ -719,6 +720,20 @@ static class Program {
             if (args.Length == 2 && args[0] == "pipe-protect") return PipeProtect(args[1]);
             if (args.Length == 2 && args[0] == "appcontainer-sid") { foreach (char c in args[1]) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_USAGE, "bad AppContainer name"); Console.Out.WriteLine(SidText(AppContainerSid(args[1]))); return 0; }
             if (args.Length == 2 && args[0] == "capability-sid") { foreach (char c in args[1]) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_USAGE, "bad capability name"); Console.Out.WriteLine(SidText(CapabilitySid(args[1]))); return 0; }
+            if (args.Length == 2 && args[0] == "canonical") {
+                // The canonical form of a path, as Windows gives it (GetFinalPathNameByHandle). Inside an AppContainer
+                // this is refused unless its capability is let in to the Mount Manager device; NEXUS asks it from
+                // inside the containment at every start, to know.
+                IntPtr h = N.CreateFileW(args[1], 0, 7, IntPtr.Zero, 3, 0x02000000 /* FILE_FLAG_BACKUP_SEMANTICS */, IntPtr.Zero);
+                if (h == IntPtr.Zero || h == new IntPtr(-1)) throw new Fail(EXIT_START, "the path could not be opened: " + Marshal.GetLastWin32Error());
+                StringBuilder path = new StringBuilder(2048);
+                uint n = N.GetFinalPathNameByHandleW(h, path, 2048, 0);
+                int e = Marshal.GetLastWin32Error();
+                N.CloseHandle(h);
+                if (n == 0 || n >= 2048) throw new Fail(EXIT_START, "Windows did not give the canonical form of the path: " + e);
+                Console.Out.WriteLine(path.ToString());
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--version") { Console.Out.WriteLine("nexus-launch 1"); return 0; }
             Err("usage: nexus-launch --spec <file> | label low|medium|protect|clear <path> | --version");
             return EXIT_USAGE;

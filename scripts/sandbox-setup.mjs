@@ -3,6 +3,7 @@
 //   node scripts/sandbox-setup.mjs           create or repair the account, the firewall rules and the sandbox root
 //   node scripts/sandbox-setup.mjs --remove  undo all of it (add --remove-root to delete the sandbox root too)
 //   node scripts/sandbox-setup.mjs --status  say what is recorded, without changing anything
+//   node scripts/sandbox-setup.mjs --canonicalization   only the AppContainer's entry on the Mount Manager device (--undo removes it)
 //
 // The password is generated here, handed to the elevated script in a file only this user can read, stored
 // as a DPAPI blob under %LOCALAPPDATA%\NexusSandbox, and the file is deleted. It is never printed.
@@ -48,6 +49,14 @@ function readResult() {
   } finally {
     rmSync(resultFile, { force: true })
   }
+}
+
+// Only the AppContainer's entry on the Mount Manager device (restore-canonicalization.ps1): set, or with --undo taken away.
+if (args.has('--canonicalization')) {
+  const run = elevated(join(here, 'native', 'sandbox-setup', 'restore-canonicalization.ps1'), ['-ResultFile', `"${resultFile}"`, ...(args.has('--undo') ? ['-Remove'] : [])])
+  const result = readResult()
+  console.log(JSON.stringify({ exit: run.status, result: result ?? 'no result: the elevation was declined or the script did not start' }, null, 2))
+  process.exit(result?.ok ? 0 : 1)
 }
 
 if (args.has('--remove')) {

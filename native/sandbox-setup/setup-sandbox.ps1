@@ -14,7 +14,12 @@
 #      and ProgramData: to read and list that folder itself, inherited by nothing in it. Without these a program
 #      in the AppContainer cannot find its own working directory. The entries name the capability, not the
 #      AppContainer: an entry for an AppContainer keeps low-integrity programs out of the folder;
-#   5. records, in HKLM where only an administrator writes, which account, folder and AppContainer are NEXUS's.
+#   5. installs a small startup security bootstrap: a one-shot scheduled task that runs once at every start of
+#      Windows, as the system, and restores one access entry that Windows forgets at a restart: the one that
+#      lets the AppContainer ask the Mount Manager for the canonical form of a path (not read it, not change
+#      it). Its script (restore-canonicalization.ps1) is copied to Program Files\NexusSandbox, where only
+#      administrators write; it takes no input, uses no network and starts nothing;
+#   6. records, in HKLM where only an administrator writes, which account, folder and AppContainer are NEXUS's.
 #
 # It trusts no name. An account, a folder or a firewall rule that is already there under the expected name is
 # looked at (sandbox-checks.ps1). What this setup made before is repaired to what it should be. What it did not
@@ -37,7 +42,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'sandbox-checks.ps1')
-$result = [ordered]@{ ok = $false; account = $AccountName; sid = $null; root = $SandboxRoot; firewallOutbound = $false; firewallInbound = $false; hidden = $false; appContainer = $null; appContainerSid = $null; capabilitySid = $null; loopbackExempt = $null; steps = @(); error = $null }
+$result = [ordered]@{ ok = $false; account = $AccountName; sid = $null; root = $SandboxRoot; firewallOutbound = $false; firewallInbound = $false; hidden = $false; appContainer = $null; appContainerSid = $null; capabilitySid = $null; loopbackExempt = $null; canonicalization = $false; startupTask = $false; steps = @(); error = $null }
 
 function Step([string]$name) { $script:result.steps += $name }
 
@@ -175,7 +180,40 @@ try {
     Step $(if ($LASTEXITCODE -eq 0) { 'loopback-exempt' } else { "loopback-exempt-failed: $($exempt.Trim())" })
   } catch { $result.loopbackExempt = $false; Step "loopback-exempt-failed: $($_.Exception.Message)" }
 
-  # 5. The record, where only an administrator writes: NEXUS compares what it is told about the account with this.
+  # 5. The startup bootstrap. The script is copied where only administrators write, run once now, and
+  # registered to run once at every start of Windows. What is registered is that one file, by its full path.
+  $bootstrapDir = Get-NexusBootstrapDir
+  if ((Test-Path -LiteralPath $bootstrapDir) -and (Test-NexusReparsePoint $bootstrapDir)) { throw "The folder $bootstrapDir is a link to another place. Nothing more was changed." }
+  if (-not (Test-Path -LiteralPath $bootstrapDir)) { New-Item -ItemType Directory -Path $bootstrapDir | Out-Null }
+  # The folder's own access list, not an inherited one: the system and administrators, and Users to read.
+  $bootAcl = New-Object Security.AccessControl.DirectorySecurity
+  $bootAcl.SetAccessRuleProtection($true, $false)
+  foreach ($entry in @(@('S-1-5-18', 'FullControl'), @('S-1-5-32-544', 'FullControl'), @('S-1-5-32-545', 'ReadAndExecute'))) {
+    $bootAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($entry[0])), [Security.AccessControl.FileSystemRights]$entry[1], $inherit, $none, $allow)))
+  }
+  $bootAcl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+  Set-Acl -LiteralPath $bootstrapDir -AclObject $bootAcl
+  $bootstrap = Join-Path $bootstrapDir 'restore-canonicalization.ps1'
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'restore-canonicalization.ps1') -Destination $bootstrap -Force
+  if ((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'restore-canonicalization.ps1') -Algorithm SHA256).Hash) { throw 'The startup script was not copied as it is.' }
+  $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $ran = (& $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap 2>&1 | Out-String)
+  $restored = $null
+  try { $restored = ($ran.Trim().Split("`n") | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1) | ConvertFrom-Json } catch { }
+  if ($null -eq $restored -or $restored.ok -ne $true -or $restored.present -ne $true -or $restored.capabilitySid -ne $capabilitySid) { throw "The AppContainer could not be let in to ask the Mount Manager: $($ran.Trim())" }
+  $result.canonicalization = $true
+  Step 'canonicalization-entry'
+  $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`""
+  $trigger = New-ScheduledTaskTrigger -AtStartup
+  $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+  Register-ScheduledTask -TaskName $script:NexusBootstrapTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'NEXUS sandbox: restores, once at every start of Windows, the entry that lets the NEXUS AppContainer ask the Mount Manager for the canonical form of a path. One shot; no network; no input.' -Force | Out-Null
+  $task = Get-ScheduledTask -TaskName $script:NexusBootstrapTask -ErrorAction Stop
+  if (@($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ne $powershell -or $task.Actions[0].Arguments -notlike "*`"$bootstrap`"" -or $task.Principal.UserId -notin @('SYSTEM', 'S-1-5-18')) { throw 'The startup task is not what was registered.' }
+  $result.startupTask = $true
+  Step 'startup-task'
+
+  # 6. The record, where only an administrator writes: NEXUS compares what it is told about the account with this.
   if (-not (Test-Path $script:NexusSandboxKey)) { New-Item -Path $script:NexusSandboxKey -Force | Out-Null }
   $users = @()
   if ($null -ne $record) { $users = @($record.Users | Where-Object { $_ }) }

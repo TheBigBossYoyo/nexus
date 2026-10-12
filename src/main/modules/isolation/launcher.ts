@@ -345,6 +345,11 @@ export class Launcher {
         lines.push(`("${join(systemRoot, 'System32', 'nslookup.exe')}" -timeout=2 -retry=1 ${DNS_PROBE_NAME} > "${join(inside, 'query.txt')}") 2>nul`)
         lines.push(`"${join(systemRoot, 'System32', 'curl.exe')}" -s -m 4 -o NUL http://${DNS_PROBE_NAME}/ && echo reached> "${join(inside, 'byname.txt')}"`)
         lines.push(`("${join(systemRoot, 'System32', 'ipconfig.exe')}" /displaydns > "${join(inside, 'cache.txt')}") 2>nul`)
+        // The canonical form of a path, asked from inside by the account's own copy of this launcher. Node's native
+        // realpath, Rust's canonicalize and the installer of Electron ask Windows the same; inside an AppContainer
+        // the answer needs the entry the setup (and, after a restart of Windows, its startup task) puts on the
+        // Mount Manager device.
+        if (place.sandbox) lines.push(`("${place.sandbox.stage2Path}" canonical "${inside}" > "${join(inside, 'canonical.txt')}") 2>nul`)
         // What the same question gives outside the containment, so that "no answer" inside is not read as more than it is.
         namesHere = await lookup(DNS_PROBE_NAME).then(() => true, () => false)
         // An AppContainer is started only with a home to derive its own directories from.
@@ -382,6 +387,8 @@ export class Launcher {
       if (asked >= 0 && address.test(query.slice(asked))) return done(false, 'The contained process got an answer to a name query of its own: its packets are not kept in.')
       if (read('byname.txt').includes('reached')) return done(false, 'The contained process reached a server by its name: it has a route out.')
       if (read('cache.txt').split(/\r?\n/).filter((line) => line.trim() !== '').length > 8) return done(false, "The contained process was shown the machine's cache of looked-up names.")
+      // Not a hole, a broken tool chain: said as what it is, and as unusable, so that nothing fails later in a way nobody understands.
+      if (!read('canonical.txt').toLowerCase().includes(inside.toLowerCase().slice(2))) return done(false, 'Windows gives a contained process no canonical form of a path: the entry of the sandbox on the Mount Manager device is missing (it is restored at every start of Windows by the startup task of the setup). Run the sandbox setup again.')
       return done(true, `Verified at this start: a contained process ran as ${who} in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.${namesHere ? '' : ' Names could not be looked up from this machine at all at that moment, so the refusal of names was seen only as far as that goes.'}`)
     } catch (e) {
       return done(false, `The containment could not be verified: ${e instanceof Error ? e.message : String(e)}`)

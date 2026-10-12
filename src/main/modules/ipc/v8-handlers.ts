@@ -29,6 +29,8 @@ const SETUP_DETAIL = [
   '',
   'It also changes two access lists that are not NEXUS\'s own: on the root of the drive and on C:\\ProgramData it adds one entry each, for the AppContainer project code runs in, to read and list that folder itself (not what is in it). Without it a program in the AppContainer cannot find its own working directory. And it registers that AppContainer as allowed to reach this machine itself (loopback), which is where the NEXUS filter listens.',
   '',
+  'And it installs a small Windows startup security bootstrap: a one-shot scheduled task that runs once at every start of Windows, as the system, and restores the narrow permission that lets the AppContainer ask Windows for the canonical form of a path (Windows forgets it at a restart). It is not a service: it adds one access entry, checks it and ends; it uses no network and takes no input. Its script lies in Program Files\\NexusSandbox. With that permission the AppContainer can ask which volumes and drive letters this machine has; it still reads no file outside what it is given.',
+  '',
   'Project code then runs as that account, in an AppContainer, on a desktop of its own: it cannot read your profile, your credentials or your other projects, and Windows gives it no network: no connection of its own but the NEXUS filter, and no host name looked up.',
   'One thing stays open: services listening on this machine (loopback) can be reached by it.',
   'It changes nothing else. It can be removed again with the removal script that ships with NEXUS, remove-sandbox.ps1 in the sandbox-setup folder of the application resources (from a source checkout: node scripts/sandbox-setup.mjs --remove); that also asks for administrator rights. There is no button for it in the app.',

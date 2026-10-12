@@ -99,6 +99,11 @@ function Invoke-NexusIcacls([string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { throw "icacls $($Arguments -join ' '): $($out.Trim())" }
 }
 
+# The startup task that restores the AppContainer's entry on the Mount Manager device after a restart of
+# Windows (restore-canonicalization.ps1), and where its script lies: a folder only administrators write.
+$script:NexusBootstrapTask = 'NexusSandbox-RestoreCanonicalization'
+function Get-NexusBootstrapDir { return (Join-Path $env:ProgramFiles 'NexusSandbox') }
+
 $script:UsersSid = 'S-1-5-32-545'
 $script:AdminsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
