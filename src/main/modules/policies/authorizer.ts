@@ -1,4 +1,4 @@
-import { grantedPushOf, renderUserGitScript, userGitOf, userGitOfPowerShell, type UserGitInvocation } from './git-pipeline'
+import { PUSH_FORM_HINT, grantedPushOf, renderUserGitScript, userGitOf, userGitOfPowerShell, type UserGitInvocation } from './git-pipeline'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -73,7 +73,7 @@ interface Outcome {
   /** 0.8: what the call needs of the capability broker. Read only when the project is enrolled. */
   needs?: CapabilityNeed[]
   /** 0.8: set for a shell call: whether the command is git and nothing else, with no finding. */
-  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean; gitScript?: string; grantedPush?: UserGitInvocation }
+  shell?: { kind: 'bash' | 'powershell'; command: string; gitOnly: boolean; gitScript?: string; grantedPush?: UserGitInvocation[] }
 }
 
 /** A decision of the file tools with the capability a grant would have to cover, when there is one. */
@@ -344,9 +344,16 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       const risk: Risk = baseRisk === 'high' || (verdict.decision === 'REQUIRE_APPROVAL' && verdict.trust === 'SYSTEM_SENSITIVE') ? 'high' : verdict.decision === 'REQUIRE_APPROVAL' ? 'medium' : baseRisk
       const classification: TrustClass =
         verdict.decision === 'REQUIRE_APPROVAL' ? verdict.trust : cls.commandClass === 'SYSTEM_CHANGE' || cls.commandClass === 'DESTRUCTIVE' ? 'SYSTEM_SENSITIVE' : 'UNTRUSTED_AGENT_AUTHORED'
-      // One `git push` and nothing else: if the user's grant lets it run, it runs as the script NEXUS writes, as the
-      // user. Only when a push is all that was asked about: a call with any other need is not treated so.
-      const push = needs.some((need) => need.capability === 'GIT_PUSH') && needs.every((need) => need.capability === 'GIT_PUSH' || need.inBoundary) ? grantedPushOf(command, shell) : null
+      // A push, and nothing else that needs a decision: if the user's grant lets it run, the push runs as the script
+      // NEXUS writes, as the user, and the git around it as git as the user. In an enrolled project whose commands
+      // are contained, a push in any other form could never run, so it is refused here, with what to write, and no
+      // question is put to the user for it.
+      const onlyPush = needs.some((need) => need.capability === 'GIT_PUSH') && needs.every((need) => need.capability === 'GIT_PUSH' || need.inBoundary)
+      const push = onlyPush ? grantedPushOf(command, shell) : null
+      if (onlyPush && push === null && ctx.autonomy !== undefined && ctx.containment !== undefined && ctx.containment.profile !== 'STANDARD') {
+        const text = `Not run: ${PUSH_FORM_HINT}`
+        return { tool: deny(text), audit: { classification: 'UNTRUSTED_AGENT_AUTHORED', provenance: verdict.provenance, decision: 'DENY', reason: text } }
+      }
       return { tool: ask(reason, risk), audit: { classification, provenance: verdict.provenance, decision: 'REQUIRE_APPROVAL', reason }, needs, shell: { kind: shell, command, gitOnly: false, ...(push !== null ? { grantedPush: push } : {}) } }
     }
     if (verdict.decision === 'ALLOW_WITH_AUDIT') {

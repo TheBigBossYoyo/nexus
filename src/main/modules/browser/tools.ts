@@ -93,7 +93,7 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
           const status = deps.apps.status(owner.key)
           const kept = deps.apps.evidence({ taskId: owner.taskId, key: owner.key })
           // On NEXUS's own record, not on anybody's word: what a session that checks the work can rely on.
-          const evidence = `NEXUS's record for this task: the application was launched ${kept.launches} time${kept.launches === 1 ? '' : 's'}; ${kept.screenshots} screenshot${kept.screenshots === 1 ? '' : 's'} kept${kept.lastScreenshotAt ? `, the last at ${kept.lastScreenshotAt}` : ''}.`
+          const evidence = `NEXUS's record for this task: the application was launched ${kept.launches} time${kept.launches === 1 ? '' : 's'}; ${kept.screenshots} screenshot${kept.screenshots === 1 ? '' : 's'} kept${kept.lastScreenshotAt ? `, the last at ${kept.lastScreenshotAt}` : ''}. This record is the evidence: the images are kept by NEXUS, not in the worktree and not in any folder a session can read, so there is no file to look for.`
           if (status === null) return ['No application has been launched for this task.', evidence].join('\n')
           return [statusText(status), evidence, status.output.length > 0 ? enveloped('output', status.output.join('\n')) : 'It has printed nothing.'].join('\n')
         }
@@ -162,8 +162,8 @@ export function createAppTools(deps: AppToolsDeps): (session: ExtensionSession) 
             return `Not done: the screenshot is ${shot.bytes} bytes, more than the ${MAX_SCREENSHOT_BYTES} that are kept. It was deleted. Take it again without full_page, or use app_snapshot.`
           }
           deps.apps.noteArtifact(owner.key, shot.path)
-          deps.recordEvidence?.(session, `Screenshot of the application under test (${shot.width}x${shot.height})`, `Taken with app_screenshot by the ${session.role} session at ${new Date().toISOString()}: ${shot.width}x${shot.height}, ${shot.bytes} bytes. Kept by NEXUS with the application session; shown to the user with the task.`)
-          return `Screenshot kept as evidence of the task: ${shot.width}x${shot.height}, ${shot.bytes} bytes. It is shown to the user with the task, and app_status reports it to whoever checks this task; to see what is on the page yourself, use app_snapshot.`
+          deps.recordEvidence?.(session, `Screenshot of the application under test (${shot.width}x${shot.height})`, `Taken with app_screenshot by the ${session.role} session at ${new Date().toISOString()}: ${shot.width}x${shot.height}, ${shot.bytes} bytes. Kept by NEXUS with the application session, not as a file of the worktree; shown to the user with the task. This record is the evidence that it was taken.`)
+          return `Screenshot kept as evidence of the task: ${shot.width}x${shot.height}, ${shot.bytes} bytes. It is shown to the user with the task, and app_status reports it to whoever checks this task; to see what is on the page yourself, use app_snapshot. The image is not a file in the worktree and cannot be read by a session: do not look for it.`
         }
         if (def.name === 'app_logs') {
           const source = String(args['source'])

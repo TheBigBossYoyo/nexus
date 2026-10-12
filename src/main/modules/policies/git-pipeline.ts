@@ -447,24 +447,47 @@ function parsePowerShellGit(command: string): UserGitInvocation[] | null {
 const PUSH_OPTIONS = new Set(['-u', '--set-upstream', '--force-with-lease', '-q', '--quiet', '--porcelain', '-v', '--verbose'])
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
 
-export function grantedPushOf(command: string, shell: 'bash' | 'powershell' = 'bash'): UserGitInvocation | null {
-  const parsed = shell === 'bash' ? parseUserGit(command) : parsePowerShellGit(command)
-  if (parsed === null || parsed.length !== 1) return null
-  const invocation = parsed[0] as UserGitInvocation
-  if (invocation.args[0] !== 'push') return null
+/** Whether the words after `git` are a push in the form described above. */
+export function isGrantablePush(args: readonly string[]): boolean {
+  if (args[0] !== 'push') return false
   const operands: string[] = []
-  for (const arg of invocation.args.slice(1)) {
+  for (const arg of args.slice(1)) {
     if (arg.startsWith('-')) {
-      if (!PUSH_OPTIONS.has(arg) || operands.length > 0) return null
+      if (!PUSH_OPTIONS.has(arg) || operands.length > 0) return false
       continue
     }
     operands.push(arg)
   }
-  if (operands.length > 2) return null
-  if (operands[0] !== undefined && !REMOTE_NAME.test(operands[0])) return null
-  if (operands[1] !== undefined && (!plainOperand(operands[1]) || operands[1].startsWith('+'))) return null
-  return invocation
+  if (operands.length > 2) return false
+  if (operands[0] !== undefined && !REMOTE_NAME.test(operands[0])) return false
+  if (operands[1] !== undefined && (!plainOperand(operands[1]) || operands[1].startsWith('+'))) return false
+  return true
 }
+
+/**
+ * A command that is git and nothing else and pushes: one or more git invocations, joined as git as the user
+ * allows, of which at least one is a push in the form above and every other one is on the list of git as the
+ * user (`git add -A && git commit -m x && git push origin HEAD`). Null for anything else: a push piped into
+ * another program, a push with an option that is not listed, a remote given as an address. Such a command can
+ * never run, grant or no grant, so no question is put to the user for it: it is refused with what to write
+ * instead.
+ */
+export function grantedPushOf(command: string, shell: 'bash' | 'powershell' = 'bash'): UserGitInvocation[] | null {
+  const parsed = shell === 'bash' ? parseUserGit(command) : parsePowerShellGit(command)
+  if (parsed === null) return null
+  let pushes = 0
+  for (const invocation of parsed) {
+    if (invocation.args[0] === 'push') {
+      if (!isGrantablePush(invocation.args)) return null
+      pushes += 1
+    } else if (!isSafeUserGit(invocation.args)) return null
+  }
+  return pushes > 0 ? parsed : null
+}
+
+/** What an agent is told when it tries to push in a form that cannot run. */
+export const PUSH_FORM_HINT =
+  'A push runs only as a plain git command: `git push <remote> <branch>` with the remote by its name (options: -u, --force-with-lease, -q), alone or joined to other plain git commands with && or ; and with no pipe and no other program on the line. Write it that way; nothing was run and nothing was asked of the user.'
 
 /** The line of the script for an allowed push. `HEAD` is said as the worktree's own branch, so that the entry's `HEAD` file decides nothing. */
 export function renderGrantedPush(invocation: UserGitInvocation, branch: string): string {

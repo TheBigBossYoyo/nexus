@@ -274,8 +274,8 @@ describe('a push the user allowed: one git push, read into arguments, written by
       'git push --exec=calc origin HEAD', 'git push --repo=x', 'git push -o ci.skip origin HEAD', 'git push --push-option=x origin HEAD', 'git push --no-verify origin HEAD', 'git push --signed origin HEAD',
       // The remote is a name the repository's own configuration knows: never an address or a path on the line.
       'git push https://example.com/x.git HEAD', 'git push ../elsewhere HEAD', 'git push C:/x HEAD', 'git push ext::calc HEAD', 'git push file:///c/x HEAD', 'git push git@host:x.git HEAD', 'git push origin HEAD main',
-      // One push and nothing else.
-      'git add -A && git push origin HEAD', 'git push origin HEAD; git status', 'git push origin HEAD | cat', 'git push origin HEAD > out.txt', 'git -c core.sshCommand=calc push origin HEAD', 'git push origin $(calc)', 'git fetch origin', 'git pull', 'git push origin HEAD -u',
+      // Git and nothing else.
+      'git add -A && git push origin HEAD | cat', 'git push origin HEAD; npm test', 'git push origin HEAD | cat', 'git push origin HEAD > out.txt', 'git -c core.sshCommand=calc push origin HEAD', 'git push origin $(calc)', 'git fetch origin', 'git pull', 'git push origin HEAD -u',
     ])
       expect(grantedPushOf(command), command).toBeNull()
     expect(grantedPushOf("git push origin 'HEAD'", 'powershell')).not.toBeNull()
@@ -283,8 +283,18 @@ describe('a push the user allowed: one git push, read into arguments, written by
     expect(grantedPushOf('git push origin HEAD 2>&1', 'powershell')).toBeNull()
   })
 
+  it('may stand among other git as the user: the line is read into invocations, each one judged', () => {
+    expect(grantedPushOf('git add -A && git commit -q -m "work" && git push origin HEAD 2>&1; git status --short')?.map((i) => i.args[0])).toEqual(['add', 'commit', 'push', 'status'])
+    expect(grantedPushOf('git push -u origin HEAD && git log --oneline -1')?.map((i) => i.then)).toEqual(['&&', null])
+    // No push in it: not this. A git around the push that is not on the list: not this either.
+    expect(grantedPushOf('git add -A && git commit -m x')).toBeNull()
+    expect(grantedPushOf('git config user.name x && git push origin HEAD')).toBeNull()
+    expect(grantedPushOf('git fetch origin && git push origin HEAD')).toBeNull()
+    expect(grantedPushOf('git push origin HEAD && git push --force origin HEAD')).toBeNull()
+  })
+
   it('is written with every argument quoted, and HEAD said as the branch of the worktree', () => {
-    const line = (command: string): string => renderGrantedPush(grantedPushOf(command) ?? { args: [], then: null, stderr: null }, 'nexus/run1/task')
+    const line = (command: string): string => renderGrantedPush((grantedPushOf(command) ?? [])[0] ?? { args: [], then: null, stderr: null }, 'nexus/run1/task')
     expect(line('git push origin HEAD')).toBe("command git 'push' 'origin' 'nexus/run1/task'")
     expect(line('git push -u origin HEAD 2>&1')).toBe("command git 'push' '-u' 'origin' 'nexus/run1/task' 2>&1")
     expect(line('git push origin main')).toBe("command git 'push' 'origin' 'main'")

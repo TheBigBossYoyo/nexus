@@ -1,7 +1,7 @@
 import { basename, dirname, join } from 'node:path'
 import type { ExecutionBroker, ExecutionProfileName, ShellKind } from './execution-broker'
 import type { ContainmentProfile } from './launcher'
-import { renderGrantedPush, type UserGitInvocation } from '@main/modules/policies/git-pipeline'
+import { renderGrantedPush, renderUserGitScript, type UserGitInvocation } from '@main/modules/policies/git-pipeline'
 
 /**
  * 0.8: how the shell commands of one agent session run. The tool authorizer of an enrolled project holds one
@@ -15,10 +15,11 @@ export interface ShellContainment {
   readonly unavailable: string | null
   /** `gitScript`: for a command that is git and nothing else, the script NEXUS wrote from its parsed invocations. It is what runs; the command's text is not. */
   /**
-   * `grantedPush`: the command is one `git push` that the user allowed (the capability broker authorized it by a
-   * grant). It runs as the user, outside the containment, as the script NEXUS writes from it.
+   * `grantedPush`: the command is git invocations with a push among them, and the user allowed the push (the
+   * capability broker authorized it by a grant). Each push runs as the user, outside the containment, as the
+   * script NEXUS writes from it; the git around it runs as git as the user does, inside the containment.
    */
-  wrap(shell: ShellKind, command: string, options: { gitOnly: boolean; gitScript?: string; grantedPush?: UserGitInvocation }): Promise<{ ok: true; command: string } | { ok: false; reason: string }>
+  wrap(shell: ShellKind, command: string, options: { gitOnly: boolean; gitScript?: string; grantedPush?: UserGitInvocation[] }): Promise<{ ok: true; command: string } | { ok: false; reason: string }>
 }
 
 /** What the user asked for in Settings. STRONGEST: the sandbox account when it is set up and holds, else the low-integrity profile. */
@@ -75,10 +76,38 @@ export function createShellContainment(input: {
       if (options.grantedPush !== undefined) {
         // Without NEXUS's record of the worktree the push is not made at all: nothing of it is taken from the worktree.
         if (gitDir === undefined || gitBranch === undefined) return { ok: false, reason: 'NEXUS has no record of the Git directory and branch of this worktree, so the push that was allowed was not made.' }
-        const granted = await broker.grantedPush({ projectId: input.projectId, worktree: input.worktree, gitDir, pushLine: renderGrantedPush(options.grantedPush, gitBranch) })
-        if (!granted.ok) return { ok: false, reason: granted.reason }
-        const text = shell === 'bash' ? `${singleQuoted(granted.bash)} --noprofile --norc ${singleQuoted(granted.script)}` : `& ${psQuoted(granted.bash)} --noprofile --norc ${psQuoted(granted.script)}; exit $LASTEXITCODE`
-        return { ok: true, command: text }
+        if (!(await broker.hasBash(asUser))) return { ok: false, reason: 'Git Bash was not found, so the push that was allowed cannot be run by NEXUS.' }
+        // The line is cut where a push stands: each push is a script of its own, run as the user; each stretch of
+        // other git between pushes is one script of git as the user, run inside the containment as always.
+        const parts: { text: string; then: UserGitInvocation['then'] }[] = []
+        let stretch: UserGitInvocation[] = []
+        const closeStretch = async (): Promise<string | null> => {
+          if (stretch.length === 0) return null
+          const then = (stretch[stretch.length - 1] as UserGitInvocation).then
+          const script = renderUserGitScript(stretch.map((invocation, i) => (i === stretch.length - 1 ? { ...invocation, then: null } : invocation)))
+          stretch = []
+          const contained = await broker.containShell({ profile: asUser, sessionProfile: profile, projectId: input.projectId, sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell: 'bash', command: script, gitOnly: true, gitWritable, gitDir, gitBranch })
+          if (!contained.ok) return contained.reason
+          const [spec] = contained.args.slice(-1)
+          parts.push({ text: shell === 'bash' ? `${singleQuoted(contained.file)} --spec ${singleQuoted(spec as string)}` : `& ${psQuoted(contained.file)} --spec ${psQuoted(spec as string)}`, then })
+          return null
+        }
+        for (const invocation of options.grantedPush) {
+          if (invocation.args[0] !== 'push') {
+            stretch.push(invocation)
+            continue
+          }
+          const failed = await closeStretch()
+          if (failed !== null) return { ok: false, reason: failed }
+          const granted = await broker.grantedPush({ projectId: input.projectId, worktree: input.worktree, gitDir, pushLine: renderGrantedPush(invocation, gitBranch) })
+          if (!granted.ok) return { ok: false, reason: granted.reason }
+          parts.push({ text: shell === 'bash' ? `${singleQuoted(granted.bash)} --noprofile --norc ${singleQuoted(granted.script)}` : `& ${psQuoted(granted.bash)} --noprofile --norc ${psQuoted(granted.script)}`, then: invocation.then })
+        }
+        const failed = await closeStretch()
+        if (failed !== null) return { ok: false, reason: failed }
+        // Joined as the command joined them. A command written for PowerShell has `;` only (its reading allows no other).
+        const text = parts.map((part, i) => (i === parts.length - 1 ? part.text : `${part.text} ${part.then === '&&' || part.then === '||' ? part.then : ';'}`)).join(' ')
+        return { ok: true, command: shell === 'bash' ? text : `${text}; exit $LASTEXITCODE` }
       }
       const use: ContainmentProfile = gitOnly ? asUser : profile
       const gitCommonDir = use === 'ISOLATED' && objects !== undefined ? dirname(objects) : undefined

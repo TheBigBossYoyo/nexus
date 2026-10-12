@@ -366,8 +366,8 @@ d('the script NEXUS writes for git as the user, against a worktree prepared by h
     const hooksDir = join(base, 'granted-no-hooks')
     mkdirSync(hooksDir, { recursive: true })
     const push = (command: string): { code: number | null; out: string } => {
-      const invocation = grantedPushOf(command)
-      if (invocation === null) throw new Error(`does not qualify: ${command}`)
+      const invocation = (grantedPushOf(command) ?? [])[0]
+      if (invocation === undefined) throw new Error(`does not qualify: ${command}`)
       const script = join(base, `push-${Math.random().toString(16).slice(2, 10)}.sh`)
       writeFileSync(script, grantedPushScript({ pushLine: renderGrantedPush(invocation, 'nexus/run1/task'), gitDir: entry, worktree, hooksDir }))
       // As the agent's shell would start it: with the user's environment, not the contained one.
