@@ -93,6 +93,12 @@ d('scenario: an agent launches and uses the application of its project (0.8)', (
     expect(answers['bad']).toContain('not an element reference')
     expect(answers['unknown']).toContain('no such tool')
     expect(answers['status']).toContain('running')
+    // NEXUS's own record of what was done with the application: what a session that checks the task reads
+    // instead of taking another session's word for a click.
+    expect(answers['status']).toContain('On record, in order: searched for "Increment": ')
+    expect(answers['status']).toMatch(/click on e\d+/)
+    expect(answers['status']).toContain('snapshot read (')
+    expect(answers['status']).toContain('The beginning of the last snapshot that was read:')
 
     // What the page said in the voice of an instruction arrived as marked data and changed nothing: no push was
     // asked for, nothing was asked of the user at all.

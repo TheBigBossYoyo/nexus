@@ -246,7 +246,8 @@ export class ApplicationUnderTestManager {
    * accepted: the record showed the launch and the screenshot, and not the click its criterion asked for.)
    */
   noteAction(key: string, line: string, snapshot?: string): void {
-    const app = this.apps.get(key)
+    // By the owner's key, as artifacts are: the latest application of that owner.
+    const app = [...this.apps.values()].filter((a) => a.owner.key === key).pop()
     if (app === undefined) return
     const actions = (app.actions ??= [])
     if (actions.length < 60) actions.push(line.replace(/\s+/g, ' ').slice(0, 160))
