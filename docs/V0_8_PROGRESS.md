@@ -354,3 +354,18 @@ to code at low integrity, and Node is refused when it looks at the directories a
 longer command could not write its lock file. Fixed: worktrees beside the data directory under RESTRICTED, git's
 directories writable for every command of a RESTRICTED session. Second run: 20 gates of 20
 (`docs/acceptance/v08-acceptance-2026-10-11T23-51-10-291Z.json`).
+
+Repeating the real missions on each later commit found more, because sessions word their commands differently
+every time:
+
+- two false boundaries in one ISOLATED run (`grep -c '\\r'` read as a network path; a .NET write through a
+  variable read as a write outside the project): fixed in the classifier and in the mapping to capabilities;
+- under RESTRICTED, an allowed push retried inside a longer line of git failed: an allowed push now runs
+  wherever it stands in a line of plain git, and a push in a form that can never run is refused with what to
+  write, without a question;
+- under RESTRICTED, once in three runs, a verifier searched a folder outside the project for the screenshot:
+  a real outside-project request, which expired with the mission. The screenshot record now says that the
+  image is not a file a session can read;
+- once in four ISOLATED runs the Electron mission paused: the work passed its tests and its reviews, and
+  verification failed four times. Its records were overwritten by the next run before they were read, so the
+  cause is not established. The three other runs passed every gate.

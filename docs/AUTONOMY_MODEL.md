@@ -212,15 +212,20 @@ again, and the push then ran as the sandbox account and failed. So an allowed pu
 runs outside the containment, and it is held to the rule of git as the user: the agent's text is parsed and
 NEXUS writes what runs.
 
-- What qualifies is one `git push` and nothing else on the line, with options from a short list
-  (`-u`, `--set-upstream`, `--force-with-lease`, `-q`, `-v`, `--porcelain`; not `--force`, `--delete`,
-  `--mirror`, `--all`, `--tags`, `--receive-pack`, `--no-verify`), at most a remote and one refspec. The remote
-  is a name your repository's configuration knows, never an address or a path on the line.
+- What qualifies is a line of plain git with a push in it (`git push origin HEAD`, or
+  `git add -A && git commit -m "x" && git push origin HEAD`): every git on the line is one git as the user
+  accepts, and each push has options from a short list (`-u`, `--set-upstream`, `--force-with-lease`, `-q`,
+  `-v`, `--porcelain`; not `--force`, `--delete`, `--mirror`, `--all`, `--tags`, `--receive-pack`,
+  `--no-verify`), at most a remote and one refspec. The remote is a name your repository's configuration knows,
+  never an address or a path on the line. The line is cut where a push stands: each push runs as you, and the
+  git around it runs as git as the user does, inside the containment.
 - The script names the Git directory and the repository NEXUS recorded, an empty hooks directory (a `pre-push`
   hook is a program of the repository), and says `HEAD` as the worktree's own branch. It lies in NEXUS's data,
   where no contained code writes. Your own git configuration applies: it holds the remote and the sign-in.
-- A push in any other form (chained after other commands, with another option) is still refused inside the
-  containment after a grant, with a message that says to run it as a command of its own.
+- A push in any other form (piped into another program, joined to a command that is not git, with another
+  option) can never run, so it is refused at once with what to write instead, and no question is put to you
+  for it. (The second real run under RESTRICTED met this: the agent retried the allowed push inside a longer
+  line, and it failed.)
 - Git LFS objects are not uploaded by it (no hooks run).
 
 `tests/unit/policies/git-user.test.ts` ("a push the user allowed"), `tests/integration/git/user-git-script.test.ts`

@@ -171,6 +171,20 @@ d('the research browser', () => {
     expect(requests).toEqual([])
   }, 120_000)
 
+  it('a page remembered from a plain fetch is rendered when the browser is asked for, and that reading is remembered in its turn', async () => {
+    const { provider, context, repos } = setup()
+    const plain = await provider.read(context, 'http://docs.vendor.org/static')
+    expect(repos.researchArtifacts.get(plain.artifact.id)?.backend).toBe('NEXUS_HTTP_FETCH')
+    expect((await provider.read(context, 'http://docs.vendor.org/static')).source.fromMemory).toBe(true)
+    const rendered = await provider.read(context, 'http://docs.vendor.org/static', { render: true })
+    expect(rendered.source.fromMemory).toBe(false)
+    expect(repos.researchArtifacts.get(rendered.artifact.id)?.backend).toBe('NEXUS_RESEARCH_BROWSER')
+    requests = []
+    const again = await provider.read(context, 'http://docs.vendor.org/static', { render: true })
+    expect(again.source.fromMemory).toBe(true)
+    expect(requests).toEqual([])
+  }, 120_000)
+
   it('does not start a browser for a page that already has its text', async () => {
     const { provider, context, repos } = setup()
     const envelope = await provider.read(context, 'http://docs.vendor.org/static')

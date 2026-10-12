@@ -303,7 +303,9 @@ export class WebResearchProvider {
     const canonical = canonicalUrl(rawUrl)
     if (!options.refresh) {
       const remembered = this.deps.artifacts.fresh(context.projectId, canonical, new Date(this.now()).toISOString())
-      if (remembered !== null) {
+      // A page asked for as the browser shows it is answered from memory only by a reading the browser made: one
+      // made by a plain fetch is another text (a real mission asked for `render` and was given the remembered fetch).
+      if (remembered !== null && (options.render !== true || remembered.backend === 'NEXUS_RESEARCH_BROWSER')) {
         // The URL is still judged: memory answers for a page, it does not widen what may be asked for.
         const verdict = checkUrl(this.deps.guard().policy, rawUrl)
         if (!verdict.allowed) throw new ResearchRefused('POLICY', `Not opened: ${verdict.reason}`)

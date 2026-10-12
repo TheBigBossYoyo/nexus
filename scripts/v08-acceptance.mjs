@@ -310,7 +310,8 @@ try {
       // As in the boundary mission: a session that checks the result may meet a boundary of its own (run of 2026-10-11:
       // a verifier tried to read the remote's directory to see that the push had arrived). That is another request,
       // and it must be a real one: for something outside the project.
-      'resume: any other request is for something that is outside the project (none is a false boundary)': m.boundaryRequests.filter((r) => r.capability !== 'GIT_PUSH').every((r) => ['READ_OUTSIDE_PROJECT', 'WRITE_OUTSIDE_PROJECT'].includes(r.capability) && r.resource.kind === 'PATH' && !r.resource.value.toLowerCase().startsWith(repo.toLowerCase()) && !(r.capability === 'READ_OUTSIDE_PROJECT' && /nexussandbox[\\/]worktrees/i.test(r.resource.value))),
+      // A check of the remote itself (`git ls-remote origin`, run of 2026-10-12) is the network, and as real a boundary.
+      'resume: any other request is for something that is outside the project (none is a false boundary)': m.boundaryRequests.filter((r) => r.capability !== 'GIT_PUSH' && !(r.capability === 'EXTERNAL_HOST_NETWORK' && /git (ls-remote|fetch|remote show)/.test(r.action))).every((r) => ['READ_OUTSIDE_PROJECT', 'WRITE_OUTSIDE_PROJECT'].includes(r.capability) && r.resource.kind === 'PATH' && !r.resource.value.toLowerCase().startsWith(repo.toLowerCase()) && !(r.capability === 'READ_OUTSIDE_PROJECT' && /nexussandbox[\\/]worktrees/i.test(r.resource.value))),
       'resume: the push that was allowed arrived at the remote': m.remoteAfter !== remoteBefore,
     })
   }
