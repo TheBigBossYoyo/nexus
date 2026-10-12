@@ -123,7 +123,7 @@ const replacePointer = async (path: string, content: string): Promise<void> => {
 }
 
 describe('NEXUS does not write through a worktree whose .git pointer was changed, and runs nothing a repository configures', () => {
-  it('ignores a rewritten .git pointer in a worktree NEXUS created: commits stay on the worktree\'s own branch, the user\'s checkout and the other worktree are untouched', async () => {
+  it('refuses a worktree NEXUS created whose .git pointer was rewritten, and changes nothing: the user\'s checkout, the worktree\'s branch and the other worktree are untouched', async () => {
     const repo = await makeRepo()
     const manager = new WorktreeManager(git, join(base, `wt-${newId()}`))
     const a = await manager.createForTask({ repoRoot: repo, runId: newId(), taskKey: 'a', startPoint: 'main' })
@@ -155,14 +155,26 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
       await untouched()
     }
 
+    /** NEXUS does not carry on in a worktree whose pointer is not the one it recorded, and nothing moves. */
+    const refused = async (): Promise<void> => {
+      await writeFile(join(a.path, 'refused.txt'), 'x\n')
+      const tip = await branchOfA()
+      await expect(git.addAll(a.path)).rejects.toThrow(/git entry of the working tree .* was changed/)
+      await expect(git.commitAll(a.path, 'refused', AUTHOR)).rejects.toThrow(/was changed/)
+      await expect(git.status(a.path)).rejects.toThrow(/was changed/)
+      expect(await branchOfA()).toBe(tip)
+      await untouched()
+      await rm(join(a.path, 'refused.txt'), { force: true })
+    }
+
     // The agent points the worktree at the user's repository.
     await replacePointer(join(a.path, '.git'), `gitdir: ${join(repo, '.git').replace(/\\/g, '/')}\n`)
-    await commitInA()
+    await refused()
 
     // At another task's worktree directory.
     const otherGitDir = (await sh(b.path, 'rev-parse', '--absolute-git-dir')).replace(/\\/g, '/')
     await replacePointer(join(a.path, '.git'), `gitdir: ${otherGitDir}\n`)
-    await commitInA()
+    await refused()
 
     // At a Git directory the agent made itself inside the worktree, whose back-pointer names the worktree and
     // whose common directory is the user's repository: the form that passed the check of 0.6.
@@ -172,16 +184,17 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
     await writeFile(join(fake, 'commondir'), `${join(repo, '.git').replace(/\\/g, '/')}\n`)
     await writeFile(join(fake, 'gitdir'), `${join(a.path, '.git').replace(/\\/g, '/')}\n`)
     await replacePointer(join(a.path, '.git'), `gitdir: ${fake.replace(/\\/g, '/')}\n`)
-    await commitInA()
+    await refused()
     expect(await sh(repo, 'rev-parse', 'refs/heads/main')).toBe(userHead)
 
     // The pointer is gone altogether: git would look further up for a repository.
     await rm(join(a.path, '.git'), { force: true })
-    await commitInA()
+    await refused()
 
-    // A reset and clean of NEXUS's stays in the worktree too.
+    // A reset and clean of NEXUS's is refused too.
     await writeFile(join(a.path, 'junk.txt'), 'x\n')
-    await git.resetClean(a.path)
+    await expect(git.resetClean(a.path)).rejects.toThrow(/was changed/)
+    await rm(join(a.path, 'junk.txt'), { force: true })
     await untouched()
 
     // Restored, nothing has changed for NEXUS.
@@ -207,10 +220,11 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
     await writeFile(join(a.path, 'tracked.txt'), 'changed\n')
     await replacePointer(join(a.path, '.git'), `gitdir: ${join(priv, '.git').replace(/\\/g, '/')}\n`)
 
-    expect((await git.status(a.path)).clean).toBe(false)
-    await git.workingState(a.path)
-    await git.addAll(a.path)
-    await git.commitAll(a.path, 'with attributes', AUTHOR)
+    // Refused, with nothing run: not even a read goes on with a pointer NEXUS did not record.
+    await expect(git.status(a.path)).rejects.toThrow(/was changed/)
+    expect(await git.workingState(a.path)).toBeNull()
+    await expect(git.addAll(a.path)).rejects.toThrow(/was changed/)
+    await expect(git.commitAll(a.path, 'with attributes', AUTHOR)).rejects.toThrow(/was changed/)
     expect(existsSync(marker)).toBe(false)
 
     // A Git service that has no record of the worktree (another process) refuses it instead, for a read as for a write.
@@ -268,6 +282,10 @@ describe('NEXUS does not write through a worktree whose .git pointer was changed
       asked.push(path)
       return path.toLowerCase() === a.path.toLowerCase() ? repo : null
     })
+    // A restarted service finds the entry in the repository, and refuses the pointer that is not its.
+    await expect(restarted.status(a.path)).rejects.toThrow(/was changed/)
+    await rm(join(a.path, '.git'), { force: true })
+    await writeFile(join(a.path, '.git'), original)
     await writeFile(join(a.path, 'after.txt'), 'x\n')
     await restarted.addAll(a.path)
     const sha = await restarted.commitAll(a.path, 'after the restart', AUTHOR)

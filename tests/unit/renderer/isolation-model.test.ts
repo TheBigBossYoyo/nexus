@@ -68,6 +68,10 @@ describe('isolation status wording', () => {
     expect(setupState({ sandboxAccount: false, setupAvailable: false })).toBe('unavailable')
     expect(setupState({ sandboxAccount: true, setupAvailable: true })).toBe('done')
     expect(setupState({ sandboxAccount: true, setupAvailable: false })).toBe('done')
+    // An account that is there while the isolated profile did not pass its check: the setup is offered again.
+    expect(setupState({ sandboxAccount: true, setupAvailable: true, isolated: { available: false } })).toBe('repair')
+    expect(setupState({ sandboxAccount: true, setupAvailable: true, isolated: { available: true } })).toBe('done')
+    expect(setupState({ sandboxAccount: true, setupAvailable: false, isolated: { available: false } })).toBe('done')
   })
 
   it('counts protected paths in words', () => {

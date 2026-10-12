@@ -382,6 +382,12 @@ function emptyHooksDir(): string {
   return dir
 }
 
+/**
+ * The keys of a clone's own configuration that NEXUS accepts: what `git clone` and `git checkout -B` write
+ * (`core` basics, a remote's address, a branch's upstream) and the author. Lower case, as git lists them.
+ */
+const PLAIN_CLONE_CONFIG = /^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|symlinks|precomposeunicode|autocrlf|safecrlf|eol|longpaths)|user\.(name|email)|remote\.[^\n]*\.(url|fetch|pushurl|tagopt)|branch\.[^\n]*\.(remote|merge|rebase|description))$/
+
 export class GitService {
   private readonly env: NodeJS.ProcessEnv
   /** An empty directory NEXUS owns: its git commands look for hooks there, so they run none. */
@@ -533,6 +539,7 @@ export class GitService {
     } catch {
       return false
     }
+    const found: string[] = []
     for (const name of names) {
       const gitDir = join(common, 'worktrees', name)
       let back: string
@@ -541,12 +548,48 @@ export class GitService {
       } catch {
         continue
       }
-      if (!samePath(resolve(gitDir, back), join(root, '.git'))) continue
-      this.trusted.set(pathKeyOf(root), { root, gitDir, branch })
-      this.notOurs.delete(pathKeyOf(root))
-      return true
+      if (samePath(resolve(gitDir, back), join(root, '.git'))) found.push(gitDir)
     }
-    return false
+    // Two entries that both claim the worktree: the one a task can write (its own) may have been made to say so.
+    // Neither is taken.
+    if (found.length !== 1) return false
+    this.trusted.set(pathKeyOf(root), { root, gitDir: found[0] as string, branch })
+    this.notOurs.delete(pathKeyOf(root))
+    return true
+  }
+
+  /**
+   * 0.8, before every command in a worktree NEXUS created. The commands already name the Git directory and the
+   * repository themselves (`--git-dir`, `GIT_COMMON_DIR`), so nothing below decides where they run; this check
+   * is for the refusal: the pointer in the worktree, and the files of the entry that say where the repository
+   * and the worktree are, must still be what git wrote and NEXUS recorded. A worktree where they are not is
+   * one a task has been rewriting its own git state in, and NEXUS does not "repair" that and carry on.
+   * What it compares with is the entry NEXUS found in the repository when it trusted the worktree, never
+   * something read from the pointer.
+   */
+  private async assertEntryIntact(own: TrustedWorktree): Promise<void> {
+    const refuse = (why: string): never => {
+      throw new NexusError('invalid_state', `The git entry of the working tree at ${own.root} was changed (${why}). NEXUS will not run git there.`, { cwd: own.root, gitDir: own.gitDir })
+    }
+    const dotGit = join(own.root, '.git')
+    const info = await lstat(dotGit).catch(() => null)
+    if (info === null) refuse('its .git pointer file is gone')
+    else if (info.isSymbolicLink() || !info.isFile()) refuse('its .git is not a plain file')
+    const pointer = (await readFile(dotGit, 'utf8').catch(() => '')).trim()
+    if (!/^gitdir: /.test(pointer) || pointer.includes('\n') || !samePath(resolve(own.root, pointer.slice(8).trim()), own.gitDir)) {
+      refuse(`its .git file says ${JSON.stringify(pointer.slice(0, 200))} instead of ${JSON.stringify(`gitdir: ${own.gitDir}`)}`)
+    }
+    const common = dirname(dirname(own.gitDir))
+    const read = async (name: string): Promise<string | null> => {
+      const file = join(own.gitDir, name)
+      const kind = await lstat(file).catch(() => null)
+      if (kind === null || kind.isSymbolicLink() || !kind.isFile()) return null
+      return (await readFile(file, 'utf8').catch(() => '')).trim()
+    }
+    const commondir = await read('commondir')
+    if (commondir === null || !samePath(resolve(own.gitDir, commondir), common)) refuse(`its commondir names ${commondir === null ? 'nothing readable' : JSON.stringify(commondir.slice(0, 200))} instead of the repository at ${common}`)
+    const back = await read('gitdir')
+    if (back === null || !samePath(resolve(own.gitDir, back), dotGit)) refuse(`its gitdir names ${back === null ? 'nothing readable' : JSON.stringify(back.slice(0, 200))} instead of ${dotGit}`)
   }
 
   /**
@@ -677,6 +720,41 @@ export class GitService {
     this.verifiedPointers.set(cwd, stamp)
   }
 
+  /**
+   * A speculative candidate is a clone, not a worktree: its `.git` is a directory the code working there owns,
+   * with a `config` of its own, and NEXUS records no entry for it that it could compare with. Git reads that
+   * configuration for every command, and a filter, a diff driver or a program named there runs as the user.
+   * Before a command in such a directory under NEXUS's worktrees, every key of the configuration must be one of
+   * the plain ones git itself writes into a clone; anything else (a filter, a driver, a program, an `include`,
+   * a URL rewrite, `extensions`) is refused, never ignored. A configuration that has not changed since it was
+   * checked is not read again.
+   */
+  private async assertPlainCloneConfig(cwd: string): Promise<void> {
+    if (!this.worktreesRoot || !isWithin(this.worktreesRoot, cwd)) return
+    const parts = relative(this.worktreesRoot, resolve(cwd)).split(/[\\/]/).filter((p) => p !== '')
+    if (parts.length < 2) return
+    const top = join(this.worktreesRoot, parts[0] as string, parts[1] as string)
+    const gitDir = join(top, '.git')
+    const info = await lstat(gitDir).catch(() => null)
+    if (info === null || info.isSymbolicLink() || !info.isDirectory()) return
+    const configFile = join(gitDir, 'config')
+    const seen = await lstat(configFile).catch(() => null)
+    if (seen === null) return
+    const stamp = `${seen.ino}:${seen.size}:${seen.mtimeMs}:${seen.ctimeMs}`
+    if (this.verifiedPointers.get(configFile) === stamp) return
+    const listed = await runProcess(this.gitPath, ['config', '--file', configFile, '--list', '-z'], { cwd: tmpdir(), env: this.env, timeoutMs: 15_000 })
+    const refuse = (why: string): never => {
+      throw new NexusError('invalid_state', `The repository at ${top} has a configuration of its own that NEXUS did not write (${why}). NEXUS will not run git there.`, { cwd })
+    }
+    if (listed.exitCode !== 0) refuse('it cannot be read')
+    for (const entry of listed.stdout.split('\0')) {
+      if (entry === '') continue
+      const key = entry.split('\n')[0]?.toLowerCase() ?? ''
+      if (!PLAIN_CLONE_CONFIG.test(key)) refuse(`the key ${key.slice(0, 100)}`)
+    }
+    this.verifiedPointers.set(configFile, stamp)
+  }
+
   /** Runs git; throws NexusError unless the exit code is in okCodes. */
   async run(cwd: string, args: readonly string[], opts: RunGitOptions = {}): Promise<ProcessResult> {
     // NEXUS's own git commands do not run what a repository's configuration could make git run: no file
@@ -690,8 +768,11 @@ export class GitService {
     const sub = subcommandOf(args)
     // Anywhere else a linked worktree's pointer is verified before every command, not only before a write: a
     // read runs the filters and drivers of whatever repository the pointer names.
-    if (!own) await this.assertOwnGitDir(cwd)
-    else {
+    if (!own) {
+      await this.assertOwnGitDir(cwd)
+      await this.assertPlainCloneConfig(cwd)
+    } else {
+      await this.assertEntryIntact(own)
       // A worktree NEXUS created has no configuration of its own. In a repository that reads per-worktree
       // configuration (`extensions.worktreeConfig`, the user's setting), a `config.worktree` in the worktree's
       // entry would name filters, drivers and hooks for NEXUS's own git. The runtime makes that file empty and

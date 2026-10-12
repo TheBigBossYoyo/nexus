@@ -17,6 +17,18 @@ $script:NexusSandboxKey = 'HKLM:\SOFTWARE\NexusSandbox'
 # begins with a folder in the user's documents, and the setup runs elevated.
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 
+# A build of 0.8 before its release tried an RPC filter to keep the account from the DNS Client service (it did
+# not: measured). A machine set up by that build still has the filter; the removal takes it away by its key.
+$script:NexusDnsFilterKey = '6e455855-0800-4d4e-9f80-0000000d0001'
+
+function Remove-NexusDnsFilter {
+  $file = Join-Path ([IO.Path]::GetTempPath()) ("nexus-rpc-{0}.txt" -f ([guid]::NewGuid().ToString('N')))
+  try {
+    Set-Content -LiteralPath $file -Value @('rpc filter', "delete filter filterkey=$($script:NexusDnsFilterKey)") -Encoding ASCII
+    [void]((& (Join-Path $env:SystemRoot 'System32\netsh.exe') -f $file 2>&1) | Out-String)
+  } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+}
+
 $script:UsersSid = 'S-1-5-32-545'
 $script:AdminsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'

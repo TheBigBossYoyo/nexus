@@ -242,6 +242,28 @@ command that was more than git, and reported themselves blocked.
   and `--no-ext-diff` on comparisons. The Codex worker process runs no git at all: it asks the runtime for the
   fingerprint of a session's working directory (`workingState`), because a git started in the worker would
   take the repository from the `.git` file the session wrote.
+- Under RESTRICTED the worktree's pointer and entry are replaceable, so NEXUS's own git never trusts them
+  (`tests/integration/git/worktree-pointer-trust.test.ts`). Every git command of NEXUS in a worktree it created
+  passes through `GitService.run`, which holds the entry NEXUS found in the repository when it trusted the
+  worktree (by the entry's back-pointer, and only when exactly one entry claims the worktree; after a restart,
+  from the repository NEXUS's own record names, never from the worktree). Before each command it checks that
+  the `.git` file is a plain file reading exactly `gitdir: <that entry>`, that the entry's `commondir` names
+  the repository's `.git` and its `gitdir` names the worktree's `.git`, that no `config.worktree` with content
+  exists, and (for commands that add to a branch) that `HEAD` names the task's own branch. On a difference the
+  command is refused with a plain message (the git entry of the working tree was changed, and how); NEXUS does
+  not repair it and carry on. Independently of that check, the command names `--git-dir`, `--work-tree` and
+  `GIT_COMMON_DIR` itself, so the pointer would decide nothing even if the check were absent (measured: a
+  pointer to a planted repository with a `core.fsmonitor`, a filter, a diff driver, hooks and `core.sshCommand`
+  ran none of them under NEXUS's git, and ran two under stock git).
+  A speculative candidate is a clone, with a `.git` directory and a `config` of its own that the task owns and
+  that NEXUS holds no record to compare with. Measured before this change: a filter in that `config` ran as the
+  user under NEXUS's `git status`/`add`. Now a command in such a directory is refused unless every key of the
+  `config` is one git writes into a clone (`core` basics, a remote's address, a branch's upstream, the author);
+  a filter, a driver, a program, an `include`, a URL rewrite or `extensions` is refused.
+  What remains: the commands NEXUS writes as scripts to run as the user (the allowed push) do their own check,
+  described above, and are a moment-before-use check under RESTRICTED. A clone's `config` is checked at each
+  command, so the same window between check and start exists there. A directory under NEXUS's worktrees that
+  NEXUS has no record of, and whose `.git` is a directory, is checked as a clone is.
 - Under RESTRICTED there is no grant: the command is the user, and reads the repository. To let git commit,
   the same three places are labeled low.
 

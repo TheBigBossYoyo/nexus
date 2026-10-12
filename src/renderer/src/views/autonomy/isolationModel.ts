@@ -71,14 +71,18 @@ export function availabilityWords(check: { available: boolean } | null): string 
 }
 
 /** What the setup control shows: a button, a line about this build, or a line that it is done. */
-export type SetupState = 'offer' | 'unavailable' | 'done'
+export type SetupState = 'offer' | 'repair' | 'unavailable' | 'done'
 
 export function setupState(
-  status: Pick<IsolationStatusView, 'sandboxAccount' | 'setupAvailable'>,
+  status: Pick<IsolationStatusView, 'sandboxAccount' | 'setupAvailable'> & { isolated?: { available: boolean } | null },
 ): SetupState {
-  if (status.sandboxAccount) return 'done'
+  // An account that is there while the isolated profile did not pass its check: the setup repairs what it made.
+  if (status.sandboxAccount) return status.isolated?.available === false && status.setupAvailable ? 'repair' : 'done'
   return status.setupAvailable ? 'offer' : 'unavailable'
 }
+
+export const SETUP_REPAIR_LINE =
+  'The sandbox account is set up, but the isolated profile did not pass its check at this start (the reason is above). Running the setup again repairs what it made; it asks for your confirmation and then for administrator rights.'
 
 export const SETUP_UNAVAILABLE_LINE =
   'The one-time setup of the isolated profile is not available in this build.'

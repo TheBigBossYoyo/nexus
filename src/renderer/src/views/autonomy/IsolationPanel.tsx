@@ -9,6 +9,7 @@ import {
   EFFECTIVE_SENTENCE,
   PROTECTED_VISIBLE,
   SETUP_DONE_LINE,
+  SETUP_REPAIR_LINE,
   SETUP_UNAVAILABLE_LINE,
   availabilityWords,
   effectiveLine,
@@ -92,7 +93,7 @@ export function IsolationPanel() {
 
   const s = status.data
   const state = s ? setupState(s) : null
-  const warning = s ? unusableWarning(s, state === 'offer') : null
+  const warning = s ? unusableWarning(s, state === 'offer' || state === 'repair') : null
   const failed = setup.isError || (outcome !== null && !outcome.ok)
   const message = setup.isPending
     ? 'Setting up. Confirm in the NEXUS dialog, then in the Windows prompt.'
@@ -158,12 +159,12 @@ export function IsolationPanel() {
           </ul>
 
           <div className="flex flex-col gap-2" data-testid="isolation-setup">
-            {state === 'offer' ? (
+            {state === 'offer' || state === 'repair' ? (
               <>
                 <p className="m-0 text-text-secondary">
-                  The isolated profile needs a sandbox account on this machine. Setting it up asks
-                  for your confirmation and then for administrator rights, and it can take a few
-                  minutes.
+                  {state === 'repair'
+                    ? SETUP_REPAIR_LINE
+                    : 'The isolated profile needs a sandbox account on this machine. Setting it up asks for your confirmation and then for administrator rights, and it can take a few minutes.'}
                 </p>
                 <div>
                   <Button
@@ -173,7 +174,7 @@ export function IsolationPanel() {
                     onClick={runSetup}
                     data-testid="isolation-setup-button"
                   >
-                    Set up the isolated profile…
+                    {state === 'repair' ? 'Run the setup again…' : 'Set up the isolated profile…'}
                   </Button>
                 </div>
               </>

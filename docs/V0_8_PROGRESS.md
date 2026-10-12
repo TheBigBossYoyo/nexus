@@ -388,3 +388,26 @@ clean git environment and git by its full path. `tests/unit/policies/git-user.te
 Three blockers (the inbox did not say how far each answer reaches; a raw profile name in the reason line; the
 setup consent said more than the isolated profile gives) and ten majors: see the release report for what was
 changed.
+
+### RESTRICTED: the worktree's git pointer is never trusted
+
+Under RESTRICTED the task can replace the `.git` file of its worktree and change `commondir`, `gitdir` and
+`config.worktree` in the worktree's entry. The decision was to accept that only if NEXUS's own git (the user,
+uncontained) never trusts any of it. Audit: every git command of NEXUS in a worktree (status, diff, add, commit,
+merge, reset, the Codex `workingState`, the orchestrator's and the speculation's calls) goes through
+`GitService.run`. For a worktree NEXUS created it already named `--git-dir`, `--work-tree` and `GIT_COMMON_DIR`
+itself and refused a planted `config.worktree`; measured again with a pointer to a planted repository (fsmonitor,
+filter, diff driver, hooks, `core.sshCommand`): none ran, where stock git ran two. Two things were open and are
+closed:
+
+- the pointer and the entry were ignored, not checked: NEXUS carried on silently in a worktree whose git state a
+  task had rewritten. Now the `.git` file, `commondir` and `gitdir` are compared with the entry NEXUS found in the
+  repository, and a difference refuses the command with a plain message; an entry claimed twice is not trusted.
+  The tests of 0.7 that expected NEXUS to carry on (`git-safety.test.ts`) now expect the refusal;
+- a speculative candidate is a clone whose `.git/config` the task owns. Measured: a filter in it ran as the user
+  under `git status`. Now a command there is refused unless every key of the configuration is one git writes
+  into a clone.
+
+Not closed: the scripts NEXUS runs as the user (the allowed push) keep their own check a moment before use, as
+before; a clone's configuration is read at each command, so a change between the check and git's start is not
+excluded. `tests/integration/git/worktree-pointer-trust.test.ts`.

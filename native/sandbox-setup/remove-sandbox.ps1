@@ -34,6 +34,8 @@ try {
       $result.steps += "firewall-$($direction.ToLower())-removed"
     } else { $result.left += "the firewall rule $name (it is not the one the setup makes)" }
   }
+  # The filter an earlier build made, if it is there. It carries NEXUS's own key: nobody else's is touched.
+  try { Remove-NexusDnsFilter } catch { $result.left += "the RPC filter $($script:NexusDnsFilterKey) ($($_.Exception.Message))" }
   if ($null -ne $account -and -not $ours) {
     $result.left += "the account $AccountName (it does not carry the mark of NEXUS's setup)"
   } else {
