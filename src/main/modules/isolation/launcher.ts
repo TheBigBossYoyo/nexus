@@ -2,7 +2,7 @@ import { lookup } from 'node:dns/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { runProcess } from '@main/modules/process/run-process'
 
@@ -173,6 +173,8 @@ export interface VerifyPlace {
   sandbox?: SandboxAccountRef
   /** Why the sandbox account's launcher could not be put in place, when that failed. */
   sandboxError?: string
+  /** Directories of the sandbox root every session reads and none may write (the tools, the launcher's copies). ISOLATED only. */
+  sharedReadOnly?: readonly string[]
 }
 
 export class Launcher {
@@ -258,6 +260,38 @@ export class Launcher {
     }
   }
 
+  /**
+   * Takes away every entry of its own the capability has in a tree, and leaves what the tree inherits (reading,
+   * from the sandbox root). For the places contained code of every session reads and none may write: the tools
+   * and the launcher's copies. An entry to write there, from whatever made it, would let one session change what
+   * the next one runs.
+   */
+  async withdrawContainerEntries(path: string): Promise<void> {
+    const sid = await this.capabilitySid()
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    const icacls = (args: string[]): ReturnType<typeof runProcess> => runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 256 * 1024 })
+    // Looked at first, the directory and what lies directly in it: walking a tree of tools at every start would
+    // cost minutes, and an entry of its own is the exception. icacls marks what is inherited with "(I)".
+    const listed = await icacls([path])
+    const below = await icacls([join(path, '*')])
+    if (listed.exitCode !== 0) throw new Error(`The access list of ${path} could not be read: ${(listed.stderr.trim() || listed.stdout.trim()).slice(-300)}`)
+    const hasOwn = (text: string): boolean => text.split(/\r?\n/).some((line) => line.includes(`${sid}:`) && !line.includes(`${sid}:(I)`))
+    const targets: string[] = []
+    if (hasOwn(listed.stdout)) targets.push(path)
+    if (below.exitCode === 0 && hasOwn(below.stdout)) {
+      for (const name of readdirSync(path)) {
+        const child = join(path, name)
+        const one = await icacls([child])
+        if (one.exitCode === 0 && hasOwn(one.stdout)) targets.push(child)
+      }
+    }
+    // Only where an entry of its own is: Windows then recomputes what lies below that one place.
+    for (const target of targets) {
+      const result = await icacls([target, '/remove:g', `*${sid}`, '/Q'])
+      if (result.exitCode !== 0) throw new Error(`The entries of the AppContainer in ${target} could not be taken away: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
+    }
+  }
+
   /** The program and arguments that run a spec. */
   invocation(specPath: string): { file: string; args: string[] } {
     return { file: this.options.executable, args: ['--spec', specPath] }
@@ -300,6 +334,7 @@ export class Launcher {
     const beside = join(root, 'beside')
     const secret = join(root, 'secret')
     const userOnly = profile === 'ISOLATED' && place.userOnlyRoot !== undefined ? join(place.userOnlyRoot, `verify-${id}`) : null
+    const shared = profile === 'ISOLATED' ? (place.sharedReadOnly ?? []).filter((dir) => existsSync(dir)) : []
     // What the account's request is checked against: a listener here that answers anything.
     const control = profile === 'ISOLATED' ? createServer((_req, res) => res.end('ok')) : null
     let controlPort = 0
@@ -350,6 +385,9 @@ export class Launcher {
         // the answer needs the entry the setup (and, after a restart of Windows, its startup task) puts on the
         // Mount Manager device.
         if (place.sandbox) lines.push(`("${place.sandbox.stage2Path}" canonical "${inside}" > "${join(inside, 'canonical.txt')}") 2>nul`)
+        // What every session reads and none may write: a file made there by this command means the next session
+        // would run what this one left.
+        for (const [i, dir] of shared.entries()) lines.push(`(echo x> "${join(dir, `nexus-verify-${id}-${i}.txt`)}") 2>nul`)
         // What the same question gives outside the containment, so that "no answer" inside is not read as more than it is.
         namesHere = await lookup(DNS_PROBE_NAME).then(() => true, () => false)
         // An AppContainer is started only with a home to derive its own directories from.
@@ -376,6 +414,13 @@ export class Launcher {
       const self = `${(process.env['USERDOMAIN'] ?? '').toLowerCase()}\\${(process.env['USERNAME'] ?? '').toLowerCase()}`
       if (who === '' || who === self) return done(false, 'The contained process did not run as the sandbox account.')
       if (read('u.txt').includes('nexus-verify-user-sentinel')) return done(false, "The sandbox account read a file in the user's profile: the containment does not hold on this machine.")
+      for (const [i, dir] of shared.entries()) {
+        const planted = join(dir, `nexus-verify-${id}-${i}.txt`)
+        if (existsSync(planted)) {
+          rmSync(planted, { force: true })
+          return done(false, `A contained process wrote in ${dir}, which every session reads: one session could change what the next one runs. The containment does not hold on this machine.`)
+        }
+      }
       if (read('net.txt').includes('reached')) return done(false, 'The sandbox account reached the Internet directly: its firewall rule is missing or not effective.')
       // Without the counterpart the failed request proves nothing: said as it is.
       if (!read('loop.txt').includes('reached')) return done(false, 'Whether the sandbox account has a route to the Internet could not be established: its test request did not even reach NEXUS on this machine.')
@@ -389,7 +434,7 @@ export class Launcher {
       if (read('cache.txt').split(/\r?\n/).filter((line) => line.trim() !== '').length > 8) return done(false, "The contained process was shown the machine's cache of looked-up names.")
       // Not a hole, a broken tool chain: said as what it is, and as unusable, so that nothing fails later in a way nobody understands.
       if (!read('canonical.txt').toLowerCase().includes(inside.toLowerCase().slice(2))) return done(false, 'Windows gives a contained process no canonical form of a path: the entry of the sandbox on the Mount Manager device is missing (it is restored at every start of Windows by the startup task of the setup). Run the sandbox setup again.')
-      return done(true, `Verified at this start: a contained process ran as ${who} in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.${namesHere ? '' : ' Names could not be looked up from this machine at all at that moment, so the refusal of names was seen only as far as that goes.'}`)
+      return done(true, `Verified at this start: a contained process ran as ${who} in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile${shared.length > 0 ? ', could not write where the shared tools lie' : ''}, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.${namesHere ? '' : ' Names could not be looked up from this machine at all at that moment, so the refusal of names was seen only as far as that goes.'}`)
     } catch (e) {
       return done(false, `The containment could not be verified: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

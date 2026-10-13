@@ -237,6 +237,7 @@ export class ExecutionBroker {
   private readonly msys = new Map<ContainmentProfile, { bash: string; binDir: string } | null>()
   private busybox: { busybox: string; binDir: string } | null | undefined = undefined
   private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
+  private sharedClosed = false
   private readonly counts = { shell: 0, commands: 0, programs: 0, refused: 0 }
   /** Paths of repositories the sandbox account was given access to at this start, by path and kind of access. */
   private readonly granted = new Set<string>()
@@ -269,7 +270,19 @@ export class ExecutionBroker {
       return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify'), sandboxError: e instanceof Error ? e.message : String(e) }, force)
     }
     if (sandbox === null) return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify') }, force)
-    return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(sandbox.account.root, 'verify'), userOnlyRoot: join(this.deps.sandboxDir, 'verify-user'), sandbox: sandbox.ref }, force)
+    // 0.9 (review, HIGH): what every session reads and none may write. An entry of the capability's own there (one
+    // was found on the tools of a machine set up by a development build) is taken away before the profile is
+    // judged, and the judgement includes a contained attempt to write there.
+    const sharedReadOnly = [join(sandbox.account.root, 'tools'), join(sandbox.account.root, 'bin')]
+    if (!this.sharedClosed || force) {
+      try {
+        for (const dir of sharedReadOnly) if (existsSync(dir)) await this.deps.launcher.withdrawContainerEntries(dir)
+        this.sharedClosed = true
+      } catch (e) {
+        return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(this.deps.sandboxDir, 'verify'), sandboxError: e instanceof Error ? e.message : String(e) }, force)
+      }
+    }
+    return this.deps.launcher.verify('ISOLATED', { scratchRoot: join(sandbox.account.root, 'verify'), userOnlyRoot: join(this.deps.sandboxDir, 'verify-user'), sandbox: sandbox.ref, sharedReadOnly }, force)
   }
 
   status(profile: ContainmentProfile): ContainmentCheck | null {
