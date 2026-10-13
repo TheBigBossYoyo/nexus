@@ -6,6 +6,9 @@ dist/
 release/
 coverage/
 test-results/
+# Fetched, not kept here: scripts/fetch-linphone-sdk.mjs and scripts/fetch-speech-models.mjs
+vendor/linphone-sdk/
+vendor/speech-models/
 playwright-report/
 *.tsbuildinfo
 *.log

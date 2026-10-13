@@ -27,6 +27,13 @@ extraResources:
   # 0.9: the helper that reads the Wi-Fi state and reconnects a saved profile (native/nexus-wlan).
   - from: out/native/nexus-wlan.exe
     to: bin/nexus-wlan.exe
+  # 0.9.1: the SIP endpoint of the Director's voice line (native/nexus-sip) and the Linphone libraries it loads
+  # (AGPL-3.0-or-later; fetched by scripts/fetch-linphone-sdk.mjs, with their licences and NOTICE.txt). A program
+  # of its own, started as a process; the libraries are real files next to it.
+  - from: out/native/nexus-sip.exe
+    to: bin/nexus-sip.exe
+  - from: vendor/linphone-sdk/win64
+    to: linphone
   # The POSIX shell of the isolated profile (vendor/busybox, GPL-2.0): it runs inside the AppContainer.
   - from: out/native/busybox.exe
     to: bin/busybox.exe

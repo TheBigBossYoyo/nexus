@@ -8,6 +8,10 @@ import { killProcessTree } from './run-process'
  */
 export interface LongProcess {
   readonly pid: number | null
+  /** With `keepStdinOpen`: writes to the process's standard input. False when it can no longer be written to. */
+  writeInput(text: string): boolean
+  /** With `keepStdinOpen`: closes the process's standard input. */
+  endInput(): void
   /** The last lines of stdout and stderr together, oldest first. */
   output(maxLines?: number): string[]
   /** Null while it runs. */
@@ -85,6 +89,15 @@ export function spawnLong(file: string, args: readonly string[], options: SpawnL
   })
   return {
     pid: child.pid ?? null,
+    writeInput: (text) => {
+      const input = child.stdin
+      if (!input || input.destroyed || !input.writable) return false
+      input.write(text)
+      return true
+    },
+    endInput: () => {
+      child.stdin?.end()
+    },
     output: (n = 200) => lines.slice(-n),
     exitCode: () => code,
     exited,
