@@ -10,6 +10,7 @@ import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { clearInterval, setInterval } from 'node:timers'
 import { stopNexus, waitForRuntime } from './acceptance-common.mjs'
 
 const root = resolve(import.meta.dirname, '..')
