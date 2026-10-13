@@ -180,32 +180,86 @@ describe('a call that comes in', () => {
   })
 })
 
+describe('a yes is a yes and nothing else', () => {
+  const authed = async () => {
+    const w = session()
+    await w.s.open()
+    await key(w.s, PIN)
+    return w
+  }
+
+  it('a sentence that only begins like a yes creates nothing; a no anywhere at the start cancels', async () => {
+    for (const said of ['yes, but change the panel to red', 'right, no, do not add it', 'correct me if I am wrong', 'exactly not that', 'yes or no', 'yeah so about that']) {
+      const w = await authed()
+      await w.s.onSpeech('after this add improve the telemetry panel')
+      expect(w.s.awaitsConfirmation).toBe(true)
+      await w.s.onSpeech(said)
+      expect(w.performed.filter((p) => p.command.kind === 'ADD_TASK_AFTER_CURRENT'), said).toEqual([])
+      expect(w.s.awaitsConfirmation, said).toBe(false)
+    }
+    for (const said of ['yes', 'Yes.', 'yes please', 'yes, add it', 'oui', "d'accord", 'go ahead']) {
+      const w = await authed()
+      await w.s.onSpeech('after this add improve the telemetry panel')
+      await w.s.onSpeech(said)
+      expect(w.performed.map((p) => p.command.kind), said).toEqual(['ADD_TASK_AFTER_CURRENT'])
+    }
+  })
+
+  it('a task too long to be read back whole is not added', async () => {
+    const w = await authed()
+    const reply = await w.s.onSpeech(`after this add ${'improve the panel and '.repeat(20)}test it`)
+    expect(reply.say).toContain('too long to read back')
+    expect(w.s.awaitsConfirmation).toBe(false)
+    await w.s.onSpeech('yes')
+    expect(w.performed.filter((p) => p.command.kind === 'ADD_TASK_AFTER_CURRENT')).toEqual([])
+  })
+
+  it('goodbye is the whole sentence: a task that begins with "hang up" does not end the call', async () => {
+    const w = await authed()
+    expect((await w.s.onSpeech('after this add hang up the banner on the home page')).end).toBe(false)
+    expect((await w.s.onSpeech("that's all wrong")).end).toBe(false)
+    expect((await w.s.onSpeech('Goodbye.')).end).toBe(true)
+  })
+
+  it('once the caller is known, keys are nothing: a stray pound is not a wrong PIN', async () => {
+    const w = await authed()
+    const before = w.authCalls.length
+    expect(await key(w.s, '999999')).toBeNull()
+    expect(w.authCalls.length).toBe(before)
+    expect(w.s.isAuthenticated).toBe(true)
+  })
+})
+
 describe('a call NEXUS places', () => {
   const report = 'Overnight completed 16 of 18 tasks. Two tasks were delayed by a 19 minute Wi-Fi outage and resumed by themselves.'
 
-  it('says its report first and answers questions about the work without a PIN', async () => {
+  it('says its report, and then answers nothing until the PIN: whoever picked up is not thereby the operator', async () => {
     const w = session({ direction: 'OUTBOUND', report })
     const opened = await w.s.open()
     expect(opened.say).toContain('This is NEXUS. Overnight completed 16 of 18 tasks.')
+    expect(opened.say).toContain('say your PIN')
     expect(opened.end).toBe(false)
-    expect((await w.s.onSpeech('how long is left')).say).toBe('did ETA')
+    for (const ask of ['how long is left', 'what is the status', 'what is blocked', 'pause after the current task', 'after this add improve the telemetry panel']) {
+      expect(await w.s.onSpeech(ask), ask).toEqual({ say: 'The PIN first, please.', end: false })
+    }
+    expect(w.performed).toEqual([])
     expect(w.s.isAuthenticated).toBe(false)
   })
 
-  it('asks for the PIN before anything that changes work, then does what was asked', async () => {
+  it('what was asked before the PIN is not done once the PIN is given: it has to be asked again', async () => {
     const w = session({ direction: 'OUTBOUND', report })
     await w.s.open()
-    expect((await w.s.onSpeech('pause after the current task')).say).toContain('The PIN is needed for that')
+    await w.s.onSpeech('pause after the current task')
+    expect((await w.s.onSpeech('four eight two nine one five')).say).toBe('Thank you. What would you like to know?')
     expect(w.performed).toEqual([])
-    expect((await key(w.s, PIN))?.say).toBe('did PAUSE_AFTER_CURRENT_TASK')
-    // A task asked before the PIN is read back after it, and still waits for a yes.
-    const w2 = session({ direction: 'OUTBOUND', report })
-    await w2.s.open()
-    await w2.s.onSpeech('after this add improve the telemetry panel')
-    expect((await w2.s.onSpeech('four eight two nine one five')).say).toMatch(/^I heard a task after the current work: improve the telemetry panel/)
-    expect(w2.performed).toEqual([])
-    await w2.s.onSpeech('oui')
-    expect(w2.performed.map((p) => p.command.kind)).toEqual(['ADD_TASK_AFTER_CURRENT'])
+    expect((await w.s.onSpeech('pause after the current task')).say).toBe('did PAUSE_AFTER_CURRENT_TASK')
+  })
+
+  it('the PIN said right away, before anything is asked, is taken as the PIN', async () => {
+    const w = session({ direction: 'OUTBOUND', report })
+    await w.s.open()
+    expect((await w.s.onSpeech('4 8 2 9 1 5')).say).toContain('Thank you')
+    expect(w.s.isAuthenticated).toBe(true)
   })
 
   it('whoever picked up the phone and does not know the PIN changes nothing', async () => {
@@ -216,5 +270,18 @@ describe('a call NEXUS places', () => {
     await key(w.s, '000001')
     expect((await key(w.s, '000002'))?.end).toBe(true)
     expect(w.performed).toEqual([])
+  })
+})
+
+describe('where the service itself says whose account is calling', () => {
+  it('the paired identity is enough when the owner chose so, and only the paired identity', async () => {
+    const w = session({ requirePin: false })
+    expect((await w.s.open()).say).toBe('NEXUS Director. What would you like to know?')
+    expect(w.s.isAuthenticated).toBe(true)
+    expect((await w.s.onSpeech('what is the status')).about).toBe('FACTS')
+
+    const stranger = session({ requirePin: false, from: '+15550001111' })
+    expect(await stranger.s.open()).toEqual({ say: 'This number is not available. Goodbye.', end: true })
+    expect(stranger.s.isAuthenticated).toBe(false)
   })
 })

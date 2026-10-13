@@ -31,6 +31,8 @@ export interface DirectorVoiceOptions {
   turnTimeoutMs?: number
   /** How long a turn that was cut off may take to end before the session is replaced. */
   settleTimeoutMs?: number
+  /** How long the session may take to start before it is replaced. */
+  warmTimeoutMs?: number
   /** One finished turn, for the record of cost and latency. `firstWordMs` is null when nothing was written. */
   onTurn?: (turn: { outcome: TurnResult['outcome'] | 'ended'; firstWordMs: number | null; totalMs: number; usage: TurnResult['usage'] }) => void
   now?: () => number
@@ -56,6 +58,8 @@ export interface SpokenAnswer {
 const FIRST_WORD_TIMEOUT_MS = 4000
 const TURN_TIMEOUT_MS = 20_000
 const SETTLE_TIMEOUT_MS = 3000
+/** A session that has not answered its first, empty turn after this long is replaced. */
+const WARM_TIMEOUT_MS = 45_000
 const MAX_SENTENCE_CHARS = 240
 const MAX_SENTENCES = 6
 const REMEMBERED_TURNS = 6
@@ -114,6 +118,7 @@ interface TurnState {
   /** Nothing more of it is wanted; the session is still finishing it. */
   abandoned: boolean
   warm: boolean
+  startedAt: number
   onDelta(text: string): void
   /** `null`: the session ended under it. */
   finish(result: TurnResult | null): void
@@ -126,6 +131,8 @@ export class DirectorVoice {
   private cut: (() => void) | null = null
   private readonly remembered: { said: string; answered: string }[] = []
   private closed = false
+  /** Counts the times the operator spoke over an answer: an answer that is still being prepared sees it too. */
+  private epoch = 0
   private readonly now: () => number
 
   constructor(private readonly o: DirectorVoiceOptions) {
@@ -143,12 +150,24 @@ export class DirectorVoice {
     return {
       abandoned: false,
       warm,
-      onDelta,
+      startedAt: this.now(),
+      // What listens must not be able to end the session's loop.
+      onDelta: (text) => {
+        try {
+          onDelta(text)
+        } catch {
+          // said nowhere: the listener is gone
+        }
+      },
       finish: (result) => {
         if (done) return
         done = true
         settle()
-        onDone(result)
+        try {
+          onDone(result)
+        } catch {
+          // as above
+        }
       },
       settled,
     }
@@ -157,7 +176,12 @@ export class DirectorVoice {
   private send(prompt: (fresh: boolean) => string, state: TurnState): void {
     this.turn = state
     if (this.handle !== null) {
-      this.handle.send(prompt(false))
+      try {
+        this.handle.send(prompt(false))
+      } catch {
+        // A session that cannot take a message is not kept.
+        this.drop()
+      }
       return
     }
     try {
@@ -205,6 +229,8 @@ export class DirectorVoice {
     const turn = this.turn
     this.turn = null
     turn?.finish(null)
+    // However the loop ended, the process behind it is not left running.
+    void handle.stop().catch(() => undefined)
   }
 
   /** The session is replaced at the next turn. */
@@ -238,7 +264,11 @@ export class DirectorVoice {
     ])
     clearTimeout(timer)
     if (settled) return true
-    if (before.warm && !before.abandoned) return false
+    if (before.warm && !before.abandoned) {
+      // Still starting: the facts are said meanwhile. A start that takes this long is not waited for again.
+      if (this.now() - before.startedAt > (this.o.warmTimeoutMs ?? WARM_TIMEOUT_MS)) this.drop()
+      return false
+    }
     // A turn that was cut off and does not end: its session is not waited for.
     this.drop()
     return true
@@ -252,7 +282,11 @@ export class DirectorVoice {
     const spoken: string[] = []
     const say = (sentence: string): void => {
       spoken.push(sentence)
-      speak(sentence)
+      try {
+        speak(sentence)
+      } catch {
+        // whoever speaks is gone; the answer still ends in order
+      }
     }
     const byFacts = (): SpokenAnswer => {
       const facts = inert((input.fallback ?? input.facts).replace(/\n+/g, '. ').replace(/\.{2,}/g, '.'), 900)
@@ -261,7 +295,11 @@ export class DirectorVoice {
     }
     if (!this.usable()) return byFacts()
     this.interrupt()
-    if (!(await this.ready()) || !this.usable()) return byFacts()
+    const epoch = this.epoch
+    const usable = await this.ready()
+    // Spoken over while the session was being waited for: this answer is no longer wanted, and nothing was said.
+    if (this.epoch !== epoch) return { text: '', by: 'MODEL', interrupted: true }
+    if (!usable || !this.usable()) return byFacts()
 
     const given = `${input.facts}\n${input.said}`
     const startedAt = this.now()
@@ -338,11 +376,14 @@ export class DirectorVoice {
   private prompt(input: SpokenTurn, fresh: boolean): string {
     // A session that had to be replaced during a call is told what was said so far.
     const earlier = fresh && this.remembered.length > 0 ? `EARLIER IN THIS CALL\n${this.remembered.map((t) => `Operator: ${t.said}\nYou: ${t.answered}`).join('\n')}\n\n` : ''
-    return `${earlier}FACTS\n${inertBlock(input.facts, 2000)}\n\nTHE OPERATOR SAID\n${inert(input.said, 600)}`
+    // The facts carry names and sentences that come from repositories: a line of them cannot pass for a heading of this message.
+    const facts = inertBlock(input.facts, 2000).replace(/^\s*(?:FACTS|THE OPERATOR SAID|EARLIER IN THIS CALL)\s*$/gim, '-')
+    return `${earlier}FACTS\n${facts}\n\nTHE OPERATOR SAID\n${inert(input.said, 600)}`
   }
 
   /** The operator spoke over the answer: nothing more of it is handed on, and the model stops writing it. */
   interrupt(): void {
+    this.epoch += 1
     this.cut?.()
   }
 

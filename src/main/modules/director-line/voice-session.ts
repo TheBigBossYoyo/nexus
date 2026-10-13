@@ -7,12 +7,15 @@ import type { PhoneAuthResult } from './pairing'
  * is given what the caller said or pressed, and answers with what to say and whether to hang up. The relay and
  * Twilio's speech recognition are on the other side of it.
  *
- * Who is on the line is established here and nowhere else:
+ * Who is on the line is established here and nowhere else, once per call:
  * - A call that comes IN must come from the paired number AND give the PIN, before anything is answered: a
  *   caller's number can be forged, so the number alone opens nothing, not even a status.
- * - A call NEXUS placed went to the paired number. It says its report, which is what the call is for, and
- *   answers questions about it; before anything that changes work (a pause, a task) it asks for the PIN too,
- *   because whoever picked up the phone is not thereby the operator.
+ * - A call NEXUS placed went to the paired number. It says its report, which is what the call is for, and then
+ *   nothing more until the PIN: whoever picked up the phone is not thereby the operator.
+ * - Until then the only thing listened for is the PIN. What an unauthenticated caller says is not interpreted,
+ *   not kept and not given to any model.
+ * - `requirePin: false` is for a service that itself establishes whose account is calling (not a telephone
+ *   number that a network merely reports): the paired identity is then enough. It is the owner's choice.
  *
  * What an authenticated caller can ask is the same closed set as by message. A task is read back and created
  * only after a yes: speech recognition errs. The session grants nothing; what asks for authority is answered
@@ -36,6 +39,8 @@ export interface VoiceSessionStart {
   from: string
   /** For a call NEXUS placed: the report to say first. */
   report?: string
+  /** Default true. See the note on who is on the line. */
+  requirePin?: boolean
 }
 
 export interface VoiceReply {
@@ -55,9 +60,12 @@ export const MAX_PIN_TRIES_PER_CALL = 3
 export const SESSION_IDLE_MS = 5 * 60_000
 export const SESSION_MAX_MS = 20 * 60_000
 
-const YES = /^(yes|yeah|yep|correct|right|do it|confirm|confirmed|go ahead|oui|ouais|d'accord|vas-y|c'est ca|c'est ça|exact)\b/i
+// A yes is the whole of what was said, or it is not a yes: "yes, but change it" and "right, no" create nothing.
+const YES = /^(yes|yeah|yep|correct|right|do it|confirm|confirmed|go ahead|oui|ouais|d'accord|vas-y|c'est ca|c'est ça|exact)(?:[\s,]+(?:please|add it|do it|go ahead|s'il te pla[iî]t|s'il vous pla[iî]t|merci|thanks|thank you))?[\s.!,]*$/i
 const NO = /^(no|nope|cancel|stop|wrong|don't|do not|non|annule|annuler|pas ca|pas ça)\b/i
-const BYE = /^(bye|goodbye|that's all|that is all|thanks,? bye|thank you,? bye|hang up|au revoir|c'est tout|merci,? au revoir)\b/i
+const BYE = /^(bye|goodbye|bye bye|that's all|that is all|thanks,? bye|thank you,? bye|hang up|au revoir|c'est tout|merci,? au revoir)[\s.!,]*$/i
+/** A task longer than this cannot be read back whole, and what was not heard is not created. */
+export const MAX_SPOKEN_TASK_CHARS = 240
 
 /** Digits as a caller says them ("one two three four", "un deux trois") or presses them. Null when the words are not only digits. */
 export function spokenDigits(text: string): string | null {
@@ -84,8 +92,6 @@ export class VoiceSession {
   private readonly startedAt: number
   private lastAuthenticatedAt = 0
   private pendingTask: { text: string; command: OperatorCommand } | null = null
-  /** What was asked before the PIN was given, on a call NEXUS placed: done once the PIN is right. */
-  private heldForPin: { text: string; command: OperatorCommand } | null = null
   private closed = false
 
   constructor(private readonly start: VoiceSessionStart, private readonly deps: VoiceSessionDeps) {
@@ -101,25 +107,38 @@ export class VoiceSession {
     return { say, end: true }
   }
 
+  /** True while a task that was read back waits for its yes or no. */
+  get awaitsConfirmation(): boolean {
+    return this.pendingTask !== null
+  }
+
   /** What is said when the call is connected. */
   async open(): Promise<VoiceReply> {
+    const paired = await this.deps.isPairedNumber(this.start.from)
+    if (paired && this.start.requirePin === false) {
+      this.authenticated = true
+      this.lastAuthenticatedAt = this.deps.now()
+    }
     if (this.start.direction === 'OUTBOUND') {
       const report = (this.start.report ?? '').trim()
-      return { say: `This is NEXUS. ${report === '' ? 'Nothing needs your attention.' : report} You can ask about it, or say goodbye.`, end: false }
+      const then = this.authenticated ? 'You can ask about it, or say goodbye.' : 'To ask about it or to change anything, say your PIN or key it in, then press pound.'
+      return { say: `This is NEXUS. ${report === '' ? 'Nothing needs your attention.' : report} ${then}`, end: false }
     }
     // An unknown number learns nothing: not that this is NEXUS, not whether a PIN exists.
-    if (!(await this.deps.isPairedNumber(this.start.from))) {
+    if (!paired) {
       this.deps.note?.('a call from a number that is not paired was ended')
       // The attempt is counted against that number, so that it cannot be probed without bound.
       await this.deps.authenticatePhone(this.start.from, null).catch(() => undefined)
       return this.end('This number is not available. Goodbye.')
     }
+    if (this.authenticated) return { say: 'NEXUS Director. What would you like to know?', end: false }
     return { say: 'NEXUS Director. What is the PIN? You can say it or key it in, then press pound.', end: false }
   }
 
   /** A key pressed. Digits are collected until the pound key; nothing is said back for a single digit. */
   async onDigit(digit: string): Promise<VoiceReply | null> {
-    if (this.closed) return null
+    // Once the caller is known, keys are nothing: a stray pound must not count as a wrong PIN.
+    if (this.closed || this.authenticated) return null
     if (/^\d$/.test(digit)) {
       if (this.keyed.length < 20) this.keyed += digit
       return null
@@ -139,9 +158,6 @@ export class VoiceSession {
     if (result === 'OK') {
       this.authenticated = true
       this.lastAuthenticatedAt = this.deps.now()
-      const held = this.heldForPin
-      this.heldForPin = null
-      if (held !== null) return this.act(held.text, held.command)
       return { say: 'Thank you. What would you like to know?', end: false }
     }
     this.pinTries += 1
@@ -164,32 +180,21 @@ export class VoiceSession {
     if (this.expired()) return this.end('This call has been open too long. Call again. Goodbye.')
     if (BYE.test(said)) return this.end('Goodbye.')
 
-    // Before the PIN on an incoming call, the only thing listened for is the PIN.
-    if (!this.authenticated && this.start.direction === 'INBOUND') {
+    // Before the PIN, in either direction, the only thing listened for is the PIN. Nothing else that is said is
+    // interpreted, by a pattern or by a model.
+    if (!this.authenticated) {
       const digits = spokenDigits(said)
       if (digits === null) return { say: 'The PIN first, please.', end: false }
       return this.tryPin(digits)
     }
 
-    // A yes or a no to the task that was read back.
+    // A yes or a no to the task that was read back. No is looked for first.
     if (this.pendingTask !== null) {
       const pending = this.pendingTask
-      if (YES.test(said)) {
-        this.pendingTask = null
-        return this.run(pending.text, pending.command)
-      }
-      if (NO.test(said)) {
-        this.pendingTask = null
-        return { say: 'Cancelled. Nothing was added.', end: false }
-      }
-      // Anything else replaces the question: the task is dropped, not created by a sentence that was not a yes.
       this.pendingTask = null
-    }
-
-    // The PIN, said after NEXUS asked for it on a call it placed.
-    if (!this.authenticated && this.heldForPin !== null) {
-      const digits = spokenDigits(said)
-      if (digits !== null) return this.tryPin(digits)
+      if (NO.test(said)) return { say: 'Cancelled. Nothing was added.', end: false }
+      if (YES.test(said)) return this.run(pending.text, pending.command)
+      // Anything else replaces the question: the task is dropped, not created by a sentence that was not a yes.
     }
 
     const { text: cleaned, command } = await this.deps.interpret(said)
@@ -197,25 +202,19 @@ export class VoiceSession {
   }
 
   private async act(text: string, command: OperatorCommand): Promise<VoiceReply> {
-    const risk = commandRisk(command)
-    // On a call NEXUS placed, reading is answered (the report was just said to whoever answered); anything that
-    // changes work needs the PIN.
-    if (!this.authenticated && risk !== 'READ_ONLY' && command.kind !== 'HELP' && command.kind !== 'UNKNOWN' && risk !== 'REFUSED') {
-      this.heldForPin = { text, command }
-      return { say: 'The PIN is needed for that. Say it or key it in, then press pound.', end: false }
-    }
-    if (risk === 'TASK_HANDOFF') {
+    if (commandRisk(command) === 'TASK_HANDOFF') {
       const task = command.kind === 'ADD_TASK_AFTER_CURRENT' || command.kind === 'CREATE_TASK' ? command.text : text
-      // Read back, because speech recognition errs; created only on a yes.
+      if (task.length > MAX_SPOKEN_TASK_CHARS) return { say: 'That task is too long to read back, so it was not added. Say it shorter, or send it as a message.', end: false }
+      // Read back whole, because speech recognition errs; created only on a yes.
       this.pendingTask = { text, command }
       const where = command.kind === 'CREATE_TASK' ? ` for ${command.project}` : command.kind === 'ADD_TASK_AFTER_CURRENT' ? ' after the current work' : ''
-      return { say: `I heard a task${where}: ${task.slice(0, 240)}. Shall I add it? Say yes or no.`, end: false }
+      return { say: `I heard a task${where}: ${task}. Shall I add it? Say yes or no.`, end: false }
     }
     return this.run(text, command)
   }
 
   private async run(text: string, command: OperatorCommand): Promise<VoiceReply> {
-    if (this.authenticated) this.lastAuthenticatedAt = this.deps.now()
+    this.lastAuthenticatedAt = this.deps.now()
     this.turn += 1
     const risk = commandRisk(command)
     if (risk === 'REFUSED') this.deps.note?.('a request that needs the machine was refused on a call')
