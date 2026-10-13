@@ -56,6 +56,7 @@ describe('the Director voice', () => {
     expect(answer).toEqual({ text: heard.join(' '), by: 'MODEL', interrupted: false })
     const spec = w.runtime.sessions[0]!
     expect(spec.tools).toEqual([])
+    expect(spec.conversational).toBe(true)
     expect(spec.model).toBe('fast-model')
     expect(spec.loadProjectSettings).toBe(false)
     expect(spec.nexusTools).toBeUndefined()

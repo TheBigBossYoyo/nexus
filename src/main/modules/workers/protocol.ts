@@ -28,6 +28,7 @@ export interface WireSessionSpec {
   resumeSessionId?: string
   loadProjectSettings: boolean
   subscriptionMode: boolean
+  conversational?: boolean
 }
 
 export function toWireSpec(spec: SessionSpec): WireSessionSpec {
@@ -49,6 +50,7 @@ export function toWireSpec(spec: SessionSpec): WireSessionSpec {
     ...(spec.resumeSessionId !== undefined ? { resumeSessionId: spec.resumeSessionId } : {}),
     loadProjectSettings: spec.loadProjectSettings,
     subscriptionMode: spec.subscriptionMode,
+    ...(spec.conversational !== undefined ? { conversational: spec.conversational } : {}),
   }
 }
 

@@ -736,7 +736,10 @@ export class ClaudeSdkRuntime implements AgentRuntime {
       disallowedTools: ['Agent', 'Task'],
       // With the stable prefix the working directory and git status reach the model in the first user message
       // instead of the system prompt, so sessions with the same role and tools share one cached system prompt.
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.systemPromptAppend, ...(spec.contextOptions?.stablePrefix ? { excludeDynamicSections: true } : {}) },
+      systemPrompt: spec.conversational
+        ? { type: 'custom', prompt: spec.systemPromptAppend }
+        : { type: 'preset', preset: 'claude_code', append: spec.systemPromptAppend, ...(spec.contextOptions?.stablePrefix ? { excludeDynamicSections: true } : {}) },
+      ...(spec.conversational ? { thinking: { type: 'disabled' as const } } : {}),
       settingSources: spec.loadProjectSettings ? ['project'] : [],
       strictMcpConfig: true,
       skills: [],

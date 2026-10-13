@@ -192,6 +192,7 @@ export class DirectorVoice {
         cwd: this.o.cwd,
         ...(this.o.model ? { model: this.o.model } : {}),
         effort: 'low',
+        conversational: true,
         maxTurns: MAX_TURNS,
         systemPromptAppend: INSTRUCTIONS,
         prompt: prompt(true),
