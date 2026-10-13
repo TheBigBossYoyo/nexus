@@ -1,7 +1,7 @@
 {
   "kind": "v0.8-packaged-check",
   "executable": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe",
-  "startedAt": "2026-10-13T18:08:44.354Z",
+  "startedAt": "2026-10-13T19:52:22.217Z",
   "checks": {
     "it is the package of this commit and version": true,
     "the runtime is ready and its endpoint is restricted": true,
@@ -18,7 +18,7 @@
     "no mission was started": true,
     "the window reported no script error": true,
     "stopped cleanly: the endpoint file is gone": true,
-    "the database is at the schema of this version (19 migrations)": true
+    "the database is at the schema of this version (20 migrations)": true
   },
   "pages": [
     "home",
@@ -47,12 +47,12 @@
     "isPackaged": true,
     "build": {
       "version": "0.9.0",
-      "commit": "ed9c18a0533af0d348e03fab688326846ac9b16b",
+      "commit": "d042794d01b89d6248d3e7cc28a156866f4610d5",
       "dirty": false,
-      "builtAt": "2026-10-13T18:07:49.798Z",
+      "builtAt": "2026-10-13T19:51:05.879Z",
       "channel": "release",
       "runtimeProtocol": 1,
-      "databaseSchema": 19
+      "databaseSchema": 20
     }
   },
   "worker": {
@@ -70,12 +70,12 @@
     "isolated": {
       "available": true,
       "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, could not write where the shared tools lie, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
-      "checkedAt": "2026-10-13T18:08:50.500Z"
+      "checkedAt": "2026-10-13T19:52:28.247Z"
     },
     "restricted": {
       "available": true,
       "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
-      "checkedAt": "2026-10-13T18:08:49.425Z"
+      "checkedAt": "2026-10-13T19:52:27.064Z"
     },
     "sandboxAccount": true,
     "setupAvailable": true
@@ -99,8 +99,9 @@
     16,
     17,
     18,
-    19
+    19,
+    20
   ],
-  "finishedAt": "2026-10-13T18:08:59.217Z",
+  "finishedAt": "2026-10-13T19:52:36.933Z",
   "verdict": "PASS"
 }

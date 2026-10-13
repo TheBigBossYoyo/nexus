@@ -6,7 +6,7 @@ everything open is `V0_9_HARDENING_LEDGER.md`; what stands between this and a 1.
 
 ## Verdict
 
-**PARTIAL against the gates 0.9 was given. Part one of 0.9.0, closed by the owner's decision; not merged and not tagged yet.**
+**PARTIAL against the gates 0.9 was given. Released as 0.9.0 on the owner's decision: merged to `main`, tagged `v0.9.0`, and published.**
 
 The brief for 0.9 sets seven gates and says: if any release-material gate remains, PARTIAL, no merge, no tag.
 Measured against that, 0.9.0 is PARTIAL: the installer was not run, there was no soak, no crash campaign, no
@@ -17,8 +17,11 @@ On 2026-10-13 at 18:33 the owner asked for 0.9.0 the same evening and said to le
 take shortcuts; at 19:20 they added a pillar to 0.9.0 (network resilience, the Director Line, progress and ETA)
 to be built after this part. So this report covers part one: the hardening and the release engineering done in
 one day, validated by the suite, the end-to-end tests and the package. It is not the "production proof" the
-brief describes, and it is not called PASS. The merge to `main` and the tag `v0.9.0` wait for the pillar: one
-tag for one version. Nothing is pushed. The package named below is of part one and will be built again.
+brief describes, and it is not called PASS. The pillar was built the same evening (its own section below, with
+what was and was not proven), after which the branch was merged to `main` and tagged `v0.9.0`, as the owner
+asked for 0.9.0 that day. The owner also asked for the project to be published: a copy of the repository whose
+history has the machine's identifiers replaced (user name, machine name, account SID) is pushed to a public
+GitHub repository; the working repository keeps its own history. NEXUS's own code is under the Apache License 2.0.
 
 | Gate of the brief | State |
 |---|---|
@@ -78,7 +81,7 @@ policy and the runtime probe remain for the next release.
 ## Installation
 
 Not run: clean install, upgrade, uninstall, reinstall, restart after an install. The package was built and
-started (Built from a clean tree at `ed9c18a` (`pnpm package`): `NEXUS-Setup-0.9.0.exe`, SHA-256 `3216e0d41f7029e826f1c2c94338a1a0293cd36e043a28afac51f0747b4a24ee`. The unpacked application was started off-screen on a data directory of its own (`scripts/v08-packaged-check.mjs`): 17 checks of 17. It is the package of that commit and of version 0.9.0, channel `release`, schema 19, runtime protocol 1; the runtime is ready and its endpoint restricted; both profiles are verified by running them from the package, ISOLATED as the sandbox account, with the contained attempt to write the shared tools refused; every page renders; it stops cleanly. Evidence: `docs/acceptance/v09-packaged-check-2026-10-13.json`. The commit that follows `ed9c18a` adds this report and that evidence file only.).
+started (see Package).
 
 ## Distribution
 
@@ -118,15 +121,37 @@ confirmation, as allowing for the whole project did.
 
 ## Tests
 
-`pnpm test` on `ed9c18a`, the packaged commit, nothing beside it: **247 files, 4,773 tests, all passed** (787 s). Typecheck (both projects) and lint clean. The runs before it are kept as they were: 245 of 246 files on the first run of the branch (a teardown refused a directory once, `V0_9_FLAKES.md`); 246 of 247 on the commit before `ed9c18a`, where the one failure was a new test of this release that looked at a folder other tests were writing at the same moment, and was corrected. The isolation tests alone: 6 files, 91 tests. Not run: the 1,000-seed orchestrator stress and the other stress suites.
+`pnpm test` on the final source (`d042794` differs from the tested commit by documents only), nothing beside it:
+**271 files, 5,182 tests, all passed** (980 s). Typecheck (both projects) and lint clean. Every run of the day
+is in `V0_9_FLAKES.md` as it was: 245 of 246 files on the first run of the branch (a teardown refused a
+directory once); 246 of 247 when a new test of this release looked at a folder other tests were writing
+(corrected); 247 of 247 with 4,773 tests on part one (`ed9c18a`); 269 of 271 when the pillar was first
+integrated, where two architecture guards objected to the new network module (a file named after the power
+controller, a process started outside the approved runners) and were satisfied, not relaxed. Not run: the
+1,000-seed orchestrator stress and the other stress suites.
 
 ## E2E
 
-`pnpm test:e2e` on `ed9c18a`'s source (the build, then Playwright on the built application): 42 passed, 3 skipped, 17.5 minutes. The three skipped are the capture specs, as in 0.8.
+`pnpm test:e2e` on the final source: **41 passed, 1 failed, 3 skipped** (18.6 minutes). The failure is
+`v4.spec.ts:200` (a checkbox on the Programs page whose click did not change its state); the same test passed
+3 times of 3 alone right after, and the whole suite had passed 42 of 42 on part one earlier the same day. It is
+recorded as an open flake with what is suspected and not established (`V0_9_FLAKES.md`): this release pushes
+progress to the window on every event of a mission, which may make such a moment more likely. It was not rerun
+until green. The three skipped are the capture specs. No end-to-end test covers the progress panel or the
+Director Line settings yet.
 
 ## Package
 
-Built from a clean tree at `ed9c18a` (`pnpm package`): `NEXUS-Setup-0.9.0.exe`, SHA-256 `3216e0d41f7029e826f1c2c94338a1a0293cd36e043a28afac51f0747b4a24ee`. The unpacked application was started off-screen on a data directory of its own (`scripts/v08-packaged-check.mjs`): 17 checks of 17. It is the package of that commit and of version 0.9.0, channel `release`, schema 19, runtime protocol 1; the runtime is ready and its endpoint restricted; both profiles are verified by running them from the package, ISOLATED as the sandbox account, with the contained attempt to write the shared tools refused; every page renders; it stops cleanly. Evidence: `docs/acceptance/v09-packaged-check-2026-10-13.json`. The commit that follows `ed9c18a` adds this report and that evidence file only.
+Built from a clean tree at `d042794` (`pnpm package`): `NEXUS-Setup-0.9.0.exe`, SHA-256
+`0d842410f751375bfa9d5588cea134ce5c2d62e7af434a93bacfdfa8d1593636`. The unpacked application was started
+off-screen on a data directory of its own (`scripts/v08-packaged-check.mjs`): 17 checks of 17. It is the package
+of that commit and of version 0.9.0, channel `release`, schema 20, runtime protocol 1; the runtime is ready and
+its endpoint restricted; both profiles are verified by running them from the package, ISOLATED as the sandbox
+account; every page renders; it stops cleanly. Evidence: `docs/acceptance/v09-packaged-check-2026-10-13.json`.
+The release folder `release/v0.9.0/` was built from the same commit: the installer, the manifest (which now
+names four native programs: the launcher, the Wi-Fi helper, busybox, the Electron executable), the bill of
+materials, the notices, the licenses, the busybox source, and checksums read back. The commit that follows
+`d042794` adds this report and that evidence file only. **The installer itself was not run.**
 
 ## Operational autonomy (added to 0.9.0 on 2026-10-13, built the same evening)
 

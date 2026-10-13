@@ -17,16 +17,16 @@ agent framework.
 
 ## Release state
 
-The version in `package.json` is **0.9.0**. The latest tagged release is **0.8.0** (`v0.8.0`, 2026-10-13). 0.9.0
-is not tagged.
+The version in `package.json` is **0.9.0**. The latest tagged release is **0.9.0** (`v0.9.0`, 2026-10-13).
 
-**0.9.0, part one, is PARTIAL against the gates its own brief set.** It is validated by the test suite (4,773
-tests), the end-to-end tests (42 passed, 3 skipped) and a package that was built and started, but the
-installer was not run, there was no soak, no crash campaign, no Arena campaign, no real Program, Workspace or
-unattended night on this source, no independent UX review, and ten MEDIUM findings of the security review are
-open. Part one was closed by the owner's decision; it is not called PASS and it is not production-ready. What
+**0.9.0 is PARTIAL against the gates its own brief set, and was released on the owner's decision.** It is
+validated by the test suite (5,182 tests), the end-to-end tests (41 passed, 1 failed once and passed alone, 3
+skipped) and a package that was built and started. The installer was not run; there was no soak, no crash
+campaign, no Arena campaign, no real Program, Workspace or unattended night on this source, and no independent
+UX review; ten MEDIUM findings of the security review are open; and the operational-autonomy features were
+proven with simulated networks and transports only. It is not called PASS and it is not production-ready. What
 was and was not done: [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md). What stands between this and a 1.0
-release candidate (seven blockers): [1_0_READINESS](docs/1_0_READINESS.md).
+release candidate (eight blockers): [1_0_READINESS](docs/1_0_READINESS.md).
 
 Nothing is signed (see [Code signing](#code-signing)). There is no update channel.
 
@@ -242,7 +242,7 @@ software is correct. The full lists, by version, are under "Current limitations"
 
 | Document | What it is |
 |---|---|
-| [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md) | The 0.9.0 part one report: the PARTIAL verdict, gates, tests, package, what was left out |
+| [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md) | The 0.9.0 report: the PARTIAL verdict, gates, tests, package, operational autonomy, what was left out |
 | [V0_9_HARDENING_LEDGER](docs/V0_9_HARDENING_LEDGER.md) | One list of everything open or closed in the hardening, with a disposition and a state for each, including review findings |
 | [1_0_READINESS](docs/1_0_READINESS.md) | Category by category readiness for 1.0, and the seven blockers |
 | [V0_9_SOAK_THRESHOLDS](docs/V0_9_SOAK_THRESHOLDS.md) | The limits a soak will be judged by, fixed before one is run |
@@ -508,7 +508,7 @@ The design and its deviations from the implementation are in [V0_2_DESIGN](docs/
 
 ## Release history and supported versions
 
-The latest tagged release is 0.8.0. 0.9.0 is not tagged (see "Release state"). Earlier tags are kept as they
+The latest tagged release is 0.9.0. Earlier tags are kept as they
 are, for history; no tag has been rewritten or deleted. Dates are those of the tagged commit. The recommendation
 column is as each release's own report left it; 0.7.x predates the operating-system containment of 0.8 (0.7 is
 not a sandbox, see below).
@@ -525,7 +525,7 @@ not a sandbox, see below).
 | 0.7.1 | `v0.7.1` | 2026-10-10 | Superseded | Context Graph and token intelligence. A real campaign of fifty runs over eight task categories found it non-inferior to 0.7.0 with no case worse; with the Context Graph, on by default, missions used 16% fewer turns. It also fixes a defect that blocked real programs in 0.7.0. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
 | 0.7.2 | `v0.7.2` | 2026-10-11 | Superseded | Directors, the Task Compiler, capacity admission, the 2.0 interface. In a real campaign against 0.7.1 it was non-inferior when requests are admitted as written; the default depth passed every hidden evaluation and its comparison is incomplete. No saving is claimed. Report: `docs/V0_7_2_RELEASE_REPORT.md` |
 | 0.8.0 | `v0.8.0` | 2026-10-13 | Latest tagged release | Execution isolation (ISOLATED, RESTRICTED, STANDARD), autonomy profiles and boundary requests, application and browser automation, internet research. Verdict PASS against its gates, merged to `main` and tagged locally; when its report was written nothing was pushed. Report: `docs/V0_8_RELEASE_REPORT.md` |
-| 0.9.0 | none | not tagged | PARTIAL, part one | Per-session capabilities, the second security review, release engineering. Not merged, not tagged: waits for the pillar in progress. Not production-ready. Report: `docs/V0_9_RELEASE_REPORT.md` |
+| 0.9.0 | 2026-10-13 | `v0.9.0` | PARTIAL against its own gates, released on the owner's decision | Per-session capabilities, the second security review, release engineering, and operational autonomy (progress and time remaining, network resilience, the Director Line). Not production-ready: the installer was not run, nothing was proven on a real outage, a real long mission or a real messaging service. Report: `docs/V0_9_RELEASE_REPORT.md` |
 
 "Superseded" is this file's word for a version that a later tagged release replaces; no report calls 0.7.x
 unsafe for the reasons below, but none of them contains the operating-system containment.
