@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Run, Task } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
-import type { ProgressSnapshot } from '@shared/progress'
+import { progressRows, type ProgressSnapshot } from '@shared/progress'
 import { ProgressService, milestoneLine, milestoneOf, type ProgressChange } from '@main/modules/progress/service'
-import { progressRows } from '../../../src/renderer/src/views/run/ProgressPanel'
 
 // 0.9: the service that keeps the progress of missions current and says when a change is worth showing.
 const T0 = Date.parse('2026-10-13T19:00:00Z')

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { formatElapsed, type ProgressSnapshot } from '@shared/progress'
+import { progressRows, type ProgressSnapshot } from '@shared/progress'
 import { api, type IpcError } from '../../lib/bridge'
 
 /**
@@ -21,28 +21,9 @@ export function useProgress(runId: string | null) {
   })
 }
 
-const CONFIDENCE_TEXT: Record<ProgressSnapshot['eta']['confidence'], string> = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' }
-
 const clock = (iso: string): string => {
   const d = new Date(iso)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-/** The rows of the panel as plain values, so that what is shown can be tested without a window. */
-export function progressRows(s: ProgressSnapshot): { label: string; value: string }[] {
-  const waiting = s.wait !== 'ACTIVE' && s.wait !== 'FINISHED'
-  const rows = [
-    { label: 'Elapsed', value: formatElapsed(s.elapsedSeconds) },
-    { label: s.wait === 'FINISHED' ? 'Remaining' : 'Active work remaining', value: s.eta.text },
-  ]
-  if (s.wait !== 'FINISHED' && s.eta.lowSeconds !== null) rows.push({ label: 'Confidence', value: s.eta.uncertainty ? `${CONFIDENCE_TEXT[s.eta.confidence]}: ${s.eta.uncertainty}` : CONFIDENCE_TEXT[s.eta.confidence] })
-  rows.push({ label: 'Tasks', value: `${s.tasks.completed} of ${s.tasks.total} done${s.tasks.failed > 0 ? `, ${s.tasks.failed} failed` : ''}` })
-  if (s.wait !== 'FINISHED') rows.push({ label: 'Workers', value: `${s.workers.active} active, ${s.workers.waiting} waiting` })
-  rows.push({ label: 'Blockers', value: s.blocker ?? 'none' })
-  if (waiting) rows.push({ label: 'On the clock', value: 'not known while it waits' })
-  if (s.lastEvent) rows.push({ label: 'Last event', value: `${clock(s.lastEvent.at)} ${s.lastEvent.text}` })
-  if (s.nextRefreshAt) rows.push({ label: 'Next refresh', value: clock(s.nextRefreshAt) })
-  return rows
 }
 
 export function ProgressPanel({ runId }: { runId: string }) {

@@ -134,7 +134,8 @@ export interface AgentRunInput {
   onActivity?: () => void
 }
 
-export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped' | 'capacity'
+/** `network` (0.9): the session ended because the provider could not be reached. A wait, like `quota`. */
+export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped' | 'capacity' | 'network'
 
 export interface AgentRunResult {
   agentId: string
@@ -356,7 +357,7 @@ export class AgentRunner {
     }
 
     // A usage limit or an authentication stop is not a failure of the agent: it ends 'stopped', reason recorded.
-    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth' && last.outcome !== 'capacity'
+    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth' && last.outcome !== 'capacity' && last.outcome !== 'network'
     const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
     try {
       this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
@@ -792,10 +793,22 @@ export class AgentRunner {
     else if (result) outcome = result.outcome
     else if (quota) outcome = 'quota'
     else outcome = 'crashed'
+    // 0.9: a session that ended in an error or without a result because the network went away did not fail its
+    // task. What it was is asked of the connectivity supervisor, with the error it ended with.
+    if ((outcome === 'crashed' || outcome === 'error') && this.deps.networkLoss !== undefined) {
+      const said = [ended.error ?? '', ...(result?.errors ?? [])].join('\n')
+      let lost = false
+      try {
+        lost = this.deps.networkLoss(said)
+      } catch {
+        lost = false
+      }
+      if (lost) outcome = 'network'
+    }
     if (outcome === 'crashed' && ended.error) appendOutput('error', ended.error)
 
     repos.sessions.update(session.id, {
-      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' || outcome === 'capacity' ? 'ended' : 'failed',
+      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' || outcome === 'capacity' || outcome === 'network' ? 'ended' : 'failed',
       endReason: stopReason ?? (outcome === 'success' ? 'completed' : outcome),
       endedAt: nowIso(),
     })

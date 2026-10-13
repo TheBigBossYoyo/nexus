@@ -144,6 +144,10 @@ export class ConsensusPlanner {
       this.core.pauseRun(runId, 'capacity', 'Waiting for quality-approved planning capacity')
       return true
     }
+    if (result.outcome === 'network') {
+      this.core.pauseRun(runId, 'network', 'Waiting for the network: the provider could not be reached')
+      return true
+    }
     if (result.outcome === 'quota') {
       this.core.pauseRun(runId, 'quota', 'Claude usage limit reached')
       return true
@@ -192,7 +196,7 @@ export class ConsensusPlanner {
     // A session that was stopped or hit a limit produced nothing; the others are real results and are kept.
     const candidates: PlanningCandidate[] = []
     for (const { lens, result, durationMs } of sessions) {
-      if (result.outcome === 'stopped' || result.outcome === 'quota' || result.outcome === 'auth' || result.outcome === 'capacity') continue
+      if (result.outcome === 'stopped' || result.outcome === 'quota' || result.outcome === 'auth' || result.outcome === 'capacity' || result.outcome === 'network') continue
       const checked = input.validate(run, result.outcome === 'success' ? result.structuredOutput : undefined, result.error)
       const agent = repos.agents.require(result.agentId)
       const row = repos.planningCandidates.insert({

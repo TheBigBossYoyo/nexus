@@ -13,6 +13,7 @@ const PAUSE_LABEL = {
   quota: 'Paused: Claude usage limit reached',
   recovery: 'Paused after an app restart (recovery)',
   capacity: 'Waiting for a provider: nothing failed, and NEXUS resumes this mission by itself',
+  network: 'Waiting for the network: nothing failed, and NEXUS resumes this mission by itself when the provider can be reached',
 } as const
 
 function TaskProblem({ task, canRetry }: { task: Task; canRetry: boolean }) {

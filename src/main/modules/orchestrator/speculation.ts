@@ -14,7 +14,7 @@ import type { PipelineHost } from './pipeline'
 import { purposeFor } from './task-kind'
 
 const LABELS = ['a', 'b', 'c'] as const
-const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown'])
+const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown', 'network'])
 /** Losing candidates keep their diff for inspection after their repository is gone. */
 const MAX_STORED_PATCH_CHARS = 200_000
 const HEARTBEAT_MS = 30_000
