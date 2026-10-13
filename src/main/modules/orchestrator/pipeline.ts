@@ -79,7 +79,7 @@ type ReviewOutcome = { status: 'approved'; summary: string } | { status: 'change
 type GateResult<T> = { status: 'ok'; value: T; agentId: string } | { status: 'halt' } | { status: 'failed'; error: string }
 
 // 'capacity': the session waited for a provider and no work was done in it.
-const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown', 'capacity'])
+const RESUMABLE_END_REASONS = new Set(['paused', 'quota', 'auth', 'app_restart', 'shutdown', 'capacity', 'network'])
 const SIGNIFICANT = new Set(['critical', 'high'])
 const HEARTBEAT_MS = 30_000
 
@@ -506,6 +506,10 @@ export class TaskPipeline {
     }
     if (outcome === 'quota') {
       this.core.pauseRun(run.id, 'quota', 'Claude usage limit reached')
+      return true
+    }
+    if (outcome === 'network') {
+      this.core.pauseRun(run.id, 'network', 'Waiting for the network: the provider could not be reached')
       return true
     }
     if (outcome === 'auth') {

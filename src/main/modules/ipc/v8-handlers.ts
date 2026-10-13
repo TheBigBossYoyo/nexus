@@ -98,8 +98,8 @@ export function enrollmentDetail(profile: AutonomyProfile): string {
 }
 
 /**
- * 0.8 autonomy channels. The two that give authority (`enroll`, and `resolve` with a grant for the whole
- * project) are confirmed natively by the runtime; the others read. None is reachable from an agent session:
+ * 0.8 autonomy channels. Those that give lasting authority (`enroll`, and `resolve` with a grant for the whole
+ * project or, since 0.9, for the whole mission) are confirmed natively by the runtime; the others read. None is reachable from an agent session:
  * a session has no channel to the runtime but the calls of its own tools.
  */
 export function createAutonomyHandlers(ctx: AutonomyHandlerContext): AutonomyHandlers {
@@ -123,15 +123,30 @@ export function createAutonomyHandlers(ctx: AutonomyHandlerContext): AutonomyHan
     'autonomy.pending': ({ projectId }) => autonomy.pending(projectId),
     'autonomy.recent': ({ projectId, limit }) => autonomy.recent(limit ?? 50, projectId),
     'autonomy.resolve': async (decision) => {
-      if (decision.decision === 'ALLOW_PROJECT') {
+      // 0.9 (review, L-1): a grant that outlives the one action shown is confirmed natively, by the runtime's own
+      // dialog: for the whole mission as for the whole project. Whoever can reach the runtime's pipe can ask for
+      // a grant; only the person at the machine can give one. Allowing the one action shown (bound to a hash of
+      // that call) and denying need no second question.
+      if (decision.decision === 'ALLOW_PROJECT' || decision.decision === 'ALLOW_MISSION') {
         const request = autonomy.pending().find((r) => r.id === decision.requestId)
         if (request === undefined) throw new NexusError('not_found', 'There is no such pending boundary request.')
         const label = AUTONOMY_CAPABILITIES[request.capability].label
+        const project = decision.decision === 'ALLOW_PROJECT'
+        const where = project ? 'in the project' : 'in this mission'
         // When the resource is not narrowed to one thing, the grant covers every action of this kind, not only the one shown.
-        const covers = request.resource.kind === 'ANY' ? `This covers EVERY such action in the project, not only the one shown here: any "${label}", to any place, now and in every later mission.` : `This covers ${describeResource(request.resource)} in the project.`
-        const detail = `${label}\n${describeResource(request.resource)}\n\nThe action shown to you:\n${cleanAgentText(request.action).slice(0, 400)}\n\n${covers}\nIt holds for every later mission in the project until you take it back in Settings > Autonomy.`
-        // No way to ask is a no: a project-wide grant that cannot be confirmed is not made.
-        if (!ctx.confirm || !(await ctx.confirm('Always allow for this project', `Always allow this in "${request.projectName}"?`, detail, 'Always allow'))) {
+        const covers = request.resource.kind === 'ANY' ? `This covers EVERY such action ${where}, not only the one shown here: any "${label}", to any place${project ? ', now and in every later mission' : ', until the mission ends'}.` : `This covers ${describeResource(request.resource)} ${where}.`
+        const lasts = project ? 'It holds for every later mission in the project until you take it back in Settings > Autonomy.' : 'It ends with the mission.'
+        const detail = `${label}
+${describeResource(request.resource)}
+
+The action shown to you:
+${cleanAgentText(request.action).slice(0, 400)}
+
+${covers}
+${lasts}`
+        // No way to ask is a no: a grant that cannot be confirmed is not made.
+        const asked = project ? (['Always allow for this project', `Always allow this in "${request.projectName}"?`, 'Always allow'] as const) : (['Allow for this mission', `Allow this for the rest of the mission in "${request.projectName}"?`, 'Allow for the mission'] as const)
+        if (!ctx.confirm || !(await ctx.confirm(asked[0], asked[1], detail, asked[2]))) {
           throw new NexusError('invalid_state', 'Nothing was allowed: the confirmation was declined. The request is still pending.')
         }
       }

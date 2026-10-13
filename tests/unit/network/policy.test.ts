@@ -118,6 +118,13 @@ describe('the URL check of a public research session', () => {
     expect(denial(checkUrl(research, `https://example.com/?q=${'a'.repeat(2100)}`))).toBe('URL_TOO_LONG')
     expect(denial(checkUrl(research, 'http://example.com:22/'))).toBe('PORT')
     expect(denial(checkUrl(research, 'https://example.com:8443/'))).toBe('PORT')
+    // 0.9 (review, K-3): the registries too are reached on the web's ports only: no ssh to github.com through the proxy.
+    const deps = policyForProjectCommands({ network: true })
+    expect(denial(checkUrl(deps, 'https://github.com:22/'))).toBe('PORT')
+    expect(denial(checkUrl(deps, 'https://registry.npmjs.org:25/'))).toBe('PORT')
+    expect(denial(checkUrl(deps, 'http://nodejs.org:8080/'))).toBe('PORT')
+    expect(checkUrl(deps, 'https://registry.npmjs.org/react').allowed).toBe(true)
+    expect(checkUrl(deps, 'http://registry.npmjs.org:80/react').allowed).toBe(true)
     expect(denial(checkUrl(research, 'not a url'))).toBe('URL_INVALID')
   })
 })

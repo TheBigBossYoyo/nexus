@@ -474,6 +474,34 @@ attempt('stage-through-lock', () => { fs.writeFileSync(path.join(entry, 'index.l
       }
     }, 120_000)
 
+    it('writes nothing where every session reads: the tools and the launcher copies, and an entry to write there is taken away before the profile is judged', async () => {
+      const root = (account as { root: string }).root
+      const shared = [join(root, 'tools'), join(root, 'bin')]
+      // 0.9 (review, HIGH): such an entry was found on a real machine. Put there again, a fresh verification
+      // removes it and holds; contained code is refused in both places, by writing, renaming and deleting.
+      const planted = join(root, 'tools', 'nexus-test-own-entry')
+      mkdirSync(planted, { recursive: true })
+      writeFileSync(join(planted, 'tool.cmd'), '@echo original')
+      await launcher.grantContainer(planted)
+      const check = await broker.verify('ISOLATED', true)
+      expect(check.available, check.detail).toBe(true)
+      expect(check.detail).toContain('could not write where the shared tools lie')
+      const r = await probe('ISOLATED', 'shared-tools', `${ATTEMPT}
+        for (const [i, dir] of ${JSON.stringify(shared)}.entries()) attempt('write-' + i, () => { fs.writeFileSync(path.join(dir, 'planted-by-a-session.cmd'), 'x'); return 'written' })
+        const tool = ${JSON.stringify(join(planted, 'tool.cmd'))}
+        attempt('overwrite', () => { fs.writeFileSync(tool, '@echo replaced'); return 'written' })
+        attempt('rename', () => { fs.renameSync(tool, tool + '.old'); return 'renamed' })
+        attempt('delete', () => { fs.rmSync(tool); return 'deleted' })
+        attempt('read', () => fs.readFileSync(tool, 'utf8'))`)
+      try {
+        for (const key of ['write-0', 'write-1', 'overwrite', 'rename', 'delete']) expect(r.lines[key], `${key}: ${r.raw}`).toMatch(/^DENIED:/)
+        expect(r.lines['read']).toBe('OK:@echo original')
+        for (const dir of shared) expect(existsSync(join(dir, 'planted-by-a-session.cmd'))).toBe(false)
+      } finally {
+        rmSync(planted, { recursive: true, force: true })
+      }
+    }, 180_000)
+
     it('reaches the loopback, which is where its proxy is', async () => {
       const before = localHits
       const r = await probe('ISOLATED', 'loopback', `const http = require('http'); http.get('http://127.0.0.1:' + process.env.PROBE_PORT + '/', (res) => { console.log('loopback=OK:' + res.statusCode); process.exit(0); }).on('error', (e) => { console.log('loopback=DENIED:' + e.code); process.exit(0); });`)

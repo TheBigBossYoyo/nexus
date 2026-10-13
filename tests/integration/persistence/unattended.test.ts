@@ -63,7 +63,7 @@ describe('the unattended policy', () => {
     expect(h.asked).toEqual(['Enable autonomous work'])
   })
 
-  it('a request met unattended waits, stored; allowing it for the mission needs no confirmation, for the whole project it does', async () => {
+  it('a request met unattended waits, stored; allowing it for the mission or for the whole project is confirmed natively (0.9, review L-1)', async () => {
     let answer = false
     const h = setup(async () => answer)
     h.autonomy.enroll(h.project.id, 'AUTONOMOUS_PROJECT')
@@ -77,11 +77,15 @@ describe('the unattended policy', () => {
     // For the whole project: asked natively, and without a yes nothing changes.
     await expect(h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_PROJECT' })).rejects.toThrow(/confirmation was declined/)
     expect(h.autonomy.pending()).toHaveLength(1)
-    // For the mission: the user's click is the decision; nothing more is asked.
+    // For the mission: asked natively too, and said as what it is. Without a yes nothing changes.
+    await expect(h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_MISSION' })).rejects.toThrow(/confirmation was declined/)
+    expect(h.autonomy.pending()).toHaveLength(1)
+    expect(ask()?.behavior).toBe('deny')
     const before = h.asked.length
-    expect(await h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_MISSION' })).toMatchObject({ state: 'GRANTED' })
-    expect(h.asked.length).toBe(before)
-    expect(ask()?.behavior).toBe('allow')
     answer = true
+    expect(await h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_MISSION' })).toMatchObject({ state: 'GRANTED' })
+    expect(h.asked.length).toBe(before + 1)
+    expect(h.asked.at(-1)).toBe('Allow for this mission')
+    expect(ask()?.behavior).toBe('allow')
   })
 })

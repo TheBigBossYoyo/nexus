@@ -145,7 +145,8 @@ export const COMPLEXITIES = ['small', 'medium', 'large'] as const
 export const ComplexitySchema = z.enum(COMPLEXITIES)
 export type Complexity = z.infer<typeof ComplexitySchema>
 
-export type PauseReason = 'user' | 'quota' | 'recovery' | 'capacity'
+/** `network` (0.9): the provider could not be reached; the run waits and is resumed when the network is back. */
+export type PauseReason = 'user' | 'quota' | 'recovery' | 'capacity' | 'network'
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired'
 export type ApprovalKind = 'plan' | 'tool' | 'git' | 'task' | 'merge' | 'graph'
 export type MemoryScope = 'global' | 'project' | 'run'

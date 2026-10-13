@@ -10,6 +10,7 @@ import { TaskList } from './graph/TaskList'
 import { TaskInspector } from './inspector/TaskInspector'
 import { MissionHeader } from './MissionHeader'
 import { OvernightBanner } from './OvernightBanner'
+import { ProgressPanel } from './ProgressPanel'
 import { PlanInspector } from './PlanInspector'
 import { PlanPanel, PlannerActivity } from './PlanPanel'
 import { RunsList } from './RunsList'
@@ -313,6 +314,7 @@ function RunWorkspace({ runId }: { runId: string }) {
       <div className="flex h-full min-h-0 flex-col" data-testid="run-view">
         <MissionHeader />
         <OvernightBanner runId={runId} />
+        <ProgressPanel runId={runId} />
         <div className="relative min-h-0 flex-1">
           {narrow ? (
             <>

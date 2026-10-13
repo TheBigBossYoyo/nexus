@@ -1,31 +1,305 @@
 # NEXUS
 
-NEXUS is a Windows desktop application that coordinates several independent Claude agent
-sessions over one Git repository. You describe a goal. A planner agent turns it into a task graph,
-NEXUS schedules the tasks in parallel (each writing task in its own Git worktree), and every task
-goes through automated checks, an independent review and an independent verification before it is
-merged into a per-run integration branch. You merge that branch into your own branch yourself.
+NEXUS is a Windows desktop application that coordinates several independent Claude agent sessions over one Git
+repository. You describe a goal. A planner agent turns it into a task graph, NEXUS schedules the tasks in
+parallel (each writing task in its own Git worktree), and every task goes through automated checks, an
+independent review and an independent verification before it is merged into a per-run integration branch. You
+merge that branch into your own branch yourself.
 
-Orchestration (scheduling, state machines, retries, merging, recovery) is ordinary application code
-backed by a SQLite database. Claude is used only for planning, engineering work, review and
-verification. NEXUS never writes to your working tree.
+Orchestration (scheduling, state machines, retries, merging, recovery) is ordinary application code backed by a
+SQLite database. Claude is used for planning, engineering work, review and verification. NEXUS never writes to
+your working tree.
 
-Documentation index: [ARCHITECTURE](docs/ARCHITECTURE.md), [ORCHESTRATION](docs/ORCHESTRATION.md),
-[TASK_LIFECYCLE](docs/TASK_LIFECYCLE.md), [AGENT_RUNTIME](docs/AGENT_RUNTIME.md),
-[GIT_WORKTREES](docs/GIT_WORKTREES.md), [SECURITY](docs/SECURITY.md), [RECOVERY](docs/RECOVERY.md),
-[AUTHENTICATION](docs/AUTHENTICATION.md), [TESTING](docs/TESTING.md),
-[V0_2_DESIGN](docs/V0_2_DESIGN.md), [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md),
-[SPECULATIVE_EXECUTION](docs/SPECULATIVE_EXECUTION.md), [V0_3_DESIGN](docs/V0_3_DESIGN.md),
-[ARENA](docs/ARENA.md), [BENCHMARK_METHODOLOGY](docs/BENCHMARK_METHODOLOGY.md),
-[ADAPTIVE_POLICY](docs/ADAPTIVE_POLICY.md), [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md),
-[QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [PROGRAMS](docs/PROGRAMS.md),
-[LONG_HORIZON_AUTONOMY](docs/LONG_HORIZON_AUTONOMY.md), [BACKGROUND_ENGINEERING](docs/BACKGROUND_ENGINEERING.md),
-[WORKSPACES](docs/WORKSPACES.md), [MULTI_REPO_ORCHESTRATION](docs/MULTI_REPO_ORCHESTRATION.md),
-[CONTRACTS](docs/CONTRACTS.md), [RELEASE_TRAINS](docs/RELEASE_TRAINS.md), [PROVIDERS](docs/PROVIDERS.md),
-[V0_7_DESIGN](docs/V0_7_DESIGN.md), [CONTROL_PLANE](docs/CONTROL_PLANE.md), [GLOBAL_SCHEDULER](docs/GLOBAL_SCHEDULER.md),
-[WORKERS](docs/WORKERS.md), [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md), [MEMORY_ARCHITECTURE](docs/MEMORY_ARCHITECTURE.md),
-[CONTEXT_ENGINE_V3](docs/CONTEXT_ENGINE_V3.md), [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md),
-[PROMPT_CACHING](docs/PROMPT_CACHING.md), [CONTEXT_LIFECYCLE](docs/CONTEXT_LIFECYCLE.md).
+It is for one developer who runs long engineering work on a Windows 11 machine, wants it to go on unattended
+(for example overnight), and wants agents that run project code to be contained by the operating system and not
+only by a reading of their commands. It is not a hosted service, it has no server, and it is not a general
+agent framework.
+
+## Release state
+
+The version in `package.json` is **0.9.0**. The latest tagged release is **0.9.0** (`v0.9.0`, 2026-10-13).
+
+**0.9.0 is PARTIAL against the gates its own brief set, and was released on the owner's decision.** It is
+validated by the test suite (5,182 tests), the end-to-end tests (41 passed, 1 failed once and passed alone, 3
+skipped) and a package that was built and started. The installer was not run; there was no soak, no crash
+campaign, no Arena campaign, no real Program, Workspace or unattended night on this source, and no independent
+UX review; ten MEDIUM findings of the security review are open; and the operational-autonomy features were
+proven with simulated networks and transports only. It is not called PASS and it is not production-ready. What
+was and was not done: [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md). What stands between this and a 1.0
+release candidate (eight blockers): [1_0_READINESS](docs/1_0_READINESS.md).
+
+Nothing is signed (see [Code signing](#code-signing)). There is no update channel.
+
+## Requirements
+
+| Requirement | Notes |
+|---|---|
+| Windows 11 x64 | The only supported and packaged platform. CI runs on `windows-latest`. |
+| Git for Windows | Needed for worktrees. Developed against Git 2.53. |
+| A Claude subscription, and Claude Code logged in | Agents are `claude.exe` processes started by the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk` 0.3.288). Run `claude auth login` once. See [Authentication](#authentication). |
+| Microsoft Edge | Used headless by the application and browser automation (`app_*` tools). Every Windows 11 has it; NEXUS looks for it in `Program Files`. |
+| Node.js 24 and pnpm 12.8.1 | Only to build from source. They match Electron 44.5.1 and the CI configuration (`.github/workflows/ci.yml`). A packaged install needs neither. |
+| Node.js 20 or newer on `PATH` | Needed only by the Arena: its built-in cases run `node --test`. NEXUS ships no Node. |
+| A ChatGPT plan (optional) | Only for the Strategic Director and the ChatGPT side of the Council and of TECHNICAL and COUNCIL task compilation. Nothing is sent to OpenAI until you switch sending on. See [PROVIDERS](docs/PROVIDERS.md). |
+| One administrator approval (optional) | Only for the one-time setup of the ISOLATED execution profile (below). |
+
+No C++ build tools are needed: `better-sqlite3` ships a prebuilt N-API binary, the Claude binary comes from the
+Agent SDK's Windows package, and the launcher (`native/nexus-launch`) is compiled with the C# compiler that
+ships with Windows.
+
+## Build, run, test and package
+
+```powershell
+git clone <this repository> Nexus
+cd Nexus
+pnpm install
+pnpm dev          # development app with hot reload
+```
+
+| Command | Result |
+|---|---|
+| `pnpm build` | Builds the launcher, then bundles main, preload and renderer into `out/`. |
+| `pnpm start` | Runs the built bundle (`electron-vite preview`). Run `pnpm build` first. |
+| `pnpm typecheck`, `pnpm lint` | TypeScript for both projects; ESLint. |
+| `pnpm test` | Unit, integration and scenario tests (Vitest). Uses `FakeAgentRuntime`; never calls the real Claude API. |
+| `pnpm test:unit`, `pnpm test:integration` | One project each. Integration also runs the Arena cases and the isolation tests, which start real contained processes. |
+| `pnpm test:e2e` | Builds, then Playwright drives the built Electron application. |
+| `pnpm stress` | Seeded orchestration stress campaign with scripted agents (no Claude usage). Not part of `pnpm test` or CI. |
+| `pnpm package` | Builds, then electron-builder produces the NSIS installer for Windows x64 in `release/`. |
+
+The installer is `release/NEXUS-Setup-<version>.exe` (a per-user install; the location can be chosen). The
+unit and integration suites are described in [TESTING](docs/TESTING.md); the manual smoke tests and the
+real-Claude acceptance scripts are in "Scripts" at the end of this file.
+
+### The release folder
+
+After `pnpm package`, `node scripts/release-artifacts.mjs release` lays out `release/v<version>/` from the commit
+being built. It refuses a tree that is not clean unless `--allow-dirty` is given (the manifest then says so). The
+folder contains:
+
+- the installer and its block map;
+- `build-manifest.json`: commit, version, hashes of the lock file and of the native binaries with their
+  sources, database schema, runtime protocol, setup version, toolchain, signing state;
+- `sbom.cdx.json`: a CycloneDX bill of materials of the production dependencies, Electron, busybox-w32 and the
+  launcher;
+- `THIRD_PARTY_NOTICES.md` and `licenses/`;
+- `source/`: the complete source of busybox-w32 at the shipped commit (see [Third-party software](#third-party-software-and-licensing));
+- `SHA256SUMS` over all of it, read back and checked after it is written.
+
+A release folder was built once for 0.9.0; a second build for comparison was not made. The installer
+(install, upgrade, uninstall, reinstall) has not been run.
+
+## Execution profiles
+
+For a project you enroll, everything an agent runs, and everything NEXUS runs for it (project scripts, tests,
+dependency installs, the application under test), is started by one program, `nexus-launch.exe`, inside a job
+object and under a restricted token. The reading of commands (policy, command classifier) still exists; it
+decides which capability a command needs and is no longer what keeps the command in. The profile is chosen in
+Settings. A project that is not enrolled is not contained and behaves as in 0.7.
+
+| Profile | What it is | What it is not |
+|---|---|---|
+| ISOLATED | Runs as a dedicated local sandbox account, in an AppContainer, at low integrity, with the Windows firewall blocking the account and its traffic going only through NEXUS's filtering proxy on the loopback. It cannot read the user's profile or credentials. Since 0.9 each session also holds a capability of its own and its project a capability of its own: a session cannot write another session's worktree, temporary directory or home, cannot end its processes, and another project's package cache is out of reach (`tests/integration/isolation/cross-session.test.ts`). The shell inside it is busybox ash, not Git's bash. | Not complete: a session can still read another session's worktree (open in the ledger) (see the security model, "What is not contained"). |
+| RESTRICTED | Runs as you, at low integrity, in a job object, writing only to directories NEXUS labeled. Needs no setup. | **Not a containment against hostile code.** Existing objects of the repository can be overwritten by code that runs as the user. Prefer ISOLATED for unattended work. |
+| STANDARD | Runs as you, at medium integrity, no job object. | No containment. |
+
+The default is `STRONGEST`: ISOLATED when the sandbox account is set up and was verified at this start,
+otherwise RESTRICTED. It never means STANDARD. There is no fallback: a profile that was asked for and cannot be
+made runs nothing. NEXUS verifies the profile at every start by running a contained command and checking what
+it could and could not do.
+
+### One-time sandbox setup and its removal
+
+ISOLATED needs a one-time setup that raises **one administrator (UAC) prompt**. It creates the sandbox account,
+its folder under `ProgramData`, firewall rules, a Windows profile for the account, access entries on `C:\` and
+`C:\ProgramData`, a loopback exemption, an entry for the AppContainer on the Mount Manager device and a startup
+task (`NexusSandbox-RestoreCanonicalization`) that restores that entry. The account's password is generated by the
+script, stored as a DPAPI blob under `%LOCALAPPDATA%\NexusSandbox` and never printed.
+
+```powershell
+node scripts/sandbox-setup.mjs              # create or repair (build first: it needs out/native/nexus-launch.exe)
+node scripts/sandbox-setup.mjs --status     # say what is recorded, change nothing
+node scripts/sandbox-setup.mjs --remove     # take all of it away (add --remove-root to delete the sandbox root too)
+```
+
+(`pnpm sandbox:setup` runs the first form.) The packaged application carries the same scripts under
+`resources/sandbox-setup`. Open finding in the ledger: the elevated scripts compile and write in the user's
+temporary folder, and the removal script has a recursion finding (W2-F12); both are listed as open. Details and
+every step: [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md).
+
+## What NEXUS does
+
+| Feature | What it does |
+|---|---|
+| Missions | One goal becomes a validated task graph, scheduled in parallel under a preset (ECO, BALANCED, MAXIMUM) and a strategy (`ADAPTIVE`, `SINGLE`, `BUILD`, `SWARM`, `CONSENSUS`, `SPECULATIVE`). Each task is implemented, checked, reviewed and verified; the result is an integration branch you merge yourself. See the sections below. |
+| Programs | A goal pursued across many missions: a plan of at most 12 milestones, verification of each, replanning, backlog and memory, waiting out usage limits. The result stays on a program branch. [PROGRAMS](docs/PROGRAMS.md) |
+| Workspaces | Several related repositories enrolled as a set, with an organization graph, contracts and cross-repository missions. NEXUS never publishes. [WORKSPACES](docs/WORKSPACES.md) |
+| Director and Council | A Strategic Director (ChatGPT) and a Technical Director (Claude) and a Council of both give advice. They never act: nothing a Director writes can start work, change a policy or grant a permission. [PROVIDERS](docs/PROVIDERS.md), [V0_7_2_RELEASE_REPORT](docs/V0_7_2_RELEASE_REPORT.md) |
+| Task Compiler | Admits every request as a specification before work starts and gives it the least depth that is enough: EXACT, LIGHT, STANDARD, TECHNICAL or COUNCIL, with AUTO as the composer's default. [PROVIDERS](docs/PROVIDERS.md) |
+| Context Graph | One index over repository facts, project, program and workspace memory and contracts, with typed relations, trust and freshness. Context Engine V3 is on by default. [CONTEXT_GRAPH](docs/CONTEXT_GRAPH.md) |
+| Token Intelligence | Accounting of every model request, cache reads and writes, and every context decision with its reason. [TOKEN_INTELLIGENCE](docs/TOKEN_INTELLIGENCE.md) |
+| Provider capacity and quota recovery | Capacity admission for every agent session; a usage limit pauses the work, and it resumes by itself after the reset the runtime reported or after a probe. NEXUS never invents remaining quota. [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md), [USAGE_INTELLIGENCE](docs/USAGE_INTELLIGENCE.md) |
+| Overnight | An unattended mission with a deadline and an end-of-run power action you authorize (shut down, sleep, hibernate or none), with a Windows shutdown timer as failsafe. The real power action has never been exercised on a night. [OVERNIGHT_MODE](docs/OVERNIGHT_MODE.md) |
+| Arena | The same task under different strategies in controlled trials, scored by a hidden evaluator, with a documented ranking. No Arena campaign has been run on 0.9.0. [ARENA](docs/ARENA.md) |
+| Autonomy profiles and boundary requests | You enroll a project with a profile (Autonomous project, Balanced, Locked down). What the profile covers runs without a question; what it does not cover becomes one deduplicated boundary request that waits for you while other work goes on, and the mission resumes by itself when it is granted. Granting for a whole project or a whole mission asks for a native Windows confirmation. [AUTONOMY_MODEL](docs/AUTONOMY_MODEL.md) |
+| App and browser automation | Eight `app_*` tools let an agent start the project's application inside the containment, read its accessibility tree, operate it, take screenshots and read its console and network, through Playwright and Edge. [APP_BROWSER_AUTOMATION](docs/APP_BROWSER_AUTOMATION.md) |
+| Internet research | Four `research_*` tools search and read the public web through NEXUS, not through a socket of the agent. Pages are data, never instructions; results are screened, attributed and held to a budget per registrable domain; a URL that looks like data being sent out is refused. [INTERNET_RESEARCH](docs/INTERNET_RESEARCH.md) |
+| Providers | Claude is required. Codex can be enabled as a read-only reviewer; Gemini is detected only. Nothing is sent to a provider you have not enabled. [PROVIDERS](docs/PROVIDERS.md) |
+
+### Operational autonomy (0.9.0)
+
+Three things built at the end of 0.9.0. Each is in the application and covered by tests with simulated
+networks and transports; none has been proven on a real outage, a real long mission or a real messaging
+service yet. The release report says exactly what was and was not shown.
+
+- **Progress and time remaining.** The mission page shows a percentage by expected work (not by count of
+  tasks), the stage, the elapsed time, and the active work that remains as a range with a confidence and its
+  reason. It is computed from the task graph and from how long tasks of the same kind took before on this
+  machine; no model is asked for a number. Work added by verification lowers the percentage and says so; time
+  spent waiting (for the network, the provider, a boundary decision, you) is kept apart from active time.
+  Refreshed when something happens and every five minutes otherwise.
+- **Network resilience.** A mission whose provider cannot be reached waits and is resumed when the network is
+  back; it is not failed. The Wi-Fi profile that was in use is reconnected through the Windows WLAN API, by
+  name, with no question; never a network that is not saved, never an open one, never a key. Windows is kept
+  from idle sleep while a mission works or will resume by itself. Outages are recorded with their facts.
+  [NETWORK_RESILIENCE](docs/NETWORK_RESILIENCE.md)
+- **Director Line.** Off until you turn it on. You pair one chat (Telegram, by long polling: no port is opened
+  on the machine) with a one-time code; from it you can ask for status, time remaining and blockers, pause
+  after the current task, continue, and add a task, which is created the way the window creates one. NEXUS
+  reports what matters (an end, a failure, a blocker or an outage that lasts), within quiet hours and limits.
+  The line grants nothing: a request to push, delete, change a profile or allow a boundary request is refused
+  and left for the machine. Telephone voice is designed, with an outbound call implemented and not configured.
+  [DIRECTOR_LINE](docs/DIRECTOR_LINE.md)
+
+## Security model in brief
+
+- The boundary for an enrolled project is the operating system (the execution profiles above), not a reading of
+  commands. A model, including a Director, the Task Compiler, a planner and a worker, is never part of the
+  boundary: all are callers of a capability broker, and none can write a grant, a profile or a policy.
+- The target statement: untrusted code may destroy its disposable worktree and its own process tree, but cannot
+  modify NEXUS, provider credentials, unrelated repositories, unrelated user data or the runtime. It holds in
+  full only for ISOLATED and with the exceptions the security model lists under "What is not contained".
+- Limits stated by the documents: RESTRICTED is no containment against hostile code; sessions can read each
+  other's worktrees; Git run as the user on the repository is not yet protected by an object store of the
+  task's own; loopback services other than NEXUS's proxy can be reached from ISOLATED; busybox ash has no bash
+  arrays and a git inside a longer command is refused; programs with a libuv older than 1.53 of their own hang on
+  a child with a pipe inside ISOLATED; the sandbox's copy of `node.exe` is changed by NEXUS in one place.
+- The window and the runtime talk over a Windows named pipe with a token only your user can read; nothing listens
+  on a TCP port. A program that runs as you and reads that file can do what the window can.
+- A second independent review of the 0.8.0 source found 1 CRITICAL, 3 HIGH, 16 MEDIUM and about 25 LOW findings.
+  The CRITICAL and the HIGH findings are fixed with tests. **Open review findings, including ten MEDIUM, are
+  listed in the ledger**, [V0_9_HARDENING_LEDGER](docs/V0_9_HARDENING_LEDGER.md), section E. There was no final
+  review after the fixes, and the launcher was read, not attacked, by the second party.
+
+Read [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md) before relying on any of this. The older
+[SECURITY](docs/SECURITY.md) describes the policy layer of 0.7.
+
+## Third-party software and licensing
+
+- **NEXUS's own code is under the Apache License, version 2.0** ([LICENSE](LICENSE)). The programs it ships
+  beside itself keep their own licenses, as said below.
+- **busybox-w32 is GPL-2.0.** `vendor/busybox/busybox.exe` (build FRP-6075-g169694ebd, unmodified) is the POSIX
+  shell of the ISOLATED profile. NEXUS starts it as a separate program and links nothing of it. Using it on your
+  own machine asks nothing of you. Giving a copy of NEXUS that contains it to anybody else asks for its source
+  (GPL-2.0, section 3(a)): the complete source of the shipped commit is in `vendor/busybox/source/`, the release
+  folder puts it in `release/v<version>/source/` beside the installer with the license text in `licenses/`, and
+  whoever passes on the installer passes on that folder with it. A build whose release folder lacks the archive
+  is for the machine it was built on, and the build stops on a binary that is not the one on record. This is the
+  author's reading of the license, not legal advice. See [vendor/busybox/README.md](vendor/busybox/README.md).
+- **Electron and Chromium** are shipped inside the installer under their own licenses, together with the other
+  production dependencies. `THIRD_PARTY_NOTICES.md` and the CycloneDX bill of materials in the release folder
+  are generated from the lock file and the installed packages, not written by hand.
+- `claude.exe` comes from Anthropic's Agent SDK package and keeps Anthropic's signature and terms.
+
+## Code signing
+
+Nothing is signed. The installer, `NEXUS.exe`, `nexus-launch.exe`, `busybox.exe` and the setup scripts are
+unsigned and no code-signing certificate is owned. This blocks public distribution, not a local release. On
+another machine an unsigned installer meets SmartScreen ("Windows protected your PC") and, where Smart App
+Control enforces, may be blocked. The pipeline for signing and for checking signatures
+(`scripts/verify-signatures.mjs`) is ready and tested with a changed byte, but has never been exercised with a
+real certificate. What can be obtained and why: [CODE_SIGNING](docs/CODE_SIGNING.md).
+
+## Known limitations and what blocks 1.0
+
+[1_0_READINESS](docs/1_0_READINESS.md) says NOT READY for a 1.0 release candidate and names eight blockers, none
+of them new architecture:
+
+1. The installer lifecycle was never run (clean install, upgrade from 0.8.0, uninstall, reinstall, restart).
+2. The open MEDIUM findings of the review (ledger, section E).
+3. Reading between sessions is open.
+4. No long run: a 12-hour soak against fixed limits, and a crash campaign.
+5. No measurement of quality on this source (an Arena campaign, with AUTO).
+6. No real work on this source: a long Program, a multi-repository Workspace, an unattended night.
+7. No final independent review after the fixes, with the launcher attacked and not only read.
+
+A signing certificate, the real power action and the LOW findings are not counted as blockers there. Other
+limits you will meet: NEXUS targets Windows 11 x64 only; it does not merge into your branch; memory is a keyword
+index, not a vector index; a passing verification means a verifier agent judged the criteria met, not that the
+software is correct. The full lists, by version, are under "Current limitations" below.
+
+## Documentation map
+
+| Document | What it is |
+|---|---|
+| [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md) | The 0.9.0 report: the PARTIAL verdict, gates, tests, package, operational autonomy, what was left out |
+| [V0_9_HARDENING_LEDGER](docs/V0_9_HARDENING_LEDGER.md) | One list of everything open or closed in the hardening, with a disposition and a state for each, including review findings |
+| [1_0_READINESS](docs/1_0_READINESS.md) | Category by category readiness for 1.0, and the eight blockers |
+| [V0_9_SOAK_THRESHOLDS](docs/V0_9_SOAK_THRESHOLDS.md) | The limits a soak will be judged by, fixed before one is run |
+| [V0_9_FLAKES](docs/V0_9_FLAKES.md) | Tests that did not give the same answer twice, and the runs of the suite |
+| [CODE_SIGNING](docs/CODE_SIGNING.md) | Signing, SmartScreen and antivirus: the state and the options |
+| [V0_8_RELEASE_REPORT](docs/V0_8_RELEASE_REPORT.md) | The 0.8.0 report (PASS): gates, runs, what the owner should know |
+| [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md) | What is and is not contained, profile by profile |
+| [AUTONOMY_MODEL](docs/AUTONOMY_MODEL.md) | Profiles, capabilities and boundary requests |
+| [APP_BROWSER_AUTOMATION](docs/APP_BROWSER_AUTOMATION.md) | The `app_*` tools and what the application and the browser can reach |
+| [INTERNET_RESEARCH](docs/INTERNET_RESEARCH.md) | The `research_*` tools and the treatment of untrusted pages |
+| [ARCHITECTURE](docs/ARCHITECTURE.md), [CONTROL_PLANE](docs/CONTROL_PLANE.md) | Process roles, modules, the local protocol, the global queue |
+| [ORCHESTRATION](docs/ORCHESTRATION.md), [TASK_LIFECYCLE](docs/TASK_LIFECYCLE.md) | Planning, scheduling, strategies, review, verification |
+| [TESTING](docs/TESTING.md) | Test layers, `FakeAgentRuntime`, stress and smoke tests |
+| [PROVIDERS](docs/PROVIDERS.md), [AUTHENTICATION](docs/AUTHENTICATION.md) | Providers, what is sent where, sign-in |
+
+The rest of the index is in the sections that follow and in `docs/`.
+
+## Feature history
+
+The sections below describe each version's additions as they were implemented, newest first. They are kept for
+detail; where one of them disagrees with the sections above, the sections above and the newest report are later.
+
+## 0.9.0 (part one): hardening and release engineering
+
+What was verified and what was not: [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md).
+
+- A capability per session and per project under ISOLATED (see "Execution profiles"). The test runs two hostile
+  sessions at once and one of another project.
+- A speculative candidate's clone can no longer redirect its repository to make NEXUS's own git run a program:
+  NEXUS names the clone's Git directory itself and refuses anything in the clone that redirects it (the CRITICAL
+  finding of the second review).
+- A URL an agent names as a way out is screened, the provider's own web tools are neither offered nor allowed in
+  an enrolled project, allowing a boundary request for the whole mission asks for the native confirmation, and a
+  launcher spec without an AppContainer is refused.
+- Release engineering: the release folder (manifest, bill of materials, notices, checksums, busybox source), the
+  check of signatures, the limits of a soak and its analyzer. See "The release folder" above.
+- One real restart of Windows was observed: ISOLATED was available by itself 6.6 seconds after launch, with no
+  elevation prompt (`docs/acceptance/v09-first-real-reboot-2026-10-13.md`). One restart, not a matrix.
+- Not done: reading between sessions, an object store of the task's own for git, the link scan, the Node
+  compatibility policy, the open MEDIUM findings, the installer lifecycle. Full list: "Left out by the owner's
+  decision" in the report.
+
+## 0.8.0: isolation and autonomy
+
+Report (PASS): [V0_8_RELEASE_REPORT](docs/V0_8_RELEASE_REPORT.md). Design: [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md),
+[AUTONOMY_MODEL](docs/AUTONOMY_MODEL.md).
+
+- The ISOLATED, RESTRICTED and STANDARD execution profiles, the launcher `nexus-launch.exe`, the sandbox account
+  and the AppContainer.
+- Autonomy profiles (Autonomous project, Balanced, Locked down) and boundary requests: a normal autonomous
+  mission interrupted the user 0 times in the real runs of the report.
+- Application and browser automation, including an Electron application under test inside the containment
+  ([APP_BROWSER_AUTOMATION](docs/APP_BROWSER_AUTOMATION.md)), and internet research
+  ([INTERNET_RESEARCH](docs/INTERNET_RESEARCH.md)).
+- Costs stated in the report: a POSIX shell (busybox ash) instead of Git's bash inside ISOLATED, no git on the
+  user's repository from inside a longer command, a changed copy of `node.exe` for the sandbox, and programs with
+  a libuv older than 1.53 of their own that hang on a child with a pipe.
 
 ## 0.7.2: Directors, the Task Compiler and capacity admission
 
@@ -108,7 +382,7 @@ What this changes for you:
   may run them, and refusals are logged ([SECURITY](docs/SECURITY.md)).
 
 **NEXUS is not a sandbox.** The execution policy classifies and decides what an agent asks to run, including what an
-interpreter or a package script would run and who wrote it. That is a policy layer. Code that NEXUS allows to run,
+interpreter or a package script would run and who wrote it. That is a policy layer (in 0.7; 0.8 adds operating-system containment, see "Execution profiles"). Code that NEXUS allows to run,
 runs as your Windows user, with your permissions; processes of the runtime and of the workers are not isolated from your
 files. Operating-system containment is not part of 0.7: see [WINDOWS_EXECUTION_ISOLATION](docs/WINDOWS_EXECUTION_ISOLATION.md)
 and [V0_8_PROPOSAL](docs/V0_8_PROPOSAL.md).
@@ -234,9 +508,10 @@ The design and its deviations from the implementation are in [V0_2_DESIGN](docs/
 
 ## Release history and supported versions
 
-Use 0.7.0. 0.6.0 is the oldest line that has the fixes of 0.6, but the security review of 0.7 found that two of
-its protections can be bypassed (see "Known defects of 0.6.0" below); 0.7.0 fixes them. Earlier tags are kept as they are, for history; no tag has been rewritten or deleted.
-Dates are those of the tagged commit (+01:00).
+The latest tagged release is 0.9.0. Earlier tags are kept as they
+are, for history; no tag has been rewritten or deleted. Dates are those of the tagged commit. The recommendation
+column is as each release's own report left it; 0.7.x predates the operating-system containment of 0.8 (0.7 is
+not a sandbox, see below).
 
 | Version | Tag | Date | Status | Note |
 |---|---|---|---|---|
@@ -245,10 +520,15 @@ Dates are those of the tagged commit (+01:00).
 | 0.3.0 | `v0.3.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
 | 0.4.0 | `v0.4.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0 |
 | 0.5.0 | `v0.5.0` | 2026-10-05 | Not recommended | Contains both defects fixed in 0.6.0. The tag also lacks the 0.5.0 entries of `docs/TEST_STATUS.md` and `docs/BUILD_PROGRESS.md` (see below) |
-| 0.6.0 | `v0.6.0` | 2026-10-05 | Minimum recommended; has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
-| 0.7.0 | `v0.7.0` | 2026-10-07 | Recommended | Secure control plane; fixes the known defects of 0.6.0 listed below. Report: `docs/V0_7_RELEASE_REPORT.md` |
-| 0.7.1 | `v0.7.1` | 2026-10-10 | Recommended | Context Graph and token intelligence. A real campaign of fifty runs over eight task categories found it non-inferior to 0.7.0 with no case worse; with the Context Graph, on by default, missions used 16% fewer turns. It also fixes a defect that blocked real programs in 0.7.0. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
-| 0.7.2 | `v0.7.2` | 2026-10-11 | Recommended | Directors, the Task Compiler, capacity admission, the 2.0 interface. In a real campaign against 0.7.1 it was non-inferior when requests are admitted as written; the default depth passed every hidden evaluation and its comparison is incomplete. No saving is claimed. Report: `docs/V0_7_2_RELEASE_REPORT.md` |
+| 0.6.0 | `v0.6.0` | 2026-10-05 | Has known defects | Contains the fixes of 0.6.0. Report: `docs/V0_6_RELEASE_REPORT.md`. The 0.7 review found them incomplete (see below) |
+| 0.7.0 | `v0.7.0` | 2026-10-07 | Superseded | Secure control plane; fixes the known defects of 0.6.0 listed below. Report: `docs/V0_7_RELEASE_REPORT.md` |
+| 0.7.1 | `v0.7.1` | 2026-10-10 | Superseded | Context Graph and token intelligence. A real campaign of fifty runs over eight task categories found it non-inferior to 0.7.0 with no case worse; with the Context Graph, on by default, missions used 16% fewer turns. It also fixes a defect that blocked real programs in 0.7.0. Report: `docs/V0_7_1_RELEASE_REPORT.md` |
+| 0.7.2 | `v0.7.2` | 2026-10-11 | Superseded | Directors, the Task Compiler, capacity admission, the 2.0 interface. In a real campaign against 0.7.1 it was non-inferior when requests are admitted as written; the default depth passed every hidden evaluation and its comparison is incomplete. No saving is claimed. Report: `docs/V0_7_2_RELEASE_REPORT.md` |
+| 0.8.0 | `v0.8.0` | 2026-10-13 | Latest tagged release | Execution isolation (ISOLATED, RESTRICTED, STANDARD), autonomy profiles and boundary requests, application and browser automation, internet research. Verdict PASS against its gates, merged to `main` and tagged locally; when its report was written nothing was pushed. Report: `docs/V0_8_RELEASE_REPORT.md` |
+| 0.9.0 | 2026-10-13 | `v0.9.0` | PARTIAL against its own gates, released on the owner's decision | Per-session capabilities, the second security review, release engineering, and operational autonomy (progress and time remaining, network resilience, the Director Line). Not production-ready: the installer was not run, nothing was proven on a real outage, a real long mission or a real messaging service. Report: `docs/V0_9_RELEASE_REPORT.md` |
+
+"Superseded" is this file's word for a version that a later tagged release replaces; no report calls 0.7.x
+unsafe for the reasons below, but none of them contains the operating-system containment.
 
 Why 0.2.1 to 0.5.0 are not recommended. `docs/V0_6_RELEASE_REPORT.md` ("Security hardening") and `docs/SECURITY.md`
 record two defects that `v0.3.0`, `v0.4.0` and `v0.5.0` do not fix:
@@ -291,39 +571,6 @@ progress for 0.5.0 were committed 28 seconds later, as `f8e5a67`, which is not i
 tag, `docs/TEST_STATUS.md` still describes 0.4.0 and `docs/BUILD_PROGRESS.md` has no 0.5.0 section. Current
 `main` and later tags have both.
 
-## Requirements
-
-| Requirement | Notes |
-|---|---|
-| Windows 11 x64 | The only supported and packaged platform. CI runs on `windows-latest`. |
-| Node.js 24 | Matches Electron 44's Node and the CI configuration. |
-| pnpm | CI pins pnpm 12.8.1. |
-| Node.js 20 or newer on `PATH` | Needed only by the Arena: its built-in cases run `node --test`. NEXUS ships no Node. |
-| Git | Needed for worktrees. Developed against Git 2.53 for Windows. |
-| Claude Code, logged in | Run `claude auth login` once in a terminal. See [Authentication](#authentication). |
-
-No C++ build tools are needed: `better-sqlite3` ships a prebuilt N-API binary and the Claude binary
-comes from the Agent SDK's Windows package.
-
-## Install from source
-
-```powershell
-git clone <this repository> Nexus
-cd Nexus
-pnpm install
-pnpm dev          # development app with hot reload
-```
-
-| Command | Result |
-|---|---|
-| `pnpm build` | Bundles main, preload and renderer into `out/`. |
-| `pnpm start` | Runs the built bundle (`electron-vite preview`). Run `pnpm build` first. |
-| `pnpm package` | `pnpm build`, then electron-builder produces an NSIS installer for Windows x64. |
-
-The installer is written to `release/NEXUS-Setup-<version>.exe` (see `electron-builder.yml`:
-`directories.output: release`, `nsis.artifactName`). The installer is not code-signed by anything in
-this repository. The install location can be chosen and it is a per-user install.
-
 ## Authentication
 
 NEXUS does not store, read or manage Claude credentials and has no login flow. Each agent is a
@@ -354,8 +601,8 @@ cost beyond that document.
 ## Launching and opening a project
 
 1. Start the app (`pnpm dev`, `pnpm start`, or the installed NEXUS shortcut). Only one window runs;
-   starting a second one focuses the first. On the `nexus-0.7` branch the window starts the runtime process when none is
-   running and connects to it; closing the window leaves the runtime and its work running (see 0.7 above).
+   starting a second one focuses the first. The window starts the runtime process when none is running and
+   connects to it; closing the window leaves the runtime and its work running (see 0.7.0 below).
 2. Projects view, "Open Project", and pick a folder. NEXUS resolves the Git root, then profiles the
    project read-only: package managers, languages, frameworks, scripts, and the build, test, lint and
    typecheck commands it will use as automated checks. Nothing in the folder is changed.
@@ -465,7 +712,7 @@ cleaned up. NEXUS does not merge into your branch, push, or delete branches. See
 | Arena trial repositories | `%APPDATA%\NEXUS\arena\<campaign>\<trial>\`; removed by `arena.cleanup` for a finished campaign |
 | Task and integration worktrees | `%APPDATA%\NEXUS\worktrees\<run>\<task>\` |
 | Electron profile data | `%APPDATA%\NEXUS\` |
-| Runtime files (0.7 branch) | `%APPDATA%\NEXUS\runtime\` (`endpoint.json`: the pipe name and token, readable by your user only; `runtime.log`), `%APPDATA%\NEXUS\runtime-profile\` (the runtime's own profile), `%APPDATA%\NEXUS\overnight.key` |
+| Runtime files | `%APPDATA%\NEXUS\runtime\` (`endpoint.json`: the pipe name and token, readable by your user only; `runtime.log`), `%APPDATA%\NEXUS\runtime-profile\` (the runtime's own profile), `%APPDATA%\NEXUS\overnight.key` |
 | Claude session transcripts | Written by the Claude runtime itself under `~\.claude\projects\` |
 
 This is Electron's `userData` directory; the exact path is reported by the app (`app.info` returns
@@ -494,15 +741,17 @@ This is Electron's `userData` directory; the exact path is reported by the app (
 | Script | Runs |
 |---|---|
 | `pnpm dev` | `electron-vite dev` |
-| `pnpm build` | `electron-vite build` |
+| `pnpm build` | `node scripts/build-launcher.mjs && electron-vite build` |
 | `pnpm start` | `electron-vite preview` |
+| `pnpm launcher:build` | `node scripts/build-launcher.mjs`: compile `native/nexus-launch/nexus-launch.cs` to `out/native/` |
+| `pnpm sandbox:setup` | `node scripts/sandbox-setup.mjs`: the one-time elevated setup of the ISOLATED profile |
 | `pnpm typecheck` | `tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json` |
 | `pnpm lint` | `eslint .` |
 | `pnpm format` | `prettier --write .` |
 | `pnpm test` | `vitest run` (unit, integration and scenario projects) |
 | `pnpm test:unit` | `vitest run --project unit` |
-| `pnpm test:integration` | `vitest run --project integration` (includes `tests/scenarios`) |
-| `pnpm test:e2e` | `electron-vite build && playwright test` (Electron UI tests, see [TESTING](docs/TESTING.md)) |
+| `pnpm test:integration` | `vitest run --project integration --project arena-cases` (includes `tests/scenarios`) |
+| `pnpm test:e2e` | `node scripts/build-launcher.mjs && electron-vite build && playwright test` (Electron UI tests, see [TESTING](docs/TESTING.md)) |
 | `pnpm stress` | `vitest run -c vitest.stress.config.ts`: seeded orchestration stress campaign with scripted agents (no Claude usage). See [TESTING](docs/TESTING.md). |
 | `pnpm smoke:claude` | Manual test against the real Claude runtime. Consumes Claude usage. |
 | `pnpm smoke:power` | Manual test of the real `WindowsPowerController`: schedules a Windows shutdown one hour away, checks it was accepted, aborts it at once and checks nothing is left armed. Never part of `pnpm test`. |
@@ -516,7 +765,13 @@ This is Electron's `userData` directory; the exact path is reported by the app (
 | `pnpm accept:arena` | `node scripts/arena-acceptance.mjs` (real Claude, consumes usage): a small Arena campaign |
 | `pnpm accept:speculative` | `node scripts/strategy-acceptance.mjs speculative` (real Claude, consumes usage) |
 | `pnpm accept:adaptive` | `node scripts/strategy-acceptance.mjs adaptive` (real Claude, consumes usage) |
-| `pnpm package` | `electron-vite build && electron-builder --win nsis` |
+| `pnpm package` | `node scripts/build-launcher.mjs && electron-vite build && electron-builder --win nsis` |
+| `node scripts/release-artifacts.mjs release` | Lays out `release/v<version>/` after `pnpm package` (see "The release folder") |
+| `node scripts/verify-signatures.mjs <dir>` | Reports which Windows program files are signed; `--require-signed` fails on any that is not |
+| `node scripts/v08-packaged-check.mjs` | Starts a packaged, unpacked application off-screen on a data directory of its own and checks it (no Claude usage) |
+
+Other `smoke:*` and `accept:*` scripts exist in `package.json` (providers, dialog, workspace, compaction,
+campaign, Director); each is manual and most consume Claude usage.
 
 Automated tests never call the real Claude API; they use `FakeAgentRuntime`.
 
@@ -546,9 +801,11 @@ earlier single-mission acceptance script.
   approval kinds exist in the type definitions but nothing creates them. You run `git merge` yourself.
 - Memory is a keyword index (SQLite FTS5 with bm25). There is no vector or embedding memory.
 - Shell command classification is heuristic. Up to 0.6, inline interpreter code (`python -c`, `node -e`) and
-  script files were not inspected, and writing roles could run such commands without approval; the `nexus-0.7` branch
-  inspects them, which is still static inspection. There is no OS-level sandbox on native Windows: agents run with
-  your user's permissions, and NEXUS is not a sandbox. See [SECURITY](docs/SECURITY.md).
+  script files were not inspected, and writing roles could run such commands without approval; since 0.7 they are
+  inspected, which is still static inspection. Since 0.8 the operating system contains the code of an enrolled
+  project (see "Execution profiles"), but only ISOLATED is meant to hold against hostile code, and a project that
+  is not enrolled runs as the user with the policy layer alone. See [SECURITY](docs/SECURITY.md) and
+  [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md).
 - NEXUS itself runs the dependency install (`pnpm install`, `yarn install`, `bun install` or
   `npm ci`) in each new worktree and the project's check commands. These run project code and are
   not passed through the agent policy engine.
@@ -568,7 +825,7 @@ earlier single-mission acceptance script.
 - The planner, reviewer and verifier outputs are schema-checked, but the quality of plans and reviews
   is whatever the model produces. A passing verification means the verifier agent judged the criteria
   met, not that the software is correct.
-- Single window, single instance. On the `nexus-0.7` branch there is also one runtime process per data directory, which keeps
+- Single window, single instance. There is also one runtime process per data directory, which keeps
   running after the window closes until you choose "Stop NEXUS" or it has had nothing to do for two minutes.
 
 ### Limitations of 0.3 features
@@ -584,7 +841,8 @@ earlier single-mission acceptance script.
   probes with one minimal session per interval.
 - Quota recovery depends on what the runtime reports. With no reset time NEXUS probes on a backoff schedule; an ordinary
   (non-overnight) run with no wait limit probes for as long as NEXUS runs. See [QUOTA_RECOVERY](docs/QUOTA_RECOVERY.md).
-- Only the Claude runtime exists. `AgentRuntime` is an interface with `ClaudeSdkRuntime` and `FakeAgentRuntime`; no other provider is implemented.
+- When this was written (0.3) only the Claude runtime existed. Since 0.6 other providers are optional: Codex is
+  read-only and Gemini is detected only (see "What's new in 0.6").
 - `ALWAYS_FOR_HIGH_RISK` speculation behaves as `AUTO`. Candidates are proposed for exact and category-level contexts, never global ones.
   Learning runs only when you ask for it. A run created without a strategy records no mission outcome.
 - The ADAPTIVE decision is fixed when the run is created. An explicit strategy choice is used as given and records no decision.

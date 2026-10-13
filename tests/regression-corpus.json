@@ -1,0 +1,1770 @@
+[
+  {
+    "id": "R-001",
+    "release": "0.7",
+    "area": "canonicalization",
+    "bug": "A write into the repository's own metadata passed the shell guard when `.git` was spelled with a trailing space or dot, or as GIT~1, because the guard compared the name as text and not as Windows reads it.",
+    "source": "docs/V0_7_RELEASE_REPORT.md, Security review, High 10 (e4fba3a)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/git-entry.test.ts",
+        "title": "reads a segment as Windows does"
+      },
+      {
+        "file": "tests/unit/policies/git-entry.test.ts",
+        "title": "refuses writes to any spelling through the file-tool check"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-002",
+    "release": "0.7",
+    "area": "git",
+    "bug": "The pointer check accepted a Git directory that an agent had made itself, so NEXUS's own commit moved the user's branch (a defect of 0.6.0).",
+    "source": "docs/V0_7_RELEASE_REPORT.md, Security review, High 9 (5fe39ba)",
+    "tests": [
+      {
+        "file": "tests/integration/git/git-safety.test.ts",
+        "title": "a Git service without a record refuses the self-made Git directory that passed the check of 0.6"
+      },
+      {
+        "file": "tests/integration/git/git-safety.test.ts",
+        "title": "refuses a worktree NEXUS created whose .git pointer was rewritten"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-003",
+    "release": "0.7",
+    "area": "git",
+    "bug": "NEXUS's read-only git commands ran the filters of whatever repository the worktree's .git pointer named, so a repository an agent put behind the pointer ran programs as the user (a defect of 0.6.0).",
+    "source": "docs/V0_7_RELEASE_REPORT.md, Security review, High 11 (5fe39ba)",
+    "tests": [
+      {
+        "file": "tests/integration/git/git-safety.test.ts",
+        "title": "runs no filter of a private repository an agent put behind the pointer, also for a read"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-004",
+    "release": "0.7",
+    "area": "git",
+    "bug": "An allowed `git symbolic-ref HEAD refs/heads/main` or `git checkout main` turned a task worktree to the user's branch, and the next NEXUS commit advanced the user's branch.",
+    "source": "docs/V0_7_RELEASE_REPORT.md, Security review, High 12 (137f2bb, 8b9d0e5)",
+    "tests": [
+      {
+        "file": "tests/integration/git/git-safety.test.ts",
+        "title": "does not commit or merge in a worktree whose HEAD an agent turned to another branch"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-005",
+    "release": "0.7",
+    "area": "git",
+    "bug": "A task branch made into a symbolic reference, and a git subcommand hidden in a variable, were not caught by the command policy.",
+    "source": "docs/V0_7_PROGRESS.md, verification passes of the security fixes (cb2ab10)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/git-subcommand.test.ts",
+        "title": "asks, in both shells"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-006",
+    "release": "0.7",
+    "area": "git",
+    "bug": "An agent could move or overwrite a branch or tag, or write a ref outside nexus/ directly, without being asked.",
+    "source": "git log: bdc392d; docs/V0_7_RELEASE_REPORT.md, Security review",
+    "tests": [
+      {
+        "file": "tests/unit/policies/command-hardening.test.ts",
+        "title": "asks before a branch or tag is moved, overwritten or a ref is written directly"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-007",
+    "release": "0.7",
+    "area": "git",
+    "bug": "A git config write from a task worktree was allowed although a linked worktree shares its configuration with the original repository.",
+    "source": "git log: e4fba3a (classifier gaps found by the Git and power reviews)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/command-hardening.test.ts",
+        "title": "asks before any git config write, because a linked worktree shares"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-008",
+    "release": "0.7",
+    "area": "other",
+    "bug": "Power commands and package-script launches slipped through the execution policy: a literal power command outside a known wrapper, pwsh-preview, a flag the parser did not know, stdin-fed forms.",
+    "source": "docs/V0_7_RELEASE_REPORT.md, Security review, High 1 to 5 (a09e2c9)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/review-regressions.test.ts",
+        "title": "recognises variants of the PowerShell hosts and more interpreters"
+      },
+      {
+        "file": "tests/unit/policies/review-regressions.test.ts",
+        "title": "finds the sub-command behind a flag it does not know and fails closed when it cannot"
+      },
+      {
+        "file": "tests/unit/policies/review-regressions.test.ts",
+        "title": "treats stdin-fed forms as stdin and names the source files of compiled launchers"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-009",
+    "release": "0.7",
+    "area": "other",
+    "bug": "Credentials were redacted in only some spellings, and a token cut by a length limit left a readable fragment because truncation came before redaction.",
+    "source": "git log: a09e2c9 (bypasses of the execution policy found by the independent review)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/review-regressions.test.ts",
+        "title": "redacts credentials in every common spelling"
+      },
+      {
+        "file": "tests/unit/policies/review-regressions.test.ts",
+        "title": "redacts before it truncates, so a token cut by the length limit leaves no fragment"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-010",
+    "release": "0.7",
+    "area": "other",
+    "bug": "Agents' file and search tools could read, write, search or glob the runtime's endpoint file, its log, its directory and its pipe.",
+    "source": "docs/V0_7_RELEASE_REPORT.md, process-boundary review (b087386, a09e2c9)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/review-regressions.test.ts",
+        "title": "refuses reading, writing, searching and globbing the endpoint, its log, its directory and the pipe"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-011",
+    "release": "0.7",
+    "area": "other",
+    "bug": "A pipe client that called itself the window could answer the runtime's own power confirmation, and settings.update could name a program for NEXUS to start.",
+    "source": "docs/V0_7_RELEASE_REPORT.md, Security review, High 6 and 7 (b087386)",
+    "tests": [
+      {
+        "file": "tests/integration/runtime/runtime-process.test.ts",
+        "title": "cannot answer its own confirmation: power control, a program in the settings, and trust are asked by the runtime itself"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-012",
+    "release": "0.7",
+    "area": "other",
+    "bug": "The runtime pipe answered requests before any handshake, and a client trusted whatever answered on the pipe.",
+    "source": "git log: b087386 (independent review of the process boundary)",
+    "tests": [
+      {
+        "file": "tests/unit/runtime/boundary.test.ts",
+        "title": "answers nothing before the handshake: a request, a wrong proof and an oversized frame each end the connection"
+      },
+      {
+        "file": "tests/unit/runtime/boundary.test.ts",
+        "title": "a client refuses what answers on the pipe when it cannot prove that it holds the token"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-013",
+    "release": "0.7",
+    "area": "scheduler",
+    "bug": "A run that had just been resumed was told it had no capacity because the queue had not caught up, and a run without capacity was judged stuck instead of waiting.",
+    "source": "git log: 95debd5",
+    "tests": [
+      {
+        "file": "tests/integration/control-plane/control-plane.test.ts",
+        "title": "a run that was just resumed is never told it has no capacity because the queue has not caught up"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-014",
+    "release": "0.7",
+    "area": "ui",
+    "bug": "The Control Center showed a connected runtime while the connection was lost, a waiting item with no reason, and a failed load with only its technical text.",
+    "source": "docs/V0_7_PROGRESS.md, independent UI review (8888a14, e412a9d)",
+    "tests": [
+      {
+        "file": "tests/unit/renderer/control-model.test.ts",
+        "title": "shows Unknown for the runtime while the connection is lost, and Recovering while it recovers"
+      },
+      {
+        "file": "tests/unit/renderer/control-model.test.ts",
+        "title": "a waiting item always has a reason, in the row and in the inspector"
+      },
+      {
+        "file": "tests/unit/renderer/control-model.test.ts",
+        "title": "puts a plain sentence above the technical text of a failed load"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-020",
+    "release": "0.7.1",
+    "area": "planner-verifier",
+    "bug": "A program was blocked on a correct milestone judgment because the model wrote it as prose; the read-only run did not name the shape of its answer, and an unreadable answer was not asked for again.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, Other defects the campaign found (5d58c46, a8a2e24)",
+    "tests": [
+      {
+        "file": "tests/integration/program/engine.test.ts",
+        "title": "a judgment written as prose is asked for again with what was wrong, and the program goes on when the answer is usable"
+      },
+      {
+        "file": "tests/integration/program/engine.test.ts",
+        "title": "a second unusable judgment still blocks the program"
+      },
+      {
+        "file": "tests/scenarios/v4-program.test.ts",
+        "title": "two milestones, two missions that build on each other, one rejection, a revision"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-021",
+    "release": "0.7.1",
+    "area": "other",
+    "bug": "The quality gate called a variant inferior although it was worse on no case, which would have rejected a sound release.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, Other defects the campaign found (0d15c07)",
+    "tests": [
+      {
+        "file": "tests/unit/token/token.test.ts",
+        "title": "a variant that is worse on no case is never inferior, however uneven its improvements are"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-022",
+    "release": "0.7.1",
+    "area": "other",
+    "bug": "A database schema contract was read by a pattern that looked to the end of the text from every unterminated statement: 30,000 of them took 4.8 s of the runtime's thread.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, Checks on the final source (12c5a30)",
+    "tests": [
+      {
+        "file": "tests/integration/workspace/engine.test.ts",
+        "title": "a hostile contract file is read in linear time"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-023",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "A superseded graph node whose record was deleted and came back was presented as current again.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, review findings, HIGH (db9c9dc)",
+    "tests": [
+      {
+        "file": "tests/integration/context-graph/review.test.ts",
+        "title": "a superseded node stays superseded when its record disappears and comes back"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-024",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "One enormous line in a check's output passed the prompt budget, and two failure patterns could take seconds on a line built to make them backtrack, on the runtime's thread.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, review findings, HIGH (db9c9dc)",
+    "tests": [
+      {
+        "file": "tests/unit/token/review.test.ts",
+        "title": "one enormous line cannot exceed the budget, in the tail or before it"
+      },
+      {
+        "file": "tests/unit/token/review.test.ts",
+        "title": "pattern matching stays fast on lines built to make a pattern backtrack"
+      },
+      {
+        "file": "tests/unit/token/review.test.ts",
+        "title": "the check section of a prompt stays bounded with hostile output in every check"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-025",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "An unreviewed proposed knowledge entry could reach an agent through navigation, search or relations, as text the agent might follow.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, review findings (db9c9dc)",
+    "tests": [
+      {
+        "file": "tests/integration/context-graph/review.test.ts",
+        "title": "a proposed entry reaches no agent: not by navigation, search or relations"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-026",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "Knowledge written for one program was named to the runs of other programs (in sections, summaries and the map).",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, security review (39727d0)",
+    "tests": [
+      {
+        "file": "tests/integration/context-graph/graph.test.ts",
+        "title": "names program knowledge only to a run of that program"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-027",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "A single run could write an unbounded number of knowledge notes.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, security review (39727d0)",
+    "tests": [
+      {
+        "file": "tests/integration/context-graph/graph.test.ts",
+        "title": "a run writes a bounded number of notes; the user is not limited"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-028",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "Garbage collection archived a program's note because another program had written the same text, and compaction folded notes that not every reader of the branch may read.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, review findings (db9c9dc)",
+    "tests": [
+      {
+        "file": "tests/integration/context-graph/review.test.ts",
+        "title": "garbage collection never archives a note because another program wrote the same text"
+      },
+      {
+        "file": "tests/integration/context-graph/review.test.ts",
+        "title": "compaction folds only notes that every reader of the branch may read"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-029",
+    "release": "0.7.1",
+    "area": "context",
+    "bug": "Reaching what a request needs in the Context Graph cost a walk of several tool calls per session; a pack entry did not say whether it was whole.",
+    "source": "git log: a9212da",
+    "tests": [
+      {
+        "file": "tests/integration/context-graph/navigation-benchmark.test.ts",
+        "title": "a planner reaches what its request needs in a fraction of the calls a cold walk took"
+      },
+      {
+        "file": "tests/integration/context-graph/navigation-benchmark.test.ts",
+        "title": "a task session never has to open a selected record to learn its files"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-030",
+    "release": "0.7.1",
+    "area": "other",
+    "bug": "Token accounting counted a response several times when many messages carried it, and counted a message the runtime made up as a request.",
+    "source": "docs/V0_7_1_RELEASE_REPORT.md, token accounting review (db9c9dc)",
+    "tests": [
+      {
+        "file": "tests/unit/token/review.test.ts",
+        "title": "counts one response once, however many messages carry it"
+      },
+      {
+        "file": "tests/unit/token/review.test.ts",
+        "title": "a message the runtime made up is no request and takes no place in the numbering"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-040",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "One 401 from ChatGPT latched the capacity pool in AUTH_REQUIRED until a full browser sign-in, while the card still said Connected.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 1.1 (7d2af7d)",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "is refreshed once and the request sent once more: one 401 does not ask for a sign-in"
+      },
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "whose refresh is refused too reads as needing a sign-in, not as connected"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-041",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "Local or deterministic failures (unreadable output, a schema error, a shutdown abort) were recorded as provider capacity failures with a backoff of 5 minutes to 6 hours.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 1.2 (a172e63)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/capacity.test.ts",
+        "title": "a request that ended without an answer about capacity changes nothing and plans no backoff"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-042",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A refused request (400, 403, 404, a model the plan does not offer) was treated as a capacity state and retried, and insufficient quota was not a quota pause.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 1.5 (86f5f80)",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "a refused request is not a capacity state and plans no wait; a limit named in the stream is one"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-043",
+    "release": "0.7.2",
+    "area": "recovery",
+    "bug": "A pending ChatGPT sign-in could not be cancelled, and one transient storage fault or an unreadable credential file stuck until the application restarted.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 1.3 and 1.4 (86f5f80)",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "a sign-in waiting for the browser can be cancelled, and the connection is free at once"
+      },
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "a failed write is left without a restart: the file as it was is loaded again"
+      },
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "a file that cannot be read is discarded only when the user chose that"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-044",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A saved model that the account no longer offered was sent anyway and failed as runtime unavailable.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 1.6 (86f5f80)",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/connection.test.ts",
+        "title": "a saved model the account no longer offers is dropped with its confirmation when the catalog is read"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-045",
+    "release": "0.7.2",
+    "area": "other",
+    "bug": "Agents inherited the variable that names NEXUS's data directory, so code an agent wrote could locate the stored ChatGPT credentials without spelling a denied path.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 2.1 (abbcc69)",
+    "tests": [
+      {
+        "file": "tests/unit/agent-runtime/env-executable.test.ts",
+        "title": "never tells an agent where NEXUS keeps its data, in either mode and whatever the case of the name"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-046",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A provider pool once marked QUOTA_PAUSED or AUTH_REQUIRED never became admissible again when the provider had no probe of its own.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 3.1 (35c9005)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "a provider with no probe of its own is tried again when its pause has run out, and not before"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-047",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "When a dispatch failed to start (a missing CLI) its leases stayed quarantined for the life of the process, so after a few failures every session waited for a slot that was never freed.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 3.2 (edc5577)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "a dispatch that cannot start leaves no capacity behind: after many failures work is still admitted"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-048",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "The limits Claude reported for account A could be written into the pool of account B after an account switch.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 3.4 (d8046c2)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/fact-times.test.ts",
+        "title": "what was observed before a change of account belongs to the other account"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-049",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A reset time and a utilization were stamped as observed now when the observation was older, and a stale copy could overwrite a newer observation.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 3.5 (ca43de4, d8046c2)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/fact-times.test.ts",
+        "title": "an observation is applied to the pool as saved, and an older one does not replace a newer one"
+      },
+      {
+        "file": "tests/integration/intelligence/fact-times.test.ts",
+        "title": "a percentage kept across a later event keeps its own time, in the usage service and in the pool"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-050",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "The HTTP lease of a ChatGPT request from an earlier start was reclaimed only at boot, so with a reused process id the single OpenAI slot stayed quarantined until the next restart.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 3.6 (d8046c2)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "a ChatGPT request of an earlier start is released once its process is gone, or its process id is ours"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-051",
+    "release": "0.7.2",
+    "area": "recovery",
+    "bug": "Capacity recovery resumed every waiting run against the same free slot, so all but one waited again every 2 s; a leftover wait record was read as waiting, and one run whose resume threw starved the others.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 3.7, 14.5, 14.6 (1403123)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "recovery resumes one waiting run per pass, a run whose resume fails does not hold the others back"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-052",
+    "release": "0.7.2",
+    "area": "scheduler",
+    "bug": "A Program or a Workspace mission was blocked, waiting for a person, whenever its current run paused for provider capacity.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 4.1, 4.2, 14.3 (edc5577)",
+    "tests": [
+      {
+        "file": "tests/integration/program/engine.test.ts",
+        "title": "a run that waits for provider capacity is not a problem for a person"
+      },
+      {
+        "file": "tests/integration/workspace/engine.test.ts",
+        "title": "a task whose run waits for provider capacity does not block the mission"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-053",
+    "release": "0.7.2",
+    "area": "scheduler",
+    "bug": "One session's wait for a provider paused the whole run instead of holding only that task.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 4.4 (ca43de4)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v72-capacity.test.ts",
+        "title": "holds the one task that waits and goes on with the rest of the run: the run does not pause"
+      },
+      {
+        "file": "tests/scenarios/v72-capacity-kernel.test.ts",
+        "title": "a task that waits is asked about before it is given a session again"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-054",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A worker that exited unexpectedly never confirmed the stop of its session, so its lease was quarantined for the life of the runtime and after a few such exits every session waited.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 14.1 (edc5577)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v72-capacity-kernel.test.ts",
+        "title": "a worker that dies gives its slot back: the retry is admitted and the run never waits for capacity"
+      },
+      {
+        "file": "tests/scenarios/v72-capacity-kernel.test.ts",
+        "title": "runs a mission to its end: every session is admitted, none waits, and no slot is left held"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-055",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A capacity wait consumed a task attempt, so after a few waits the first real failure gave up and the model tier was escalated.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 14.2 (edc5577)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v72-capacity.test.ts",
+        "title": "pauses the run for capacity, resumes it, and a wait is never counted as an attempt of the task"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-056",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "After a crash, the slots of the sessions that had been running were held for ever; and after a usage reset the ramp did not limit how many sessions restarted at once.",
+    "source": "git log: d26154b, 1ecddb4",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "after a crash the slots of its sessions stay taken until their processes are proven gone, and are then free again"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-057",
+    "release": "0.7.2",
+    "area": "recovery",
+    "bug": "After a hard kill of the runtime the old worker could still be alive when the next start resumed its task on the same worktree.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 14.7 (509a997)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "no session starts while a worker of the earlier start is alive, and the wait for it is bounded"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-058",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "A session or advisory request sent before the providers were detected was paused for capacity instead of waiting for the detection.",
+    "source": "git log: 883d114",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/discovery-race.test.ts",
+        "title": "waits for the detection and is admitted, not paused for capacity"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-059",
+    "release": "0.7.2",
+    "area": "provider-capacity",
+    "bug": "The requested primary provider was refused admission when its account reported no email, or an API key instead of a subscription.",
+    "source": "git log: 828d211",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/worker-routing.test.ts",
+        "title": "admits the requested primary whatever its account says about itself"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-060",
+    "release": "0.7.2",
+    "area": "autonomy",
+    "bug": "A Director escalation that had waited or failed could be neither invoked again nor dismissed, though the message said to retry.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 5.1 (01ebf97)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/capacity-routing.test.ts",
+        "title": "an escalation whose request failed can be invoked again by the user, and is closed once it has completed"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-061",
+    "release": "0.7.2",
+    "area": "other",
+    "bug": "A stage whose answer cited one evidence id outside the context was dropped whole although the call was paid for, and the first real ChatGPT answers broke the strict schema (objects where a string was expected).",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 5.4 (aa1809a, 9ab6a2e)",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/intelligence.test.ts",
+        "title": "removes a reference to evidence that was not supplied, says so, and keeps the answer"
+      },
+      {
+        "file": "tests/unit/intelligence/advisory-shape.test.ts",
+        "title": "says an ambiguity is a string: the first real answer gave objects there"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-062",
+    "release": "0.7.2",
+    "area": "other",
+    "bug": "Malformed model keys and raw schema failures from the advisory stages were exposed in error messages.",
+    "source": "git log: 13c015a",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/intelligence.test.ts",
+        "title": "does not expose malformed model keys through compilation or drift schema errors"
+      },
+      {
+        "file": "tests/unit/intelligence/intelligence.test.ts",
+        "title": "sanitizes schema failures from each council stage without continuing"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-063",
+    "release": "0.7.2",
+    "area": "context",
+    "bug": "The Task Compiler was given notes an agent had written, so text an agent controlled could steer the specification the user is asked to approve.",
+    "source": "git log: 8253cb5",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/admission.test.ts",
+        "title": "gives the compiler no note an agent wrote, and says how far the rest can be trusted"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-065",
+    "release": "0.7.2",
+    "area": "context",
+    "bug": "When a session was rotated, the resumed worker lost the user's earlier instructions: the prompt held the task and the handoff, not the request or the amendments, so a constraint such as never touching the public API survived only if the handoff restated it. Repairs, reviewers and verifiers had the same gap.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 6.1, 6.2 (dc8e0a8)",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/workload-admission.test.ts",
+        "title": "gates user-added tasks and instructions, preserving exact input and rejecting stale task scope"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-066",
+    "release": "0.7.2",
+    "area": "context",
+    "bug": "Accepted text was cut silently later in the prompt: a request accepted to 20,000 characters reached workers cut to 8,000 with no mark, and a worker's copy of the request did not keep the limit of a section.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 6.6 (477fcef, b66f758)",
+    "tests": [
+      {
+        "file": "tests/unit/context/prompts.test.ts",
+        "title": "a long task description reaches its sessions whole, and what is longer than accepted is marked as cut"
+      },
+      {
+        "file": "tests/unit/context/context-builder.test.ts",
+        "title": "keeps a long request within the limit of a section, and says so"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-067",
+    "release": "0.7.2",
+    "area": "snapshot",
+    "bug": "The mission planner read the live checkout while the run executed at the admitted commit; if the checkout moved during planning the plan was written against one state and executed on another.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 6.3 (ad9c5db)",
+    "tests": [
+      {
+        "file": "tests/scenarios/planning.test.ts",
+        "title": "the planner reads the commit the run executes, also when the user checkout moves while it plans"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-068",
+    "release": "0.7.2",
+    "area": "snapshot",
+    "bug": "The workspace planner's read-only run had no base reference and read the checkout, not the commit that was admitted.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 6.3 (8639827)",
+    "tests": [
+      {
+        "file": "tests/scenarios/read-snapshot.test.ts",
+        "title": "reads the base commit, not the newer or uncommitted state of the checkout, and leaves nothing behind"
+      },
+      {
+        "file": "tests/scenarios/read-snapshot.test.ts",
+        "title": "without the option a read-only run reads the checkout, as before"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-069",
+    "release": "0.7.2",
+    "area": "planner-verifier",
+    "bug": "A plan asked a read-only task (planner, reviewer, verifier) to write ad-hoc code, which the role is not allowed to run, so the task could not be done.",
+    "source": "git log: be766d7",
+    "tests": [
+      {
+        "file": "tests/unit/context/prompts.test.ts",
+        "title": "the planner is told that a read-only role cannot run ad-hoc code"
+      },
+      {
+        "file": "tests/unit/context/prompts.test.ts",
+        "title": "mission criteria shown with a task say whose they are"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-070",
+    "release": "0.7.2",
+    "area": "planner-verifier",
+    "bug": "A program replan note was a single slot: a second note overwrote the first and only the latest reached the replanner.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 6.4 (8339119)",
+    "tests": [
+      {
+        "file": "tests/integration/program/engine.test.ts",
+        "title": "keeps every reassessment note of the user: two notes reach one reassessment and the missions after it"
+      },
+      {
+        "file": "tests/integration/program/engine.test.ts",
+        "title": "refuses a reassessment note when the reassessment budget is used, and does not drop it later"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-071",
+    "release": "0.7.2",
+    "area": "autonomy",
+    "bug": "Drift detection missed additions of consequence, and flagged instructions that forbade the thing as if they proposed it.",
+    "source": "docs/V0_7_2_REVIEW_FINDINGS.md 6.9, 7.2 (9ab6a2e)",
+    "tests": [
+      {
+        "file": "tests/unit/intelligence/drift.test.ts",
+        "title": "an item that forbids the thing is not a proposal to do it"
+      },
+      {
+        "file": "tests/unit/intelligence/drift.test.ts",
+        "title": "what the user asked for in their own words is not an addition"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-072",
+    "release": "0.7.2",
+    "area": "ui",
+    "bug": "The focus jumped on the first render and while a dialog was open, and an error toast expired before it was read.",
+    "source": "git log: 86f5f80 (focus and errors on critical paths)",
+    "tests": [
+      {
+        "file": "tests/unit/renderer/a11y-behaviour.test.ts",
+        "title": "does not steal the focus on the first render, on a re-render of the same view or while a dialog is open"
+      },
+      {
+        "file": "tests/unit/renderer/a11y-behaviour.test.ts",
+        "title": "keeps an error until it is dismissed and lets the other toasts expire"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-073",
+    "release": "0.7.2",
+    "area": "context",
+    "bug": "Text that looked like a credential in stored knowledge was sent to OpenAI with the rest of the retrieved notes.",
+    "source": "git log: 59c92f3",
+    "tests": [
+      {
+        "file": "tests/integration/intelligence/admission.test.ts",
+        "title": "gives the compiler no note an agent wrote, and says how far the rest can be trusted"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-080",
+    "release": "0.8",
+    "area": "git",
+    "bug": "Under the isolated profile a command that was more than git ran as the sandbox account and found no repository, so real missions ended paused.",
+    "source": "docs/V0_8_PROGRESS.md, What the real acceptance found, 1 (af1e79d)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v8-isolated-git.test.ts",
+        "title": "git works in every kind of command, as the sandbox account, and only on what is the task own"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-081",
+    "release": "0.8",
+    "area": "git",
+    "bug": "A harmless line git prints after every contained commit (the refused packed-refs lock) read as a failure, and sessions reported themselves blocked.",
+    "source": "docs/V0_8_PROGRESS.md, What the real acceptance found, 2 (af1e79d, a04a65c)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v8-containment.test.ts",
+        "title": "an agent commits on its own branch with a contained git, and cannot touch the branches of the user"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-082",
+    "release": "0.8",
+    "area": "git",
+    "bug": "A long option of the user's git (`--format`, `--date`) without `=` let the next word become an option such as `--output=`, and so write a file.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, A2-1 (0b58ac3)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "second audit, finding 1: a long option takes its value after"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-083",
+    "release": "0.8",
+    "area": "git",
+    "bug": "PowerShell 5.1 re-quotes an argument with a double quote in it, so a git command could mean something else to git than to NEXUS's parser.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, A2-2 (0b58ac3)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "second audit, finding 2: a double quote or a backslash anywhere in a PowerShell command"
+      },
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "a command written for PowerShell runs as the same bash script"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-084",
+    "release": "0.8",
+    "area": "git",
+    "bug": "An index forged in the worktree made the user's git read or write outside the worktree.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, A2-3 (0b58ac3)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "second audit, finding 3: an index forged in the worktree is not the index the command reads"
+      },
+      {
+        "file": "tests/integration/git/hostile-index.test.ts",
+        "title": "the index stages content that is not in the file: the commit holds the file"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-085",
+    "release": "0.8",
+    "area": "git",
+    "bug": "Drivers of the machine's git configuration selected by .gitattributes ran on a task's files: a Git LFS download from an address in .lfsconfig, and the document converter astextplain.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, A2-4 (0b58ac3)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "second audit, finding 4: no conversion or comparison program named by a .gitattributes of the worktree runs"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-086",
+    "release": "0.8",
+    "area": "git",
+    "bug": "NEXUS's own `git diff` started Git for Windows' document converters (textconv) on the files of a task, and one named by a .gitattributes.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, What the review of trusted git found (dd88748)",
+    "tests": [
+      {
+        "file": "tests/integration/git/git-safety.test.ts",
+        "title": "review of 0.8: starts no conversion program on the files of a task"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-087",
+    "release": "0.8",
+    "area": "git",
+    "bug": "NEXUS's own reset --hard or merge wrote through a junction that stood where a tracked directory was, and so wrote outside the worktree.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, A2-5 (0b58ac3)",
+    "tests": [
+      {
+        "file": "tests/integration/git/hostile-index.test.ts",
+        "title": "second audit, finding 5: a junction where a tracked directory was is removed before a reset or a merge writes below it"
+      },
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "third review: a junction where a tracked directory was stops every git of the script"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-088",
+    "release": "0.8",
+    "area": "git",
+    "bug": "add, rm and stash entered a nested repository named in the index (and `git stash -m list` was a push that skipped the guard), so a hostile nested repository could run its configuration.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, A2-6 and third review (0b58ac3, a5bbddf)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "second audit, finding 6: a nested repository is never entered, by add, rm, stash, status, diff or commit"
+      },
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "third review: \"stash -m list\" is a push with a message"
+      },
+      {
+        "file": "tests/integration/git/hostile-index.test.ts",
+        "title": "a nested repository named in the index: nothing of it runs, and it is not committed"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-089",
+    "release": "0.8",
+    "area": "git",
+    "bug": "The user's git in an isolated session could move any branch (checkout -B, a forged HEAD) and the worktree's entry could be rewritten by contained code.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, third review (a5bbddf)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "third review: the worktree stays on its own branch; a forged HEAD or a configuration planted in the entry stops git"
+      },
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "third review: no command changes the branch the worktree is on, or makes or moves another"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-090",
+    "release": "0.8",
+    "area": "git",
+    "bug": "The access to .git let one task rewrite a sibling task's branch or replace files in the object store; a label did not keep a file from being replaced.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Independent review, finding 2; V0_8_PROGRESS.md A third review (a5bbddf, 4d8686e)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v8-isolated-git.test.ts",
+        "title": "git works in every kind of command, as the sandbox account, and only on what is the task own"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-091",
+    "release": "0.8",
+    "area": "git",
+    "bug": "A task could replace the .git file of its worktree, or the commondir and gitdir of the worktree's entry, with a pointer to a repository it made; stock git then ran the planted program, and NEXUS carried on silently.",
+    "source": "docs/V0_8_PROGRESS.md, RESTRICTED: the worktree's git pointer is never trusted (a28a83c)",
+    "tests": [
+      {
+        "file": "tests/integration/git/worktree-pointer-trust.test.ts",
+        "title": "a .git file replaced by a pointer to a repository the task made: nothing of it runs, and NEXUS refuses"
+      },
+      {
+        "file": "tests/integration/git/worktree-pointer-trust.test.ts",
+        "title": "commondir of the entry repointed to a repository the task made: nothing runs, NEXUS refuses"
+      },
+      {
+        "file": "tests/integration/git/worktree-pointer-trust.test.ts",
+        "title": "gitdir of the entry repointed: refused"
+      },
+      {
+        "file": "tests/integration/git/git-safety.test.ts",
+        "title": "refuses a worktree NEXUS created whose .git pointer was rewritten"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-092",
+    "release": "0.8",
+    "area": "git",
+    "bug": "A speculative candidate is a clone whose own .git/config the task owns; a filter named there ran as the user under git status (measured).",
+    "source": "docs/V0_8_PROGRESS.md, RESTRICTED: the worktree's git pointer is never trusted (a28a83c)",
+    "tests": [
+      {
+        "file": "tests/integration/git/worktree-pointer-trust.test.ts",
+        "title": "a speculative candidate is a clone whose .git/config the task owns: a hostile configuration is refused and runs nothing"
+      },
+      {
+        "file": "tests/integration/git/worktree-pointer-trust.test.ts",
+        "title": "a config.worktree planted while the repository reads per-worktree configuration: nothing runs"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-093",
+    "release": "0.8",
+    "area": "git",
+    "bug": "An allowed push to a word that is no configured remote was taken by git as a path, and a push into a directory of the worktree ran that directory's hooks as the user (measured); the same for a remote that is a path in the host-side review.",
+    "source": "docs/V0_8_PROGRESS.md, Fourth review (b28601c); V0_8_SECURITY_MODEL.md, review of trusted git (dd88748)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "review of 0.8: an allowed push goes to a network address only; a remote that is a path, relative or not, is refused and no hook of the target runs"
+      },
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "qualifies as a push with listed options, a remote by name and a branch"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-094",
+    "release": "0.8",
+    "area": "git",
+    "bug": "An allowed push could publish a private branch the task had turned its branch to, or merged with one, and a forged HEAD, a refspec form or inherited GIT_ variables could choose another branch or program.",
+    "source": "docs/V0_8_PROGRESS.md, Fourth review (64f23ae, dd88748)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "review of 0.8: an allowed push carries the task's own commits; a branch turned to a private branch of the user's, or merged with one, is not published"
+      },
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "is written as the branch of the worktree, in full, to a remote the repository knows; any other branch is not pushed"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-095",
+    "release": "0.8",
+    "area": "git",
+    "bug": "After NEXUS committed the task's work with an index of its own, the user's git index was stale, so status showed the work as changed and a commit undid it.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, real missions (dd88748)",
+    "tests": [
+      {
+        "file": "tests/integration/git/user-git-script.test.ts",
+        "title": "the index of the command follows the branch: after NEXUS committed the task's work with an index of its own, status is clean and a commit undoes nothing"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-096",
+    "release": "0.8",
+    "area": "git",
+    "bug": "An allowed push retried inside a longer line of plain git failed under RESTRICTED, and a push in a form that could never run asked a question instead of saying what to write.",
+    "source": "docs/V0_8_PROGRESS.md, Real missions on the final code (45c39bd)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "may stand among other git as the user: the line is read into invocations, each one judged"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-097",
+    "release": "0.8",
+    "area": "git",
+    "bug": "Nested repositories, a sparse checkout and a configuration file planted in the worktree's entry ran or were committed by NEXUS's own git.",
+    "source": "docs/V0_8_PROGRESS.md; git log: 6b9db50, 31d2778",
+    "tests": [
+      {
+        "file": "tests/integration/git/hostile-index.test.ts",
+        "title": "a nested repository already in the branch, with a .gitmodules that says"
+      },
+      {
+        "file": "tests/integration/git/hostile-index.test.ts",
+        "title": "a sparse checkout set up from inside the worktree: it writes a configuration into the entry, and NEXUS stops"
+      },
+      {
+        "file": "tests/integration/git/hostile-index.test.ts",
+        "title": "a link in the worktree to a directory elsewhere: removing the worktree removes the link, not what it leads to"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-098",
+    "release": "0.8",
+    "area": "git",
+    "bug": "Git as the user was a loose pattern: aliases, a shortened spelling of a refused option, saved operations, a substitution hidden between quotes of two kinds, or a program beside git could run as the user.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Independent review, finding 1 (11e3e80, 6b9db50, b3c0d6b)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "only listed subcommands"
+      },
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "finding B1: a substitution hidden between quotes of two kinds does not parse"
+      },
+      {
+        "file": "tests/unit/policies/git-user.test.ts",
+        "title": "only listed options, each spelled in full (finding B3 and the shortened spellings)"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-099",
+    "release": "0.8",
+    "area": "package-config",
+    "bug": "Diagnosing a dependency problem needed a raw read of .npmrc, which can hold registry tokens; the raw read had to stay a boundary and the facts had to be read by a tool that never prints a secret.",
+    "source": "docs/V0_8_RELEASE_REPORT.md, Release gates (63ae7be)",
+    "tests": [
+      {
+        "file": "tests/unit/autonomy/tool-capabilities.test.ts",
+        "title": "keeps a raw read of .npmrc a read of project secrets, contained or not"
+      },
+      {
+        "file": "tests/unit/policies/package-config.test.ts",
+        "title": "never lets a secret, in any form, reach the serialized output"
+      },
+      {
+        "file": "tests/unit/policies/package-config.test.ts",
+        "title": "reports that a credential is configured for a host, by kind, without its value"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-100",
+    "release": "0.8",
+    "area": "package-config",
+    "bug": "The package-configuration tool could be led to read a .npmrc that was a second name (a hard link) of a file elsewhere.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, What the review of trusted git found (dd88748)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/package-config.test.ts",
+        "title": "reads what it checked: a .npmrc that is a second name of a file elsewhere (a hard link) is not read"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-101",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "Windows looked up names for the sandbox account (the DNS Client service answered, and the account could read the machine's name cache), which no firewall rule for an account can stop.",
+    "source": "docs/V0_8_PROGRESS.md, DNS under ISOLATED; V0_8_RELEASE_REPORT.md, The last open gate (63ae7be)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/containment.test.ts",
+        "title": "gets no name looked up and is not shown the cache of names, whichever way it asks"
+      },
+      {
+        "file": "tests/integration/isolation/containment.test.ts",
+        "title": "has no route to the Internet: TCP, HTTP, DNS"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-102",
+    "release": "0.8",
+    "area": "network-dns",
+    "bug": "On a network whose resolver makes up IPv6 addresses (DNS64), the address made up from an IPv4 address was judged and used instead of the IPv4 address, so a real mission could not download Electron from github.com.",
+    "source": "git log: bb9389e",
+    "tests": [
+      {
+        "file": "tests/unit/network/guard-pin.test.ts",
+        "title": "the address made up from an IPv4 address of the same answer is left out, and the IPv4 address is used"
+      },
+      {
+        "file": "tests/unit/network/guard-pin.test.ts",
+        "title": "any other translated address is refused as before"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-103",
+    "release": "0.8",
+    "area": "node-libuv",
+    "bug": "Inside the AppContainer, Node (libuv before 1.53) hangs on a child process started with a pipe, because libuv names its pipes outside the namespace an AppContainer may use; the sandbox's copy of node.exe is changed in one place for it.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, The isolated profile since 2026-10-12; src/main/modules/isolation/tools.ts",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/shell-semantics.test.ts",
+        "title": "node starting a child of its own with a pipe"
+      },
+      {
+        "file": "tests/integration/isolation/shell-semantics.test.ts",
+        "title": "node, started by name, with a pipe to it"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-104",
+    "release": "0.8",
+    "area": "canonicalization",
+    "bug": "Windows gave a contained process no canonical form of a path (the Mount Manager refused it), so programs that resolve real paths failed inside the AppContainer; one narrow entry on the device restores it, and every change to the device must stay refused.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Mount Manager entry (6f7efc8)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/containment.test.ts",
+        "title": "asks the Mount Manager for the canonical form of a path, and can do nothing else to it"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-105",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "Git's bash does not start inside the AppContainer; the shell became busybox ash behind an adapter, which must run what it parses as written, refuse what it cannot as a whole, and be the contained account rather than the user.",
+    "source": "docs/V0_8_PROGRESS.md, 2026-10-12/13: the AppContainer, and PASS (63ae7be)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/shell-semantics.test.ts",
+        "title": "is the contained account in the AppContainer, not the user: the shell itself, and what it starts"
+      },
+      {
+        "file": "tests/integration/isolation/shell-semantics.test.ts",
+        "title": "fails, inside the containment and with a message, on what parses and does not exist"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-106",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "From the AppContainer, git cannot see the folders above the user's repository, so a git inside a longer command found no repository; it is told to run alone and git alone runs as the user.",
+    "source": "docs/V0_8_PROGRESS.md, 2026-10-12/13 (b26a878)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/containment.test.ts",
+        "title": "in the user's repository it reads and writes nothing: objects, branches, its own included, and the worktree's entry stay as they were"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-107",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "A contained command ran on the user's desktop and could read the screen, a windowed application could make desktops, and the command could inherit more handles than its three standard ones.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, W1 to W3 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/containment.test.ts",
+        "title": "runs on a desktop of its own, cannot open the one the user sees, makes no desktop, and inherits its three standard handles only"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-108",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "The elevated setup trusted names: an existing account, folder or firewall rule of the same name made by somebody else could be taken over, and a group whose members could not be listed was read as no members.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Independent review, finding 10 (4cee02f, e1af049)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/sandbox-checks.test.ts",
+        "title": "of that name and somebody else"
+      },
+      {
+        "file": "tests/integration/isolation/sandbox-checks.test.ts",
+        "title": "a group whose members could not be listed: not taken for a group the account is out of"
+      },
+      {
+        "file": "tests/integration/isolation/sandbox-checks.test.ts",
+        "title": "a record that names another account or another folder than Windows has is not believed"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-109",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "The runtime pipe could be opened by contained code (and by a process of the same user at lower integrity), which could read the token or have a request answered.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Runtime pipe and credentials (b3c0d6b)",
+    "tests": [
+      {
+        "file": "tests/integration/isolation/pipe.test.ts",
+        "title": "a process of the same user at medium integrity without the token opens the pipe and gets nowhere"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-110",
+    "release": "0.8",
+    "area": "appcontainer",
+    "bug": "Where the isolated profile had been set up and did not hold at a start, NEXUS fell back quietly to RESTRICTED and ran project code as the user.",
+    "source": "docs/V0_8_PROGRESS.md, The owner's decisions on the stated limits (4bc1a97)",
+    "tests": [
+      {
+        "file": "tests/unit/isolation/effective-profile.test.ts",
+        "title": "does not quietly become Restricted where the isolated profile was set up and does not hold"
+      },
+      {
+        "file": "tests/integration/isolation/containment.test.ts",
+        "title": "refuses rather than runs when a profile was not verified, and when ISOLATED is asked for without an account"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-111",
+    "release": "0.8",
+    "area": "network-dns",
+    "bug": "A connection through the dependency proxy to a listed host could upload without limit, and a render could open any number of connections or relay without a byte limit.",
+    "source": "docs/V0_8_PROGRESS.md, D3 and the owner's decisions (e1af049, 4bc1a97)",
+    "tests": [
+      {
+        "file": "tests/integration/network/fetch-proxy.test.ts",
+        "title": "a tunnel that sends more than fetching does is cut and reported; one that fetches is not"
+      },
+      {
+        "file": "tests/integration/network/proxy-limits.test.ts",
+        "title": "refuses the requests beyond its limit, tunnels included, and says so through its callback"
+      },
+      {
+        "file": "tests/integration/network/proxy-limits.test.ts",
+        "title": "cuts what it relays at its byte limit, and refuses what comes after"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-112",
+    "release": "0.8",
+    "area": "browser-injection",
+    "bug": "Text from a web page could be read as an instruction: a hostile scripted page's title, text and quotes had to be inside the DATA block and its instructions arrive as marked data.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, D6 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/research/envelope.test.ts",
+        "title": "holds the title, the content and the quotes inside the DATA block, and nothing of the page outside it"
+      },
+      {
+        "file": "tests/integration/research/browser.test.ts",
+        "title": "a hostile scripted page reaches nothing local, sends nothing, downloads nothing, and its instructions arrive as marked data"
+      },
+      {
+        "file": "tests/scenarios/v8-research.test.ts",
+        "title": "a hostile page is read as data: the fact arrives, the instruction does not, and what it asked for is refused when tried"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-113",
+    "release": "0.8",
+    "area": "browser-injection",
+    "bug": "Hostile HTML (deeply nested hidden elements, one huge input) made the research page extraction quadratic: seconds to minutes on the runtime's thread.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, D1 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/research/extract-limits.test.ts",
+        "title": "closes hundreds of nested hidden elements and goes on reading after them"
+      },
+      {
+        "file": "tests/unit/research/extract-limits.test.ts",
+        "title": "reads an input over the cap as far as the cap and says so"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-114",
+    "release": "0.8",
+    "area": "browser-injection",
+    "bug": "A page that blocked its own thread hung the research browser, and a render had no deadline of its own; a script could move the page to a private address, or use a WebSocket.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, D2 and D4 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/integration/research/browser.test.ts",
+        "title": "a page whose script holds the browser is given up on at the deadline, and the browser and the proxy are gone"
+      },
+      {
+        "file": "tests/integration/research/browser.test.ts",
+        "title": "a page whose script moves it to an address that is not public is not read from there"
+      },
+      {
+        "file": "tests/integration/research/browser.test.ts",
+        "title": "a WebSocket, a very long address and a flood of subresources do not get through"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-115",
+    "release": "0.8",
+    "area": "browser-injection",
+    "bug": "A page asked for as the browser shows it was answered from a remembered plain fetch, and the rendered path read hidden text.",
+    "source": "git log: f627917; docs/V0_8_PROGRESS.md D7",
+    "tests": [
+      {
+        "file": "tests/integration/research/browser.test.ts",
+        "title": "a page remembered from a plain fetch is rendered when the browser is asked for"
+      },
+      {
+        "file": "tests/integration/research/browser.test.ts",
+        "title": "reads what the page shows: text that a stylesheet hides is left out"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-116",
+    "release": "0.8",
+    "area": "browser-injection",
+    "bug": "An application's manifest ready pattern was a regular expression run in the runtime, which a hostile output froze; the ready address and Electron arguments were not checked.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, F1, F3, F5 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/browser/manifest.test.ts",
+        "title": "the hostile pattern that froze the runtime returns at once against hostile output"
+      },
+      {
+        "file": "tests/unit/browser/manifest.test.ts",
+        "title": "a manifest handed to the manager without validation is refused before anything is started or requested"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-117",
+    "release": "0.8",
+    "area": "other",
+    "bug": "Any loopback address an application printed was taken as its own, and a foreign listener on the same port was not noticed.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Independent review, finding 7; V0_8_PROGRESS.md F2 (cf0e209, e1af049)",
+    "tests": [
+      {
+        "file": "tests/integration/browser/port-owner.test.ts",
+        "title": "a foreign listener on 127.0.0.1 and the application on [::1] on the same port is refused"
+      },
+      {
+        "file": "tests/integration/browser/app-faults.test.ts",
+        "title": "an application that names a port it does not hold is not opened: what it prints is not taken on trust"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-118",
+    "release": "0.8",
+    "area": "other",
+    "bug": "A single output line without a newline grew without bound in the runtime's memory.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, F4 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/process/spawn-long.test.ts",
+        "title": "50 MB without a newline stays bounded and the next normal line still arrives"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-119",
+    "release": "0.8",
+    "area": "autonomy",
+    "bug": "An allow-once answer could be spent on another action needing the same capability, and was bound to a shortened text that the agent's own description of the call could change on a retry.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Independent review, finding 4; V0_8_PROGRESS.md E1 (bd02e8f, e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/autonomy/broker.test.ts",
+        "title": "allow once is for the action that was shown: another action that needs the same capability is not let through by it"
+      },
+      {
+        "file": "tests/unit/autonomy/broker.test.ts",
+        "title": "another command with the same first 299 characters is not covered; the identical command is"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-120",
+    "release": "0.8",
+    "area": "autonomy",
+    "bug": "The same out-of-scope action tried again and again made many boundary requests; a denial was not final, and a restart by decisions could loop.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, E2 and E3 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/autonomy/broker.test.ts",
+        "title": "refuses at once after 12 distinct requests for a capability in a mission, creates none, and audits it"
+      },
+      {
+        "file": "tests/unit/autonomy/broker.test.ts",
+        "title": "a denial is final for the capability and resource in the mission, for any action"
+      },
+      {
+        "file": "tests/unit/autonomy/resume.test.ts",
+        "title": "restarts it three times and then leaves it, saying so in the outcome and in the audit"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-121",
+    "release": "0.8",
+    "area": "autonomy",
+    "bug": "Agent text in NEXUS's records and in a boundary request was shown as NEXUS's own words, and bidirectional and control characters could hide or reorder it.",
+    "source": "docs/V0_8_PROGRESS.md, Finishing 0.8, E5 and E7 (e1af049)",
+    "tests": [
+      {
+        "file": "tests/unit/autonomy/resume.test.ts",
+        "title": "in the boundary-decision artifact: on its own line, as a JSON string, introduced as data"
+      },
+      {
+        "file": "tests/unit/autonomy/broker.test.ts",
+        "title": "strips the characters that reorder or hide text from what is stored"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-122",
+    "release": "0.8",
+    "area": "autonomy",
+    "bug": "RESTRICTED counted as the isolated profile, so commands NEXUS cannot read into ran without a question, with the user's network.",
+    "source": "docs/V0_8_SECURITY_MODEL.md, Independent review, finding 5 (bd02e8f)",
+    "tests": [
+      {
+        "file": "tests/unit/autonomy/tool-capabilities.test.ts",
+        "title": "what NEXUS cannot read into is still a question there"
+      }
+    ],
+    "security": true
+  },
+  {
+    "id": "R-123",
+    "release": "0.8",
+    "area": "autonomy",
+    "bug": "False boundaries met by real missions: two backslashes before a word read as a network path, a write whose path NEXUS cannot read, the text echo prints, a .NET write in the worktree, reading the worktree's own .git entry, and a verifier's Test-Path over the repository's .git.",
+    "source": "docs/V0_8_PROGRESS.md, Real missions on the final code (59847bc, 3d7bc5b, a04a65c, 7f57e62, af1e79d)",
+    "tests": [
+      {
+        "file": "tests/unit/policies/v8-classifier.test.ts",
+        "title": "two backslashes before a word are not a network path; a server and a share still are"
+      },
+      {
+        "file": "tests/unit/policies/v8-classifier.test.ts",
+        "title": "a command that only tests whether paths exist may name Git"
+      },
+      {
+        "file": "tests/unit/policies/v8-classifier.test.ts",
+        "title": "the text echo and printf print is not a path, and where it is sent still is"
+      },
+      {
+        "file": "tests/unit/policies/v8-classifier.test.ts",
+        "title": "a .NET write whose path is in the worktree is not outside it because of what is written"
+      },
+      {
+        "file": "tests/unit/policies/v8-classifier.test.ts",
+        "title": "reading the worktree's own .git entry is not a finding"
+      },
+      {
+        "file": "tests/unit/autonomy/tool-capabilities.test.ts",
+        "title": "a write whose path could not be read is work in the worktree inside a containment, and a question outside one"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-124",
+    "release": "0.8",
+    "area": "planner-verifier",
+    "bug": "The application record found the application by the wrong owner, so it was always empty and a verifier could not check a click; a refused launch counted as a launch, so a mission whose criterion said one launch could not be accepted.",
+    "source": "docs/V0_8_PROGRESS.md, What the real acceptance found, 5; 2026-10-12 (1b9cfd6, 794ee37)",
+    "tests": [
+      {
+        "file": "tests/scenarios/v8-app.test.ts",
+        "title": "launches it contained, clicks through it, reads its console, and the mission asks for nothing"
+      },
+      {
+        "file": "tests/integration/browser/app-faults.test.ts",
+        "title": "an application that ends while starting is reported with what it printed, and leaves nothing"
+      },
+      {
+        "file": "tests/integration/browser/app-faults.test.ts",
+        "title": "an application that dies while it is used is seen as ended, says so, and can be launched again"
+      }
+    ],
+    "security": false
+  },
+  {
+    "id": "R-127",
+    "release": "0.8",
+    "area": "ui",
+    "bug": "The inbox did not say how far each answer reaches, a raw profile name appeared in the reason line, and the setup consent said more than the isolated profile gives.",
+    "source": "docs/V0_8_PROGRESS.md, Independent UX review (64f23ae)",
+    "tests": [
+      {
+        "file": "tests/unit/renderer/autonomy-model.test.ts",
+        "title": "says how far each offered answer reaches, narrow to wide, then Deny"
+      },
+      {
+        "file": "tests/unit/renderer/isolation-model.test.ts",
+        "title": "promises nothing about a setup that stopped half way"
+      },
+      {
+        "file": "tests/unit/renderer/isolation-model.test.ts",
+        "title": "says where code runs Restricted that it is no containment against hostile code"
+      }
+    ],
+    "security": false
+  }
+]

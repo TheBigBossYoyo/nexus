@@ -26,13 +26,19 @@ const gitRead = (args: string[]) => {
     return 'unknown'
   }
 }
+// The channel is read from the version and from nothing else: `x.y.z-development` while the source moves,
+// `x.y.z-rc.n` for a candidate, a plain `x.y.z` for a release.
+function buildChannel(version: string): 'development' | 'candidate' | 'release' {
+  if (/^\d+\.\d+\.\d+$/.test(version)) return 'release'
+  return /-rc(\.\d+)?$/.test(version) ? 'candidate' : 'development'
+}
 const buildDefine = {
   __NEXUS_BUILD__: JSON.stringify({
     version: packageVersion,
     commit: gitRead(['rev-parse', 'HEAD']),
     dirty: gitRead(['status', '--porcelain']) !== '',
     builtAt: new Date().toISOString(),
-    channel: 'development',
+    channel: buildChannel(packageVersion),
   }),
 }
 

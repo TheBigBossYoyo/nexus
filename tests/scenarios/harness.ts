@@ -673,6 +673,8 @@ export async function ipc<C extends IpcChannel>(h: Harness, channel: C, input: I
     pickDirectory: async () => null,
     openDataDir: async () => undefined,
     push: () => undefined,
+    // The person at the machine says yes: a scenario that answers a boundary request stands for them.
+    confirmAutonomy: async () => true,
   })
   const result = await dispatchIpc(handlers, channel, input)
   if (!result.ok) throw new Error(`${channel} failed: ${result.error.message}`)

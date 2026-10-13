@@ -21,7 +21,8 @@ import {
   type UiResponse,
 } from '@shared/runtime-protocol'
 import type { WorkersOverview } from '@shared/workers'
-import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { TERMINAL_RUN_STATES, type Run } from '@shared/domain'
+import { isReasoningRun } from '@shared/program'
 import { ArenaService } from '../modules/arena'
 import { AutonomyService } from '../modules/autonomy/service'
 import { createHash, randomUUID } from 'node:crypto'
@@ -43,7 +44,17 @@ import { mirrorTools, type ToolMirrorState } from '../modules/isolation/tools'
 import { startPolicyProxy } from '../modules/network/proxy'
 import { policyForProjectCommands, policyForPurpose } from '../modules/network/policy'
 import { DEFAULT_SEARCH_URL, WebResearchProvider } from '../modules/research/provider'
+import { isSecretEnvName } from '../modules/process/contained-env'
 import { createResearchTools } from '../modules/research/tools'
+import { ProgressService } from '../modules/progress/service'
+import { sqliteOutageStore } from '../modules/connectivity/sqlite-outage-store'
+import { startNetworkResilience, type NetworkResilience } from './network-resilience'
+import type { FinishedTask } from '../modules/progress/estimator'
+import { DEFAULT_PROGRESS_REFRESH_SECONDS, type ProgressSnapshot } from '@shared/progress'
+import { createDirectorLineRuntime } from '../modules/director-line/runtime'
+import type { HttpFetch } from '../modules/director-line'
+import { createDirectorLineHost, protectedSecretStore } from './director-line-host'
+import { DirectorLineReporter } from './director-line-reports'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
@@ -418,6 +429,62 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     notifier?.onEvent(event)
     stateChanged()
   })
+  // 0.9: progress and time remaining, from the task graph and from how long tasks took here before. Looked at
+  // again when something happens in a mission (tool calls and token counts are not "something"), and on a tick
+  // for the refresh of what is shown. No session is started for it and no model is asked.
+  const finishedTaskRows = db.prepare("SELECT kind, complexity, started_at AS s, finished_at AS f FROM tasks WHERE state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?")
+  const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
+  const progressListeners: ((snapshot: ProgressSnapshot, why: string) => void)[] = []
+  const progress = new ProgressService({
+    now: () => Date.now(),
+    run: (runId) => repos.runs.get(runId) ?? null,
+    tasks: (runId) => repos.tasks.listByRun(runId),
+    dependencies: (runId) => repos.dependencies.listByRun(runId),
+    events: (runId, afterSeq) => repos.events.listByRun(runId, afterSeq, 5000),
+    finishedTasks: (limit) => (finishedTaskRows.all(limit) as { kind: string; complexity: string; s: string; f: string }[]).map((r) => ({ kind: r.kind as FinishedTask['kind'], complexity: r.complexity as FinishedTask['complexity'], seconds: (Date.parse(r.f) - Date.parse(r.s)) / 1000 })),
+    repairRate: () => {
+      const row = repairRateRow.get() as { r: number | null; n: number }
+      return row.n >= 8 && row.r !== null ? row.r : null
+    },
+    parallelism: (run) => Math.max(1, run.config.maxParallelAgents),
+    refreshSeconds: () => repos.settings.get().execution.progressRefreshSeconds ?? DEFAULT_PROGRESS_REFRESH_SECONDS,
+    waitOf: (run) => progressWaitOf(run),
+    onChange: (snapshot, why) => {
+      push({ kind: 'progress', snapshot })
+      for (const listener of progressListeners) listener(snapshot, why)
+    },
+  })
+  // What a run waits on beyond its own state: the network (set by the connectivity supervisor), or a decision
+  // of the user's on a boundary request of that mission.
+  let network: NetworkResilience | null = null
+  const progressWaitOf = (run: Run): { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_PROVIDER' | 'WAITING_FOR_USER_BOUNDARY'; detail: string } | null => {
+    if (TERMINAL_RUN_STATES.includes(run.state)) return null
+    const offline = network?.waitOf() ?? null
+    if (offline !== null) return offline
+    // A request that some task waits on while others work is a blocker of that task, not a wait of the mission.
+    if (repos.tasks.listByRun(run.id).some((t) => t.state === 'running' || t.state === 'assigned')) return null
+    const pending = repos.boundaryRequests.listPending(run.projectId).filter((r) => r.runId === run.id)
+    return pending.length > 0 ? { kind: 'WAITING_FOR_USER_BOUNDARY', detail: `${pending.length} boundary ${pending.length === 1 ? 'request' : 'requests'} to decide` } : null
+  }
+  const QUIET_FOR_PROGRESS = new Set(['agent.usage', 'agent.tool.started', 'agent.tool.completed', 'agent.message', 'agent.state_changed', 'context.composed'])
+  bus.subscribe((event) => {
+    if (QUIET_FOR_PROGRESS.has(event.type)) return
+    try {
+      progress.refresh(event.runId)
+    } catch (e) {
+      console.error(`[nexus] progress: ${errorMessage(e)}`)
+    }
+  })
+  const progressTick = setInterval(() => {
+    for (const runId of progress.open()) {
+      try {
+        progress.refresh(runId)
+      } catch (e) {
+        console.error(`[nexus] progress: ${errorMessage(e)}`)
+      }
+    }
+  }, 30_000)
+  progressTick.unref()
 
   // UI tests answer confirmations through the window they drive: with the scripted runtime, or in an acceptance
   // run of a development build that says so. Never in a package: there the question is always the runtime's own.
@@ -754,6 +821,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
     legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
     policy: () => researchPolicy,
+    secrets: () => Object.entries(process.env).flatMap(([name, value]) => (value !== undefined && value.length >= 12 && isSecretEnvName(name) ? [value] : [])),
     record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
   })
   const appTools = createAppTools({
@@ -784,6 +852,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     autonomy,
     extensions: extensionTools,
     execution: isolation,
+    // 0.9: a session that ended because the provider could not be reached is a wait. Judged by the network
+    // supervisor, which is started further down (and not at all where agents are scripted).
+    networkLoss: (error) => network?.networkLoss(error) ?? false,
   })
   orchestrator.setDispatchGate(usage)
   boundaryResumer = new BoundaryResumer({
@@ -852,14 +923,54 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       })
     : undefined
   let awake = false
+  // 0.9: held for an Overnight run as before, and also while any mission, Program or Workspace run is working or
+  // will resume by itself (the guard of the network module decides that, and lets go when nothing moves for hours).
+  let guardWantsAwake = false
   keepAwake = () => {
     // Windows must not suspend the runtime in the middle of unattended work.
-    const wanted = phase !== 'STOPPING' && (overnight?.hasActive() ?? false)
+    const wanted = phase !== 'STOPPING' && ((overnight?.hasActive() ?? false) || guardWantsAwake)
     if (wanted === awake) return
     awake = wanted
     host.setKeepAwake?.(wanted)
+    logger(`power: the idle-sleep request is ${wanted ? 'held' : 'released'}`)
   }
   keepAwake()
+  // Network resilience. Not where agents are scripted (the tests of the runtime make no connectivity check),
+  // unless a test asks for it.
+  const scripted = env['NEXUS_FAKE_RUNTIME'] === '1' || env['NEXUS_FAKE_WORKERS'] === '1'
+  if (process.platform === 'win32' && (!scripted || env['NEXUS_NETWORK_RESILIENCE'] === '1') && env['NEXUS_NETWORK_RESILIENCE'] !== '0') {
+    const lastProgress = db.prepare('SELECT MAX(finished_at) AS at FROM tasks WHERE run_id = ?')
+    const openRunRows = db.prepare("SELECT id FROM runs WHERE state NOT IN ('completed', 'failed', 'cancelled')")
+    network = startNetworkResilience({
+      ...(host.launcherPath !== undefined ? { wlanHelperPath: join(dirname(host.launcherPath), 'nexus-wlan.exe') } : {}),
+      providerHosts: () => ['api.anthropic.com'],
+      quota: () => null,
+      openRuns: () => (openRunRows.all() as { id: string }[]).flatMap((r) => repos.runs.get(r.id) ?? []),
+      workOf: (run) => {
+        const at = (lastProgress.get(run.id) as { at: string | null }).at
+        const kind = repos.overnight.getByRun(run.id) !== null ? 'OVERNIGHT' : 'LONG_MISSION'
+        const waitsOnBoundary = repos.boundaryRequests.listPending(run.projectId).some((r) => r.runId === run.id) && !repos.tasks.listByRun(run.id).some((t) => t.state === 'running' || t.state === 'assigned')
+        return { kind, lastProgressAt: Date.parse(at ?? run.startedAt ?? run.createdAt), waitsOnBoundary }
+      },
+      resumeRun: (runId) => orchestrator.resumeRun(runId),
+      setKeepAwake: (on) => {
+        guardWantsAwake = on
+        keepAwake()
+      },
+      policy: () => repos.settings.get().execution.networkRecovery ?? null,
+      store: sqliteOutageStore(db),
+      onState: (snapshot) => {
+        push({ kind: 'connectivity', snapshot })
+        for (const runId of progress.open()) progress.refresh(runId)
+      },
+      logger,
+    })
+    const networkOf = network
+    bus.subscribe((event) => {
+      if (event.type.startsWith('run.') || event.type === 'task.completed') networkOf.workChanged()
+    })
+    networkOf.workChanged()
+  }
 
   // Arena: controlled trials of the same task under different strategies. Each trial is an ordinary run
   // on its own throwaway repository; the hidden evaluators stay in the cases directory, outside every
@@ -1334,6 +1445,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     phase = 'STOPPING'
     intelligenceOperations.closeAdmission()
     clearInterval(capacityRecoveryTimer)
+    clearInterval(progressTick)
+    clearInterval(lineTick)
+    void directorLine.stop().catch(() => undefined)
+    void network?.stop().catch(() => undefined)
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
     push({ kind: 'runtime' })
@@ -1460,7 +1575,62 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     isPackaged: host.isPackaged,
   })
 
+  // 0.9: the Director Line. It is given facts to read, pause and continue for the user's own missions, and the
+  // ordinary creation of a mission; nothing that grants. Off until the user turns it on in Settings, with a
+  // native confirmation; while off, nothing is polled and nothing is sent.
+  const openRunIds = db.prepare("SELECT id FROM runs WHERE state NOT IN ('completed', 'failed', 'cancelled') ORDER BY created_at")
+  const lastOvernightReport = db.prepare("SELECT run_id FROM overnight_runs WHERE final_report IS NOT NULL ORDER BY rowid DESC LIMIT 1")
+  const missionName = (run: Run): string => `${repos.projects.get(run.projectId)?.name ?? 'project'}: ${run.prompt.replace(/\s+/g, ' ').slice(0, 60)}`
+  let createMissionFromLine: (input: { projectId: string; prompt: string }) => Promise<{ id: string }> = async () => {
+    throw new Error('The runtime is still starting.')
+  }
+  const directorLineHost = createDirectorLineHost({
+    openRuns: () => (openRunIds.all() as { id: string }[]).flatMap((r) => repos.runs.get(r.id) ?? []).filter((r) => !isReasoningRun(r)),
+    projectName: (projectId) => repos.projects.get(projectId)?.name ?? null,
+    projects: () => repos.projects.list().map((p) => ({ id: p.id, name: p.name })),
+    progressOf: (runId) => progress.snapshot(runId),
+    eventsOf: (runId, afterSeq) => repos.events.listByRun(runId, afterSeq, 5000),
+    pendingBoundaryRequests: () => repos.boundaryRequests.countPending(),
+    isOnline: () => network?.isOnline() ?? true,
+    latestOvernightReport: () => {
+      try {
+        const row = lastOvernightReport.get() as { run_id: string } | undefined
+        return row === undefined ? null : (overnight?.report(row.run_id).text ?? null)
+      } catch {
+        return null
+      }
+    },
+    pauseRun: (runId, detail) => orchestrator.pauseRun(runId, 'user', detail),
+    resumeRun: (runId) => orchestrator.resumeRun(runId),
+    createMission: (input) => createMissionFromLine(input),
+    subscribe: (listener) => bus.subscribe(listener),
+    logger,
+  })
+  const directorLine = createDirectorLineRuntime({
+    db,
+    secrets: protectedSecretStore(join(dataDir, 'director-line'), host.protectedStorage),
+    fetch: ((url, init) => fetch(url, init as RequestInit)) as HttpFetch,
+    reads: directorLineHost.reads,
+    actions: directorLineHost.actions,
+    isOnline: () => network?.isOnline() ?? true,
+    localNotify: async (title, text) => host.notify?.(title, text.slice(0, 400)),
+    recordNote: (note) => logger(`director line: refused a remote request (${note.topic})`),
+    log: (line) => logger(`director line: ${line}`),
+  })
+  const lineReporter = new DirectorLineReporter({ report: (event) => directorLine.line.report(event), now: () => Date.now() })
+  progressListeners.push((snapshot) => {
+    const run = repos.runs.get(snapshot.subject.id)
+    if (!run || isReasoningRun(run)) return
+    const overnightText = snapshot.wait === 'FINISHED' && repos.overnight.getByRun(run.id) !== null ? (overnight?.report(run.id).text ?? null) : null
+    lineReporter.onProgress(snapshot, missionName(run), overnightText)
+  })
+  const lineTick = setInterval(() => lineReporter.tick(), 60_000)
+  lineTick.unref()
+  void directorLine.start().catch((e: unknown) => logger(`director line: could not start: ${errorMessage(e)}`))
+
   const handlers = createIpcHandlers({
+    progress,
+    directorLine,
     chatgpt,
     intelligenceOperations,
     taskAdmission,
@@ -1563,6 +1733,14 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
 
   // ───────────────────────────── the local server ─────────────────────────────
+
+  // A task sent over the Director Line is created the way the window creates one: the same channel, the same
+  // admission, Task Compiler and capability broker. The line adds nothing to it.
+  createMissionFromLine = async ({ projectId, prompt }) => {
+    const result = await dispatchIpc(handlers, 'runs.create', { projectId, mode: 'build', preset: repos.settings.get().execution.defaultPreset, prompt })
+    if (!result.ok) throw new Error(result.error.message)
+    return { id: (result.value as Run).id }
+  }
 
   const token = newToken()
   const pipe = newPipeName(dataDir)

@@ -13,6 +13,9 @@ files:
   - "!out/main/runtime-node.js"
   - "!out/validation/**"
   - "!**/better-sqlite3/{deps,src}/**"
+  # The SQLite binding for other systems: a Windows package has no use for them.
+  - "!**/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*"
+  - "!**/better-sqlite3/prebuilds/win32-arm64.node"
 # The built-in Arena cases (fixtures and hidden evaluators) are plain files NEXUS copies and executes.
 extraResources:
   - from: arena/cases
@@ -21,6 +24,9 @@ extraResources:
   # setup of the sandbox account. Real files on disk: one is started as a process, the others run elevated.
   - from: out/native/nexus-launch.exe
     to: bin/nexus-launch.exe
+  # 0.9: the helper that reads the Wi-Fi state and reconnects a saved profile (native/nexus-wlan).
+  - from: out/native/nexus-wlan.exe
+    to: bin/nexus-wlan.exe
   # The POSIX shell of the isolated profile (vendor/busybox, GPL-2.0): it runs inside the AppContainer.
   - from: out/native/busybox.exe
     to: bin/busybox.exe

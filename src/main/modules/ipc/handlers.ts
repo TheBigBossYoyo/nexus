@@ -1,3 +1,4 @@
+import type { ProgressSnapshot } from '@shared/progress'
 import type { AuthStatus } from '@shared/auth'
 import { TERMINAL_RUN_STATES, type RunConfig } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
@@ -34,6 +35,7 @@ import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
 import { createAutonomyHandlers, createIsolationHandlers, type IsolationHandlerContext } from './v8-handlers'
+import { createDirectorLineHandlers, type DirectorLineHandlerContext } from './v9-handlers'
 import { AutonomyService } from '@main/modules/autonomy/service'
 import { createV71Handlers } from './v71-handlers'
 import { createV72Handlers } from './v72-handlers'
@@ -50,6 +52,8 @@ import {
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 
 export interface IpcContext {
+  /** 0.9: progress and time remaining of missions. Absent: the channel answers null. */
+  progress?: { snapshot: (runId: string) => ProgressSnapshot | null }
   chatgpt?: ChatGPTConnection
   intelligenceOperations?: IntelligenceOperations
   taskAdmission?: TaskAdmissionService
@@ -94,6 +98,8 @@ export interface IpcContext {
   autonomy?: AutonomyService
   /** 0.8: the native confirmation before lasting authority is given (enrolling, allowing for a whole project). Absent: no question. */
   confirmAutonomy?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
+  /** 0.9: the remote operator channel. Its channels that open it to the outside or give a phone authority are confirmed natively. */
+  directorLine?: DirectorLineHandlerContext['directorLine']
   /** 0.8: the containment as the runtime holds it. Absent (tests of other handlers): no containment exists and none can be set up. */
   isolation?: Omit<IsolationHandlerContext, 'confirm'>
 }
@@ -291,6 +297,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       // A program's planning, verification and reassessment sessions are its own; they are not missions of the user.
       return includeInternal ? runs : runs.filter((r) => !isReasoningRun(r))
     },
+    'progress.get': ({ runId }) => ctx.progress?.snapshot(runId) ?? null,
     'runs.get': ({ runId }) => ({
       run: repos.runs.require(runId),
       tasks: repos.tasks.listByRun(runId),
@@ -781,6 +788,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           change.endAction !== 'NONE' &&
           change.endAction !== current.policy.endAction) ||
           (change.forceCloseApplications === true && !current.policy.forceCloseApplications) ||
+          // 0.9 (review, N-1): less time to say no before Windows is shut down is more power, not less.
+          (change.finalDelaySeconds !== undefined && change.finalDelaySeconds < current.policy.finalDelaySeconds) ||
           (change.shutdownOn !== undefined &&
             Object.entries(change.shutdownOn).some(
               ([name, on]) =>
@@ -789,7 +798,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       if (escalates && ctx.confirmPower) {
         const ok = await ctx.confirmPower(
           'Change what NEXUS may do to Windows at the end of this run?',
-          `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}`,
+          `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}${change.finalDelaySeconds !== undefined && change.finalDelaySeconds < current.policy.finalDelaySeconds ? `, final delay ${change.finalDelaySeconds} s instead of ${current.policy.finalDelaySeconds} s` : ''}`,
         )
         if (!ok) throw new NexusError('invalid_state', 'The change was not authorized.')
       }
@@ -821,6 +830,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       // The path of the kept text and of a held file stays in the runtime.
       artifacts: repos.researchArtifacts.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((a) => ({ ...a, textPath: null })),
       downloads: repos.researchDownloads.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((d) => ({ id: d.id, projectId: d.projectId, runId: d.runId, url: d.url, finalUrl: d.finalUrl, fileName: d.suggestedName, sniffed: d.sniffed, bytes: d.bytes, sha256: d.sha256, state: d.state, refusal: d.refusal, downloadedAt: d.downloadedAt })),
+    }),
+    ...createDirectorLineHandlers({
+      directorLine: ctx.directorLine ?? unavailableDirectorLine(),
+      ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
     }),
     ...createIsolationHandlers({
       ...(ctx.isolation ?? {
@@ -860,4 +873,13 @@ export async function dispatchIpc(
     const code = e instanceof NexusError ? e.code : 'internal'
     return { ok: false, error: { code, message: errorMessage(e) } }
   }
+}
+
+/** A runtime without the Director Line (a test's): every channel says so. */
+function unavailableDirectorLine(): DirectorLineHandlerContext['directorLine'] {
+  return new Proxy({} as DirectorLineHandlerContext['directorLine'], {
+    get: () => () => {
+      throw new NexusError('runtime_unavailable', 'The Director Line is not part of this runtime.')
+    },
+  })
 }

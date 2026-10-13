@@ -1,0 +1,301 @@
+{
+  "kind": "v0.9-first-real-reboot",
+  "date": "2026-10-13",
+  "observedBuild": {
+    "version": "0.8.0",
+    "commit": "3795306d9dd47256f87579958d0f9b3c3389e08f",
+    "dirty": false,
+    "builtAt": "2026-10-13T10:19:10.410Z",
+    "channel": "development",
+    "runtimeProtocol": 1,
+    "databaseSchema": 19,
+    "executable": "release/v08-check/win-unpacked/NEXUS.exe (packaged, not installed by an installer)"
+  },
+  "sourceCheckout": {
+    "branch": "nexus-0.8-isolation-autonomy",
+    "commit": "3795306",
+    "tag": "v0.8.0",
+    "tree": "clean; the two observation scripts were added untracked and no product source was changed"
+  },
+  "environment": {
+    "windows": "Microsoft Windows 11 Professionnel 10.0.26200",
+    "build": 26200,
+    "user": "ordinary session of the owner, not elevated",
+    "securitySoftware": "Bitdefender active, not touched"
+  },
+  "rule": "Observed before anything was changed: no setup run, no repair, no elevation, no access list written by hand.",
+  "boot": {
+    "shutdownAtUtc": "2026-10-13T10:32:32Z",
+    "startedAtUtc": "2026-10-13T10:32:43.5000000Z",
+    "bootType": "0x0 (Kernel-Boot event 27: a full start, not a fast startup and not a resume)",
+    "nexusRunningAtShutdown": "not known (not observed before the restart)",
+    "firstObservationSecondsAfterBoot": 109,
+    "noNexusProcessAtFirstObservation": true
+  },
+  "machineStateAsFound": {
+    "observedAt": "2026-10-13T10:37:11.0353083Z",
+    "lastBoot": "2026-10-13T10:32:43.5000000Z",
+    "uptimeSeconds": 268,
+    "windows": "Microsoft Windows 11 Professionnel 10.0.26200",
+    "session": 1,
+    "bootType": "0x0",
+    "bootTypeAt": "2026-10-13T10:32:43.7272110Z",
+    "account": {
+      "present": true,
+      "enabled": true,
+      "sid": "S-1-5-21-1111111111-2222222222-3333333333-1008",
+      "description": "NEXUS sandbox account v1",
+      "passwordLastSet": "2026-10-12T21:06:41.2146736Z"
+    },
+    "record": {
+      "version": "3",
+      "accountSid": "S-1-5-21-1111111111-2222222222-3333333333-1008",
+      "root": "C:\\ProgramData\\NexusSandbox",
+      "appContainerName": "NexusSandbox.Contained.1",
+      "appContainerSid": "S-1-15-2-2156023561-1840754306-2200609880-3546711855-1968635281-3243649039-2500335696",
+      "capabilitySid": "S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572",
+      "users": 1
+    },
+    "firewall": [
+      {
+        "name": "NexusSandbox-Block-Outbound",
+        "enabled": "True",
+        "direction": "Outbound",
+        "action": "Block"
+      },
+      {
+        "name": "NexusSandbox-Block-Inbound",
+        "enabled": "True",
+        "direction": "Inbound",
+        "action": "Block"
+      }
+    ],
+    "startupTask": {
+      "name": "NexusSandbox-RestoreCanonicalization",
+      "queryExitCode": 1,
+      "readableUnelevated": false,
+      "listedUnelevated": false,
+      "answer": "schtasks.exe : Erreur�: Acc�s refus�.\r\nAu caract�re C:\\Users\\user\\Documents\\Nexus\\scripts\\v09-machine-state.ps1:28 : 10\r\n+ $text = (& (Join-Path $env:SystemRoot 'System32\\schtasks.exe') /query ...\r"
+    },
+    "obsoleteElevatedTask": {
+      "name": "NexusSetupElevated",
+      "queryExitCode": 1
+    },
+    "bootstrapScript": {
+      "path": "C:\\Program Files\\NexusSandbox\\restore-canonicalization.ps1",
+      "sha256": "CDD7D18B521CD5BC3B166542DCE5EB415B0345A2C738CB8C8366726C84C6C2F6",
+      "owner": "S-1-5-32-544",
+      "writableByOthersThanSystemAdminsTrustedInstaller": []
+    },
+    "mountManager": {
+      "ok": true,
+      "changed": false,
+      "present": true,
+      "capabilitySid": "S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572",
+      "before": "D:(A;;FX;;;WD)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FX;;;RC)(A;;FX;;;S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572)",
+      "after": "D:(A;;FX;;;WD)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FX;;;RC)(A;;FX;;;S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572)",
+      "error": null
+    },
+    "elevated": false
+  },
+  "startupTask": {
+    "name": "NexusSandbox-RestoreCanonicalization",
+    "exists": "yes: a query by an ordinary user is refused (\"access denied\"), where a task that is not there answers \"not found\" (as NexusSetupElevated now does)",
+    "definitionReadableUnelevated": false,
+    "ranAtThisBoot": true,
+    "evidence": "Windows PowerShell log, event 400 (engine start), 2026-10-13T10:33:08Z, 25 s after the kernel started: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:\\Program Files\\NexusSandbox\\restore-canonicalization.ps1\", with no other argument. The later starts of the same script carry -Check and are this observation.",
+    "restoredAnEntry": "NOT KNOWN. The script writes its result (changed/present) to standard output only, and the task keeps none; the Task Scheduler operational log is disabled on this machine. The entry was there 109 s after boot.",
+    "entryPersistentAcrossAFullStart": "NOT KNOWN at this boot, for the same reason. 0.8 measured that Windows makes the device object anew at a full start.",
+    "uacRequired": false
+  },
+  "earlierStartsSinceTheTaskWasRegistered": [
+    {
+      "atUtc": "2026-10-13T06:01:21Z",
+      "bootType": "0x0 full start (a restart asked from the Start menu)",
+      "taskRan": "yes, engine start at 06:01:46Z",
+      "note": "before the 0.8.0 release commit; nobody looked at the isolated profile then, so it was not counted as an observation"
+    },
+    {
+      "atUtc": "2026-10-13T09:15:06Z",
+      "bootType": "0x1 fast startup after a shutdown",
+      "taskRan": "no engine start of the script is logged",
+      "note": "the kernel session is restored from disk on a fast startup, and the entry was still there: the final 0.8 validation ran after it with ISOLATED available"
+    }
+  ],
+  "applicationStart": {
+    "how": "node scripts/v09-reboot-observation.mjs release/v08-check/win-unpacked first-real-reboot-after-v0.8.0 (data directory of its own, window off-screen, no mission, no inference)",
+    "startedAt": "2026-10-13T10:37:10.427Z",
+    "secondsAfterBoot": 268,
+    "runtime": {
+      "phase": "READY",
+      "endpointAcl": "restricted"
+    },
+    "secondsFromLaunchToIsolationAnswer": 6.6,
+    "isolation": {
+      "requested": "STRONGEST",
+      "effective": "ISOLATED",
+      "usable": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
+      "isolated": {
+        "available": true,
+        "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
+        "checkedAt": "2026-10-13T10:37:20.277Z"
+      },
+      "restricted": {
+        "available": true,
+        "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+        "checkedAt": "2026-10-13T10:37:19.405Z"
+      },
+      "sandboxAccount": true,
+      "setupAvailable": true
+    },
+    "checks": {
+      "the runtime is ready": true,
+      "ISOLATED is reported available, verified at this start by running it": true,
+      "a contained process ran as the sandbox account in the AppContainer": true,
+      "the filesystem containment holds (refused beside its directory, a protected file, a file of the user)": true,
+      "no direct route to the Internet": true,
+      "no name looked up (resolver, own query, request by name)": true,
+      "names could be looked up outside the containment at that moment (so the refusal was really seen)": true,
+      "not shown the machine's name cache": true,
+      "the canonical form of a path is given inside the containment": true,
+      "RESTRICTED is verified too": true,
+      "the window reported no script error": true,
+      "no elevation prompt appeared during the start": true,
+      "the start changed nothing on the Mount Manager device": true
+    },
+    "consentPromptsSeen": [],
+    "verdict": "PASS"
+  },
+  "machineStateAfterTheStart": {
+    "observedAt": "2026-10-13T10:37:23.6588267Z",
+    "lastBoot": "2026-10-13T10:32:43.5000000Z",
+    "uptimeSeconds": 280,
+    "windows": "Microsoft Windows 11 Professionnel 10.0.26200",
+    "session": 1,
+    "bootType": "0x0",
+    "bootTypeAt": "2026-10-13T10:32:43.7272110Z",
+    "account": {
+      "present": true,
+      "enabled": true,
+      "sid": "S-1-5-21-1111111111-2222222222-3333333333-1008",
+      "description": "NEXUS sandbox account v1",
+      "passwordLastSet": "2026-10-12T21:06:41.2146736Z"
+    },
+    "record": {
+      "version": "3",
+      "accountSid": "S-1-5-21-1111111111-2222222222-3333333333-1008",
+      "root": "C:\\ProgramData\\NexusSandbox",
+      "appContainerName": "NexusSandbox.Contained.1",
+      "appContainerSid": "S-1-15-2-2156023561-1840754306-2200609880-3546711855-1968635281-3243649039-2500335696",
+      "capabilitySid": "S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572",
+      "users": 1
+    },
+    "firewall": [
+      {
+        "name": "NexusSandbox-Block-Outbound",
+        "enabled": "True",
+        "direction": "Outbound",
+        "action": "Block"
+      },
+      {
+        "name": "NexusSandbox-Block-Inbound",
+        "enabled": "True",
+        "direction": "Inbound",
+        "action": "Block"
+      }
+    ],
+    "startupTask": {
+      "name": "NexusSandbox-RestoreCanonicalization",
+      "queryExitCode": 1,
+      "readableUnelevated": false,
+      "listedUnelevated": false,
+      "answer": "schtasks.exe : Erreur�: Acc�s refus�.\r\nAu caract�re C:\\Users\\user\\Documents\\Nexus\\scripts\\v09-machine-state.ps1:28 : 10\r\n+ $text = (& (Join-Path $env:SystemRoot 'System32\\schtasks.exe') /query ...\r"
+    },
+    "obsoleteElevatedTask": {
+      "name": "NexusSetupElevated",
+      "queryExitCode": 1
+    },
+    "bootstrapScript": {
+      "path": "C:\\Program Files\\NexusSandbox\\restore-canonicalization.ps1",
+      "sha256": "CDD7D18B521CD5BC3B166542DCE5EB415B0345A2C738CB8C8366726C84C6C2F6",
+      "owner": "S-1-5-32-544",
+      "writableByOthersThanSystemAdminsTrustedInstaller": []
+    },
+    "mountManager": {
+      "ok": true,
+      "changed": false,
+      "present": true,
+      "capabilitySid": "S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572",
+      "before": "D:(A;;FX;;;WD)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FX;;;RC)(A;;FX;;;S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572)",
+      "after": "D:(A;;FX;;;WD)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FX;;;RC)(A;;FX;;;S-1-15-3-1024-913607018-890609827-841438636-1361414428-3752027639-2111554529-3411157481-722180572)",
+      "error": null
+    },
+    "elevated": false
+  },
+  "hostileTestsAfterTheReboot": {
+    "command": "npx vitest run --project integration tests/integration/isolation/containment.test.ts tests/integration/isolation/pipe.test.ts",
+    "source": "3795306 (v0.8.0), unchanged",
+    "startedLocal": "2026-10-13 11:37:39",
+    "result": "2 files, 34/34 tests passed, 69.65 s",
+    "recorded": {
+      "nodeRealpathNativeInsideIsolated": "OK (fs.realpathSync.native in the worktree)",
+      "mountManager": {
+        "canonical": "OK",
+        "open-to-ask": "OK",
+        "open-to-read": "DENIED:5",
+        "open-to-write": "DENIED:5",
+        "open-to-read-and-write": "DENIED:5",
+        "open-to-change-its-access-list": "DENIED:5",
+        "create-mount-point": "DENIED:5",
+        "delete-mount-points": "DENIED:5",
+        "delete-from-database": "DENIED:5",
+        "next-drive-letter": "DENIED:5",
+        "automatic-drive-letters": "DENIED:5",
+        "volume-arrival": "DENIED:5",
+        "set-volume-mount-point": "DENIED:2",
+        "delete-volume-mount-point": "DENIED:5",
+        "define-drive-raw": "DENIED:5",
+        "define-drive-for-own-directory": "DENIED:5"
+      },
+      "names": {
+        "cache-lines": 2,
+        "getaddrinfo": "DENIED",
+        "dotnet": "DENIED",
+        "dnsquery": "DENIED",
+        "nslookup": "DENIED",
+        "curl-name": "DENIED",
+        "node-lookup": "DENIED:ENOTFOUND",
+        "node-fresh": "DENIED:ENOTFOUND",
+        "cacheLinesOutside": 115
+      },
+      "network": "no route to the Internet over TCP, HTTP or DNS; the loopback is reached",
+      "filesystem": "writes in its worktree and temporary directory only; nothing of the user's profile read or listed; junctions and symbolic links to places not its own refused; the granted repository read, nothing in it written",
+      "runtimePipe": "cannot be opened from RESTRICTED or ISOLATED"
+    }
+  },
+  "answers": {
+    "Does ISOLATED report AVAILABLE?": "yes",
+    "Does its startup health check pass automatically?": "yes, 6.6 s after the launch, nothing asked of the user",
+    "Does path canonicalization work?": "yes",
+    "Does Node realpath work inside ISOLATED?": "yes",
+    "Does direct DNS remain denied?": "yes (resolver, own query, request by name, .NET, Node)",
+    "Does DNS cache remain denied?": "yes (2 lines shown inside, 115 outside)",
+    "Does direct network remain denied?": "yes",
+    "Does filesystem containment still hold?": "yes",
+    "Did the startup canonicalization bootstrap run?": "yes, 25 s after the kernel started",
+    "Did it restore an ACE?": "not known: the task keeps no record of what it did",
+    "Was the ACE already persistent?": "not known, same reason",
+    "Did it require UAC?": "no",
+    "User interruptions at reboot": 0
+  },
+  "findingsForTheLedger": [
+    "The startup task leaves no durable record of its result: after a restart nobody can say whether it restored the entry, found it there, or failed. (The application does notice a missing entry, by using the profile.)",
+    "An ordinary user cannot read the task (definition, last run, last result): the application can tell \"there\" from \"not there\" and nothing more.",
+    "A fast startup (boot type 0x1) does not run the task; the entry survives with the restored kernel session. To be covered by the reboot matrix, with a hibernation resume (0x2).",
+    "C:\\ProgramData\\NexusSandbox\\bin holds about 200 copies of the launcher, one per build of the development tree: nothing removes the old ones.",
+    "The machine still lists \"NEXUS 0.7.0\" among installed programs (an earlier installer test): to be accounted for by the installer lifecycle.",
+    "The installed copy of restore-canonicalization.ps1 differs from the repository in line endings only (same text); a hash comparison by the application would have to allow for it or the setup must copy bytes as they are."
+  ],
+  "verdict": "PASS: the reboot recovery of v0.8.0 worked with no user interruption. Two questions (restored or persistent) cannot be answered from what 0.8 records."
+}

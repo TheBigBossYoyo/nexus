@@ -490,7 +490,10 @@ export class GitService {
   /** One git process, with NEXUS's settings and, in a worktree NEXUS created, its Git directory and index named. No checks: `run` makes them. */
   private async exec(own: TrustedWorktree | null, args: readonly string[], opts: RunGitOptions, index: string | null, cwd?: string): Promise<ProcessResult> {
     this.noHooksDir ??= emptyHooksDir()
-    const scope = own ? [`--git-dir=${own.gitDir}`, `--work-tree=${own.root}`] : []
+    // 0.9 (review, CRITICAL): a directory under NEXUS's worktrees that is not one of its worktrees is a candidate's
+    // clone. Its Git directory is named here as well, and nothing inside the clone says where it is.
+    const clone = own ? null : await this.cloneScopeFor(cwd ?? process.cwd())
+    const scope = own ? [`--git-dir=${own.gitDir}`, `--work-tree=${own.root}`] : clone ? [`--git-dir=${clone.gitDir}`, `--work-tree=${clone.root}`] : []
     const sub = subcommandOf(args)
     const at = args.indexOf(sub)
     // A comparison of contents never starts a program on the files compared. Git for Windows ships attributes
@@ -506,7 +509,7 @@ export class GitService {
     const fullArgs = ['--no-replace-objects', ...scope, '-c', 'core.longpaths=true', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${this.noHooksDir}`, '-c', 'core.pager=cat', '-c', 'protocol.ext.allow=never', ...SAFE_CONFIG, ...own_args]
     const where = cwd ?? own?.root ?? process.cwd()
     const ceiling = this.worktreesRoot && isWithin(this.worktreesRoot, where) ? { GIT_CEILING_DIRECTORIES: this.worktreesRoot } : {}
-    const common = own ? { GIT_COMMON_DIR: dirname(dirname(own.gitDir)) } : {}
+    const common = own ? { GIT_COMMON_DIR: dirname(dirname(own.gitDir)) } : clone ? { GIT_COMMON_DIR: clone.gitDir } : {}
     return runProcess(this.gitPath, fullArgs, {
       cwd: where,
       // GIT_NO_LAZY_FETCH: in a repository that is a partial clone, an object that is not there is not fetched for a task.
@@ -731,6 +734,60 @@ export class GitService {
   }
 
   /**
+   * 0.9 (review, CRITICAL). The Git directory of a candidate's clone, for a directory under NEXUS's worktrees
+   * that is not one of its worktrees; null anywhere else, and where there is no `.git` yet.
+   *
+   * The code working in a clone owns everything in it, its `.git` included. Checking the clone's `config` was
+   * not enough: a `commondir` file in `.git` sends git to another directory for the configuration (and for the
+   * objects and the refs), and a `.git` that is a file sends it to another repository altogether, with a
+   * back-pointer the same code wrote. A filter named by that other configuration then ran, as the user, when
+   * NEXUS staged the candidate's files (reproduced by the review, both ways).
+   *
+   * So nothing in the clone decides where its repository is. The Git directory is `<clone>/.git` and must be a
+   * real directory; it is named to git on the command line with the working tree, and named again as the common
+   * directory in the environment, which outranks a `commondir` file. And the things that would redirect it are
+   * refused where they are found, never ignored: a `.git` that is not a plain directory, a `commondir` or a
+   * `gitdir` file, a `config.worktree`, a list of other object stores.
+   */
+  private async cloneScopeFor(cwd: string): Promise<{ root: string; gitDir: string } | null> {
+    if (!this.worktreesRoot || !isWithin(this.worktreesRoot, cwd)) return null
+    const parts = relative(this.worktreesRoot, resolve(cwd)).split(/[\\/]/).filter((p) => p !== '')
+    if (parts.length < 2) return null
+    return this.inspectClone(join(this.worktreesRoot, parts[0] as string, parts[1] as string), cwd)
+  }
+
+  /** The checks of cloneScopeFor, on the directory that is the clone. */
+  private async inspectClone(root: string, cwd: string): Promise<{ root: string; gitDir: string } | null> {
+    const gitDir = join(root, '.git')
+    const info = await lstat(gitDir).catch(() => null)
+    if (info === null) return null
+    const refuse = (why: string): never => {
+      throw new NexusError('invalid_state', `The repository at ${root} is not the plain clone NEXUS made (${why}). NEXUS will not run git there.`, { cwd })
+    }
+    if (info.isSymbolicLink()) refuse('its .git is a link')
+    if (info.isFile()) {
+      // A worktree of a repository NEXUS has no record of. With a record to ask (the runtime always has one), a
+      // pointer under NEXUS's own root that the record does not know is nobody's to follow. Without one (a bare
+      // GitService), the pointer is judged against its repository as before.
+      if (this.repositoryOf) refuse('its .git is a pointer to another place, and NEXUS made no worktree there')
+      return null
+    }
+    if (!info.isDirectory()) refuse('its .git is neither a directory nor a file')
+    for (const name of ['commondir', 'gitdir', 'config.worktree']) {
+      const planted = await lstat(join(gitDir, name)).catch(() => null)
+      if (planted !== null) refuse(`its .git holds a ${name}, which a clone does not have`)
+    }
+    for (const name of ['objects', 'refs', 'info', 'hooks']) {
+      const dir = await lstat(join(gitDir, name)).catch(() => null)
+      if (dir !== null && (dir.isSymbolicLink() || !dir.isDirectory())) refuse(`its .git/${name} is not a directory`)
+    }
+    for (const name of ['alternates', 'http-alternates']) {
+      if ((await lstat(join(gitDir, 'objects', 'info', name)).catch(() => null)) !== null) refuse('it names other object stores')
+    }
+    return { root, gitDir }
+  }
+
+  /**
    * A speculative candidate is a clone, not a worktree: its `.git` is a directory the code working there owns,
    * with a `config` of its own, and NEXUS records no entry for it that it could compare with. Git reads that
    * configuration for every command, and a filter, a diff driver or a program named there runs as the user.
@@ -765,6 +822,18 @@ export class GitService {
     this.verifiedPointers.set(configFile, stamp)
   }
 
+  /**
+   * Where the commits of a candidate's clone are fetched from: its Git directory itself, after the same checks as
+   * for any command there. Fetching from the clone's top directory would let git look for the repository again.
+   */
+  async cloneGitDir(clone: string): Promise<string> {
+    // Without a worktrees root (a GitService of a test or a tool) the directory named is judged as it is.
+    const scope = this.worktreesRoot ? await this.cloneScopeFor(clone) : await this.inspectClone(resolve(clone), clone)
+    if (scope === null || !samePath(scope.root, resolve(clone))) throw new NexusError('invalid_state', `${clone} is not a candidate's clone under NEXUS's worktrees. NEXUS will not fetch from it.`, { cwd: clone })
+    await this.assertPlainCloneConfig(clone)
+    return scope.gitDir
+  }
+
   /** Runs git; throws NexusError unless the exit code is in okCodes. */
   async run(cwd: string, args: readonly string[], opts: RunGitOptions = {}): Promise<ProcessResult> {
     // NEXUS's own git commands do not run what a repository's configuration could make git run: no file
@@ -779,6 +848,9 @@ export class GitService {
     // Anywhere else a linked worktree's pointer is verified before every command, not only before a write: a
     // read runs the filters and drivers of whatever repository the pointer names.
     if (!own) {
+      // First what the directory is: a candidate's clone is refused here when anything in it redirects its
+      // repository, before any git looks at it (assertOwnGitDir below starts one).
+      await this.cloneScopeFor(cwd)
       await this.assertOwnGitDir(cwd)
       await this.assertPlainCloneConfig(cwd)
     } else {

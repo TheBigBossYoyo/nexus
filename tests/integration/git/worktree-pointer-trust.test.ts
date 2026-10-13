@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { GitService } from '@main/modules/git/git-service'
@@ -227,6 +227,77 @@ describe('a task rewrites the git state of its worktree', () => {
       await expect(f()).rejects.toThrow(/has a configuration of its own that NEXUS did not write/)
     }
     expect(ran()).toEqual([])
+  })
+
+  // 0.9 (review, CRITICAL G-I-1). The configuration of the clone was checked and nothing else: the two ways
+  // below left `.git/config` as git wrote it and had NEXUS's own `add -A` run a filter of the task's choosing.
+  function candidateClone(name: string): string {
+    const clone = join(base, 'worktrees', 'run1', name)
+    raw(repo, 'clone', '-q', '--no-hardlinks', '--no-tags', '--no-checkout', repo, clone)
+    raw(clone, 'remote', 'remove', 'origin')
+    raw(clone, 'checkout', '-q', '-B', `nexus/run1/${name}`, 'main')
+    return clone
+  }
+  const everyCommand = (clone: string): (() => Promise<unknown>)[] => [() => git.status(clone), () => git.addAll(clone), () => git.diffWorkingTree(clone, 'HEAD'), () => git.headCommit(clone), () => git.commitAll(clone, 'candidate work', AUTHOR), () => git.cloneGitDir(clone)]
+
+  it("a candidate's clone whose .git/commondir names a directory with a configuration of the task's: refused, nothing runs", async () => {
+    const clone = candidateClone('task-cand-b')
+    const elsewhere = join(clone, '.evil')
+    cpSync(join(clone, '.git'), elsewhere, { recursive: true })
+    writeFileSync(join(elsewhere, 'config'), `${readFileSync(join(elsewhere, 'config'), 'utf8')}${hostileConfig()}`)
+    writeFileSync(join(clone, '.git', 'commondir'), '../.evil\n')
+    writeFileSync(join(clone, '.gitattributes'), '* filter=evil\n')
+    writeFileSync(join(clone, 'e.txt'), 'e\n')
+    // The clone's own configuration is still the plain one: the old check passed.
+    expect(readFileSync(join(clone, '.git', 'config'), 'utf8')).not.toContain('filter')
+    for (const f of everyCommand(clone)) await expect(f()).rejects.toThrow(/is not the plain clone NEXUS made \(its \.git holds a commondir/)
+    expect(ran()).toEqual([])
+  })
+
+  it("a candidate's clone whose .git was replaced by a pointer to a repository the task made, back-pointer included: refused when NEXUS has a record to ask, nothing runs", async () => {
+    const clone = candidateClone('task-cand-c')
+    const fabricated = join(base, 'fabricated')
+    cpSync(join(clone, '.git'), fabricated, { recursive: true })
+    writeFileSync(join(fabricated, 'config'), `${readFileSync(join(fabricated, 'config'), 'utf8')}${hostileConfig()}`)
+    const entry = join(fabricated, 'worktrees', 'x')
+    mkdirSync(entry, { recursive: true })
+    writeFileSync(join(entry, 'HEAD'), 'ref: refs/heads/nexus/run1/task-cand-c\n')
+    writeFileSync(join(entry, 'commondir'), '../..\n')
+    writeFileSync(join(entry, 'gitdir'), `${slash(join(clone, '.git'))}\n`)
+    rmSync(join(clone, '.git'), { recursive: true, force: true })
+    writeFileSync(join(clone, '.git'), `gitdir: ${slash(entry)}\n`)
+    writeFileSync(join(clone, '.gitattributes'), '* filter=evil\n')
+    writeFileSync(join(clone, 'f.txt'), 'f\n')
+    // As the runtime is: a record of NEXUS's worktrees, which does not know this directory.
+    const recorded = new GitService()
+    recorded.setWorktreesRoot(join(base, 'worktrees'))
+    recorded.setWorktreeResolver(() => null)
+    for (const f of [() => recorded.status(clone), () => recorded.addAll(clone), () => recorded.headCommit(clone), () => recorded.cloneGitDir(clone)]) await expect(f()).rejects.toThrow(/is not the plain clone NEXUS made \(its \.git is a pointer/)
+    expect(ran()).toEqual([])
+  })
+
+  it("a candidate's clone with a per-worktree configuration, or with other object stores named: refused", async () => {
+    const withConfig = candidateClone('task-cand-d')
+    writeFileSync(join(withConfig, '.git', 'config.worktree'), hostileConfig())
+    await expect(git.addAll(withConfig)).rejects.toThrow(/holds a config\.worktree/)
+    const withAlternates = candidateClone('task-cand-e')
+    mkdirSync(join(withAlternates, '.git', 'objects', 'info'), { recursive: true })
+    writeFileSync(join(withAlternates, '.git', 'objects', 'info', 'alternates'), `${slash(join(repo, '.git', 'objects'))}\n`)
+    await expect(git.status(withAlternates)).rejects.toThrow(/names other object stores/)
+    expect(ran()).toEqual([])
+  })
+
+  it("the honest clone is named to git by NEXUS: its commits are made, and fetched from its Git directory", async () => {
+    const clone = candidateClone('task-cand-f')
+    writeFileSync(join(clone, 'g.txt'), 'g\n')
+    await git.addAll(clone)
+    const commit = await git.commitAll(clone, 'candidate work', AUTHOR)
+    expect(commit).not.toBeNull()
+    expect(raw(clone, 'log', '-1', '--format=%s')).toBe('candidate work')
+    expect(slash(await git.cloneGitDir(clone))).toBe(slash(join(clone, '.git')))
+    await git.run(repo, ['-c', 'fetch.fsckObjects=true', 'fetch', '--no-tags', '--quiet', await git.cloneGitDir(clone), 'nexus/run1/task-cand-f'])
+    expect(raw(repo, 'rev-parse', 'FETCH_HEAD')).toBe(commit)
+    await expect(git.cloneGitDir(join(base, 'elsewhere'))).rejects.toThrow(/is not a candidate's clone/)
   })
 
   it('stock git, for the record, runs the planted program when the pointer is followed', () => {

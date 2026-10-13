@@ -134,7 +134,8 @@ export interface AgentRunInput {
   onActivity?: () => void
 }
 
-export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped' | 'capacity'
+/** `network` (0.9): the session ended because the provider could not be reached. A wait, like `quota`. */
+export type AgentOutcome = TurnOutcome | 'crashed' | 'stopped' | 'capacity' | 'network'
 
 export interface AgentRunResult {
   agentId: string
@@ -356,7 +357,7 @@ export class AgentRunner {
     }
 
     // A usage limit or an authentication stop is not a failure of the agent: it ends 'stopped', reason recorded.
-    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth' && last.outcome !== 'capacity'
+    const failed = last.outcome !== 'success' && last.outcome !== 'stopped' && last.outcome !== 'quota' && last.outcome !== 'auth' && last.outcome !== 'capacity' && last.outcome !== 'network'
     const error = failed ? (last.error ?? last.result?.errors.join('; ') ?? last.outcome) : null
     try {
       this.finishAgent(agent.id, failed ? 'failed' : 'stopped', error, input.control.stopReason ?? last.outcome)
@@ -397,6 +398,11 @@ export class AgentRunner {
     const { repos, bus } = this.deps
     const settings = repos.settings.get()
     const { run, task, role } = input
+    // 0.9 (review, K-2): the provider's own WebFetch and WebSearch are judged by the text of a host name and are
+    // not put to the capability broker. In an enrolled project they are not offered at all: its sessions read the
+    // web through NEXUS's research tools, which resolve, pin, budget and record. The 0.7 setting keeps its meaning
+    // for a project that is not enrolled.
+    const enrolled = this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }) !== undefined
     const allowNetworkTools = settings.permissions.allowNetworkTools
 
     const servers = settings.mcp.servers.filter(
@@ -442,7 +448,7 @@ export class AgentRunner {
     const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null
     const extensions = this.deps.extensions?.({ run, task, agentId: agent.id, role, cwd: input.cwd }) ?? null
     const systemPromptAppend = rolePrompt(role, input.purpose)
-    const builtinTools = toolsForRole(role, { allowNetworkTools })
+    const builtinTools = toolsForRole(role, { allowNetworkTools: allowNetworkTools && !enrolled })
     const mayPropose = !!task && canProposeGraphChange(role, input.purpose)
     const plan = this.context?.tokens.planSession({
       runId: run.id,
@@ -787,10 +793,20 @@ export class AgentRunner {
     else if (result) outcome = result.outcome
     else if (quota) outcome = 'quota'
     else outcome = 'crashed'
+    // 0.9: a session that ended in an error or without a result because the network went away did not fail its
+    // task. What it was is asked of the connectivity supervisor, with the error it ended with.
+    if ((outcome === 'crashed' || outcome === 'error') && this.deps.networkLoss !== undefined) {
+      const said = [ended.error ?? '', ...(result?.errors ?? [])].join('\n')
+      try {
+        if (this.deps.networkLoss(said)) outcome = 'network'
+      } catch {
+        // A judgement that fails changes nothing: the session ended as it ended.
+      }
+    }
     if (outcome === 'crashed' && ended.error) appendOutput('error', ended.error)
 
     repos.sessions.update(session.id, {
-      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' || outcome === 'capacity' ? 'ended' : 'failed',
+      state: outcome === 'success' || outcome === 'stopped' || outcome === 'quota' || outcome === 'capacity' || outcome === 'network' ? 'ended' : 'failed',
       endReason: stopReason ?? (outcome === 'success' ? 'completed' : outcome),
       endedAt: nowIso(),
     })

@@ -1,3 +1,5 @@
+import type { ConnectivitySnapshot } from './connectivity'
+import type { ProgressSnapshot } from './progress'
 import type {
   AgentState,
   ApprovalStatus,
@@ -15,7 +17,7 @@ import type { UsageOverview } from './v3'
  * Why a run paused, more precisely than PauseReason: 'user' is the person pausing it, 'intervention'
  * is NEXUS stopping because no task can make progress. Absent on events written before 0.2.1.
  */
-export type PauseCause = 'user' | 'intervention' | 'time_limit' | 'auth' | 'quota' | 'recovery' | 'capacity'
+export type PauseCause = 'user' | 'intervention' | 'time_limit' | 'auth' | 'quota' | 'recovery' | 'capacity' | 'network'
 
 /** Payload shape for every durable event type. Adding an event means adding a key here. */
 /**
@@ -199,6 +201,10 @@ export type PushMessage =
   | { kind: 'agent.output'; agentId: string; runId: string; seq: number; outputKind: string; content: string }
   | { kind: 'agent.delta'; agentId: string; runId: string; text: string }
   | { kind: 'auth.changed' }
+  /** 0.9. The progress of a mission changed in a way worth showing, or its estimate was refreshed. */
+  | { kind: 'progress'; snapshot: ProgressSnapshot }
+  /** 0.9. What the network supervisor sees changed. */
+  | { kind: 'connectivity'; snapshot: ConnectivitySnapshot }
   | { kind: 'overnight'; status: OvernightStatus }
   /** v0.3. The usage status changed (limit, wait, probe, resume) or observed totals moved. */
   | { kind: 'usage'; overview: UsageOverview }

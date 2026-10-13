@@ -51,6 +51,10 @@ export const SettingsSchema = z.object({
   execution: z.object({
     defaultPreset: PresetSchema,
     maxParallelAgents: z.number().int().min(1).max(16),
+    /** 0.9: how often a shown progress estimate is refreshed when nothing happens, in seconds. Five minutes unless set. */
+    progressRefreshSeconds: z.number().int().min(30).max(3600).optional(),
+    /** 0.9: the network recovery policy (see NetworkRecoveryPolicy); normalized where it is read. Absent: the default. */
+    networkRecovery: z.record(z.string(), z.unknown()).optional(),
     maximumPresetAgents: z.number().int().min(1).max(16),
     maxTurnsPerAgent: z.number().int().min(1).max(1000),
     maxRetriesPerTask: z.number().int().min(0).max(10),

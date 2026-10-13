@@ -68,6 +68,12 @@ export interface OrchestratorDeps {
    * 0.8: the capability gate of a session in an enrolled project; undefined for a project that is not enrolled,
    * whose sessions ask the user as in 0.7. Absent where no autonomy service exists (older scenario tests).
    */
+  /**
+   * 0.9: whether a session that ended without a result ended because the network or the provider could not be
+   * reached (the connectivity supervisor's judgement of the error and of the state it sees). Such an end is a
+   * wait, not a failure of the task. Absent: every such end is a failure, as before.
+   */
+  networkLoss?: (error: string) => boolean
   autonomy?: { gateFor(session: { projectId: string; runId: string | null; taskId: string | null; role: AgentRole; provider: string | null; cwd: string | null }): AutonomyGate | undefined }
   /** v0.7.1. Created from `repos` when absent, so every orchestrator has both. */
   contextGraph?: ContextGraphService

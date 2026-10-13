@@ -2,7 +2,7 @@ import { lookup } from 'node:dns/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { runProcess } from '@main/modules/process/run-process'
 
@@ -62,7 +62,16 @@ export interface LaunchSpec {
    * looks up no name for it, shows it nothing of the machine's name cache and lets none of its packets out.
    */
   appContainer?: string
+  /**
+   * 0.9, ISOLATED only: further capabilities of NEXUS's own, by name, that the command holds. The first is the
+   * session's own (see `sessionCapabilityName`): what only this session writes is opened to it, and the command's
+   * processes are closed to every other session. A second may be the project's.
+   */
+  capabilities?: readonly string[]
 }
+
+/** A capability name of NEXUS's own making: never one of Windows'. */
+const CAPABILITY_NAME = /^NexusSandbox\.[A-Za-z0-9.-]{1,51}$/
 
 /**
  * The AppContainer every command of the ISOLATED profile is started in. A name: Windows derives the same SID
@@ -122,7 +131,12 @@ export function renderSpec(spec: LaunchSpec): string {
       if (!/^[A-Za-z0-9.-]{1,64}$/.test(spec.appContainer)) throw new Error('An AppContainer name is letters, digits, dots and hyphens.')
       lines.push(`appcontainer=${spec.appContainer}`)
     }
-  } else if (spec.appContainer !== undefined) {
+    for (const name of spec.capabilities ?? []) {
+      if (spec.appContainer === undefined) throw new Error('A capability is held by an AppContainer only.')
+      if (!CAPABILITY_NAME.test(name) || name === spec.appContainer) throw new Error('A capability name is one of NEXUS\'s own.')
+      lines.push(`capability=${name}`)
+    }
+  } else if (spec.appContainer !== undefined || (spec.capabilities ?? []).length > 0) {
     throw new Error('An AppContainer is part of the ISOLATED profile only.')
   }
   return `${lines.join('\n')}\n`
@@ -173,12 +187,14 @@ export interface VerifyPlace {
   sandbox?: SandboxAccountRef
   /** Why the sandbox account's launcher could not be put in place, when that failed. */
   sandboxError?: string
+  /** Directories of the sandbox root every session reads and none may write (the tools, the launcher's copies). ISOLATED only. */
+  sharedReadOnly?: readonly string[]
 }
 
 export class Launcher {
   private readonly checks = new Map<ContainmentProfile, ContainmentCheck>()
   private containerSid: string | null = null
-  private capability: string | null = null
+  private readonly capabilitySids = new Map<string, string>()
 
   constructor(private readonly options: LauncherOptions) {}
 
@@ -222,13 +238,18 @@ export class Launcher {
     return sid
   }
 
-  /** The SID of NEXUS's own capability, the one thing the AppContainer holds: what access lists name. */
-  async capabilitySid(): Promise<string> {
-    if (this.capability !== null) return this.capability
-    const result = await runProcess(this.options.executable, ['capability-sid', SANDBOX_APP_CONTAINER], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
+  /**
+   * The SID of a capability of NEXUS's own, as the launcher itself derives it from its name: what access lists
+   * name. Without a name, the one every command of the isolated profile holds (the AppContainer's own name).
+   */
+  async capabilitySid(name: string = SANDBOX_APP_CONTAINER): Promise<string> {
+    const known = this.capabilitySids.get(name)
+    if (known !== undefined) return known
+    if (name !== SANDBOX_APP_CONTAINER && !CAPABILITY_NAME.test(name)) throw new Error('A capability name is one of NEXUS\'s own.')
+    const result = await runProcess(this.options.executable, ['capability-sid', name], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
     const sid = result.stdout.trim()
     if (result.exitCode !== 0 || !/^S-1-15-3-1024-[0-9-]{10,140}$/.test(sid)) throw new Error(`The sandbox's capability could not be derived: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
-    this.capability = sid
+    this.capabilitySids.set(name, sid)
     return sid
   }
 
@@ -236,9 +257,9 @@ export class Launcher {
    * Lets the AppContainer write in a directory tree of the sandbox, by its capability. Without an entry of its
    * own an AppContainer writes nowhere, whatever the account may do.
    */
-  async grantContainer(path: string): Promise<void> {
-    const sid = await this.capabilitySid()
-    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+  async grantContainer(path: string, capability?: string): Promise<void> {
+    const sid = await this.capabilitySid(capability)
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
     const result = await runProcess(join(system32, 'icacls.exe'), [path, '/grant', `*${sid}:(OI)(CI)(M)`, '/Q'], { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
     if (result.exitCode !== 0) throw new Error(`The AppContainer could not be let into ${path}: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
   }
@@ -251,10 +272,42 @@ export class Launcher {
    */
   async closeToContainer(path: string): Promise<void> {
     const sid = await this.capabilitySid()
-    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
     for (const args of [[path, '/inheritance:d', '/Q'], [path, '/remove', `*${sid}`, '/T', '/Q']]) {
       const result = await runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
       if (result.exitCode !== 0) throw new Error(`${path} could not be closed to the AppContainer: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
+    }
+  }
+
+  /**
+   * Takes away every entry of its own the capability has in a tree, and leaves what the tree inherits (reading,
+   * from the sandbox root). For the places contained code of every session reads and none may write: the tools
+   * and the launcher's copies. An entry to write there, from whatever made it, would let one session change what
+   * the next one runs.
+   */
+  async withdrawContainerEntries(path: string): Promise<void> {
+    const sid = await this.capabilitySid()
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+    const icacls = (args: string[]): ReturnType<typeof runProcess> => runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 256 * 1024 })
+    // Looked at first, the directory and what lies directly in it: walking a tree of tools at every start would
+    // cost minutes, and an entry of its own is the exception. icacls marks what is inherited with "(I)".
+    const listed = await icacls([path])
+    const below = await icacls([join(path, '*')])
+    if (listed.exitCode !== 0) throw new Error(`The access list of ${path} could not be read: ${(listed.stderr.trim() || listed.stdout.trim()).slice(-300)}`)
+    const hasOwn = (text: string): boolean => text.split(/\r?\n/).some((line) => line.includes(`${sid}:`) && !line.includes(`${sid}:(I)`))
+    const targets: string[] = []
+    if (hasOwn(listed.stdout)) targets.push(path)
+    if (below.exitCode === 0 && hasOwn(below.stdout)) {
+      for (const name of readdirSync(path)) {
+        const child = join(path, name)
+        const one = await icacls([child])
+        if (one.exitCode === 0 && hasOwn(one.stdout)) targets.push(child)
+      }
+    }
+    // Only where an entry of its own is: Windows then recomputes what lies below that one place.
+    for (const target of targets) {
+      const result = await icacls([target, '/remove:g', `*${sid}`, '/Q'])
+      if (result.exitCode !== 0) throw new Error(`The entries of the AppContainer in ${target} could not be taken away: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
     }
   }
 
@@ -300,6 +353,7 @@ export class Launcher {
     const beside = join(root, 'beside')
     const secret = join(root, 'secret')
     const userOnly = profile === 'ISOLATED' && place.userOnlyRoot !== undefined ? join(place.userOnlyRoot, `verify-${id}`) : null
+    const shared = profile === 'ISOLATED' ? (place.sharedReadOnly ?? []).filter((dir) => existsSync(dir)) : []
     // What the account's request is checked against: a listener here that answers anything.
     const control = profile === 'ISOLATED' ? createServer((_req, res) => res.end('ok')) : null
     let controlPort = 0
@@ -350,6 +404,9 @@ export class Launcher {
         // the answer needs the entry the setup (and, after a restart of Windows, its startup task) puts on the
         // Mount Manager device.
         if (place.sandbox) lines.push(`("${place.sandbox.stage2Path}" canonical "${inside}" > "${join(inside, 'canonical.txt')}") 2>nul`)
+        // What every session reads and none may write: a file made there by this command means the next session
+        // would run what this one left.
+        for (const [i, dir] of shared.entries()) lines.push(`(echo x> "${join(dir, `nexus-verify-${id}-${i}.txt`)}") 2>nul`)
         // What the same question gives outside the containment, so that "no answer" inside is not read as more than it is.
         namesHere = await lookup(DNS_PROBE_NAME).then(() => true, () => false)
         // An AppContainer is started only with a home to derive its own directories from.
@@ -376,6 +433,13 @@ export class Launcher {
       const self = `${(process.env['USERDOMAIN'] ?? '').toLowerCase()}\\${(process.env['USERNAME'] ?? '').toLowerCase()}`
       if (who === '' || who === self) return done(false, 'The contained process did not run as the sandbox account.')
       if (read('u.txt').includes('nexus-verify-user-sentinel')) return done(false, "The sandbox account read a file in the user's profile: the containment does not hold on this machine.")
+      for (const [i, dir] of shared.entries()) {
+        const planted = join(dir, `nexus-verify-${id}-${i}.txt`)
+        if (existsSync(planted)) {
+          rmSync(planted, { force: true })
+          return done(false, `A contained process wrote in ${dir}, which every session reads: one session could change what the next one runs. The containment does not hold on this machine.`)
+        }
+      }
       if (read('net.txt').includes('reached')) return done(false, 'The sandbox account reached the Internet directly: its firewall rule is missing or not effective.')
       // Without the counterpart the failed request proves nothing: said as it is.
       if (!read('loop.txt').includes('reached')) return done(false, 'Whether the sandbox account has a route to the Internet could not be established: its test request did not even reach NEXUS on this machine.')
@@ -389,7 +453,7 @@ export class Launcher {
       if (read('cache.txt').split(/\r?\n/).filter((line) => line.trim() !== '').length > 8) return done(false, "The contained process was shown the machine's cache of looked-up names.")
       // Not a hole, a broken tool chain: said as what it is, and as unusable, so that nothing fails later in a way nobody understands.
       if (!read('canonical.txt').toLowerCase().includes(inside.toLowerCase().slice(2))) return done(false, 'Windows gives a contained process no canonical form of a path: the entry of the sandbox on the Mount Manager device is missing (it is restored at every start of Windows by the startup task of the setup). Run the sandbox setup again.')
-      return done(true, `Verified at this start: a contained process ran as ${who} in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.${namesHere ? '' : ' Names could not be looked up from this machine at all at that moment, so the refusal of names was seen only as far as that goes.'}`)
+      return done(true, `Verified at this start: a contained process ran as ${who} in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile${shared.length > 0 ? ', could not write where the shared tools lie' : ''}, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.${namesHere ? '' : ' Names could not be looked up from this machine at all at that moment, so the refusal of names was seen only as far as that goes.'}`)
     } catch (e) {
       return done(false, `The containment could not be verified: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
