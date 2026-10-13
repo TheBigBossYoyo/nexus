@@ -287,7 +287,7 @@ export interface ProjectEnrollment {
 }
 
 /** Bump when a capability changes kind, or a profile gains one: an enrollment made under an older version is shown its difference. */
-export const AUTONOMY_POLICY_VERSION = '0.8.0-autonomy.1'
+export const AUTONOMY_POLICY_VERSION = '0.9.0-autonomy.1'
 
 export const SECURITY_EVENT_SEVERITIES = [
   'NORMAL_AUTONOMOUS_ACTION',
