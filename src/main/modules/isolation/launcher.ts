@@ -240,7 +240,7 @@ export class Launcher {
    */
   async grantContainer(path: string): Promise<void> {
     const sid = await this.capabilitySid()
-    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
     const result = await runProcess(join(system32, 'icacls.exe'), [path, '/grant', `*${sid}:(OI)(CI)(M)`, '/Q'], { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
     if (result.exitCode !== 0) throw new Error(`The AppContainer could not be let into ${path}: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
   }
@@ -253,7 +253,7 @@ export class Launcher {
    */
   async closeToContainer(path: string): Promise<void> {
     const sid = await this.capabilitySid()
-    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
     for (const args of [[path, '/inheritance:d', '/Q'], [path, '/remove', `*${sid}`, '/T', '/Q']]) {
       const result = await runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
       if (result.exitCode !== 0) throw new Error(`${path} could not be closed to the AppContainer: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)
@@ -268,7 +268,7 @@ export class Launcher {
    */
   async withdrawContainerEntries(path: string): Promise<void> {
     const sid = await this.capabilitySid()
-    const system32 = join(process.env['SystemRoot'] ?? 'C:\Windows', 'System32')
+    const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
     const icacls = (args: string[]): ReturnType<typeof runProcess> => runProcess(join(system32, 'icacls.exe'), args, { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 256 * 1024 })
     // Looked at first, the directory and what lies directly in it: walking a tree of tools at every start would
     // cost minutes, and an entry of its own is the exception. icacls marks what is inherited with "(I)".
