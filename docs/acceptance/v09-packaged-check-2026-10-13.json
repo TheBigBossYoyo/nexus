@@ -1,0 +1,106 @@
+{
+  "kind": "v0.8-packaged-check",
+  "executable": "C:\\Users\\user\\Documents\\Nexus\\release\\win-unpacked\\NEXUS.exe",
+  "startedAt": "2026-10-13T18:08:44.354Z",
+  "checks": {
+    "it is the package of this commit and version": true,
+    "the runtime is ready and its endpoint is restricted": true,
+    "a worker process starts and answers": true,
+    "the packaged launcher runs: RESTRICTED was verified by running it": true,
+    "the sandbox setup is offered from the package (its scripts and launcher are there)": true,
+    "ISOLATED was verified by running it as the sandbox account": true,
+    "a containment is in effect and verified": true,
+    "a project opens": true,
+    "the autonomy overview of a profile is served, with what holds unattended": true,
+    "nothing waits and nothing was read or launched": true,
+    "every page renders": true,
+    "Settings > Autonomy and the isolation panel render": true,
+    "no mission was started": true,
+    "the window reported no script error": true,
+    "stopped cleanly: the endpoint file is gone": true,
+    "the database is at the schema of this version (19 migrations)": true
+  },
+  "pages": [
+    "home",
+    "projects",
+    "run",
+    "programs",
+    "workspaces",
+    "agents",
+    "arena",
+    "policy",
+    "usage",
+    "providers",
+    "director",
+    "performance",
+    "intelligence",
+    "knowledge",
+    "control",
+    "overnight",
+    "activity",
+    "memory",
+    "settings"
+  ],
+  "errors": [],
+  "app": {
+    "version": "0.9.0",
+    "isPackaged": true,
+    "build": {
+      "version": "0.9.0",
+      "commit": "ed9c18a0533af0d348e03fab688326846ac9b16b",
+      "dirty": false,
+      "builtAt": "2026-10-13T18:07:49.798Z",
+      "channel": "release",
+      "runtimeProtocol": 1,
+      "databaseSchema": 19
+    }
+  },
+  "worker": {
+    "ok": true,
+    "capabilities": [
+      "claude",
+      "codex"
+    ]
+  },
+  "isolation": {
+    "requested": "STRONGEST",
+    "effective": "ISOLATED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, could not write where the shared tools lie, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
+    "isolated": {
+      "available": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, could not write where the shared tools lie, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
+      "checkedAt": "2026-10-13T18:08:50.500Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+      "checkedAt": "2026-10-13T18:08:49.425Z"
+    },
+    "sandboxAccount": true,
+    "setupAvailable": true
+  },
+  "migrations": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "finishedAt": "2026-10-13T18:08:59.217Z",
+  "verdict": "PASS"
+}
