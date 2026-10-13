@@ -165,6 +165,19 @@ Each gets its disposition when it is taken up; the table of closed items is kept
 | N-K-1 | `3194d1c` | `tests/unit/network/exfiltration.test.ts` |
 | W1-F1 / G-G-1 | `ded0121` | `containment.test.ts`, "writes nothing where every session reads" |
 | W2-F20 | the commit after `4660a2b` | lint |
+| G-I-1 (CRITICAL) | `ecf3a80` | `tests/integration/git/worktree-pointer-trust.test.ts`: both ways the review reproduced, a per-worktree configuration, other object stores, and the honest clone |
+| G-I-2 | `ecf3a80` | same file: the fetch is from the clone's Git directory with every object checked |
+| N-K-2 | the commit "fix(security, K-2)" | `tests/unit/policies/authorizer.test.ts`, "WebFetch and what a name resolves to" |
+| N-L-1 | `1fd60a0` | `tests/integration/persistence/autonomy-handlers.test.ts`, `unattended.test.ts` |
+| N-N-1, N-N-3, N-K-3 (ports) | `a58ba4c` | `tests/unit/network/policy.test.ts` for the ports; the other two by reading |
+| G-E-1, G-E-2, G-E-3 | `6417b00` | `tests/unit/policies/package-config.test.ts`, four cases from the review |
+
+Decided and not changed: **N-K-3, the total** (the dependency proxy is one for the whole runtime: a total for
+all sessions would stop honest work after enough installs; a connection that sends more than 4 MiB is still
+cut; a proxy per session, with a total of its own, goes with the per-session capability). **N-M-2** (the text an
+agent writes can name a request it was told about: the effect is a restart of its own task, at most three, with
+no authority beyond the grant; stated). **N-K-1's "a host never seen"** (a question for every new host would
+bring back the interruptions 0.8 removed).
 
 ## F. Carried from 0.7.2 through 0.8 (`V0_8_DEFERRED_FINDINGS_TRIAGE.md`)
 
