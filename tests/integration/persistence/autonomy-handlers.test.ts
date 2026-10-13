@@ -35,7 +35,7 @@ describe('autonomy handlers with no way to ask', () => {
     expect(h.autonomy.enrollment(h.project.id)).toBeNull()
   })
 
-  it('refuse a project-wide grant and leave the request pending; a mission grant needs no confirmation', async () => {
+  it('refuse a grant for the project and a grant for the mission and leave the request pending; allowing the one action shown needs no confirmation (0.9, review L-1)', async () => {
     const h = setup()
     h.autonomy.enroll(h.project.id, 'AUTONOMOUS_PROJECT')
     h.push('git push origin HEAD')
@@ -43,7 +43,10 @@ describe('autonomy handlers with no way to ask', () => {
     await expect(h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_PROJECT' })).rejects.toThrow(/confirmation was declined/)
     expect(h.autonomy.pending()).toHaveLength(1)
     expect(h.repos.capabilityGrants.list(h.project.id)).toEqual([])
-    expect(await h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_MISSION' })).toMatchObject({ state: 'GRANTED' })
+    await expect(h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_MISSION' })).rejects.toThrow(/confirmation was declined/)
+    expect(h.autonomy.pending()).toHaveLength(1)
+    expect(h.repos.capabilityGrants.list(h.project.id)).toEqual([])
+    expect(await h.handlers['autonomy.resolve']({ requestId: id, decision: 'ALLOW_ONCE' })).toMatchObject({ state: 'GRANTED' })
   })
 
   it('work with an explicit confirmation that says yes', async () => {

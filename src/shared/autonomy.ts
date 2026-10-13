@@ -148,7 +148,7 @@ export interface UnattendedPolicy {
   needsPresence: string[]
 }
 
-export const UNATTENDED_NEEDS_PRESENCE = ['Enrolling a project, or widening its profile', 'Allowing something for a whole project', 'The one-time setup of the sandbox account (a Windows administrator prompt)'] as const
+export const UNATTENDED_NEEDS_PRESENCE = ['Enrolling a project, or widening its profile', 'Allowing something for a whole mission or a whole project', 'The one-time setup of the sandbox account (a Windows administrator prompt)'] as const
 
 export function unattendedPolicy(profile: AutonomyProfile): UnattendedPolicy {
   const granted = profileCapabilities(profile)
