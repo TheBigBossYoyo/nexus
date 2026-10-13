@@ -73,6 +73,8 @@ const packagedBusybox = packaged(join('bin', 'busybox.exe'))
 if (packagedBusybox === null || packagedBusybox.sha256 !== busybox.sha256) throw new Error('The busybox in the package is not the one on record.')
 const packagedLauncher = packaged(join('bin', 'nexus-launch.exe'))
 if (packagedLauncher === null) throw new Error('The package carries no launcher.')
+const packagedWlan = packaged(join('bin', 'nexus-wlan.exe'))
+if (packagedWlan === null) throw new Error('The package carries no Wi-Fi helper.')
 
 const manifest = {
   kind: 'nexus-build-manifest',
@@ -99,6 +101,7 @@ const manifest = {
   },
   nativeBinaries: [
     { name: 'nexus-launch.exe', ...packagedLauncher, builtFrom: 'native/nexus-launch/nexus-launch.cs', sourceSha256: sha256(join(root, 'native', 'nexus-launch', 'nexus-launch.cs')), compiler: cscVersion, license: 'part of NEXUS' },
+    { name: 'nexus-wlan.exe', ...packagedWlan, builtFrom: 'native/nexus-wlan/nexus-wlan.cs', sourceSha256: sha256(join(root, 'native', 'nexus-wlan', 'nexus-wlan.cs')), compiler: cscVersion, license: 'part of NEXUS' },
     { name: 'busybox.exe', ...packagedBusybox, build: busybox.build, license: busybox.license, binaryUrl: busybox.binaryUrl, sourceRepository: busybox.sourceRepository, sourceCommit: busybox.sourceCommit, modified: busybox.modified },
     { name: 'NEXUS.exe', path: 'NEXUS.exe', sha256: sha256(join(unpacked, 'NEXUS.exe')), bytes: statSync(join(unpacked, 'NEXUS.exe')).size, note: `the Electron ${installed('electron')} executable, renamed by electron-builder` },
   ],
