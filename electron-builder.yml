@@ -13,6 +13,9 @@ files:
   - "!out/main/runtime-node.js"
   - "!out/validation/**"
   - "!**/better-sqlite3/{deps,src}/**"
+  # The SQLite binding for other systems: a Windows package has no use for them.
+  - "!**/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*"
+  - "!**/better-sqlite3/prebuilds/win32-arm64.node"
 # The built-in Arena cases (fixtures and hidden evaluators) are plain files NEXUS copies and executes.
 extraResources:
   - from: arena/cases
