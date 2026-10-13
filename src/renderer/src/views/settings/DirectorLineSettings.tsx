@@ -4,6 +4,7 @@ import type { DirectorLineView } from '@shared/ipc'
 import {
   useDirectorLine,
   useDirectorLineSetEnabled,
+  useDirectorLineSetPin,
   useDirectorLineSetPolicy,
   useDirectorLineSetProvider,
   useDirectorLineStartPairing,
@@ -67,6 +68,9 @@ export function DirectorLineSettings() {
   const unpair = useDirectorLineUnpair()
   const testMessage = useDirectorLineTestMessage()
   const testCall = useDirectorLineTestCall()
+  const setPin = useDirectorLineSetPin()
+  const [pin, setPinText] = useState('')
+  const [pinAgain, setPinAgain] = useState('')
 
   const [token, setToken] = useState('')
   const [voice, setVoice] = useState<VoiceForm>(EMPTY_VOICE_FORM)
@@ -110,7 +114,7 @@ export function DirectorLineSettings() {
     change(next)
     setDraft(next)
   }
-  const failure = setEnabled.error ?? setProvider.error ?? setPolicy.error ?? startPairing.error ?? unpair.error ?? testMessage.error ?? testCall.error
+  const failure = setEnabled.error ?? setProvider.error ?? setPolicy.error ?? startPairing.error ?? unpair.error ?? testMessage.error ?? testCall.error ?? setPin.error
   const working = setEnabled.isPending || setProvider.isPending || setPolicy.isPending || startPairing.isPending
   const voiceReady = view.voiceProvider.configured
   const status = view.messageProvider.status
@@ -292,6 +296,32 @@ export function DirectorLineSettings() {
             </>
           )
         })()}
+      </Block>
+
+      <Block title="Voice PIN">
+        <p className="m-0 text-text-secondary" data-testid="director-line-pin-state">
+          {view.pinConfigured ? 'A PIN is set.' : 'No PIN is set. Without one, nobody is authenticated on a call: an incoming call is ended, and a call NEXUS places only says its report.'}
+        </p>
+        <p className="m-0 text-small text-text-muted">
+          A caller's number can be forged, so the number alone opens nothing. The PIN is asked on every incoming call, and before anything that changes work on a call NEXUS places. It is kept as a salted hash and never shown.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label={view.pinConfigured ? 'New PIN' : 'PIN'} hint="6 to 12 digits.">
+            {(id) => <Input id={id} type="password" inputMode="numeric" autoComplete="off" className="font-mono" value={pin} onChange={(e) => setPinText(e.target.value.replace(/\D/g, '').slice(0, 12))} data-testid="director-line-pin" />}
+          </Field>
+          <Field label="Again" error={pinAgain !== '' && pinAgain !== pin ? 'The two do not match.' : undefined}>
+            {(id) => <Input id={id} type="password" inputMode="numeric" autoComplete="off" className="font-mono" value={pinAgain} onChange={(e) => setPinAgain(e.target.value.replace(/\D/g, '').slice(0, 12))} data-testid="director-line-pin-again" />}
+          </Field>
+          <Button
+            variant="primary"
+            loading={setPin.isPending}
+            disabled={pin.length < 6 || pin !== pinAgain}
+            onClick={() => setPin.mutate({ pin }, { onSuccess: () => { setPinText(''); setPinAgain(''); setAnnounce('The voice PIN is set.') } })}
+            data-testid="director-line-save-pin"
+          >
+            {view.pinConfigured ? 'Change PIN' : 'Set PIN'}
+          </Button>
+        </div>
       </Block>
 
       <Block title="Report policy">

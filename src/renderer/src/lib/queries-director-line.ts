@@ -20,6 +20,7 @@ export const useDirectorLineSetEnabled = () => useWrite('directorLine.setEnabled
 export const useDirectorLineSetProvider = () => useWrite('directorLine.setProvider', replaceView, { silent: true })
 export const useDirectorLineSetPolicy = () => useWrite('directorLine.setPolicy', replaceView, { silent: true })
 export const useDirectorLineStartPairing = () => useWrite('directorLine.startPairing', undefined, { silent: true })
+export const useDirectorLineSetPin = () => useWrite('directorLine.setPin', refresh, { silent: true })
 export const useDirectorLineUnpair = () => useWrite('directorLine.unpair', refresh, { silent: true })
 export const useDirectorLineTestMessage = () => useWrite('directorLine.sendTestMessage', refresh, { silent: true })
 export const useDirectorLineTestCall = () => useWrite('directorLine.testCall', refresh, { silent: true })
