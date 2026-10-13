@@ -87,6 +87,8 @@ const CREDENTIAL_KINDS = ['_auth', '_authtoken', '_password', 'username', 'email
 interface Entry {
   key: string
   value: string
+  /** The line had no `=`: the whole line was taken as the key. */
+  bare: boolean
 }
 
 /** ini as npm reads it, as far as the keys that matter: `key=value`, bare `key` is true, `;` and `#` start a comment. */
@@ -103,7 +105,7 @@ export function parseNpmrc(text: string): Entry[] {
     // An unquoted value ends where a comment begins.
     if (!/^["']/.test(value)) value = value.replace(/\s+[;#].*$/, '')
     value = value.replace(/^(["'])(.*)\1$/, '$2')
-    if (key !== '') entries.push({ key, value })
+    if (key !== '') entries.push({ key, value, bare: eq === -1 })
   }
   return entries
 }
@@ -118,8 +120,26 @@ function printableKey(key: string): string {
 }
 
 const HOSTNAME = /^[a-z0-9.\-_[\]:]{1,255}$/i
-// A path segment of 24 characters or more that mixes letters and digits is how a token travels in a URL.
-const looksLikeToken = (seg: string): boolean => seg.length >= 24 && /[A-Za-z]/.test(seg) && /\d/.test(seg)
+/**
+ * The host of an address given as a value: a name with a dot in it (or `localhost`, or an address), in the
+ * characters of a host name. A value that is not an address at all (a token put where an address belongs) has
+ * none of that and is not printed as if it were a host. (0.9, review G-E-2)
+ */
+const VALUE_HOST = /^(localhost|[a-z0-9]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62}))+|\[[0-9a-f:.]+\])(:\d{1,5})?$/i
+/**
+ * A path segment that is how a credential travels in a URL: long and mixing letters with digits, a long run of
+ * letters alone, or anything in the alphabet of base64. Names of repositories and of paths are words.
+ */
+const looksLikeToken = (seg: string): boolean => {
+  const digits = (seg.match(/\d/g) ?? []).length
+  const letters = (seg.match(/[A-Za-z]/g) ?? []).length
+  return (seg.length >= 12 && digits >= 3 && letters >= 3) || seg.length >= 24 || /[=+]|%3d|%2b/i.test(seg)
+}
+/**
+ * A key name that says nothing but a name: lower-case words of at most 20 letters, joined by hyphens, underscores
+ * or dots, with at most three digits in all and 40 characters at most.
+ */
+const nameLike = (key: string): boolean => key.length <= 40 && /^[a-z][a-z0-9._-]*$/.test(key) && (key.match(/\d/g) ?? []).length <= 3 && key.split(/[._\-\d]+/).every((word) => word.length <= 20)
 
 /** host/path of an address, with scheme, userinfo, query and fragment gone. Null: not an address, or one that holds an environment reference. */
 export function hostAndPath(value: string): string | null {
@@ -130,7 +150,7 @@ export function hostAndPath(value: string): string | null {
   } catch {
     return null
   }
-  if (!HOSTNAME.test(url.host)) return null
+  if (!HOSTNAME.test(url.host) || !VALUE_HOST.test(url.host)) return null
   const segments = url.pathname.split('/').map((s) => (looksLikeToken(s) ? '[segment]' : s.replace(/[^\w.@%~+\-]/g, '?')))
   return `${url.host.toLowerCase()}${segments.join('/')}`.slice(0, 200)
 }
@@ -163,7 +183,8 @@ function classify(entries: Entry[], projectDir: string): Scratch {
   // The last assignment of a key wins, as it does for npm.
   const last = new Map<string, Entry>()
   for (const e of entries) last.set(e.key, e)
-  for (const { key, value } of last.values()) {
+  for (const entry of last.values()) {
+    const { key, value } = entry
     // `//registry.example.com/:_authToken`: everything after the host is a setting of that host. Which setting
     // is only ever named from a fixed list; the value is not looked at.
     const scoped = /^\/\/([^/:]+(?::\d+)?)(\/[^:]*)?:(.+)$/.exec(key)
@@ -177,7 +198,7 @@ function classify(entries: Entry[], projectDir: string): Scratch {
       s.behavior[name] = /^(true|false)$/i.test(value) ? value.toLowerCase() : '[unrecognised value]'
     } else if (NUMBER_KEYS.has(name)) {
       s.behavior[name] = /^\d{1,9}$/.test(value) ? value : '[unrecognised value]'
-    } else if (name in ENUM_KEYS) {
+    } else if (Object.hasOwn(ENUM_KEYS, name)) {
       s.behavior[name] = ENUM_KEYS[name]?.includes(value.toLowerCase()) ? value.toLowerCase() : '[unrecognised value]'
     } else if (PRESENCE_KEYS.has(name)) {
       s.behavior[name] = 'set (value not shown)'
@@ -196,8 +217,10 @@ function classify(entries: Entry[], projectDir: string): Scratch {
       if (/(dir|path|cache)$/.test(name)) s.cache.push({ key: name, location: placeOf(value, projectDir) })
       else if (/^(true|false|0|1)$/i.test(value)) s.behavior[name] = value.toLowerCase()
       else s.downloads.push({ key: name, where: hostAndPath(value) ?? (value.includes('${') ? 'set from an environment variable' : 'set (value not shown)') })
-    } else if (s.otherKeys.length < MAX_LIST) {
+    } else if (!entry.bare && !/^=+$/.test(value) && nameLike(key) && s.otherKeys.length < MAX_LIST) {
       s.otherKeys.push({ key: printableKey(key), value: REDACTED })
+      // 0.9 (review, G-E-1): a line without `=` is not a setting NEXUS knows, and its text may be a credential
+      // pasted alone on a line or the body of a key; so may a "key" that does not read like a name. Counted, not shown.
     } else s.omitted++
   }
   s.registries.scopes = s.registries.scopes.slice(0, MAX_LIST)

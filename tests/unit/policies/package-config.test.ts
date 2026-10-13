@@ -121,6 +121,48 @@ describe('package-config redaction', () => {
     expect(JSON.stringify(r)).not.toMatch(/VALUE-[AB]/)
   })
 
+  // 0.9 (review G-E-1, G-E-2, G-E-3). The values are assembled from parts so that the repository's own scan for
+  // credentials does not find them.
+  it('a line without "=" is counted and never shown: a token alone on a line, the body of a key', () => {
+    const token = ['npm_', 'AbCdEf0123456789AbCdEf0123456789AbCd'].join('')
+    const body = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7'
+    const r = inspectPackageConfig(project('bare', { '.npmrc': `${token}\n${body}\nabc==\nsave-exact\nfoo=bar\n` }), undefined, none)
+    const shown = JSON.stringify(r)
+    expect(shown).not.toContain(token)
+    expect(shown).not.toContain(body)
+    expect(shown).not.toContain('abc')
+    expect(r.otherKeys).toEqual([{ key: 'foo', value: '[redacted]' }])
+    expect(r.behavior['save-exact']).toBe('true')
+    expect(r.omitted).toBe(3)
+  })
+
+  it('a key that does not read like a name is counted and not shown, with "=" or without', () => {
+    const r = inspectPackageConfig(project('odd-keys', { '.npmrc': 'abcdefghijklmnopqrstuvwxyzabcdefgh=1\nAbC123def456=2\nx9y8z7w6v5=3\nmy-setting=4\n' }), undefined, none)
+    expect(r.otherKeys).toEqual([{ key: 'my-setting', value: '[redacted]' }])
+    expect(r.omitted).toBe(3)
+  })
+
+  it('a value that is no address is not printed as a host; a path segment that could be a credential is not printed', () => {
+    const r = inspectPackageConfig(
+      project('hosts', {
+        '.npmrc': ['registry=ghp_SECRET1234', 'proxy=SECRETPROXYVALUE', 'electron-mirror=SECRETVAL', '@a:registry=https://h.example/ab12cd34ef56gh78ij90/', '@b:registry=https://h.example/abcdefghijklmnopqrstuvwxyzABCDEFGH/', '@c:registry=https://h.example/_auth/ZGVwbG95OnMzY3IzdA==/', '@d:registry=https://npm.pkg.github.com/api/npm/npm-virtual/'].join('\n'),
+      }),
+      undefined,
+      none,
+    )
+    const shown = JSON.stringify(r).toLowerCase()
+    for (const leaked of ['secret1234', 'secretproxyvalue', 'secretval', 'ab12cd34ef56gh78ij90', 'abcdefghijklmnopqrstuvwxyz', 'zgvwbg95']) expect(shown, leaked).not.toContain(leaked)
+    expect(r.registries.default).toBe('[not an address]')
+    expect(r.registries.scopes.find((x) => x.scope === '@d')?.where).toBe('npm.pkg.github.com/api/npm/npm-virtual/')
+    expect(r.registries.scopes.find((x) => x.scope === '@a')?.where).toBe('h.example/[segment]/')
+  })
+
+  it('a key named like a property of every object does not break the reading', () => {
+    const r = inspectPackageConfig(project('proto', { '.npmrc': 'constructor=x\ntoString=y\n__proto__=z\nnode-linker=hoisted\n' }), undefined, none)
+    expect(r.behavior['node-linker']).toBe('hoisted')
+    expect(JSON.stringify(r.otherKeys)).toContain('constructor')
+  })
+
   it('leaves an environment reference unexpanded and unnamed', () => {
     const r = inspectPackageConfig(project('env', { '.npmrc': 'registry=${REGISTRY_URL}\ncache=${HOME}/c\n' }), undefined, none)
     expect(r.registries.default).toBe('set from an environment variable')
