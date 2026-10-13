@@ -43,6 +43,7 @@ import { mirrorTools, type ToolMirrorState } from '../modules/isolation/tools'
 import { startPolicyProxy } from '../modules/network/proxy'
 import { policyForProjectCommands, policyForPurpose } from '../modules/network/policy'
 import { DEFAULT_SEARCH_URL, WebResearchProvider } from '../modules/research/provider'
+import { isSecretEnvName } from '../modules/process/contained-env'
 import { createResearchTools } from '../modules/research/tools'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
@@ -754,6 +755,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
     legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
     policy: () => researchPolicy,
+    secrets: () => Object.entries(process.env).flatMap(([name, value]) => (value !== undefined && value.length >= 12 && isSecretEnvName(name) ? [value] : [])),
     record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
   })
   const appTools = createAppTools({

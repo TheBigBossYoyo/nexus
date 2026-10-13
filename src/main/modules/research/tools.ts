@@ -3,6 +3,7 @@ import type { AgentRole, Run, Task } from '@shared/domain'
 import { parseExtensionCall } from '@main/modules/agent-runtime/extension-tools'
 import type { AutonomyGate } from '@main/modules/autonomy/gate'
 import type { CapabilityNeed } from '@main/modules/autonomy/tool-capabilities'
+import { screenOutboundUrl } from '@main/modules/network/exfiltration'
 import { checkUrl, type NetworkPolicy } from '@main/modules/network/policy'
 import { ResearchRefused, renderEnvelope, type ResearchContext, type WebResearchProvider } from './provider'
 
@@ -29,6 +30,8 @@ export interface ResearchToolsDeps {
   legacyNetworkTools: () => boolean
   /** The policy research runs under, for the first look at an address before the broker is asked. */
   policy: () => NetworkPolicy
+  /** Values this process knows to be credentials (of its environment): a URL an agent names never carries one. */
+  secrets?: () => readonly string[]
   /** A finding for the autonomy audit log (an injection taken out of a page). Quiet: it tells nobody. */
   record?: (session: ExtensionSession, severity: SecurityEventSeverity, action: string, resource: string, reason: string) => void
 }
@@ -74,6 +77,13 @@ export function createResearchTools(deps: ResearchToolsDeps): (session: Extensio
           const url = String(args['url'])
           // The broker is asked about the host; whether the host is public is established here, from the
           // policy, and not from anything the caller says about it.
+          // 0.9: before anything else, what the URL itself would carry out. An agent that read hostile text can
+          // be made to name a URL that is the data; such a URL is refused here, for every session, and recorded.
+          const outbound = screenOutboundUrl(url, deps.secrets?.() ?? [])
+          if (!outbound.allowed) {
+            deps.record?.(session, 'POLICY_DENIAL', `${def.name}: ${hostOf(url).slice(0, 120)}`, `host: ${hostOf(url).slice(0, 120)}`, `A URL an agent named was not opened (${outbound.rule}): ${outbound.reason}`)
+            return `Not opened: ${outbound.reason}`
+          }
           const verdict = checkUrl(deps.policy(), url)
           const capability: AutonomyCapability = def.name === 'research_read' ? 'WEB_FETCH' : 'DOWNLOAD_RESEARCH_ARTIFACT'
           const no = refused(def.name, capability, def.name === 'research_read' ? 'reads a public web page' : 'fetches a file into quarantine', `${def.name}: ${url.slice(0, 300)}`, { kind: 'HOST', value: hostOf(url) }, verdict.allowed)

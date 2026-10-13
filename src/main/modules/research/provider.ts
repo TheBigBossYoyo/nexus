@@ -18,6 +18,7 @@ import {
 import { NexusError } from '@shared/result'
 import { safeFetch, FetchFailed, type SafeFetchResult } from '@main/modules/network/fetch'
 import { NetworkDenied, type GuardOptions, type NetworkEvent } from '@main/modules/network/guard'
+import { budgetDomain } from '@main/modules/network/exfiltration'
 import { checkUrl } from '@main/modules/network/policy'
 import type { ResearchArtifactRepository, ResearchDownloadRepository, ResearchDownloadRow } from '@main/modules/persistence/repositories/research'
 import { decodeEntities, extractHtml, extractPlain } from './extract'
@@ -239,7 +240,9 @@ export class WebResearchProvider {
     const spent = this.account(context)
     let host: string
     try {
-      host = new URL(url).hostname.toLowerCase()
+      // 0.9: counted by registrable domain. Every name below a domain is its owner's to make, and a budget per
+      // host name would be a new budget for each.
+      host = budgetDomain(new URL(url).hostname)
     } catch {
       throw new ResearchRefused('POLICY', 'The URL cannot be read.')
     }
