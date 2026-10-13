@@ -199,3 +199,20 @@ in `1_0_READINESS.md`. The findings still OPEN above (ten MEDIUM, the reading ha
 carried to the next release with their severity unchanged; none of them is CRITICAL, and no HIGH is open for
 writing or for processes. The brief's rule that a release-material MEDIUM blocks PASS was set aside by the
 owner's decision, not met.
+
+## H. Operational autonomy (added to 0.9.0 the same evening): what is open
+
+Built and in the application: progress and time remaining, network resilience, the Director Line. What each
+proves and does not is in `V0_9_RELEASE_REPORT.md`. Open, to be closed before any of it is called proven:
+
+| # | Open | Kind |
+|---|---|---|
+| H1 | No real network outage was produced; the helper's `connect` and `watch` never ran against Windows; the reason code of a user's own disconnect is assumed | PROVE (needs the owner present: it disconnects the machine) |
+| H2 | The Director Line never exchanged a message with a real service; no operator is paired | PROVE (needs a bot token from the owner) |
+| H3 | Telephone voice: inbound flow and relay server designed, not built; no screen for credentials | BUILD, then EXTERNAL (a telephony account costs money and is the owner's to open) |
+| H4 | Programs and Workspaces have no progress of their own | BUILD |
+| H5 | The kept estimates and their accuracy are not written to the database (the tables exist) | BUILD |
+| H6 | No screen for the network recovery policy and no status channel for the network | BUILD |
+| H7 | The combined overnight acceptance (keep-awake, an outage, recovery, a report, a remote "status", a remote task) | PROVE |
+| H8 | None of the new code was read by a second party | REVIEW: the line takes input from the Internet and the helper is a new native program |
+| H9 | The quiet interval of the network check contacts two well-known hosts while work is active: said in `NETWORK_RESILIENCE.md`; whether the owner wants it configurable | DECIDE |

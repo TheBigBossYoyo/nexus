@@ -5,7 +5,7 @@
 on evidence from the 0.9.0 source or from a run named here; "not run" is never READY.
 
 **Recommendation: NOT READY for a 1.0 release candidate.** The blockers are listed at the end; there are
-seven, and none is new architecture.
+eight, and none is new architecture.
 
 | Category | State | On what evidence | What is missing |
 |---|---|---|---|
@@ -23,6 +23,7 @@ seven, and none is new architecture.
 | OVERNIGHT | READY_WITH_LIMITATION | Overnight scenarios and end-to-end tests | No unattended night on 0.9; the real power action was never exercised |
 | APP AUTOMATION | READY_WITH_LIMITATION | The browser and Electron tests of the suite under the new capabilities | No reliability campaign |
 | INTERNET RESEARCH | READY_WITH_LIMITATION | The research tests; the screen of URLs an agent names | No current-web acceptance on 0.9 |
+| OPERATIONAL AUTONOMY | READY_WITH_LIMITATION | Progress and ETA, network resilience and the Director Line are in the application with about 420 tests on simulated networks and transports | Nothing real: no outage, no paired phone, no night; voice unconfigured |
 | UX | NOT_READY | End-to-end tests | No independent review |
 | ACCESSIBILITY | READY_WITH_LIMITATION | The accessibility checks inside the end-to-end suite | No manual keyboard pass, no review |
 | DISTRIBUTION | READY_WITH_LIMITATION | Release folder with manifest, bill of materials, notices, checksums read back | No update channel; a build was never given to anybody |
@@ -31,6 +32,8 @@ seven, and none is new architecture.
 
 ## What blocks a 1.0 release candidate
 
+0. **The operational-autonomy pillar is built and not proven on anything real** (ledger, section H): a real
+   outage, a real paired phone, one unattended night with both, and a second reading of the new code.
 1. **The installer lifecycle was never run**: clean install, upgrade from 0.8.0, uninstall, reinstall, a
    restart after the install.
 2. **The open MEDIUM findings of the review** (ledger, section E): the elevated scripts and where they write,
