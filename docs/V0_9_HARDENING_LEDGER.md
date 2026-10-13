@@ -208,11 +208,19 @@ proves and does not is in `V0_9_RELEASE_REPORT.md`. Open, to be closed before an
 | # | Open | Kind |
 |---|---|---|
 | H1 | No real network outage was produced; the helper's `connect` and `watch` never ran against Windows; the reason code of a user's own disconnect is assumed | PROVE (needs the owner present: it disconnects the machine) |
-| H2 | The Director Line never exchanged a message with a real service; no operator is paired | PROVE (needs a bot token from the owner) |
-| H3 | Telephone voice: inbound flow and relay server designed, not built; no screen for credentials | BUILD, then EXTERNAL (a telephony account costs money and is the owner's to open) |
+| H2 | ~~The Director Line never exchanged a message with a real service; no operator is paired~~ Done after the release, see I2. Still open under it: a report raised by a real event (only a test message and typed questions were exchanged), quiet hours, a restart with messages waiting | PROVE |
+| H3 | Telephone voice: inbound flow and relay server designed, not built; no screen for credentials. Replaced by the owner's decision of the same evening, see I3 | BUILD, then EXTERNAL (an account with the provider costs money and is the owner's to open) |
 | H4 | Programs and Workspaces have no progress of their own | BUILD |
 | H5 | The kept estimates and their accuracy are not written to the database (the tables exist) | BUILD |
 | H6 | No screen for the network recovery policy and no status channel for the network | BUILD |
 | H7 | The combined overnight acceptance (keep-awake, an outage, recovery, a report, a remote "status", a remote task) | PROVE |
 | H8 | None of the new code was read by a second party | REVIEW: the line takes input from the Internet and the helper is a new native program |
 | H9 | The quiet interval of the network check contacts two well-known hosts while work is active: said in `NETWORK_RESILIENCE.md`; whether the owner wants it configurable | DECIDE |
+
+## I. After the release (2026-10-13, evening; branch `nexus-0.9.1-voice`, nothing of it is in the `v0.9.0` tag)
+
+| # | What happened | What it shows and does not |
+|---|---|---|
+| I1 | The owner asked for the latest version on the machine. `NEXUS-Setup-0.9.0.exe` from `release/v0.9.0/` was run by hand, for the current user, over the 0.7.0 test install of B5 (data copied first to `%APPDATA%\nexus\backup-before-0.9.0`). Windows now lists 0.9.0, the shortcuts point at it, the database went from schema 11 to 20 (the previous file kept as `nexus.db.v11.bak`), the runtime started and reported ISOLATED as verified | A13 in part: one upgrade, on the machine it was built on. Not shown: a clean install, an uninstall, a reinstall, another machine, an upgrade from 0.8.0. B5 is closed by it |
+| I2 | The owner made a Telegram bot, entered its token in Settings and paired their account with the pairing code. A test message arrived. The owner then asked for the status and the time remaining and wrote "push it", and reported that all three were answered as designed (the last one refused) | H2: the line works against the real service for pairing, a test message, two questions and a refusal. It is the owner's report; no log of the exchange was read for this entry |
+| I3 | The owner decided that the Director's voice channel is WhatsApp calling through Plivo with audio in both directions, not a telephone call through Twilio (a Twilio call to a Tunisian mobile was read at about 1.27 USD a minute), and that a call is a live conversation, not a spoken report. The Twilio settings fields and the two Twilio documents on the branch are to be replaced | Nothing real: no account, no call. What is on the branch is tested against scripted sessions and fake services only |
