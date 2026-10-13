@@ -75,7 +75,7 @@ describe.runIf(account !== null)('the shell of the isolated profile (busybox ash
     ['node starting a child of its own with a pipe', `node -e "console.log(require('child_process').execSync('echo child').toString().trim())"`, 'child\n'],
     ['process substitution, which this shell has', `cat <(echo a) <(echo b); while read -r l; do echo "got $l"; done < <(printf 'x\\n')`, 'a\nb\ngot x\n'],
     ['bash by name: it is this same shell, inside the containment', `bash -c 'echo "from $0"'`, 'from bash\n'],
-    ['a script file with a sh shebang', `printf '#!/bin/sh\\necho from-script \"$1\"\\n' > s.sh; sh s.sh a; chmod +x s.sh; ./s.sh b`, 'from-script a\nfrom-script b\n'],
+    ['a script file with a sh shebang', `printf '#!/bin/sh\\necho from-script "$1"\\n' > s.sh; sh s.sh a; chmod +x s.sh; ./s.sh b`, 'from-script a\nfrom-script b\n'],
   ]
   for (const [what, command, expected] of SUPPORTED) {
     it(`runs ${what}`, async () => {

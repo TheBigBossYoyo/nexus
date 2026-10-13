@@ -116,7 +116,7 @@ function plainKey(key: string): string {
 
 /** A key name that is safe to print: its characters are limited and its length is cut. */
 function printableKey(key: string): string {
-  return key.replace(/[^\w.@:/\-]/g, '?').slice(0, 80)
+  return key.replace(/[^\w.@:/-]/g, '?').slice(0, 80)
 }
 
 const HOSTNAME = /^[a-z0-9.\-_[\]:]{1,255}$/i
@@ -151,7 +151,7 @@ export function hostAndPath(value: string): string | null {
     return null
   }
   if (!HOSTNAME.test(url.host) || !VALUE_HOST.test(url.host)) return null
-  const segments = url.pathname.split('/').map((s) => (looksLikeToken(s) ? '[segment]' : s.replace(/[^\w.@%~+\-]/g, '?')))
+  const segments = url.pathname.split('/').map((s) => (looksLikeToken(s) ? '[segment]' : s.replace(/[^\w.@%~+-]/g, '?')))
   return `${url.host.toLowerCase()}${segments.join('/')}`.slice(0, 200)
 }
 
@@ -307,7 +307,7 @@ function packageJsonFacts(root: string): PackageJsonFacts | null {
   if (typeof json !== 'object' || json === null) return null
   const pkg = json as Record<string, unknown>
   const facts: PackageJsonFacts = { lifecycleScripts: [] }
-  if (typeof pkg['packageManager'] === 'string') facts.packageManager = /^[a-z]+@[\w.+\-]{1,200}$/.test(pkg['packageManager']) ? pkg['packageManager'] : '[unrecognised]'
+  if (typeof pkg['packageManager'] === 'string') facts.packageManager = /^[a-z]+@[\w.+-]{1,200}$/.test(pkg['packageManager']) ? pkg['packageManager'] : '[unrecognised]'
   const engines = pkg['engines']
   if (typeof engines === 'object' && engines !== null && !Array.isArray(engines)) {
     facts.engines = {}
@@ -379,7 +379,7 @@ export function inspectPackageConfig(projectDir: string, subdir?: string, option
     if (!within(realpathSync.native(root), realpathSync.native(dir))) throw new Error('The directory is not inside the task worktree.')
     if (!lstatSync(dir).isDirectory()) throw new Error('That is not a directory.')
   } catch (e) {
-    throw new Error(e instanceof Error && /worktree|directory/.test(e.message) ? e.message : 'The directory does not exist.')
+    throw new Error(e instanceof Error && /worktree|directory/.test(e.message) ? e.message : 'The directory does not exist.', { cause: e })
   }
   const rel = path.relative(root, dir)
 
