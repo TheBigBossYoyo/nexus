@@ -222,7 +222,7 @@ real certificate. What can be obtained and why: [CODE_SIGNING](docs/CODE_SIGNING
 
 ## Known limitations and what blocks 1.0
 
-[1_0_READINESS](docs/1_0_READINESS.md) says NOT READY for a 1.0 release candidate and names seven blockers, none
+[1_0_READINESS](docs/1_0_READINESS.md) says NOT READY for a 1.0 release candidate and names eight blockers, none
 of them new architecture:
 
 1. The installer lifecycle was never run (clean install, upgrade from 0.8.0, uninstall, reinstall, restart).
@@ -244,7 +244,7 @@ software is correct. The full lists, by version, are under "Current limitations"
 |---|---|
 | [V0_9_RELEASE_REPORT](docs/V0_9_RELEASE_REPORT.md) | The 0.9.0 report: the PARTIAL verdict, gates, tests, package, operational autonomy, what was left out |
 | [V0_9_HARDENING_LEDGER](docs/V0_9_HARDENING_LEDGER.md) | One list of everything open or closed in the hardening, with a disposition and a state for each, including review findings |
-| [1_0_READINESS](docs/1_0_READINESS.md) | Category by category readiness for 1.0, and the seven blockers |
+| [1_0_READINESS](docs/1_0_READINESS.md) | Category by category readiness for 1.0, and the eight blockers |
 | [V0_9_SOAK_THRESHOLDS](docs/V0_9_SOAK_THRESHOLDS.md) | The limits a soak will be judged by, fixed before one is run |
 | [V0_9_FLAKES](docs/V0_9_FLAKES.md) | Tests that did not give the same answer twice, and the runs of the suite |
 | [CODE_SIGNING](docs/CODE_SIGNING.md) | Signing, SmartScreen and antivirus: the state and the options |
