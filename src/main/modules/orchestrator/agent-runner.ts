@@ -397,6 +397,11 @@ export class AgentRunner {
     const { repos, bus } = this.deps
     const settings = repos.settings.get()
     const { run, task, role } = input
+    // 0.9 (review, K-2): the provider's own WebFetch and WebSearch are judged by the text of a host name and are
+    // not put to the capability broker. In an enrolled project they are not offered at all: its sessions read the
+    // web through NEXUS's research tools, which resolve, pin, budget and record. The 0.7 setting keeps its meaning
+    // for a project that is not enrolled.
+    const enrolled = this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }) !== undefined
     const allowNetworkTools = settings.permissions.allowNetworkTools
 
     const servers = settings.mcp.servers.filter(
@@ -442,7 +447,7 @@ export class AgentRunner {
     const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null
     const extensions = this.deps.extensions?.({ run, task, agentId: agent.id, role, cwd: input.cwd }) ?? null
     const systemPromptAppend = rolePrompt(role, input.purpose)
-    const builtinTools = toolsForRole(role, { allowNetworkTools })
+    const builtinTools = toolsForRole(role, { allowNetworkTools: allowNetworkTools && !enrolled })
     const mayPropose = !!task && canProposeGraphChange(role, input.purpose)
     const plan = this.context?.tokens.planSession({
       runId: run.id,

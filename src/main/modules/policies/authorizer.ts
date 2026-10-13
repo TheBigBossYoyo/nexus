@@ -1,4 +1,5 @@
 import { PUSH_FORM_HINT, grantedPushOf, renderUserGitScript, userGitOf, userGitOfPowerShell, type UserGitInvocation } from './git-pipeline'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -7,6 +8,8 @@ import type { ToolDecision, ToolRequest } from '@main/modules/agent-runtime/type
 import type { AutonomyGate } from '@main/modules/autonomy/gate'
 import type { ShellContainment } from '@main/modules/isolation/session-containment'
 import { needForExecutionReason, needsForFindings, type CapabilityNeed } from '@main/modules/autonomy/tool-capabilities'
+import { classifyAddress } from '@main/modules/network/address'
+import { screenOutboundUrl } from '@main/modules/network/exfiltration'
 import { capabilitiesForRole } from './capabilities'
 import { classifyCommand } from './command-classifier'
 import type { SegmentKind } from './command-classifier'
@@ -27,6 +30,8 @@ export interface PolicyContext {
   /** Command word-prefixes (e.g. "pnpm test:unit") that reviewers/verifiers may run in addition to the built-in runners. */
   safeCommandPrefixes: string[]
   allowNetworkTools: boolean
+  /** How a host name is resolved before a native fetch is allowed without a question. Tests replace it. */
+  resolveHost?: (host: string) => Promise<string[]>
   /** Exact `mcp__<server>__<tool>` names permitted besides the built-in `nexus` server. */
   allowedMcpTools?: string[]
   /** Whole MCP servers (the `<server>` part) permitted. */
@@ -77,7 +82,7 @@ interface Outcome {
 }
 
 /** A decision of the file tools with the capability a grant would have to cover, when there is one. */
-type Decided = ToolDecision & { need?: CapabilityNeed }
+type Decided = ToolDecision & { need?: CapabilityNeed; /** A host that must resolve to public addresses only for the decision to stand. */ resolveHost?: string }
 const needing = (decision: ToolDecision, capability: CapabilityNeed['capability'], why: string, pathValue?: string): Decided => ({
   ...decision,
   need: { capability, why, inBoundary: false, resource: pathValue === undefined ? { kind: 'ANY', value: '' } : { kind: 'PATH', value: pathValue } },
@@ -88,6 +93,8 @@ const NEXUS_DATA_DENY = "Denied: NEXUS's own database, key files and runtime end
 const deny = (reason: string): ToolDecision => ({ behavior: 'deny', reason })
 const ask = (reason: string, risk: Risk): ToolDecision => ({ behavior: 'ask', reason, risk })
 const ALLOW: ToolDecision = { behavior: 'allow' }
+const ENROLLED_WEB = 'In this project the web is read with research_search and research_read, not with WebSearch or WebFetch.'
+const resolvePublicly = async (host: string): Promise<string[]> => (await dnsLookup(host, { all: true })).map((entry) => entry.address)
 
 const canon = canonicalizePath
 
@@ -448,7 +455,13 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       if (!tools.has(toolName)) return { tool: deny(`Tool ${toolName} is not available to the ${ctx.role} role. Available tools: ${[...tools].join(', ')}.`) }
       return authorizeShell(toolName, input, req.agentId)
     }
-    const { need, ...tool } = decideOther(req)
+    const { need, resolveHost, ...tool } = decideOther(req)
+    if (resolveHost !== undefined && tool.behavior === 'allow') {
+      const addresses = await (ctx.resolveHost ?? resolvePublicly)(resolveHost).catch(() => [] as string[])
+      const classes = addresses.map((address) => classifyAddress(address))
+      if (addresses.length === 0) return { tool: deny(`${resolveHost} did not resolve to an address.`) }
+      if (classes.some((c) => c !== 'PUBLIC')) return { tool: ask(`fetches ${resolveHost}, a name that resolves to a local or private address`, 'medium') }
+    }
     return { tool: tool as ToolDecision, ...(need !== undefined ? { needs: [need] } : {}) }
   }
 
@@ -485,8 +498,12 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       case 'TodoWrite':
         return ALLOW
       case 'WebSearch':
+        if (ctx.autonomy !== undefined) return deny(ENROLLED_WEB)
         return strField(input, 'query') === null ? deny('query is required') : ALLOW
       case 'WebFetch': {
+        // 0.9 (review, K-2): in an enrolled project the web is read through NEXUS's research tools, which the
+        // capability broker decides and which resolve, pin, budget and record. This tool does none of that.
+        if (ctx.autonomy !== undefined) return deny(ENROLLED_WEB)
         const raw = strField(input, 'url')
         if (raw === null) return deny('url is required')
         let url: URL
@@ -497,7 +514,13 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
         }
         if (url.protocol !== 'http:' && url.protocol !== 'https:') return deny(`Only http(s) URLs may be fetched, not ${url.protocol}`)
         if (isPrivateHost(url.hostname)) return ask(`fetches a local or private-network address: ${url.hostname}`, 'medium')
-        return ALLOW
+        // 0.9 (review, K-1, K-2): a URL that is data is not fetched, by this tool either.
+        const outbound = screenOutboundUrl(raw)
+        if (!outbound.allowed) return deny(outbound.reason)
+        // A public name can answer with a local address (`localtest.me`). The provider's tool is not NEXUS's
+        // fetch and pins nothing, so a name is fetched without a question only when it resolves, here and now,
+        // to public addresses alone; anything else is the user's to decide.
+        return { ...ALLOW, resolveHost: url.hostname }
       }
       default:
         return deny(`Tool ${toolName} has no policy and is denied by default.`)
