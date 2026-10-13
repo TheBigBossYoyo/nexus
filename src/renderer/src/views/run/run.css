@@ -51,3 +51,98 @@
 .nexus-diff .diff-widget-content {
   white-space: normal;
 }
+
+/* 0.9: progress and time remaining of a mission. */
+.progress-panel {
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  font-size: 13px;
+}
+.progress-panel-waiting {
+  border-color: var(--color-tone-warning, var(--color-border-strong));
+}
+.progress-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.progress-percent {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.progress-stage {
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+}
+.progress-bar {
+  height: 6px;
+  margin: 8px 0;
+  border-radius: 3px;
+  background: var(--color-surface-3);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 400ms ease;
+}
+.progress-panel-waiting .progress-bar-fill {
+  background: var(--color-tone-warning, var(--color-accent));
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar-fill {
+    transition: none;
+  }
+}
+.progress-summary,
+.progress-scope {
+  margin: 4px 0;
+}
+.progress-scope {
+  color: var(--color-tone-warning, var(--color-fg));
+}
+.progress-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 16px;
+  margin: 8px 0 0;
+}
+.progress-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.progress-row dt {
+  color: var(--color-fg-muted);
+  flex: none;
+}
+.progress-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.progress-feed {
+  margin-top: 8px;
+}
+.progress-feed summary {
+  cursor: pointer;
+  color: var(--color-fg-muted);
+}
+.progress-feed ol {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow: auto;
+}
+.progress-feed time {
+  color: var(--color-fg-muted);
+  font-variant-numeric: tabular-nums;
+}

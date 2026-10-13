@@ -307,6 +307,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'projects.remove': { projectId: 'p1' },
   'runs.list': {},
   'runs.get': { runId: 'r1' },
+  'progress.get': { runId: 'r1' },
   'runs.create': { projectId: 'p1', mode: 'build', preset: 'balanced', prompt: 'do it' },
   'runs.approvePlan': { runId: 'r1' },
   'runs.replan': { runId: 'r1', feedback: 'again' },

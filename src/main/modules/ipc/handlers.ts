@@ -1,3 +1,4 @@
+import type { ProgressSnapshot } from '@shared/progress'
 import type { AuthStatus } from '@shared/auth'
 import { TERMINAL_RUN_STATES, type RunConfig } from '@shared/domain'
 import type { PushMessage } from '@shared/events'
@@ -50,6 +51,8 @@ import {
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 
 export interface IpcContext {
+  /** 0.9: progress and time remaining of missions. Absent: the channel answers null. */
+  progress?: { snapshot: (runId: string) => ProgressSnapshot | null }
   chatgpt?: ChatGPTConnection
   intelligenceOperations?: IntelligenceOperations
   taskAdmission?: TaskAdmissionService
@@ -291,6 +294,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       // A program's planning, verification and reassessment sessions are its own; they are not missions of the user.
       return includeInternal ? runs : runs.filter((r) => !isReasoningRun(r))
     },
+    'progress.get': ({ runId }) => ctx.progress?.snapshot(runId) ?? null,
     'runs.get': ({ runId }) => ({
       run: repos.runs.require(runId),
       tasks: repos.tasks.listByRun(runId),

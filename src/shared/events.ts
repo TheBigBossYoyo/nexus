@@ -1,3 +1,4 @@
+import type { ProgressSnapshot } from './progress'
 import type {
   AgentState,
   ApprovalStatus,
@@ -199,6 +200,8 @@ export type PushMessage =
   | { kind: 'agent.output'; agentId: string; runId: string; seq: number; outputKind: string; content: string }
   | { kind: 'agent.delta'; agentId: string; runId: string; text: string }
   | { kind: 'auth.changed' }
+  /** 0.9. The progress of a mission changed in a way worth showing, or its estimate was refreshed. */
+  | { kind: 'progress'; snapshot: ProgressSnapshot }
   | { kind: 'overnight'; status: OvernightStatus }
   /** v0.3. The usage status changed (limit, wait, probe, resume) or observed totals moved. */
   | { kind: 'usage'; overview: UsageOverview }

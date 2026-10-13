@@ -187,6 +187,10 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
               : [qk.overnightActive(), qk.overnightReport(message.status.runId), qk.run(message.status.runId), qk.runsList()],
           )
           break
+        case 'progress':
+          // The push carries the whole snapshot: it is what the panel shows.
+          qc.setQueryData(['progress', message.snapshot.subject.id], message.snapshot)
+          break
         case 'usage':
           // The push carries the whole overview: render from it immediately, then refresh what hangs off it.
           qc.setQueryData(qk.usageOverview(), message.overview)

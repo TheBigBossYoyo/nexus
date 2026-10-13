@@ -21,7 +21,7 @@ import {
   type UiResponse,
 } from '@shared/runtime-protocol'
 import type { WorkersOverview } from '@shared/workers'
-import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { TERMINAL_RUN_STATES, type Run } from '@shared/domain'
 import { ArenaService } from '../modules/arena'
 import { AutonomyService } from '../modules/autonomy/service'
 import { createHash, randomUUID } from 'node:crypto'
@@ -45,6 +45,9 @@ import { policyForProjectCommands, policyForPurpose } from '../modules/network/p
 import { DEFAULT_SEARCH_URL, WebResearchProvider } from '../modules/research/provider'
 import { isSecretEnvName } from '../modules/process/contained-env'
 import { createResearchTools } from '../modules/research/tools'
+import { ProgressService } from '../modules/progress/service'
+import type { FinishedTask } from '../modules/progress/estimator'
+import { DEFAULT_PROGRESS_REFRESH_SECONDS } from '@shared/progress'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
@@ -419,6 +422,57 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     notifier?.onEvent(event)
     stateChanged()
   })
+  // 0.9: progress and time remaining, from the task graph and from how long tasks took here before. Looked at
+  // again when something happens in a mission (tool calls and token counts are not "something"), and on a tick
+  // for the refresh of what is shown. No session is started for it and no model is asked.
+  const finishedTaskRows = db.prepare("SELECT kind, complexity, started_at AS s, finished_at AS f FROM tasks WHERE state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?")
+  const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
+  const progress = new ProgressService({
+    now: () => Date.now(),
+    run: (runId) => repos.runs.get(runId) ?? null,
+    tasks: (runId) => repos.tasks.listByRun(runId),
+    dependencies: (runId) => repos.dependencies.listByRun(runId),
+    events: (runId, afterSeq) => repos.events.listByRun(runId, afterSeq, 5000),
+    finishedTasks: (limit) => (finishedTaskRows.all(limit) as { kind: string; complexity: string; s: string; f: string }[]).map((r) => ({ kind: r.kind as FinishedTask['kind'], complexity: r.complexity as FinishedTask['complexity'], seconds: (Date.parse(r.f) - Date.parse(r.s)) / 1000 })),
+    repairRate: () => {
+      const row = repairRateRow.get() as { r: number | null; n: number }
+      return row.n >= 8 && row.r !== null ? row.r : null
+    },
+    parallelism: (run) => Math.max(1, run.config.maxParallelAgents),
+    refreshSeconds: () => repos.settings.get().execution.progressRefreshSeconds ?? DEFAULT_PROGRESS_REFRESH_SECONDS,
+    waitOf: (run) => progressWaitOf(run),
+    onChange: (snapshot) => push({ kind: 'progress', snapshot }),
+  })
+  // What a run waits on beyond its own state: the network (set by the connectivity supervisor), or a decision
+  // of the user's on a boundary request of that mission.
+  const networkWait: { current: { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_PROVIDER'; detail: string } | null } = { current: null }
+  const progressWaitOf = (run: Run): { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_PROVIDER' | 'WAITING_FOR_USER_BOUNDARY'; detail: string } | null => {
+    if (TERMINAL_RUN_STATES.includes(run.state)) return null
+    if (networkWait.current !== null) return networkWait.current
+    // A request that some task waits on while others work is a blocker of that task, not a wait of the mission.
+    if (repos.tasks.listByRun(run.id).some((t) => t.state === 'running' || t.state === 'assigned')) return null
+    const pending = repos.boundaryRequests.listPending(run.projectId).filter((r) => r.runId === run.id)
+    return pending.length > 0 ? { kind: 'WAITING_FOR_USER_BOUNDARY', detail: `${pending.length} boundary ${pending.length === 1 ? 'request' : 'requests'} to decide` } : null
+  }
+  const QUIET_FOR_PROGRESS = new Set(['agent.usage', 'agent.tool.started', 'agent.tool.completed', 'agent.message', 'agent.state_changed', 'context.composed'])
+  bus.subscribe((event) => {
+    if (QUIET_FOR_PROGRESS.has(event.type)) return
+    try {
+      progress.refresh(event.runId)
+    } catch (e) {
+      console.error(`[nexus] progress: ${errorMessage(e)}`)
+    }
+  })
+  const progressTick = setInterval(() => {
+    for (const runId of progress.open()) {
+      try {
+        progress.refresh(runId)
+      } catch (e) {
+        console.error(`[nexus] progress: ${errorMessage(e)}`)
+      }
+    }
+  }, 30_000)
+  progressTick.unref()
 
   // UI tests answer confirmations through the window they drive: with the scripted runtime, or in an acceptance
   // run of a development build that says so. Never in a package: there the question is always the runtime's own.
@@ -1463,6 +1517,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
 
   const handlers = createIpcHandlers({
+    progress,
     chatgpt,
     intelligenceOperations,
     taskAdmission,

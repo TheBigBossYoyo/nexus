@@ -1,3 +1,4 @@
+import type { ProgressSnapshot } from './progress'
 import { z } from 'zod'
 import type { BuildIdentity } from './build-identity'
 import type { ChatGPTStatus } from './chatgpt'
@@ -362,6 +363,8 @@ export const ipcInputs = {
     .object({ projectId: Id.optional(), includeInternal: z.boolean().optional() })
     .strict(),
   'runs.get': z.object({ runId: Id }).strict(),
+  /** 0.9: how far a mission is and how much active work remains, computed from the task graph and history. */
+  'progress.get': z.object({ runId: Id }).strict(),
   'runs.create': z
     .object({
       projectId: Id,
@@ -1102,6 +1105,7 @@ export interface IpcOutputs {
   'projects.remove': null
   'runs.list': Run[]
   'runs.get': RunDetail
+  'progress.get': ProgressSnapshot | null
   'runs.create': Run
   'runs.approvePlan': Run
   'runs.replan': Run
