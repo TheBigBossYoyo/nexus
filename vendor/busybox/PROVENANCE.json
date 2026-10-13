@@ -1,0 +1,20 @@
+{
+  "name": "busybox-w32",
+  "build": "FRP-6075-g169694ebd",
+  "variant": "64-bit, Unicode (busybox-w64u)",
+  "file": "busybox.exe",
+  "sha256": "6e263d154d8548d1eb936f65d1d8312c80df31c45974e48d6335e4dcc0f4f34c",
+  "binaryUrl": "https://frippery.org/files/busybox/busybox-w64u-FRP-6075-g169694ebd.exe",
+  "license": "GPL-2.0-only",
+  "licenseFile": "COPYING",
+  "sourceRepository": "https://github.com/rmyorston/busybox-w32",
+  "sourceCommit": "169694ebdba292f6533f78aeea678bfbb907396c",
+  "sourceArchiveUrl": "https://github.com/rmyorston/busybox-w32/archive/169694ebd.tar.gz",
+  "modified": false,
+  "sourceArchive": {
+    "file": "source/busybox-w32-169694ebd.tar.gz",
+    "sha256": "5eb0519678cb0615c641496342329ea296bedc5ca3d508f3e37a37b370c6f852",
+    "fetched": "2026-10-13",
+    "note": "The archive GitHub generates for the commit: the complete tree, including the build configuration upstream uses for this variant (configs/mingw64u_defconfig) and the Makefiles. NEXUS did not build the binary; it ships upstream's, unmodified."
+  }
+}
