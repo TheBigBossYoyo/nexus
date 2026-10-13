@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.8.0",
+  "version": "0.9.0-development",
   "private": true,
   "description": "Local-first multi-agent software-engineering control plane",
   "author": "Youssef Melki",

@@ -3,7 +3,7 @@ export interface BuildIdentity {
   commit: string
   dirty: boolean
   builtAt: string | null
-  channel: 'development' | 'candidate'
+  channel: 'development' | 'candidate' | 'release'
   runtimeProtocol: number
   databaseSchema: number
 }
