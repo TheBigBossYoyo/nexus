@@ -77,9 +77,12 @@ git('config', 'user.name', 'Acceptance')
 git('config', 'user.email', 'acceptance@example.com')
 git('add', '-A')
 git('commit', '-q', '-m', 'initial')
-// A remote that is a directory here: a push that got through would be seen in it, and reaches nobody.
+// A remote that is a directory here: a push that got through would be seen in it, and reaches nobody. An allowed
+// push goes to a network address only (0.8), so the remote is named by an https address, and the repository's own
+// configuration, which no task writes, turns that address to the directory.
 execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
-git('remote', 'add', 'origin', remote)
+git('remote', 'add', 'origin', 'https://nexus-acceptance.invalid/remote.git')
+git('config', `url.${base.replace(/\\/g, '/')}/.insteadOf`, 'https://nexus-acceptance.invalid/')
 git('push', '-q', 'origin', 'main')
 const baseCommit = git('rev-parse', 'HEAD')
 const remoteRefs = () => execFileSync('git', ['-C', remote, 'for-each-ref', '--format=%(refname) %(objectname)'], { encoding: 'utf8' }).trim()

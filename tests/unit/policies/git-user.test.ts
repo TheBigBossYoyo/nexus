@@ -296,7 +296,18 @@ describe('a push the user allowed: the branch of the worktree, to a remote by na
   })
 
   it('is written as the branch of the worktree, in full, to a remote the repository knows; any other branch is not pushed', () => {
-    const lines = (command: string): string[] => renderGrantedPush((grantedPushOf(command) ?? [])[0] ?? { args: [], then: null, stderr: null }, 'nexus/run1/task').split('\n')
+    // The first line (the remote is one the repository knows) and the last (the push itself). Between them the
+    // script checks where the remote is and what the branch holds; those checks are run against real
+    // repositories in tests/integration/git/user-git-script.test.ts.
+    const all = (command: string): string[] => renderGrantedPush((grantedPushOf(command) ?? [])[0] ?? { args: [], then: null, stderr: null }, 'nexus/run1/task').split('\n')
+    const lines = (command: string): string[] => {
+      const rendered = all(command)
+      return rendered.length > 2 ? [rendered[0] as string, rendered[rendered.length - 1] as string] : rendered
+    }
+    const full = all('git push origin HEAD').join('\n')
+    expect(full).toContain('goes to a network address only')
+    expect(full).toContain('holds commits that another branch, tag or stash of this repository holds')
+    expect(full).toContain("'--exclude=nexus/run1/*' --branches")
     const known = (remote: string): string => `if [ -z "$("$NX_GIT" config --get 'remote.${remote}.url' 2>/dev/null)" ]; then echo 'NEXUS: this repository has no remote called ${remote}; the push was not made.' >&2; exit 128; fi`
     const mapping = "'refs/heads/nexus/run1/task:refs/heads/nexus/run1/task'"
     expect(lines('git push origin HEAD')).toEqual([known('origin'), `"$NX_GIT" 'push' 'origin' ${mapping}`])
