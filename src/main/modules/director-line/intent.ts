@@ -76,6 +76,9 @@ const BLOCKERS = /\b(?:block\w*|stuck|waiting (?:on|for)|what(?:'s| is) (?:wrong
 const TESTS = /\b(?:tests?\s+(?:results?|status)|latest tests?|last tests?|did (?:the )?tests? pass|tests? (?:pass|fail)\w*|resultats? (?:des )?tests?|les tests?|derniers tests?|tests? ok)/
 const STATUS = /\b(?:status|statut|etat|how(?:'s| is) it going|how is (?:everything|it)|progress|avancement|ca avance|comment ca (?:va|avance)|ou en (?:est|sommes|en est)|where are we|what happened|what's up|overnight|cette nuit|pendant la nuit|qu'est[- ]ce qui s'est passe|rapport|report|update|point)\b/
 const DETAILS = /^\s*(?:details?|detail|detaille|infos?|donne[- ]moi les details (?:de|du|sur)?)\s*[:,-]?\s*(?:(?:on|of|about|for|sur|de|du|pour|the|le|la)\s+)?(.{1,80})$/ds
+// "How is RaceDeck going?", "comment avance RaceDeck ?": a question about one piece of work, as it is asked aloud.
+const HOW_IS = /^\s*(?:how(?:'s| is| are)\s+(?:the\s+)?(.{1,60}?)\s+(?:going|doing|coming along|progressing|getting on)|comment (?:va|avance|se passe)\s+(?:le\s+|la\s+)?(.{1,60}?))\s*\??\s*$/ds
+const HOW_IS_NOBODY = /^(?:it|everything|things|this|that|all|work|the work|ca|tout|le travail)$/
 const PAUSE = /\b(?:pause|pauser|suspend\w*|mets? en pause|met en pause|fais une pause|hold on|wait here)\b/
 const CONTINUE = /^\s*(?:please\s+|s'il (?:te|vous) plait\s+)?(?:continue\w*|resume|unpause|go on|go ahead|carry on|reprend\w*|reprise|poursui\w*|vas-y|allez-y)\b/
 const HELP = /^\s*(?:help|aide|\?|\/help|\/start|menu|commands?|commandes?|what can you do)\b/
@@ -125,6 +128,13 @@ export function interpretDeterministic(original: string): OperatorCommand {
     const span = (details as RegExpMatchArray & { indices?: [number, number][] }).indices?.[1]
     const subject = span ? cleanProject(original.slice(span[0], span[1])) : ''
     if (subject) return { kind: 'DETAILS', subject }
+  }
+  const how = text.match(HOW_IS)
+  if (how) {
+    const indices = (how as RegExpMatchArray & { indices?: ([number, number] | undefined)[] }).indices
+    const span = indices?.[1] ?? indices?.[2]
+    const subject = span ? cleanProject(original.slice(span[0], span[1])) : ''
+    if (subject && !HOW_IS_NOBODY.test(subject.toLowerCase())) return { kind: 'DETAILS', subject }
   }
   if (ETA.test(text)) return { kind: 'ETA' }
   if (TESTS.test(text)) return { kind: 'LATEST_TEST_RESULTS' }

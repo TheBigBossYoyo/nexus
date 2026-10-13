@@ -228,6 +228,35 @@ export class DirectorLine {
     return { speak: inert(spoken.replace(/\n+/g, '. '), 500), authenticated: true }
   }
 
+  /**
+   * 0.9.1: what a sentence of a live call asks for. The same closed set of commands as a message; the text is
+   * cleaned the same way. Nothing is done by this.
+   */
+  async interpretSpoken(text: string): Promise<{ text: string; command: OperatorCommand }> {
+    const cleaned = sanitizeInbound(text)
+    return { text: cleaned, command: await interpretMessage(cleaned, this.o.classify) }
+  }
+
+  /**
+   * 0.9.1: carries out one command of a live call and returns what is said back. Only for a call that the voice
+   * session authenticated (the paired number and the PIN): the caller must be a paired phone, and each turn is
+   * done once (a turn that is delivered twice is answered with nothing the second time). Tasks are allowed here,
+   * unlike `handleVoiceInput`: the session reads a task back and waits for a yes before it calls this.
+   */
+  async performSpoken(input: { from: string; callId: string; turnId: string; text: string; command: OperatorCommand }): Promise<string> {
+    const at = this.now().toISOString()
+    const identity = await this.o.pairing.findPaired('TWILIO_VOICE', input.from)
+    if (!identity) return 'Not authorised.'
+    if (!(await this.o.seen.addIfAbsent(`voice-turn:${input.callId}:${input.turnId}`, at))) return ''
+    const spoken = await this.act(identity, { channel: 'TWILIO_VOICE', providerUserId: input.from, providerMessageId: `${input.callId}:${input.turnId}`, dedupeKey: '', senderLabel: '', text: input.text, receivedAt: at, providerAuthenticated: true }, input.text, input.command, true)
+    return inert(spoken.replace(/\n+/g, '. '), 600)
+  }
+
+  /** What is said at the start of a call NEXUS places about an event: the report's own text, made safe to speak. */
+  spokenReport(text: string): string {
+    return inert(text.replace(/\n+/g, '. '), 500)
+  }
+
   private async act(identity: OperatorIdentity, update: RawProviderUpdate, text: string, command: OperatorCommand, spoken: boolean): Promise<string> {
     const { reads, actions } = this.o
     try {
