@@ -11,6 +11,20 @@ export interface AudioFormat {
   sampleRate: 8000 | 16000 | 24000 | 48000
 }
 
+/**
+ * A SIP address in one normal form, `sip:user@domain` in lower case, or null when the text is not one. A display
+ * name, angle brackets, a port and parameters are dropped: two spellings of one account compare equal, and
+ * nothing a caller can add to its address changes which account it names.
+ */
+export function normalizeSipIdentity(text: string): string | null {
+  const inner = /<([^<>]*)>/.exec(text)?.[1] ?? text
+  const m = /^\s*(?:sips?:)?([a-z0-9._+~-]{1,64})@([a-z0-9.-]{1,253})(?::\d{1,5})?(?:;[^\s]*)?\s*$/i.exec(inner)
+  if (!m) return null
+  const domain = (m[2] as string).toLowerCase()
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) return null
+  return `sip:${(m[1] as string).toLowerCase()}@${domain}`
+}
+
 export type CallEndReason = 'REMOTE_HUNG_UP' | 'LOCAL_HUNG_UP' | 'NETWORK_LOST' | 'FAILED'
 
 /** What was really negotiated for one call, as the transport reports it. UNKNOWN is said rather than assumed. */

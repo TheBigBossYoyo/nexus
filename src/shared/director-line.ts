@@ -8,7 +8,7 @@
  * what NEXUS may do": the line has no path to the capability broker, to settings or to power.
  */
 
-export const OPERATOR_CHANNEL_KINDS = ['TELEGRAM', 'TWILIO_SMS', 'TWILIO_VOICE', 'WHATSAPP', 'EMAIL'] as const
+export const OPERATOR_CHANNEL_KINDS = ['TELEGRAM', 'TWILIO_SMS', 'TWILIO_VOICE', 'WHATSAPP', 'EMAIL', 'SIP_VOICE'] as const
 export type OperatorChannelKind = (typeof OPERATOR_CHANNEL_KINDS)[number]
 
 export type PairingMethod = 'PAIRING_CODE' | 'PHONE_AND_PIN' | 'CONFIGURED'
@@ -71,7 +71,10 @@ export type RefusedTopic = (typeof REFUSED_TOPICS)[number]
 export interface RawUserIntent {
   text: string
   projectHint: string | null
-  source: 'OPERATOR_REMOTE'
+  /** DIRECTOR_LINE_VOICE: said on a live call, read back and confirmed there. */
+  source: 'OPERATOR_REMOTE' | 'DIRECTOR_LINE_VOICE'
+  /** For a task said on a call: what was said around it, as it was recognised, oldest first. The task itself is `text`. */
+  transcript?: string[]
   channel: OperatorChannelKind
   operatorId: string
   messageId: string

@@ -225,6 +225,14 @@ export class PairingService {
     return 'WRONG_PIN'
   }
 
+  /** Pairs the one identity that may call and be called (from Settings, on the PC, where the user is present). It replaces the one before. */
+  async pairVoiceIdentityFromSettings(channel: OperatorChannelKind, identity: string, label: string): Promise<OperatorIdentity> {
+    await this.unpair(channel)
+    const paired: OperatorIdentity = { channel, providerUserId: identity, label: label.slice(0, 60), pairedAt: this.now().toISOString(), pairedVia: 'CONFIGURED' }
+    await this.o.identities.put(paired)
+    return paired
+  }
+
   /** Pairs a phone number directly (from Settings, on the PC, where the user is present). */
   async pairPhoneFromSettings(channel: OperatorChannelKind, e164: string, label: string, via: PairingMethod = 'PHONE_AND_PIN'): Promise<OperatorIdentity> {
     if (!/^\+[1-9]\d{6,14}$/.test(e164)) throw new Error('number must be E.164, like +33612345678')

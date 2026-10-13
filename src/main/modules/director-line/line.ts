@@ -243,12 +243,13 @@ export class DirectorLine {
    * done once (a turn that is delivered twice is answered with nothing the second time). Tasks are allowed here,
    * unlike `handleVoiceInput`: the session reads a task back and waits for a yes before it calls this.
    */
-  async performSpoken(input: { from: string; callId: string; turnId: string; text: string; command: OperatorCommand }): Promise<string> {
+  async performSpoken(input: { from: string; callId: string; turnId: string; text: string; command: OperatorCommand; channel?: OperatorChannelKind; transcript?: string[] }): Promise<string> {
     const at = this.now().toISOString()
-    const identity = await this.o.pairing.findPaired('TWILIO_VOICE', input.from)
+    const channel = input.channel ?? 'TWILIO_VOICE'
+    const identity = await this.o.pairing.findPaired(channel, input.from)
     if (!identity) return 'Not authorised.'
     if (!(await this.o.seen.addIfAbsent(`voice-turn:${input.callId}:${input.turnId}`, at))) return ''
-    const spoken = await this.act(identity, { channel: 'TWILIO_VOICE', providerUserId: input.from, providerMessageId: `${input.callId}:${input.turnId}`, dedupeKey: '', senderLabel: '', text: input.text, receivedAt: at, providerAuthenticated: true }, input.text, input.command, true)
+    const spoken = await this.act(identity, { channel, providerUserId: input.from, providerMessageId: `${input.callId}:${input.turnId}`, dedupeKey: '', senderLabel: '', text: input.text, receivedAt: at, providerAuthenticated: true }, input.text, input.command, true, { transcript: (input.transcript ?? []).slice(-40).map((l) => inert(l, 400)) })
     return inert(spoken.replace(/\n+/g, '. '), 600)
   }
 
@@ -257,7 +258,7 @@ export class DirectorLine {
     return inert(text.replace(/\n+/g, '. '), 500)
   }
 
-  private async act(identity: OperatorIdentity, update: RawProviderUpdate, text: string, command: OperatorCommand, spoken: boolean): Promise<string> {
+  private async act(identity: OperatorIdentity, update: RawProviderUpdate, text: string, command: OperatorCommand, spoken: boolean, call?: { transcript: string[] }): Promise<string> {
     const { reads, actions } = this.o
     try {
       switch (command.kind) {
@@ -279,7 +280,8 @@ export class DirectorLine {
           const intent: RawUserIntent = {
             text: command.text,
             projectHint: command.kind === 'CREATE_TASK' ? command.project : null,
-            source: 'OPERATOR_REMOTE',
+            source: call ? 'DIRECTOR_LINE_VOICE' : 'OPERATOR_REMOTE',
+            ...(call ? { transcript: call.transcript } : {}),
             channel: update.channel,
             operatorId: identity.providerUserId,
             messageId: update.providerMessageId,
