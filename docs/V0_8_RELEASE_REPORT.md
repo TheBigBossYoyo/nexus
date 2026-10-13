@@ -1,132 +1,107 @@
 # NEXUS 0.8 release report
 
-Written 2026-10-11. Branch `nexus-0.8-isolation-autonomy`, 46 commits on top of `main` (v0.7.2 at `ad3cb43`).
+Written 2026-10-13. Branch `nexus-0.8-isolation-autonomy`, on top of `main` (v0.7.2). It replaces the report of
+2026-10-11, whose verdict was PARTIAL, and says what closed each thing that report and the sessions after it left
+open. The log of the work is `V0_8_PROGRESS.md`; what is and is not contained is `V0_8_SECURITY_MODEL.md`; how the
+last open question was closed is `V0_8_DNS_CONTAINMENT_EVALUATION.md`.
 
-## Verdict: PARTIAL
+## Verdict: PASS
 
-**Not merged. Not tagged. Version left at 0.7.2. Nothing pushed.**
+**Every release gate is met on the commit named below. Version 0.8.0. Merged to `main` with a merge commit and tagged `v0.8.0`, on this machine only: nothing is pushed.**
 
-The core of the theme works and was shown to work with real sessions on this machine: an enrolled project
-runs a normal mission with no interruption, inside a containment that Windows enforces, reads the web through
-a guarded fetch, and starts and operates its own application. It is PARTIAL and not PASS because parts of the
-specification are not built, some of what is built was not verified in the way a release needs, and one
-security question raised by the independent review is not closed. Each is listed below. None is presented as
-a limitation to be lived with: they are the reasons this is not a release.
+## The last open gate: names under the isolated profile
 
-## What was asked for, and where it stands
+On 2026-10-12 everything was closed except one thing: Windows looked up names for the sandbox account and showed
+it the machine's name cache, which no firewall rule for an account sees. The owner's decision was to close it
+before PASS, with no placebo. A bounded cycle on the account and its token found nothing that holds; the
+isolated profile now runs project code in an AppContainer, and:
 
-| Pillar | State |
+| Asked from inside the containment | Answer |
 |---|---|
-| 1. Windows execution isolation | Built and verified against the operating system. ISOLATED (a sandbox account, low integrity, a job, the firewall) and RESTRICTED (the user at low integrity, a job, labels). No fallback from one to less. One open question (below). |
-| 2. Low-friction autonomy | Built and verified. Profiles, capability broker, grants, deduplicated boundary requests, inbox. Real sessions: 0 interruptions in a normal mission; 1 request for one deliberate push. |
-| 3. Internet research, application and browser interaction | Research by guarded fetch: built; verified with scripted pages and one real site. Application under test, web and Electron: built and verified under both profiles. A research browser, signed-in browsing and third-party interaction: not built. |
-| 4. Reliability, fault injection, long-run hardening | Fault injection and a soak of the containment and application paths: done. A soak of hours, of real sessions, and under ISOLATED: not done. `V0_8_RELIABILITY.md`. |
+| The resolver every program uses (`ping`), .NET, `Resolve-DnsName`, `nslookup`, `curl` by name, Node `dns.lookup` and `dns.resolve4`, a name never asked before | no name looked up |
+| `ipconfig /displaydns` | refused |
+| A connection by address, TCP and HTTP, a DNS question over UDP | no route |
+| NEXUS's proxy on the loopback | reached |
+
+Asserted by `tests/integration/isolation/containment.test.ts` and checked from inside at every start of NEXUS: an
+isolated profile for which a name is looked up is reported as not holding, and nothing runs under it.
+
+The AppContainer cost more than a setting, and each cost is stated in the security model: a POSIX shell that runs
+inside it (busybox ash) instead of Git's bash; no git on the user's repository from inside a longer command; a
+changed copy of node.exe for the sandbox, because of a defect in libuv that is fixed upstream and not yet released
+in any Node; an entry for the sandbox on the Mount Manager device with a one-shot startup task that restores it;
+two entries on the folders above the sandbox root.
 
 ## Release gates
 
-| Gate | Result | Evidence |
-|---|---|---|
-| A normal autonomous mission interrupts the user 0 times | **Met**, with real Claude sessions under ISOLATED, in runs 5, 7 and 8 (0 tool approvals, 0 boundary requests, 0 dialogs). Run 6 had one false request, since fixed. | `docs/acceptance/v08-acceptance-2026-10-11T19-45-35-090Z.json` (run 8) |
-| One deliberate out-of-scope action is exactly 1 deduplicated boundary request | **Met** for the push in runs 5, 6, 7, 8: one request, nothing on the remote. In runs 7 and 8 a session also met a second, real boundary of its own accord (a read of the remote's directory; a temporary file beside its worktree): each was one request. | same |
-| ISOLATED never falls back to STANDARD | **Met.** A profile that was not verified at start runs nothing; tested with the launcher missing, with no account, with a profile not verified. | `integration/isolation/containment`, `scenarios/v8-containment` |
-| Contained code cannot read credentials, the runtime, or write outside its roots | **Met** against Windows, for what the security model claims; see its "What is not contained". | 22 containment tests, both profiles |
-| No provider credential reaches untrusted code; no personal browser profile; no separately billed API | **Met.** The environment is an allowlist; the browser is NEXUS's own with a profile per session; research uses no provider API. | `contained-env`, `browser/provider.ts` |
-| Independent security review with no open finding | **Not met.** 10 findings; 8 fixed with tests, 2 left with reasons, and one residual question open (next section). | `V0_8_SECURITY_MODEL.md`, "Independent review" |
-| Independent UX review | **Not done.** | |
-| End-to-end and accessibility of the new UI | **Met.** 5 end-to-end tests and the axe audit (light and dark) of the autonomy settings, the boundary inbox and the project panels pass. | `tests/e2e/v8.spec.ts`, `a11y.spec.ts` |
-| Full regression | See "Final runs". | |
-| Package | An unpacked package builds and contains the launcher, the setup scripts and the browser driver. The packaged application was not started and not accepted. | `test-results/v08/package-1.log` |
-
-## Why not PASS
-
-**Security, open.**
-
-1. *A forged Git index or commit-graph.* Contained code can write the index of its own worktree entry and add
-   files to the object store of the enrolled repository. NEXUS checks `HEAD` before it adds to a branch; it
-   does not validate an index that contained code wrote before its own git reads it. What a forged one can
-   make NEXUS's git (which runs as the user) do is not established. The review could not close it; neither did I.
-2. *The critical finding of the review was in code written hours earlier.* An isolated session could have run
-   programs as the user through the path that lets git commit. It was fixed (a closed list of git subcommands
-   and arguments, pinned directories, regression tests in which contained code plants hooks and
-   configuration), and no second review has looked at the fix. A fix of that weight wants one.
-3. *Two findings were left as they were*, on reasoning and not on a test: a junction swapped under a file tool
-   of the provider (relies on Windows refusing a low-integrity process a junction to what it cannot write),
-   and handle inheritance in the launcher without a list.
-4. *The elevated setup script* trusts an existing `C:\ProgramData\NexusSandbox` and an existing account of
-   that name.
-
-**Specified and not built.**
-
-- A research browser for pages that need script; signed-in browsing; interaction with third-party sites.
-- A grant resuming the task that waited for it. In 0.8 the mission pauses and the user resumes it.
-- Rules for unattended work (overnight, arena) in enrolled projects.
-- `RoleCapabilityContract` in planning: the contract exists at the gate (a role is refused a capability that
-  is not its own); the planner is not told of it.
-- Context Graph nodes for research artifacts.
-- The pipe's explicit DACL and per-kind dispatch.
-- Release of a held download into a worktree; a setting for what a project's application may reach besides itself.
-- Desktop applications that are not Electron.
-
-**Built and not verified as a release needs.**
-
-- The setup of the sandbox account from the window (`isolation.setup`): never run. The account on this machine
-  was made by `scripts/sandbox-setup.mjs`, which shares its steps.
-- The packaged application: built, not started, not accepted. Every acceptance ran the development build.
-- A real mission under RESTRICTED (the profile a user has before the one-time setup). All real runs were ISOLATED.
-- A real mission with an Electron application under test. Tests cover it; real sessions used a web application.
-- The search results page against the real site in a mission. Real sessions read one real page
-  (`nodejs.org`); search was exercised by scripted tests only.
-- Protection of the user's real credential folders: the labels are applied only by a packaged build or when
-  asked (`NEXUS_PROTECT_USER_STORES=1`); neither was done here. Tested on a scratch directory.
-- One fix (a session reads the worktrees of its own mission) has no unit test; the acceptance covers it.
-- The stress campaign of the orchestrator (1,000 seeds) was not rerun for 0.8.
-- The 0.7.2 deferred findings: triaged in `V0_8_DEFERRED_FINDINGS_TRIAGE.md`; those absorbed into 0.8 were not
-  all implemented.
-
-## What real use found
-
-Eight acceptance runs with real Claude sessions (Max subscription; no separately billed API). Runs 2, 3, 4 and
-6 failed and each failure was a defect: git unusable for the sandbox account outside commands that were git
-alone; a harmless git message read as failure; four ordinary actions put to the user as boundary requests;
-verifiers failing correct work for lack of evidence only NEXUS held. All fixed, each with a regression test
-except the one noted. Runs 5, 7 and 8 passed; run 8 is on the final code. A mission of this size took about
-three minutes and cost about 0.56 USD-equivalent of subscription usage as the SDK reports it.
-
-Two things the user should know about how these runs were made:
-
-- The first attempt put the enrollment confirmation on the screen without warning. Confirmations are shown by
-  the runtime process, not by the window the script had stubbed. Since then a development build puts
-  confirmations to the off-screen window when the acceptance asks; a packaged build never does.
-- Run 6's first attempt was stopped from outside when the machine ran low on memory. It left nothing behind.
-
-## Final runs
-
-| What | Result |
+| Gate | Result |
 |---|---|
-| Full suite (`npx vitest run`), final commit | 220 files, 4,461 tests, all passed (748 s) |
-| Full suite before the last test-helper fix | 218 of 220 files, 4,441 tests passed; 2 files (20 tests) could not bundle the new browser dependency; fixed, both pass |
-| End-to-end, new UI | 5 of 5 |
-| Accessibility | 2 of 2 (the existing audit and the 0.8 one) |
-| The older end-to-end specs | NOT RERUN for 0.8 |
-| Soak | 400 contained commands, 40 application launches: nothing left behind |
-| Lint, typecheck | clean |
-| Acceptance, real sessions, final code | run 8: every gate |
+| A normal autonomous mission interrupts the user 0 times | Met under both profiles, with real sessions: 0 tool approvals, 0 boundary requests, 0 dialogs |
+| One deliberate out-of-scope action is one deduplicated boundary request; the mission resumes by itself when it is granted | Met under both profiles: the push is one request; granted, NEXUS resumes the mission by itself and the push arrives |
+| An autonomous mission with an Electron application under test, under ISOLATED, with no question to the user | Met: Electron's installer ran, the application was started, operated, captured and stopped inside the AppContainer; 0 questions |
+| ISOLATED never falls back; a profile that does not hold runs nothing | Met (`effective-profile`, `containment`, the scenarios) |
+| Contained code reads no credential and nothing of the user's, writes nothing outside its roots, has no network of its own and gets no name looked up | Met against Windows: the isolation folder, 86 tests, both profiles, with the Mount Manager and the name assertions |
+| The Bash capability under ISOLATED is a shell inside the containment, with stated semantics and explicit refusal | Met: `shell-semantics.test.ts`, 30 tests |
+| Raw `.npmrc` stays a boundary; dependency diagnosis does not need it | Met: `package_config_inspect`; in the Electron mission the worker used it and asked nothing |
+| Independent review of the host-side git | Done on 2026-10-12; three findings fixed with tests, the rest stated (security model) |
+| Full regression | Met: 240 files, 4,714 tests, none failing |
+| End-to-end and accessibility | Met: 42 passed, 3 skipped |
+| The packaged application starts, verifies both profiles and renders | Met: 17 checks of 17 on the validated commit, and again on the commit that sets the version |
+| The setup from the application's own button, with the owner present | Done on 2026-10-12 (before the AppContainer). The setup of version 3 was run by the owner from `scripts/sandbox-setup.mjs`, which shares its steps; from the button it was not run again. |
 
-## What exists on the branch
+## Final runs (on `2e1af3f`)
 
-Security and autonomy model: `V0_8_SECURITY_MODEL.md`, `AUTONOMY_MODEL.md`. Research: `INTERNET_RESEARCH.md`.
-Applications and the browser: `APP_BROWSER_AUTOMATION.md`. Reliability: `V0_8_RELIABILITY.md`. The log of the
-work, with every measurement and every rejected approach: `V0_8_PROGRESS.md`. Research behind the decisions:
-`WINDOWS_ISOLATION_RESEARCH.md`, `BROWSER_AUTOMATION_RESEARCH.md`, `UNTRUSTED_CONTENT_SECURITY.md`,
-`CLAUDE_WEB_TOOLS_RESEARCH.md`.
+One sequential run, nothing in parallel: `pnpm test`, the build, end-to-end, the package and its check, then the
+eight real missions (Claude sessions on the owner's subscription; no separately billed API).
 
-On this machine, outside the repository: the local account `NexusSandbox`, the directory
-`C:\ProgramData\NexusSandbox`, two firewall rules, and `%LOCALAPPDATA%\NexusSandbox` (the account's record and
-its protected credential). `node scripts/sandbox-setup.mjs --remove` undoes them (one elevation prompt).
+| Stage | Result |
+|---|---|
+| Full suite | 240 files, 4,714 tests passed |
+| Build; browser, isolation and git-scenario tests | 122 of 122 |
+| End-to-end (Playwright, the built application) | 42 passed, 3 skipped |
+| Packaged application (`scripts/v08-packaged-check.mjs`) | 17 of 17 |
+| ISOLATED missions: normal, boundary, resume, render, electron | 28 gates of 28; all five completed; 0 tool approvals; the only requests were the push the script asks for |
+| RESTRICTED missions: normal, boundary, resume | 20 gates of 20 |
 
-## To reach PASS
+Evidence: `docs/acceptance/v08-acceptance-2026-10-13T10-11-46-869Z.json` (ISOLATED) and
+`…T10-17-55-335Z.json` (RESTRICTED). The commit that follows `2e1af3f` changes documents, the version number and
+evidence files only; the package was built and checked again on it.
 
-In order: a second independent review of the git path and of the index question, with the launcher's handle
-list; the setup from the window, run once with the user present; a real mission under RESTRICTED and one with
-an Electron application; the packaged application accepted; the older end-to-end specs; then the unbuilt items
-the user still wants in 0.8, or their explicit move to 0.9.
+The runs before this one are in `docs/acceptance/` as they were, failures included: 23 of 28 on `b26a878`, the
+pauses that led to the Mount Manager entry and to the application record, 25 of 28 on `53d3a36` (the acceptance
+remote was a folder; a network outage of the machine failed one RESTRICTED mission).
+
+What was reviewed and by whom: the host-side git by an independent reviewer (a separate session that was given
+the code and the threat model, not the author's conclusions). The launcher's AppContainer code, the package
+configuration reader and the change to node.exe were read again by their author before this run, not by a
+second reviewer.
+
+## What the owner should know
+
+- **The machine.** The setup is version 3: the account, its folder and firewall rules; a Windows profile for the
+  account; one access entry each on `C:\` and `C:\ProgramData`; a loopback exemption; one entry on the Mount
+  Manager device; a startup task, `NexusSandbox-RestoreCanonicalization`. `node scripts/sandbox-setup.mjs --remove`
+  takes all of it away.
+- **Not observed: a restart of Windows.** The startup task has never run at a real start. NEXUS checks from inside
+  at every start and says so if the isolated profile's tools would break.
+- **A mistake made on the way and corrected.** The first run of the new setup put an entry for the AppContainer
+  itself on `C:\` and `C:\ProgramData`; for about a quarter of an hour no low-integrity program could open
+  either. The second run removed it. The setup, the verification and the removal now refuse or remove such an
+  entry.
+- **busybox-w32 is GPL-2.0.** A build that contains it is for this machine until its source, or a written offer
+  for it, goes with the build (`vendor/busybox/README.md`).
+- **The restricted profile is no containment against hostile code**, and since the review of git that sentence
+  includes: its pins can be replaced and existing objects of the repository overwritten by code that runs as the
+  user. Prefer the isolated profile for unattended work.
+- **Agents meet two new refusals under the isolated profile**: a git inside a longer command, and a command with
+  a bash array. Both say what to do instead. A scratch file under `/tmp` does not work there; agents are told to
+  use `$TMPDIR`.
+- **Programs with a libuv of their own** (the Node inside Electron's main process, a Node a project installs)
+  hang when they start a child with a pipe inside the isolated profile, until they carry libuv 1.53.
+
+## Not in 0.8
+
+What was built after the report of 2026-10-11, and what was decided about the rest, is in `V0_8_PROGRESS.md`; this
+session changed none of it. Per-session capabilities (so that one session cannot write another's
+directories), an object store of the task's own for git as the user, and a walk of the worktree for reparse
+points before the user's git stages it are the hardening this session found and did not do.

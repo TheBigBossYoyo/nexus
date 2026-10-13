@@ -480,3 +480,19 @@ closed: a speculative candidate (a clone, not a worktree) whose own `config` nam
   RESTRICTED missions 20/20 (alone); ISOLATED missions 26/28 alone (the Electron mission, for the reason
   above) and 28/28 in a run that overlapped another suite by accident (not counted).
 
+### 2026-10-12/13: the AppContainer, and PASS
+
+The isolated profile was moved into an AppContainer to close name lookups (owner's decision of 2026-10-12). In the
+order things were found: the account needs its profile; a contained process could not see `C:\`; an entry for an
+AppContainer's own SID shuts low-integrity programs out of a folder (made on `C:\` by mistake, corrected within the
+hour, now a private capability everywhere); integrity labels do not bind inside an AppContainer; Git's bash does
+not start there (busybox ash behind a shell adapter); git cannot see above the user's repository from inside; Node
+hangs on child pipes (libuv before 1.53: the sandbox's copy of node.exe is changed in one place); Windows gives no
+canonical path (one entry on the Mount Manager device, restored at every start by a one-shot task). An
+independent review of the host-side git found three things that were fixed (document converters started by
+NEXUS's own diff; a push to a remote that is a path; a push of commits that are not the task's). Real missions
+found two more (the application record; a stale index after NEXUS's own commits). The package configuration is
+read as facts by a tool (`package_config_inspect`); raw `.npmrc` stays a boundary.
+
+Final run on `2e1af3f`: suite 4,714 of 4,714; end-to-end 42 passed; packaged check 17 of 17; ISOLATED missions 28
+gates of 28; RESTRICTED 20 of 20. Verdict PASS: `V0_8_RELEASE_REPORT.md`.

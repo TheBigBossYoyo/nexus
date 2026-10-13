@@ -500,3 +500,82 @@ removal of the labels and of the Git access when no project is enrolled.
   follows them: it names the git directory, the worktree and the repository itself, from what it recorded, and
   refuses a worktree whose pointer or entry no longer says what it recorded.
 
+## The isolated profile since 2026-10-12: an AppContainer
+
+This section replaces what the sections above say about the isolated profile wherever they differ. The
+measurements behind it are in `V0_8_DNS_CONTAINMENT_EVALUATION.md`.
+
+**What a contained command is.** A process of the sandbox account, started in an AppContainer
+(`NexusSandbox.Contained.1`), at low integrity, in a job object, on a desktop of its own. The AppContainer holds
+one capability, NEXUS's own and of the same name, to which Windows attaches no meaning, and none of Windows'
+capabilities. The launcher reads both back from the token of the process it made, before it lets it run.
+
+**What decides what it reaches.** Inside an AppContainer a file is opened only where the account and the
+AppContainer both have an access entry, and integrity labels do not bind (measured: a file labeled "no read from
+below" was read, one labeled "no write from below" was overwritten). So:
+
+- every entry NEXUS or the setup makes names the capability, never the AppContainer's own SID (an entry for an
+  AppContainer shuts every low-integrity program out of the folder: measured);
+- the sandbox root gives the capability reading; NEXUS gives it writing on the directories of a session, one by
+  one; the user's profile, NEXUS's data and the user's repositories give it nothing at all;
+- the labels NEXUS sets remain what holds for the restricted profile, and for git that runs as the user.
+
+**The network.** None of its own: no capability for it, and the account's firewall rules as before. Windows looks
+up no name for it and shows it nothing of the name cache, whichever way it asks (asserted in the tests and
+checked from inside at every start of NEXUS). The loopback is reached, which is where NEXUS's proxy listens;
+other services listening on the loopback are reached too.
+
+**The shell.** busybox ash (busybox-w32, pinned by its SHA-256), inside the AppContainer, behind the
+`SandboxShellAdapter`. A command it cannot parse is refused as a whole, inside, with a message; no shell outside
+is ever tried. Git for Windows' bash is the shell of the restricted profile only.
+
+**git.** A git inside a longer command does not reach the user's repository from the AppContainer and is told to
+run alone. Git alone is parsed and written again by NEXUS and runs as the user at low integrity (the restricted
+mechanics), as before 2026-10-12. Hooks, aliases and filters that git starts through the shell of its own
+installation do not run inside the AppContainer.
+
+**What the setup changes on the machine for this, beyond the account, its folder and its firewall rules:**
+
+- a Windows profile for the account (made when it first runs a command; removed with the account);
+- one entry each on the drive's root and on `C:\ProgramData` for the capability: read and list that folder
+  itself, inherited by nothing;
+- a loopback exemption for the AppContainer;
+- one entry on the Mount Manager device for the capability: to open it and ask (what Everyone has there), so that
+  Windows gives a contained process the canonical form of a path. Not to read or write the device: every change
+  to the Mount Manager is refused, which is asserted as a test;
+- a one-shot startup task (`NexusSandbox-RestoreCanonicalization`, as the system, at every start of Windows) that
+  puts that one entry back, because Windows makes the device anew at every start. Its script lies in
+  `Program Files\NexusSandbox`, takes no input, uses no network and starts no program. It is not a service.
+
+The removal script takes all of it away.
+
+**What stays open, stated plainly:**
+
+- Loopback services other than the proxy can be reached.
+- With the Mount Manager entry the AppContainer can ask which volumes and drive letters the machine has. It
+  reads no file outside what it is given.
+- Sessions are not kept apart from one another by the AppContainer: every session holds the same capability.
+- The sandbox's own copy of node.exe is changed in one place (the name pattern of libuv's pipes), because Node
+  before libuv 1.53 hangs on child pipes in an AppContainer. A program that brings a libuv of its own (the Node
+  inside Electron's main process, a Node a project installs) is not reached by this, and a child process with a
+  pipe started from it hangs.
+- Whether the startup task restores the entry after a real restart has not been observed (the machine was not
+  restarted). NEXUS checks canonicalization from inside at every start and reports the isolated profile as not
+  usable, with the reason, when it is refused.
+- Whether a machine without the loopback exemption would refuse the proxy could not be measured here.
+
+**The restricted profile is not a containment against hostile code**, as decided on 2026-10-12, and the review of
+trusted git (2026-10-12) adds two things to what that means: code at low integrity that runs as the user can
+replace the files NEXUS pins in a worktree's entry and can overwrite existing objects of the repository, and git
+then serves the changed object without complaint. And a side effect reaches the isolated profile's users too:
+after a command that is git alone has run for a session, the repository's `objects` directory stays writable
+for other low-integrity processes of the same user until the access is taken back.
+
+**What the review of trusted git found and what was done** (all with tests in `tests/integration/git/`):
+NEXUS's own `git diff` started Git for Windows' document converters on a task's files (now: no conversion
+program for any comparison, and the installation's attributes are not read); an allowed push to a remote that is
+a path ran the target's hooks as the user (now: a network address only); an allowed push could publish a private
+branch the task had turned its branch to (now refused when the branch holds commits that another ref holds and
+the mission does not; commits no ref holds are not seen by this). Not changed: a filter or a driver the user
+defined in their own global git configuration can be selected by a worktree's `.gitattributes` when NEXUS stages
+files; the program is the user's, its input is the task's.
