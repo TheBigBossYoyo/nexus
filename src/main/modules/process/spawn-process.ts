@@ -23,6 +23,8 @@ export interface SpawnLongOptions {
   onLine?: (line: string, stream: 'stdout' | 'stderr') => void
   /** Lines kept. Default 2000. */
   maxLines?: number
+  /** The child's standard input is a pipe that stays open and is never written: for a helper that runs until its input closes. */
+  keepStdinOpen?: boolean
 }
 
 /** The most of an unfinished line that is kept while waiting for its newline. */
@@ -32,7 +34,8 @@ export function spawnLong(file: string, args: readonly string[], options: SpawnL
   const maxLines = options.maxLines ?? 2000
   const lines: string[] = []
   let code: number | null | undefined
-  const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, windowsHide: true, shell: false, stdio: [options.keepStdinOpen === true ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
+  child.stdin?.on('error', () => undefined)
   const take = (stream: 'stdout' | 'stderr') => {
     let rest = ''
     // The unfinished line is kept to a bounded size: an application that prints without a newline must not grow
@@ -68,8 +71,8 @@ export function spawnLong(file: string, args: readonly string[], options: SpawnL
       }
     }
   }
-  child.stdout.on('data', take('stdout'))
-  child.stderr.on('data', take('stderr'))
+  child.stdout?.on('data', take('stdout'))
+  child.stderr?.on('data', take('stderr'))
   const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     child.on('error', () => {
       code = null

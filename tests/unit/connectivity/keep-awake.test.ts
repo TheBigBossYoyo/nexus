@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decideKeepAwake, OvernightPowerGuard, type AutonomousWorkItem, type AutonomousWorkStatus, type PowerLogEntry } from '@main/modules/connectivity/power'
+import { decideKeepAwake, OvernightPowerGuard, type AutonomousWorkItem, type AutonomousWorkStatus, type PowerLogEntry } from '@main/modules/connectivity/keep-awake'
 import { FakeClock } from './fakes'
 
 const HOUR = 3_600_000

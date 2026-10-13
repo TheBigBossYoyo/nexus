@@ -146,23 +146,30 @@ every step: [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md).
 | Internet research | Four `research_*` tools search and read the public web through NEXUS, not through a socket of the agent. Pages are data, never instructions; results are screened, attributed and held to a budget per registrable domain; a URL that looks like data being sent out is refused. [INTERNET_RESEARCH](docs/INTERNET_RESEARCH.md) |
 | Providers | Claude is required. Codex can be enabled as a read-only reviewer; Gemini is detected only. Nothing is sent to a provider you have not enabled. [PROVIDERS](docs/PROVIDERS.md) |
 
-### Progress and time remaining (partly present)
+### Operational autonomy (0.9.0)
 
-`src/shared/progress.ts` and `src/main/modules/progress/estimator.ts` (with unit tests) compute the progress of a
-mission and a range for the active work that remains, from the task graph as it is and from how long tasks of
-the same kind took before on this machine. No model is asked for a number. Work that is added while a mission
-runs lowers the percentage and says why; time spent waiting (for the network, the provider, you) is kept apart
-from active time. **The estimator is not yet wired into the runtime or the interface**: no service calls it and
-no page shows it.
+Three things built at the end of 0.9.0. Each is in the application and covered by tests with simulated
+networks and transports; none has been proven on a real outage, a real long mission or a real messaging
+service yet. The release report says exactly what was and was not shown.
 
-### In progress for 0.9.0 (not finished)
-
-The owner added a pillar to 0.9.0 after part one: network resilience, a remote "Director Line", and progress
-and time remaining. Of these, only the estimator above is committed. The Director Line (the user talking to
-NEXUS from away from the PC, through channels such as Telegram, SMS, voice, WhatsApp or e-mail) exists so far as
-type definitions in `src/shared/director-line.ts`, not yet committed, with no module behind them. There is no
-connectivity module (network resilience) in the tree. None of this is a feature of this version until it is built and verified. The
-merge of 0.9.0 to `main` and the tag `v0.9.0` wait for them.
+- **Progress and time remaining.** The mission page shows a percentage by expected work (not by count of
+  tasks), the stage, the elapsed time, and the active work that remains as a range with a confidence and its
+  reason. It is computed from the task graph and from how long tasks of the same kind took before on this
+  machine; no model is asked for a number. Work added by verification lowers the percentage and says so; time
+  spent waiting (for the network, the provider, a boundary decision, you) is kept apart from active time.
+  Refreshed when something happens and every five minutes otherwise.
+- **Network resilience.** A mission whose provider cannot be reached waits and is resumed when the network is
+  back; it is not failed. The Wi-Fi profile that was in use is reconnected through the Windows WLAN API, by
+  name, with no question; never a network that is not saved, never an open one, never a key. Windows is kept
+  from idle sleep while a mission works or will resume by itself. Outages are recorded with their facts.
+  [NETWORK_RESILIENCE](docs/NETWORK_RESILIENCE.md)
+- **Director Line.** Off until you turn it on. You pair one chat (Telegram, by long polling: no port is opened
+  on the machine) with a one-time code; from it you can ask for status, time remaining and blockers, pause
+  after the current task, continue, and add a task, which is created the way the window creates one. NEXUS
+  reports what matters (an end, a failure, a blocker or an outage that lasts), within quiet hours and limits.
+  The line grants nothing: a request to push, delete, change a profile or allow a boundary request is refused
+  and left for the machine. Telephone voice is designed, with an outbound call implemented and not configured.
+  [DIRECTOR_LINE](docs/DIRECTOR_LINE.md)
 
 ## Security model in brief
 

@@ -128,6 +128,125 @@ confirmation, as allowing for the whole project did.
 
 Built from a clean tree at `ed9c18a` (`pnpm package`): `NEXUS-Setup-0.9.0.exe`, SHA-256 `3216e0d41f7029e826f1c2c94338a1a0293cd36e043a28afac51f0747b4a24ee`. The unpacked application was started off-screen on a data directory of its own (`scripts/v08-packaged-check.mjs`): 17 checks of 17. It is the package of that commit and of version 0.9.0, channel `release`, schema 19, runtime protocol 1; the runtime is ready and its endpoint restricted; both profiles are verified by running them from the package, ISOLATED as the sandbox account, with the contained attempt to write the shared tools refused; every page renders; it stops cleanly. Evidence: `docs/acceptance/v09-packaged-check-2026-10-13.json`. The commit that follows `ed9c18a` adds this report and that evidence file only.
 
+## Operational autonomy (added to 0.9.0 on 2026-10-13, built the same evening)
+
+Three things the owner asked for after part one: a network that goes away must not end a night's work; the
+owner must be able to reach NEXUS from a phone and be told what matters; and a long mission must say how far
+it is and how long it still needs. Built in one evening by four parallel sessions with the files divided
+between them, then wired by one. What follows says for each what is in the application, what proves it, and
+what was not done. Documents: `NETWORK_RESILIENCE.md`, `DIRECTOR_LINE.md`.
+
+### Progress and time remaining
+
+In the application: `src/main/modules/progress`, the channel `progress.get`, a panel on the mission page
+(percentage, stage, elapsed, active work remaining as a range, confidence with its reason, tasks, workers,
+blocker, scope change, last event, milestones, next refresh).
+
+- The percentage is by expected work, not by count of tasks; the remaining time follows the dependencies (the
+  longest chain, or all the work spread over the workers, whichever is longer).
+- Durations are learned from the tasks that finished on this machine, by kind and size, with medians and
+  quartiles; few samples are mixed with general figures and the confidence then says LOW and why.
+- A range, never one number; HIGH, MEDIUM or LOW with the reason.
+- When verification adds repairs the percentage goes down and the panel says "Scope expanded".
+- A wait is said as a wait: "24-35 min of active work remain. Waiting for the Internet; when that ends is not
+  known". Waiting for the network, for the provider, for a boundary decision and for the user are told apart.
+- Refreshed when something happens in the mission and every five minutes otherwise (a setting, 30 s to 1 h).
+- No model is asked for any number or sentence: the texts are templates over the computed snapshot.
+- Each estimate shown is kept in memory and, at the end of a mission, its coverage, bias and width are computed.
+
+Proof: 20 unit tests (estimator, service, what the panel shows). **Not done:** a Program or a Workspace has no
+progress of its own, only each of its missions; the kept estimates are not written to the database yet (the
+tables exist), so nothing is learned from past accuracy; no run with a real long mission; the panel has no
+screenshot test.
+
+### Network resilience
+
+In the application: `src/main/modules/connectivity`, `native/nexus-wlan` (shipped as `bin/nexus-wlan.exe`),
+`src/main/runtime/network-resilience.ts`, a pause reason and a session outcome `network`.
+
+- Eight states from distinct evidence (the Wi-Fi interface, a name lookup, two independent hosts by name and
+  by address, the provider's host, the usage state): a lost Wi-Fi, a Wi-Fi without Internet, a DNS failure and
+  an unreachable provider are different things and are recorded as such.
+- A session that ends because the provider could not be reached is a wait, not a failed task: the mission is
+  paused as "waiting for the network" and resumed, once, when the network is seen again. Sessions are resumed
+  by the same mechanism as after a usage wait.
+- The saved Wi-Fi profile that was in use when the work began is reconnected through the Windows WLAN API, by
+  name, with no question to the user. Then approved saved backups in order. Never a network that is not saved,
+  never an open one, never a new profile, never a key; a disconnect the user made is respected.
+- The request that keeps Windows from idle sleep is held while any mission works or will resume by itself
+  (before 0.9: only during Overnight), released when nothing autonomous is active or everything waits on the
+  user, and let go after six hours without progress. It does not block a sleep the user asks for.
+- The network is checked only while there is autonomous work. The check is a name lookup and TLS handshakes
+  with two well-known hosts and the provider's; nothing is sent.
+- Every outage is recorded with its facts (states passed through, reason codes, reconnect attempts) in the
+  database, and the diagnosis is assembled from those facts only.
+
+Proof: 167 tests of the module with fakes, and 3 through the runtime's glue with a simulated outage (Wi-Fi
+drops, the session's error is judged a network loss, the profile is reconnected, the mission is resumed once,
+the open network is never used; an error that is not the network is not a wait; a mission the user paused is
+neither kept awake for nor resumed). The helper's `status` and `profiles` were run on this machine and agreed
+with Windows.
+
+**Not done, plainly:** no real outage was produced. The helper's `connect` and `watch` were never run against
+Windows; which reason code Windows gives for a user's own disconnect is assumed; captive portals, VPNs and
+IPv6-only networks are untested. While the provider is away the mission is paused as a whole: commands of the
+project that are already running finish, and nothing new starts, because every task needs the model. There is
+no screen for the recovery policy (the default applies: reconnect the profile that was in use; no backups).
+
+### Director Line
+
+In the application: `src/main/modules/director-line`, schema 20, nine `directorLine.*` channels, Settings >
+Director Line, `src/main/runtime/director-line-host.ts` and `director-line-reports.ts`. Off until turned on.
+
+- A provider interface; Telegram by long polling (no inbound port on the machine); a Twilio voice provider
+  that is ready and not configured; types for the other channels.
+- Pairing: a one-time code shown on the machine (12 characters, 10 minutes, 5 attempts) sent from the phone to
+  the bot; that chat becomes the operator. Everything from any other chat is untrusted: one fixed reply, rate
+  limited, never interpreted. For voice: the expected number and a PIN.
+- What a paired phone can do: ask for status, time remaining, blockers, details, the last checks, the overnight
+  report; pause after the current task; continue what the user paused; add a task (now, or after the current
+  work), which is created through the same channel as in the window, so admission, the Task Compiler and the
+  capability broker apply as always.
+- What it cannot do, by construction: the line holds no path to the capability broker, the settings, the
+  boundary inbox or power. A message that asks to push, publish, delete, disable the sandbox, change the
+  profile, grant a boundary request or run a command is refused and noted, and the reply says it is decided at
+  the machine. A boundary request is reported to the phone as something that cannot be granted from there.
+- Reports: the end of a mission (an overnight run with its report), a failure, a blocker or an outage that has
+  lasted (5, 15, 30, 60 minutes, then hourly), an estimate that slipped by a quarter and ten minutes. The
+  policy decides what is sent, where and how often: quiet hours, call then one message then a local
+  notification, one call attempt, progress messages no more often than every 45 minutes. Reports made without
+  a network are queued; when it returns, stale ones are dropped and related ones become one message.
+- The bot token is kept only through Windows' protected storage, is never returned by any channel, and does
+  not appear in errors or logs (tested with a transport that fails with the full address in its message).
+- Turning the line on, setting a provider, starting a pairing, setting a PIN, a test call and a policy change
+  that widens anything need the native confirmation.
+
+Proof: 201 unit tests and 21 integration tests (pairing, a spoofed chat, a wrong and an expired code, wrong
+number and PIN, replayed and duplicated updates across a restart, injected instructions, each dangerous request
+refused with no action called, the outbox, quiet hours, the handlers with and without a confirmation, no
+channel returning a secret, the upgrade of a schema-19 database).
+
+**Not done, plainly:** no real service was contacted, so the line has never exchanged a message with Telegram.
+No operator is paired on this machine. Voice: no credentials; the inbound call flow and the relay server are
+designed, not built, and the screen has no fields for them: ready and unconfigured at best, and only for an
+outbound call. No model classifies what the patterns do not recognise (the hook is there, unused): an
+unrecognised message gets a short help text.
+
+### The gates the owner added
+
+| Gate | State |
+|---|---|
+| Network loss no longer kills a long mission | Shown with a simulated outage through the runtime's glue; not with a real one |
+| Automatic saved-profile reconnect tested | With a fake adapter only; the real `connect` was not run |
+| Local work continues offline | Partly: running commands finish; the mission waits as a whole |
+| Network work resumes without duplicate execution | Resumed once (test); a real provider session was not interrupted for real |
+| Overnight prevents ordinary idle sleep while active | The decision is tested; it was already held during Overnight and is now held for any working mission |
+| No arbitrary Wi-Fi connection | Tested: never unsaved, never open, never unapproved |
+| Progress bar, five-minute refresh, range and confidence, honest scope and waits, no model for numbers | Met by tests; not seen on a real long mission |
+| Paired bidirectional messaging, status, safe remote task, no bypass of capabilities, spoof and replay tests | Met with a fake transport; no actual channel is configured, so by the brief's own wording this gate is not yet due |
+| Telephone voice | Not configured; outbound only is implemented |
+| The combined overnight acceptance | **Not run** |
+
 ## Left out by the owner's decision
 
 Per-session reading; the object store of the task's own; the link scan; the Node compatibility policy and the

@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process'
+import { dirname } from 'node:path'
+import { spawnLong } from '../process/spawn-process'
 import { isPlausibleProfileName, type WlanInterfaceState } from '@shared/connectivity'
 import { runProcess, type ProcessResult } from '../process/run-process'
 import type { ConnectivityLogger, Timers } from './timers'
@@ -179,26 +180,18 @@ export type WatchStarter = (file: string, handlers: WatchHandlers) => { stop(): 
 
 /** Starts `nexus-wlan watch`; its stdin stays open, and closing it ends the helper. */
 export const spawnWatch: WatchStarter = (file, handlers) => {
-  const child = spawn(file, ['watch'], { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'ignore'] })
-  let buffer = ''
-  child.stdout.setEncoding('utf8')
-  child.stdout.on('data', (chunk: string) => {
-    buffer += chunk
-    let nl = buffer.indexOf('\n')
-    while (nl >= 0) {
-      handlers.onLine(buffer.slice(0, nl).trim())
-      buffer = buffer.slice(nl + 1)
-      nl = buffer.indexOf('\n')
-    }
-    if (buffer.length > 8192) buffer = ''
-  })
-  child.stdin.on('error', () => undefined)
-  child.on('error', () => handlers.onExit())
-  child.on('close', () => handlers.onExit())
+  // Through the runner of long processes, like every process NEXUS keeps running: one fixed program, one fixed
+  // argument, no shell. Its own environment is the little Windows needs.
+  const env: Record<string, string> = {}
+  for (const name of ['SystemRoot', 'SystemDrive', 'windir', 'TEMP', 'TMP']) {
+    const value = process.env[name] ?? process.env[name.toUpperCase()]
+    if (value !== undefined) env[name] = value
+  }
+  const child = spawnLong(file, ['watch'], { cwd: dirname(file), env, keepStdinOpen: true, maxLines: 50, onLine: (line, stream) => (stream === 'stdout' ? handlers.onLine(line.trim()) : undefined) })
+  void child.exited.then(() => handlers.onExit())
   return {
     stop: () => {
-      child.stdin.end()
-      setTimeout(() => child.kill(), 2000).unref()
+      void child.stop().catch(() => undefined)
     },
   }
 }
