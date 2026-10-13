@@ -1,4 +1,4 @@
-import type { CommunicationPolicy } from '@shared/director-line'
+import { normalizeSipIdentity, type CommunicationPolicy } from '@shared/director-line'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { NexusError } from '@shared/result'
 import type { DirectorLineRuntime } from '@main/modules/director-line/runtime'
@@ -9,7 +9,7 @@ export type DirectorLineHandlers = { [C in DirectorLineChannel]: (input: IpcInpu
 /** The part of the runtime the handlers use. */
 export type DirectorLineControl = Pick<
   DirectorLineRuntime,
-  'settingsView' | 'setEnabled' | 'setProvider' | 'setPolicy' | 'startPairing' | 'setPin' | 'unpair' | 'sendTestMessage' | 'testCall'
+  'settingsView' | 'setEnabled' | 'setProvider' | 'setPolicy' | 'startPairing' | 'setPin' | 'unpair' | 'sendTestMessage' | 'setSip' | 'removeSip' | 'setVoicePolicy' | 'callMe' | 'hangUpCall'
 >
 
 export interface DirectorLineHandlerContext {
@@ -25,7 +25,8 @@ const WHAT_A_PHONE_CAN_DO = [
   'The paired chat will be able to:',
   '  • ask for status, time remaining, blockers, details of a project and the latest test results;',
   '  • pause missions after the current task, and resume them;',
-  '  • add tasks, which go through the same checks as a task you type here.',
+  '  • add tasks, which go through the same checks as a task you type here;',
+  '  • ask NEXUS to call them, and talk to it on a call.',
   '',
   'It can never:',
   '  • grant or approve a boundary request (that needs the confirmation on this PC);',
@@ -78,16 +79,13 @@ export function createDirectorLineHandlers(ctx: DirectorLineHandlerContext): Dir
     },
 
     'directorLine.setProvider': async (input) => {
-      const what = input.kind === 'TELEGRAM' ? 'Telegram bot' : 'Twilio voice account'
       const detail =
         input.secret === null
-          ? `The stored credentials of the ${what} will be removed.`
-          : input.kind === 'TELEGRAM'
-            ? ['The bot token is stored in protected storage and never shown again. NEXUS will use it to talk to api.telegram.org on your behalf.', 'Anyone who holds the token controls the bot: keep it private.'].join('\n')
-            : ['The Twilio credentials are stored in protected storage and never shown again.', 'Every call NEXUS places is billed to your own Twilio account. NEXUS never signs up for a service and never spends on its own.'].join('\n')
+          ? 'The stored credentials of the Telegram bot will be removed.'
+          : ['The bot token is stored in protected storage and never shown again. NEXUS will use it to talk to api.telegram.org on your behalf.', 'Anyone who holds the token controls the bot: keep it private.'].join('\n')
       await mustConfirm(
         input.secret === null ? 'Remove a provider' : 'Set a provider',
-        input.secret === null ? `Remove the ${what}?` : `Use this ${what} for the Director Line?`,
+        input.secret === null ? 'Remove the Telegram bot?' : 'Use this Telegram bot for the Director Line?',
         detail,
         input.secret === null ? 'Remove' : 'Use',
       )
@@ -132,9 +130,44 @@ export function createDirectorLineHandlers(ctx: DirectorLineHandlerContext): Dir
 
     'directorLine.sendTestMessage': () => directorLine.sendTestMessage(),
 
-    'directorLine.testCall': async () => {
-      await mustConfirm('Place a test call', 'Call your phone now?', 'This places one real phone call, billed to your Twilio account.', 'Call')
-      return directorLine.testCall()
+    'directorLine.setSip': async (input) => {
+      await mustConfirm(
+        'Set up the voice line',
+        'Let NEXUS use this SIP account, and answer this phone?',
+        [
+          `NEXUS will register as ${normalizeSipIdentity(input.identity) ?? input.identity} with its SIP server over the Internet, and keep the password in protected storage, never shown again.`,
+          '',
+          `The one SIP address ${normalizeSipIdentity(input.operatorIdentity) ?? input.operatorIdentity} will be able to call NEXUS, and NEXUS will call it. On a call it can do what the paired chat can do, after the PIN.`,
+          '',
+          WHAT_A_PHONE_CAN_DO,
+        ].join('\n'),
+        'Set up',
+      )
+      await directorLine.setSip(input)
+      return directorLine.settingsView()
+    },
+
+    'directorLine.removeSip': async () => {
+      await mustConfirm('Remove the voice line', 'Remove the SIP account of NEXUS?', 'The stored password is deleted and the phone address is unpaired. Calls stop at once.', 'Remove')
+      await directorLine.removeSip()
+      return directorLine.settingsView()
+    },
+
+    'directorLine.setVoicePolicy': async (policy) => {
+      const current = (await directorLine.settingsView()).voice.policy
+      // Only a weakening is asked about: letting the SIP address alone open the line.
+      if (current.requirePin && !policy.requirePin) {
+        await mustConfirm('Change what a call may do', 'Stop asking for the PIN on calls?', 'The paired SIP address alone will open the line, and only when the SIP service itself establishes who is calling. An address that a service only passes on still needs the PIN.', 'Change')
+      }
+      await directorLine.setVoicePolicy(policy)
+      return directorLine.settingsView()
+    },
+
+    'directorLine.callMe': async () => ({ result: await directorLine.callMe() }),
+
+    'directorLine.hangUpCall': async () => {
+      await directorLine.hangUpCall()
+      return directorLine.settingsView()
     },
   }
 }

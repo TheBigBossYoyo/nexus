@@ -7,7 +7,6 @@ import type { HttpFetch } from '@main/modules/director-line/provider'
 import { snapshot } from '../../unit/director-line/harness'
 
 const TOKEN = '123456789:AAFakeFakeFakeFakeFakeFake_WXYZ'
-const TWILIO_SECRET = 'twilio-secret-abcdef0123456789'
 const open: Database[] = []
 const running: DirectorLineRuntime[] = []
 afterEach(async () => {
@@ -179,36 +178,23 @@ describe('director line runtime', () => {
     expect((await runtime.settingsView()).messageProvider).toMatchObject({ kind: null, configured: false, tokenSuffix: null, status: 'UNCONFIGURED' })
   })
 
-  it('stores secrets only through the SecretStore and never returns them', async () => {
+  it('stores the bot token only through the SecretStore and never returns it', async () => {
     const { db, runtime, secrets } = rig()
     await runtime.setProvider({ kind: 'TELEGRAM', secret: TOKEN })
-    await runtime.setProvider({
-      kind: 'TWILIO_VOICE',
-      secret: TWILIO_SECRET,
-      extra: { accountSid: `AC${'a'.repeat(32)}`, apiKeySid: `SK${'b'.repeat(32)}`, fromNumber: '+15005550006', operatorNumber: '+33612345678' },
-    })
     expect(await secrets.get('telegram.botToken')).toBe(TOKEN)
     const view = await runtime.settingsView()
-    expect(view.voiceProvider).toMatchObject({ kind: 'TWILIO_VOICE', configured: true, tokenSuffix: TWILIO_SECRET.slice(-4) })
-    expect(view.voiceReason).toBe('The Director Line is off.') // configured and a number set; only the line being off holds the test call back
-    for (const secret of [TOKEN, TWILIO_SECRET]) {
-      expect(JSON.stringify(view)).not.toContain(secret)
-      for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]) {
-        expect(JSON.stringify(db.prepare(`SELECT * FROM "${name}"`).all()), name).not.toContain(secret)
-      }
+    expect(JSON.stringify(view)).not.toContain(TOKEN)
+    for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]) {
+      expect(JSON.stringify(db.prepare(`SELECT * FROM "${name}"`).all()), name).not.toContain(TOKEN)
     }
-    await expect(runtime.setProvider({ kind: 'TWILIO_VOICE', secret: TWILIO_SECRET.replace('twilio', 'other') })).resolves.toBeUndefined() // merges with the stored ids
-    await runtime.setProvider({ kind: 'TWILIO_VOICE', secret: null })
-    expect((await runtime.settingsView()).voiceProvider.configured).toBe(false)
-    expect((await runtime.settingsView()).voiceReason).toMatch(/cost money/)
-    expect(await runtime.testCall()).toEqual({ ok: false, errorClass: 'NOT_CONFIGURED' })
+    expect(view.voice).toMatchObject({ available: false, configured: false, identity: null, passwordSet: false, operatorIdentity: null, state: 'STOPPED', inCall: false, lastCalls: [] })
+    expect(view.voice.unavailableReason).toMatch(/not available/i)
   })
 
-  it('refuses incomplete Twilio settings, and a pairing before the line is on', async () => {
+  it('refuses a pairing before the line is on, and a code for the voice channel', async () => {
     const { runtime } = rig()
-    await expect(runtime.setProvider({ kind: 'TWILIO_VOICE', secret: TWILIO_SECRET })).rejects.toThrow(/account SID/)
     await expect(runtime.startPairing('TELEGRAM')).rejects.toThrow(/Turn the Director Line on/)
-    await expect(runtime.startPairing('TWILIO_VOICE')).rejects.toThrow(/message channel/)
+    await expect(runtime.startPairing('SIP_VOICE')).rejects.toThrow(/message channel/)
   })
 
   it('quiet hours default to the machine zone until a policy is saved, and a saved policy is kept across a restart', async () => {

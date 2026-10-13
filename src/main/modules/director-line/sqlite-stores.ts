@@ -1,5 +1,7 @@
 import type { CommunicationPolicy, DeliveryAttempt, OperatorChannelKind, OperatorIdentity, PairingMethod, ReportEvent } from '@shared/director-line'
 import type { Database } from '../persistence/database'
+import { sanitizeVoiceLineConfig, type VoiceLineConfig } from './voice-config'
+import type { CallRecord } from './voice-line'
 import type { OffsetStore } from './telegram'
 import type { AttemptCounter, DeliveryStore, IdentityStore, OutboxItem, OutboxStore, PairingState, PairingStateStore, PolicyStore, SeenStore } from './stores'
 
@@ -185,25 +187,25 @@ export class SqlitePolicyStore implements PolicyStore {
 export interface DirectorLineSettingsRow {
   enabled: boolean
   messageProvider: OperatorChannelKind | null
-  voiceProvider: 'TWILIO_VOICE' | null
   telegramOffset: number | null
-  relayBaseUrl: string | null
 }
 
-/** The single settings row: enabled, the chosen providers and the Telegram offset. Holds no secret. */
+/**
+ * The single settings row: enabled, the message provider and the Telegram offset. Holds no secret. The columns
+ * `voice_provider` and `relay_base_url` of migration 020 are no longer read: since 0.9.1 voice is SIP (its own table),
+ * and a 0.9.0 row that says TWILIO_VOICE means nothing.
+ */
 export class SqliteDirectorLineSettings {
   constructor(private readonly db: Database) {}
 
   read(): DirectorLineSettingsRow {
-    const row = this.db.prepare('SELECT enabled, message_provider, voice_provider, telegram_offset, relay_base_url FROM director_line_settings WHERE id = 1').get() as
-      | { enabled: number; message_provider: string | null; voice_provider: string | null; telegram_offset: number | null; relay_base_url: string | null }
+    const row = this.db.prepare('SELECT enabled, message_provider, telegram_offset FROM director_line_settings WHERE id = 1').get() as
+      | { enabled: number; message_provider: string | null; telegram_offset: number | null }
       | undefined
     return {
       enabled: row?.enabled === 1,
       messageProvider: (row?.message_provider ?? null) as OperatorChannelKind | null,
-      voiceProvider: row?.voice_provider === 'TWILIO_VOICE' ? 'TWILIO_VOICE' : null,
       telegramOffset: row?.telegram_offset ?? null,
-      relayBaseUrl: row?.relay_base_url ?? null,
     }
   }
 
@@ -221,16 +223,6 @@ export class SqliteDirectorLineSettings {
     this.db.prepare('UPDATE director_line_settings SET message_provider = ? WHERE id = 1').run(kind)
   }
 
-  setVoiceProvider(kind: 'TWILIO_VOICE' | null): void {
-    this.ensure()
-    this.db.prepare('UPDATE director_line_settings SET voice_provider = ? WHERE id = 1').run(kind)
-  }
-
-  setRelayBaseUrl(url: string | null): void {
-    this.ensure()
-    this.db.prepare('UPDATE director_line_settings SET relay_base_url = ? WHERE id = 1').run(url)
-  }
-
   setOffset(offset: number | null): void {
     this.ensure()
     this.db.prepare('UPDATE director_line_settings SET telegram_offset = ? WHERE id = 1').run(offset)
@@ -242,4 +234,69 @@ export class SqliteOffsetStore implements OffsetStore {
   constructor(private readonly settings: SqliteDirectorLineSettings) {}
   async get(): Promise<number | null> { return this.settings.read().telegramOffset }
   async set(offset: number): Promise<void> { this.settings.setOffset(offset) }
+}
+
+/** The non-secret configuration of the voice line: one JSON row (migration 021). The SIP password is never in it. */
+export class SqliteVoiceConfigStore {
+  constructor(private readonly db: Database) {}
+
+  get(): VoiceLineConfig {
+    const row = this.db.prepare('SELECT config_json FROM director_line_voice WHERE id = 1').get() as { config_json: string } | undefined
+    if (!row) return sanitizeVoiceLineConfig(null)
+    try {
+      return sanitizeVoiceLineConfig(JSON.parse(row.config_json))
+    } catch {
+      return sanitizeVoiceLineConfig(null)
+    }
+  }
+
+  set(config: VoiceLineConfig): void {
+    this.db
+      .prepare('INSERT INTO director_line_voice (id, config_json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json')
+      .run(JSON.stringify(config))
+  }
+}
+
+export const MAX_CALL_RECORDS = 200
+
+interface CallRow {
+  call_id: string; direction: string; started_at: string; ended_at: string; outcome: string; end_reason: string | null
+  authenticated: number; signalling: string | null; media: string | null; end_to_end: number | null; median_answer_ms: number | null
+}
+
+/** What is kept of each call: when, which way, how it ended, what was negotiated. Never what was said. The newest 200 stay. */
+export class SqliteCallStore {
+  constructor(private readonly db: Database) {}
+
+  add(call: CallRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO director_line_calls (call_id, direction, started_at, ended_at, outcome, end_reason, authenticated, signalling, media, end_to_end, median_answer_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(call.callId, call.direction, call.startedAt, call.endedAt, call.outcome, call.endReason, call.authenticated ? 1 : 0, call.security?.signalling ?? null, call.security?.media ?? null, call.security ? (call.security.endToEnd ? 1 : 0) : null, call.medianAnswerMs === null ? null : Math.round(call.medianAnswerMs))
+    this.db.prepare('DELETE FROM director_line_calls WHERE seq <= (SELECT MAX(seq) FROM director_line_calls) - ?').run(MAX_CALL_RECORDS)
+  }
+
+  /** Newest first. */
+  recent(limit: number): CallRecord[] {
+    const rows = this.db
+      .prepare('SELECT call_id, direction, started_at, ended_at, outcome, end_reason, authenticated, signalling, media, end_to_end, median_answer_ms FROM director_line_calls ORDER BY seq DESC LIMIT ?')
+      .all(Math.max(0, Math.floor(limit))) as CallRow[]
+    return rows.map((r) => ({
+      callId: r.call_id,
+      direction: r.direction as CallRecord['direction'],
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      outcome: r.outcome as CallRecord['outcome'],
+      endReason: r.end_reason as CallRecord['endReason'],
+      authenticated: r.authenticated === 1,
+      security: r.signalling !== null && r.media !== null ? { signalling: r.signalling as 'TLS' | 'NONE' | 'UNKNOWN', media: r.media as 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN', endToEnd: r.end_to_end === 1 } : null,
+      medianAnswerMs: r.median_answer_ms,
+    }))
+  }
+
+  count(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM director_line_calls').get() as { n: number }).n
+  }
 }

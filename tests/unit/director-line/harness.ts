@@ -6,7 +6,21 @@ import { DirectorLine, type DirectorLineOptions } from '@main/modules/director-l
 import { PairingService } from '@main/modules/director-line/pairing'
 import { fakeUpdate, FakeProvider, type RawProviderUpdate } from '@main/modules/director-line/provider'
 import { MemoryDeliveryStore, MemoryIdentityStore, MemoryOutboxStore, MemoryPairingStateStore, MemoryPolicyStore, MemorySeenStore } from '@main/modules/director-line/stores'
-import { FakeVoiceProvider } from '@main/modules/director-line/voice'
+import type { PlaceResult } from '@main/modules/director-line/voice-line'
+
+/**
+ * Stands for the voice line as the outbox sees it. Like the real one, a call that did not take place sends the report by
+ * message itself (`sendsFallback`), except when nobody is paired or the line is busy.
+ */
+export class FakeVoiceLine {
+  calls: { report: string }[] = []
+  next: PlaceResult = 'CONVERSATION'
+  configured = true
+  sendsFallback = true
+  throws = false
+  asked = 0
+  askReply = 'CALLING'
+}
 
 export const OPERATOR = '1001'
 export const STRANGER = '9009'
@@ -35,7 +49,7 @@ export function snapshot(partial: Partial<ProgressSnapshot> = {}): ProgressSnaps
 export interface Rig {
   line: DirectorLine
   provider: FakeProvider
-  voice: FakeVoiceProvider
+  voice: FakeVoiceLine
   pairing: PairingService
   seen: MemorySeenStore
   outbox: MemoryOutboxStore
@@ -70,7 +84,8 @@ export function makeRig(extra: Partial<DirectorLineOptions> = {}, shared?: Parti
   const now = (): Date => new Date(clock.t)
   const pairing = new PairingService({ state: pairingState, identities, now })
   const provider = new FakeProvider('TELEGRAM')
-  const voice = new FakeVoiceProvider()
+  const voice = new FakeVoiceLine()
+  let lineRef: DirectorLine | null = null
   const spies = {
     pause: vi.fn(async () => undefined),
     resume: vi.fn(async () => undefined),
@@ -81,7 +96,16 @@ export function makeRig(extra: Partial<DirectorLineOptions> = {}, shared?: Parti
   }
   const line = new DirectorLine({
     messageProvider: provider,
-    voiceProvider: voice,
+    callOperator: async () => { voice.asked += 1; return voice.askReply },
+    callForEvent: async (report) => {
+      if (!voice.configured) return { result: 'NOT_CONFIGURED' as const, fallbackSent: false }
+      voice.calls.push({ report })
+      if (voice.throws) throw new Error('process died')
+      if (voice.next === 'CONVERSATION') return { result: voice.next, fallbackSent: false }
+      const owesMessage = voice.next !== 'NOT_PAIRED' && voice.next !== 'LINE_BUSY'
+      const sent = owesMessage && voice.sendsFallback ? await lineRef!.sendToOperator(`NEXUS: I called and there was no answer. ${report}`) : false
+      return { result: voice.next, fallbackSent: sent }
+    },
     pairing,
     seen,
     outbox,
@@ -95,6 +119,7 @@ export function makeRig(extra: Partial<DirectorLineOptions> = {}, shared?: Parti
     now,
     ...extra,
   })
+  lineRef = line
   let counter = 0
   const rig: Rig = {
     line, provider, voice, pairing, seen, outbox, deliveries, policy, identities, pairingState, clock, online, spies,

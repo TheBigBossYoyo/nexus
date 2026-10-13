@@ -52,12 +52,12 @@ export interface OperatorCall {
 
 export const OPERATOR_COMMAND_KINDS = [
   'STATUS', 'ETA', 'BLOCKERS', 'DETAILS', 'LATEST_TEST_RESULTS', 'PAUSE_AFTER_CURRENT_TASK', 'CONTINUE',
-  'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'HELP', 'REFUSED_AT_MACHINE', 'UNKNOWN',
+  'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'CALL_ME', 'HELP', 'REFUSED_AT_MACHINE', 'UNKNOWN',
 ] as const
 export type OperatorCommandKind = (typeof OPERATOR_COMMAND_KINDS)[number]
 
 export type OperatorCommand =
-  | { kind: 'STATUS' | 'ETA' | 'BLOCKERS' | 'LATEST_TEST_RESULTS' | 'PAUSE_AFTER_CURRENT_TASK' | 'CONTINUE' | 'HELP' | 'UNKNOWN' }
+  | { kind: 'STATUS' | 'ETA' | 'BLOCKERS' | 'LATEST_TEST_RESULTS' | 'PAUSE_AFTER_CURRENT_TASK' | 'CONTINUE' | 'CALL_ME' | 'HELP' | 'UNKNOWN' }
   | { kind: 'DETAILS'; subject: string }
   | { kind: 'ADD_TASK_AFTER_CURRENT'; text: string }
   | { kind: 'CREATE_TASK'; project: string; text: string }
@@ -170,11 +170,51 @@ export const DEFAULT_COMMUNICATION_POLICY: CommunicationPolicy = {
 
 export type ConnectionStatus = 'UNCONFIGURED' | 'STOPPED' | 'CONNECTING' | 'CONNECTED' | 'ERROR'
 
+/**
+ * A SIP address in one normal form, `sip:user@domain` in lower case, or null when the text is not one. Kept in step
+ * with `normalizeSipIdentity` of the voice provider (main process); a unit test compares them.
+ */
+export function normalizeSipIdentity(text: string): string | null {
+  const inner = /<([^<>]*)>/.exec(text)?.[1] ?? text
+  const m = /^\s*(?:sips?:)?([a-z0-9._+~-]{1,64})@([a-z0-9.-]{1,253})(?::\d{1,5})?(?:;[^\s]*)?\s*$/i.exec(inner)
+  if (!m) return null
+  const domain = (m[2] as string).toLowerCase()
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) return null
+  return `sip:${(m[1] as string).toLowerCase()}@${domain}`
+}
+
+/** 0.9.1: the voice line (standard SIP). Mirrors the main-process types so that the screen needs nothing from the main process. */
+
+export type VoiceMediaEncryption = 'none' | 'srtp' | 'zrtp' | 'dtls'
+export type VoiceLineState = 'STOPPED' | 'CONNECTING' | 'REGISTERED' | 'UNREACHABLE' | 'REJECTED'
+
+export interface VoiceLinePolicyView {
+  /** Whether the paired identity alone is enough when the transport established it. */
+  requirePin: boolean
+  ringSeconds: number
+  maxPlacedCallsPerDay: number
+  minMinutesBetweenPlacedCalls: number
+}
+
+/** What is kept of a call: when, which way, how it ended, what was negotiated. Never what was said. */
+export interface CallRecordView {
+  callId: string
+  direction: 'INBOUND' | 'OUTBOUND'
+  startedAt: string
+  endedAt: string
+  outcome: 'CONVERSATION' | 'DECLINED_UNPAIRED' | 'DECLINED_BUSY' | 'NO_ANSWER' | 'BUSY' | 'DECLINED' | 'FAILED' | 'SUPPRESSED'
+  endReason: 'REMOTE_HUNG_UP' | 'LOCAL_HUNG_UP' | 'NETWORK_LOST' | 'FAILED' | null
+  authenticated: boolean
+  security: { signalling: 'TLS' | 'NONE' | 'UNKNOWN'; media: 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN'; endToEnd: boolean } | null
+  medianAnswerMs: number | null
+}
+
+export type PlaceCallResult = 'CONVERSATION' | 'NO_ANSWER' | 'BUSY' | 'DECLINED' | 'FAILED' | 'NOT_PAIRED' | 'LINE_BUSY' | 'NOT_REGISTERED' | 'SUPPRESSED' | 'NOT_CONFIGURED'
+
 /** What Settings may show. There is deliberately no field that can hold a token, a PIN or a pairing code. */
 export interface DirectorLineSettingsView {
   enabled: boolean
   messageProvider: { kind: OperatorChannelKind | null; configured: boolean; tokenSuffix: string | null; status: ConnectionStatus }
-  voiceProvider: { kind: 'TWILIO_VOICE' | null; configured: boolean; tokenSuffix: string | null; status: ConnectionStatus }
   pairedOperator: Pick<OperatorIdentity, 'channel' | 'label' | 'pairedAt' | 'pairedVia'> | null
   pinConfigured: boolean
   policy: CommunicationPolicy
@@ -191,5 +231,9 @@ export const DIRECTOR_LINE_IPC = {
   setPin: 'directorLine.setPin',
   unpair: 'directorLine.unpair',
   sendTestMessage: 'directorLine.sendTestMessage',
-  testCall: 'directorLine.testCall',
+  setSip: 'directorLine.setSip',
+  removeSip: 'directorLine.removeSip',
+  setVoicePolicy: 'directorLine.setVoicePolicy',
+  callMe: 'directorLine.callMe',
+  hangUpCall: 'directorLine.hangUpCall',
 } as const

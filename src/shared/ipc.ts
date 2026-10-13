@@ -254,10 +254,12 @@ const WorkspaceKey = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
 
 import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
 import type { WorkersOverview } from './workers'
-import { OPERATOR_CHANNEL_KINDS, REPORT_EVENT_KINDS, type DirectorLineSettingsView } from './director-line'
+import {
+  normalizeSipIdentity, OPERATOR_CHANNEL_KINDS, REPORT_EVENT_KINDS,
+  type CallRecordView, type DirectorLineSettingsView, type PlaceCallResult, type VoiceLinePolicyView, type VoiceLineState, type VoiceMediaEncryption,
+} from './director-line'
 
 /** 0.9: the Director Line. A secret is accepted as input once and is never part of any output. */
-const E164 = /^\+[1-9]\d{6,14}$/
 const DirectorLineEventPolicy = z
   .object({
     enabled: z.boolean(),
@@ -1063,19 +1065,10 @@ export const ipcInputs = {
   'directorLine.setEnabled': z.object({ enabled: z.boolean() }).strict(),
   'directorLine.setProvider': z
     .object({
-      kind: z.enum(['TELEGRAM', 'TWILIO_VOICE']),
-      /** The bot token or the Twilio API key secret. Goes straight to protected storage; null clears it. */
+      /** 0.9.1: the message channel only. Voice is SIP (directorLine.setSip). */
+      kind: z.enum(['TELEGRAM']),
+      /** The bot token. Goes straight to protected storage; null clears it. */
       secret: z.string().min(8).max(256).regex(/^\S+$/).nullable(),
-      extra: z
-        .object({
-          fromNumber: z.string().regex(E164).optional(),
-          operatorNumber: z.string().regex(E164).optional(),
-          accountSid: z.string().regex(/^AC[0-9a-fA-F]{32}$/).optional(),
-          apiKeySid: z.string().regex(/^SK[0-9a-fA-F]{32}$/).optional(),
-          relayBaseUrl: z.string().url().max(300).startsWith('https://').optional(),
-        })
-        .strict()
-        .optional(),
     })
     .strict(),
   'directorLine.setPolicy': z.object({ policy: DirectorLinePolicy }).strict(),
@@ -1083,7 +1076,29 @@ export const ipcInputs = {
   'directorLine.setPin': z.object({ pin: z.string().regex(/^\d{6,12}$/) }).strict(),
   'directorLine.unpair': z.object({ channel: DirectorLineChannel.optional() }).strict(),
   'directorLine.sendTestMessage': Empty,
-  'directorLine.testCall': Empty,
+  'directorLine.setSip': z
+    .object({
+      identity: z.string().max(200).refine((v) => normalizeSipIdentity(v) !== null, 'not a SIP address'),
+      /** null keeps the stored password. The password goes straight to protected storage and is never returned. */
+      password: z.string().min(1).max(128).nullable(),
+      operatorIdentity: z.string().max(200).refine((v) => normalizeSipIdentity(v) !== null, 'not a SIP address'),
+      mediaEncryption: z.enum(['none', 'srtp', 'zrtp', 'dtls']),
+      mediaEncryptionMandatory: z.boolean(),
+      stunServer: z.string().min(1).max(253).regex(/^[a-zA-Z0-9.:-]+$/).nullable(),
+      ice: z.boolean(),
+    })
+    .strict(),
+  'directorLine.removeSip': Empty,
+  'directorLine.setVoicePolicy': z
+    .object({
+      requirePin: z.boolean(),
+      ringSeconds: z.number().int().min(10).max(60),
+      maxPlacedCallsPerDay: z.number().int().min(0).max(24),
+      minMinutesBetweenPlacedCalls: z.number().int().min(0).max(240),
+    })
+    .strict(),
+  'directorLine.callMe': Empty,
+  'directorLine.hangUpCall': Empty,
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
   'knowledge.tree': z
@@ -1132,13 +1147,27 @@ export const ipcInputs = {
 export interface DirectorLineView extends DirectorLineSettingsView {
   /** Why the connection is in the state it is in, in a sentence. */
   statusReason: string
-  /** Why the test call is unavailable, or null when it is available. */
-  voiceReason: string | null
   /** The machine's time zone, for the quiet-hours default. */
   machineTimeZone: string
-  /** 0.9.1: the last digits of the number calls come from and of the number that is called. Never the whole numbers, never a credential. */
-  voiceFromSuffix: string | null
-  voiceToSuffix: string | null
+  /** 0.9.1: the voice line (standard SIP). The password is never part of it. */
+  voice: {
+    available: boolean
+    unavailableReason: string | null
+    configured: boolean
+    identity: string | null
+    passwordSet: boolean
+    operatorIdentity: string | null
+    state: VoiceLineState
+    stateDetail: string | null
+    inCall: boolean
+    mediaEncryption: VoiceMediaEncryption
+    mediaEncryptionMandatory: boolean
+    stunServer: string | null
+    ice: boolean
+    policy: VoiceLinePolicyView
+    speech: { stt: { kind: string; local: boolean } | null; tts: { kind: string; local: boolean } | null }
+    lastCalls: CallRecordView[]
+  }
 }
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -1345,7 +1374,11 @@ export interface IpcOutputs {
   'directorLine.setPin': { configured: true }
   'directorLine.unpair': { removed: number }
   'directorLine.sendTestMessage': { ok: boolean; errorClass: string | null }
-  'directorLine.testCall': { ok: boolean; errorClass: string | null }
+  'directorLine.setSip': DirectorLineView
+  'directorLine.removeSip': DirectorLineView
+  'directorLine.setVoicePolicy': DirectorLineView
+  'directorLine.callMe': { result: PlaceCallResult }
+  'directorLine.hangUpCall': DirectorLineView
   'knowledge.health': {
     spaces: {
       space: ContextSpace

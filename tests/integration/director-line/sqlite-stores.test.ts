@@ -115,16 +115,14 @@ describe('SQLite director line stores', () => {
     expect(await new SqlitePolicyStore(db).get()).toEqual(p)
 
     const settings = new SqliteDirectorLineSettings(db)
-    expect(settings.read()).toEqual({ enabled: false, messageProvider: null, voiceProvider: null, telegramOffset: null, relayBaseUrl: null })
+    expect(settings.read()).toEqual({ enabled: false, messageProvider: null, telegramOffset: null })
     settings.setEnabled(true)
     settings.setMessageProvider('TELEGRAM')
-    settings.setVoiceProvider('TWILIO_VOICE')
-    settings.setRelayBaseUrl('https://relay.example.invalid')
     const offset = new SqliteOffsetStore(settings)
     expect(await offset.get()).toBeNull()
     await offset.set(4242)
     expect(await new SqliteOffsetStore(new SqliteDirectorLineSettings(db)).get()).toBe(4242)
-    expect(new SqliteDirectorLineSettings(db).read()).toEqual({ enabled: true, messageProvider: 'TELEGRAM', voiceProvider: 'TWILIO_VOICE', telegramOffset: 4242, relayBaseUrl: 'https://relay.example.invalid' })
+    expect(new SqliteDirectorLineSettings(db).read()).toEqual({ enabled: true, messageProvider: 'TELEGRAM', telegramOffset: 4242 })
   })
 
   it('nothing secret reaches the database in the clear: neither the PIN nor the pairing code, in any table or in the file', async () => {
