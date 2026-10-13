@@ -238,7 +238,9 @@ export class SpeculativeStage {
       await this.host.withMergeLock(run.id, async () => {
         // Dependency setup may have touched tracked files; a fast-forward refuses a dirty tree.
         await this.core.cleanWorktree(worktree.path)
-        await git.run(worktree.path, ['fetch', '--no-tags', '--quiet', winner.worktreePath, winner.branch])
+        // From the clone's Git directory, named and checked by NEXUS, and with every object verified as it
+        // arrives: the clone was written by the candidate's code.
+        await git.run(worktree.path, ['-c', 'fetch.fsckObjects=true', '-c', 'transfer.fsckObjects=true', 'fetch', '--no-tags', '--quiet', await git.cloneGitDir(winner.worktreePath), winner.branch])
         await git.run(worktree.path, ['merge', '--ff-only', '--no-verify', 'FETCH_HEAD'])
       })
     }
