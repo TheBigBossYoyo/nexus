@@ -781,6 +781,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           change.endAction !== 'NONE' &&
           change.endAction !== current.policy.endAction) ||
           (change.forceCloseApplications === true && !current.policy.forceCloseApplications) ||
+          // 0.9 (review, N-1): less time to say no before Windows is shut down is more power, not less.
+          (change.finalDelaySeconds !== undefined && change.finalDelaySeconds < current.policy.finalDelaySeconds) ||
           (change.shutdownOn !== undefined &&
             Object.entries(change.shutdownOn).some(
               ([name, on]) =>
@@ -789,7 +791,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       if (escalates && ctx.confirmPower) {
         const ok = await ctx.confirmPower(
           'Change what NEXUS may do to Windows at the end of this run?',
-          `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}`,
+          `New end action: ${change.endAction ?? current.policy.endAction}${change.forceCloseApplications ? ', force close applications' : ''}${change.finalDelaySeconds !== undefined && change.finalDelaySeconds < current.policy.finalDelaySeconds ? `, final delay ${change.finalDelaySeconds} s instead of ${current.policy.finalDelaySeconds} s` : ''}`,
         )
         if (!ok) throw new NexusError('invalid_state', 'The change was not authorized.')
       }

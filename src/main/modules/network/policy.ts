@@ -148,6 +148,11 @@ export function checkUrl(policy: NetworkPolicy, raw: string, options: { websocke
   if (cls === 'INVALID' && isLocalName(host)) return deny('LOCAL_NAME', `${host} is a name of the local network, not of the public Internet.`)
   const allowed = publicAllowed(policy, host)
   if (!allowed.allowed) return allowed
+  // 0.9 (review, K-3): a registry is fetched from over the web's ports. Port 22 of a host on the list is a
+  // different service (git over ssh), and so is any other.
+  if (policy.profile === 'PACKAGE_REGISTRIES' && !WEB_PORTS.has(port) && !policy.approvedHosts.includes(host)) {
+    return deny('PORT', `Port ${port} is not opened for package registries; only 80 and 443 are.`)
+  }
   // Research reads the web on its usual ports. Another port is a different service, which a project approves by host.
   if ((policy.profile === 'RESEARCH_WEB' || policy.profile === 'RESEARCH_AND_DEPS') && !WEB_PORTS.has(port) && !policy.approvedHosts.includes(host)) {
     return deny('PORT', `Port ${port} is not opened for research; only 80 and 443 are.`)
