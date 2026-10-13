@@ -274,6 +274,8 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
       statusReason: msg.reason,
       voiceReason,
       machineTimeZone: zone,
+      voiceFromSuffix: creds ? creds.fromNumber.slice(-4) : null,
+      voiceToSuffix: voiceNumber ? voiceNumber.providerUserId.slice(-3) : null,
     }
   }
 

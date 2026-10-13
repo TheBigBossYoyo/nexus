@@ -109,3 +109,40 @@ export function deliveryLine(outcome: string): string {
     default: return outcome.toLowerCase()
   }
 }
+
+/** A telephone number as Twilio wants it: a plus sign, the country code, the number, no spaces. */
+export const E164 = /^\+[1-9]\d{6,14}$/
+
+export interface VoiceForm {
+  accountSid: string
+  apiKeySid: string
+  apiKeySecret: string
+  fromNumber: string
+  operatorNumber: string
+}
+
+export const EMPTY_VOICE_FORM: VoiceForm = { accountSid: '', apiKeySid: '', apiKeySecret: '', fromNumber: '', operatorNumber: '' }
+
+/** What is wrong with each field of the voice form as it stands; an empty object when it can be saved. Spaces in a number are forgiven. */
+export function voiceFormProblems(form: VoiceForm, alreadyConfigured: boolean): Partial<Record<keyof VoiceForm, string>> {
+  const problems: Partial<Record<keyof VoiceForm, string>> = {}
+  const number = (v: string): string => v.replace(/[\s().-]/g, '')
+  const needed = !alreadyConfigured
+  if (form.accountSid.trim() === '' ? needed : !/^AC[0-9a-fA-F]{32}$/.test(form.accountSid.trim())) problems.accountSid = 'The account SID begins with AC and has 34 characters.'
+  if (form.apiKeySid.trim() === '' ? needed : !/^SK[0-9a-fA-F]{32}$/.test(form.apiKeySid.trim())) problems.apiKeySid = 'The API key SID begins with SK and has 34 characters.'
+  if (!/^\S{8,256}$/.test(form.apiKeySecret.trim())) problems.apiKeySecret = 'The secret of the API key, as Twilio showed it once.'
+  if (form.fromNumber.trim() === '' ? needed : !E164.test(number(form.fromNumber))) problems.fromNumber = 'Your Twilio number, with + and the country code, for example +12025550123.'
+  if (form.operatorNumber.trim() === '' ? needed : !E164.test(number(form.operatorNumber))) problems.operatorNumber = 'Your own phone number, with + and the country code, for example +21620123456.'
+  return problems
+}
+
+/** The form as the runtime takes it. Only what was typed is sent; a field left empty keeps what is stored. */
+export function voiceFormInput(form: VoiceForm): { kind: 'TWILIO_VOICE'; secret: string; extra: { accountSid?: string; apiKeySid?: string; fromNumber?: string; operatorNumber?: string } } {
+  const number = (v: string): string => v.replace(/[\s().-]/g, '')
+  const extra: { accountSid?: string; apiKeySid?: string; fromNumber?: string; operatorNumber?: string } = {}
+  if (form.accountSid.trim() !== '') extra.accountSid = form.accountSid.trim()
+  if (form.apiKeySid.trim() !== '') extra.apiKeySid = form.apiKeySid.trim()
+  if (form.fromNumber.trim() !== '') extra.fromNumber = number(form.fromNumber)
+  if (form.operatorNumber.trim() !== '') extra.operatorNumber = number(form.operatorNumber)
+  return { kind: 'TWILIO_VOICE', secret: form.apiKeySecret.trim(), extra }
+}

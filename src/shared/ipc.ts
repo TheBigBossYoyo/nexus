@@ -1136,6 +1136,9 @@ export interface DirectorLineView extends DirectorLineSettingsView {
   voiceReason: string | null
   /** The machine's time zone, for the quiet-hours default. */
   machineTimeZone: string
+  /** 0.9.1: the last digits of the number calls come from and of the number that is called. Never the whole numbers, never a credential. */
+  voiceFromSuffix: string | null
+  voiceToSuffix: string | null
 }
 
 export type IpcChannel = keyof typeof ipcInputs

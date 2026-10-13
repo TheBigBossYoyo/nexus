@@ -21,7 +21,11 @@ import {
   EVENT_ORDER,
   STATUS_WORDS,
   THRESHOLD_WORDS,
+  EMPTY_VOICE_FORM,
   VOICE_COST_LINE,
+  voiceFormInput,
+  voiceFormProblems,
+  type VoiceForm,
   clock,
   deliveryLine,
   isValidTimeZone,
@@ -65,6 +69,8 @@ export function DirectorLineSettings() {
   const testCall = useDirectorLineTestCall()
 
   const [token, setToken] = useState('')
+  const [voice, setVoice] = useState<VoiceForm>(EMPTY_VOICE_FORM)
+  const [voiceTried, setVoiceTried] = useState(false)
   const [code, setCode] = useState<{ displayCode: string; expiresAt: string } | null>(null)
   const [draft, setDraft] = useState<CommunicationPolicy | null>(null)
   const [announce, setAnnounce] = useState('')
@@ -232,8 +238,60 @@ export function DirectorLineSettings() {
       <Block title="Voice provider: Twilio">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={voiceReady ? 'success' : 'neutral'}>{voiceReady ? `Configured ····${view.voiceProvider.tokenSuffix ?? ''}` : 'Ready, not configured'}</Badge>
+          {voiceReady ? (
+            <span className="text-text-secondary" data-testid="director-line-voice-state">
+              Calls come from the number ending {view.voiceFromSuffix ?? '?'}
+              {view.voiceToSuffix ? ` and go to the number ending ${view.voiceToSuffix}.` : '. No number to call is set.'}
+            </span>
+          ) : null}
         </div>
         <p className="m-0 text-text-secondary">{VOICE_COST_LINE}</p>
+        <p className="m-0 text-small text-text-muted">
+          NEXUS places the call, says the report and hangs up. It does not record, and it cannot take a command during the call: the answer to a call is a message. Calling NEXUS is not available yet.
+        </p>
+        {(() => {
+          const problems = voiceTried ? voiceFormProblems(voice, voiceReady) : {}
+          const field = (key: keyof VoiceForm, label: string, hint: string, secret = false): ReactNode => (
+            <Field label={label} hint={hint} error={problems[key]}>
+              {(id) => (
+                <Input
+                  id={id}
+                  type={secret ? 'password' : 'text'}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono"
+                  value={voice[key]}
+                  onChange={(e) => setVoice({ ...voice, [key]: e.target.value })}
+                  data-testid={`director-line-voice-${key}`}
+                />
+              )}
+            </Field>
+          )
+          const save = (): void => {
+            setVoiceTried(true)
+            if (Object.keys(voiceFormProblems(voice, voiceReady)).length > 0) return
+            setProvider.mutate(voiceFormInput(voice), { onSuccess: () => { setVoice(EMPTY_VOICE_FORM); setVoiceTried(false); setAnnounce('Twilio is configured.') } })
+          }
+          return (
+            <>
+              {field('accountSid', 'Account SID', voiceReady ? 'Leave empty to keep the one stored.' : 'In the Twilio console, on the account dashboard.')}
+              {field('apiKeySid', 'API key SID', voiceReady ? 'Leave empty to keep the one stored.' : 'Create an API key in the Twilio console (Account, API keys and tokens).')}
+              {field('apiKeySecret', voiceReady ? 'API key secret (needed again to change anything)' : 'API key secret', 'Twilio shows it once, when the key is made. It is stored in protected storage and never shown again.', true)}
+              {field('fromNumber', 'Twilio number', voiceReady ? 'Leave empty to keep the one stored.' : 'The number you have on Twilio, that calls come from. With + and the country code.')}
+              {field('operatorNumber', 'Your phone number', voiceReady ? 'Leave empty to keep the one stored.' : 'The number NEXUS calls. With + and the country code. On a trial account it must be verified with Twilio first.')}
+              <div className="flex flex-wrap gap-2">
+                <Button variant="primary" loading={setProvider.isPending} disabled={voice.apiKeySecret.trim() === ''} onClick={save} data-testid="director-line-save-voice">
+                  {voiceReady ? 'Save changes' : 'Save Twilio settings'}
+                </Button>
+                {voiceReady ? (
+                  <Button variant="danger" busy={setProvider.isPending} onClick={() => setProvider.mutate({ kind: 'TWILIO_VOICE', secret: null }, { onSuccess: () => setAnnounce('Twilio settings removed. NEXUS will not call.') })}>
+                    Remove Twilio
+                  </Button>
+                ) : null}
+              </div>
+            </>
+          )
+        })()}
       </Block>
 
       <Block title="Report policy">
