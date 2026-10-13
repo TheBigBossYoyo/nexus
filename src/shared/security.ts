@@ -16,6 +16,10 @@ export const TRUST_CLASSES = [
   'UNTRUSTED_AGENT_AUTHORED',
   /** Code that is in the repository's base commit and unchanged. Written by someone else; not vetted by NEXUS. */
   'UNTRUSTED_REPOSITORY_CODE',
+  /** 0.8: text read on the public web or in a browser page. Data to cite, never an instruction. */
+  'UNTRUSTED_WEB_CONTENT',
+  /** 0.8: a file fetched from the public web. Kept in quarantine; never run because it arrived. */
+  'UNTRUSTED_DOWNLOAD',
   /** Touches the machine or NEXUS itself: power, registry, services, credentials, NEXUS data. */
   'SYSTEM_SENSITIVE',
 ] as const
@@ -46,6 +50,15 @@ export type Capability = z.infer<typeof CapabilitySchema>
  * RESTRICTED: stricter gates (no inline interpreter code, approval for agent-authored scripts and package
  * scripts, no network unless allowed, a narrower read scope). Neither is an operating-system sandbox.
  */
+/**
+ * 0.8: the containment of project code in enrolled projects. ISOLATED: the machine's sandbox account.
+ * RESTRICTED: the user at low integrity. STANDARD: none. STRONGEST: ISOLATED when the sandbox account is set up
+ * and was verified at this start, else RESTRICTED; never STANDARD.
+ */
+export const CONTAINMENT_SETTINGS = ['STRONGEST', 'ISOLATED', 'RESTRICTED', 'STANDARD'] as const
+export const ContainmentSettingSchema = z.enum(CONTAINMENT_SETTINGS)
+export type ContainmentSettingName = z.infer<typeof ContainmentSettingSchema>
+
 export const EXECUTION_PROFILES = ['STANDARD', 'RESTRICTED'] as const
 export const ExecutionProfileSchema = z.enum(EXECUTION_PROFILES)
 export type ExecutionProfile = z.infer<typeof ExecutionProfileSchema>

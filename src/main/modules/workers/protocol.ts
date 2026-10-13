@@ -22,7 +22,7 @@ export interface WireSessionSpec {
   tools: string[]
   outputSchema?: Record<string, unknown>
   /** Which NEXUS tools the session gets; null when it gets none. */
-  nexusTools: { proposeGraphChange: boolean; contextTool?: boolean } | null
+  nexusTools: { proposeGraphChange: boolean; contextTool?: boolean; extensionGroups?: string[] } | null
   contextOptions?: SessionContextOptions
   mcpServers?: Record<string, ExternalMcpServer>
   resumeSessionId?: string
@@ -43,7 +43,7 @@ export function toWireSpec(spec: SessionSpec): WireSessionSpec {
     prompt: spec.prompt,
     tools: [...spec.tools],
     ...(spec.outputSchema !== undefined ? { outputSchema: spec.outputSchema } : {}),
-    nexusTools: spec.nexusTools ? { proposeGraphChange: typeof spec.nexusTools.proposeGraphChange === 'function', contextTool: typeof spec.nexusTools.contextTool === 'function' } : null,
+    nexusTools: spec.nexusTools ? { proposeGraphChange: typeof spec.nexusTools.proposeGraphChange === 'function', contextTool: typeof spec.nexusTools.contextTool === 'function', ...(typeof spec.nexusTools.extensionTool === 'function' ? { extensionGroups: [...(spec.nexusTools.extensionGroups ?? [])] } : {}) } : null,
     ...(spec.contextOptions !== undefined ? { contextOptions: { ...spec.contextOptions } } : {}),
     ...(spec.mcpServers !== undefined ? { mcpServers: spec.mcpServers } : {}),
     ...(spec.resumeSessionId !== undefined ? { resumeSessionId: spec.resumeSessionId } : {}),
@@ -62,7 +62,7 @@ export interface WorkerConfig {
   heartbeatMs: number
 }
 
-export type WorkerCallMethod = 'authorize' | 'requestApproval' | 'sendMessage' | 'reportBlocker' | 'recordDecision' | 'proposeMemory' | 'proposeGraphChange' | 'contextTool'
+export type WorkerCallMethod = 'authorize' | 'requestApproval' | 'workingState' | 'sendMessage' | 'reportBlocker' | 'recordDecision' | 'proposeMemory' | 'proposeGraphChange' | 'contextTool' | 'extensionTool'
 
 export type RuntimeToWorker =
   | { t: 'init'; workerId: string; config: WorkerConfig }

@@ -43,6 +43,8 @@ import { ProviderSessionStore } from './provider'
 import { ControlIncidentStore, ControlScheduleStore, WorkItemStore } from './control-plane'
 import { ScheduleFiringStore, SchedulerDecisionStore, WorkerLeaseStore, WorkerStore } from './workers'
 import { FileProvenanceRepository, SecurityDecisionRepository } from './security'
+import { AutonomyAuditRepository, BoundaryRequestRepository, CapabilityGrantRepository, EnrollmentRepository } from './autonomy'
+import { ResearchArtifactRepository, ResearchDownloadRepository } from './research'
 import { contextGraphStores, type ContextGraphStores } from './context-graph'
 import {
   ArtifactContextRefStore,
@@ -202,6 +204,14 @@ export interface Repositories {
   releaseTrains: ReleaseTrainStore
   workspaceMemory: WorkspaceMemoryStore
   workspaceDecisions: WorkspaceDecisionStore
+  /** 0.8: enrolled projects, grants, boundary requests and the broker's audit log. */
+  enrollments: EnrollmentRepository
+  capabilityGrants: CapabilityGrantRepository
+  boundaryRequests: BoundaryRequestRepository
+  autonomyAudit: AutonomyAuditRepository
+  /** 0.8: what was read on the public web, and the files held in quarantine. */
+  researchArtifacts: ResearchArtifactRepository
+  researchDownloads: ResearchDownloadRepository
   /** Runs `fn` atomically. Nests (savepoints); an exception rolls back everything done inside. */
   transaction<T>(fn: () => T): T
 }
@@ -304,6 +314,12 @@ export function createRepositories(db: Database): Repositories {
     releaseTrains: new ReleaseTrainStore(db),
     workspaceMemory: new WorkspaceMemoryStore(db),
     workspaceDecisions: new WorkspaceDecisionStore(db),
+    enrollments: new EnrollmentRepository(db),
+    capabilityGrants: new CapabilityGrantRepository(db),
+    boundaryRequests: new BoundaryRequestRepository(db),
+    autonomyAudit: new AutonomyAuditRepository(db),
+    researchArtifacts: new ResearchArtifactRepository(db),
+    researchDownloads: new ResearchDownloadRepository(db),
     transaction: <T>(fn: () => T): T => db.transaction(fn)(),
   }
 }

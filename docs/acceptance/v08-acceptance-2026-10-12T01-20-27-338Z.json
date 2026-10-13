@@ -1,0 +1,280 @@
+{
+  "kind": "v0.8-acceptance",
+  "startedAt": "2026-10-12T01:16:27.301Z",
+  "executable": "dev build",
+  "baseCommit": "15230895ef84f90e2869a7040c8ee94430918129",
+  "missions": {
+    "electron": {
+      "runId": "656601a7-13b6-4d5f-87b3-c81bd92688bd",
+      "state": "completed",
+      "minutes": 3.8,
+      "tasks": [
+        {
+          "key": "fix-addnote-and-verify-app",
+          "state": "completed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [],
+      "answered": null,
+      "resumedEvents": 0,
+      "tools": {
+        "events": 109,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git, for, do, done, tr). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (tasklist). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}"
+        ],
+        "containedShell": 16,
+        "containedCommands": 4,
+        "containedPrograms": 2,
+        "refusedLaunches": 0,
+        "shellToolCalls": 19,
+        "names": {
+          "Bash": 41,
+          "Edit": 2,
+          "Glob": 2,
+          "Read": 16,
+          "StructuredOutput": 8,
+          "Write": 2,
+          "mcp__nexus__app_act": 8,
+          "mcp__nexus__app_find": 4,
+          "mcp__nexus__app_launch": 8,
+          "mcp__nexus__app_screenshot": 2,
+          "mcp__nexus__app_snapshot": 4,
+          "mcp__nexus__app_status": 8,
+          "mcp__nexus__app_stop": 4
+        }
+      },
+      "audit": {
+        "total": 31,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 31
+        },
+        "denials": []
+      },
+      "apps": [
+        {
+          "type": "electron",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": null,
+          "screenshots": 0
+        },
+        {
+          "type": "electron",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": null,
+          "screenshots": 0
+        },
+        {
+          "type": "electron",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": null,
+          "screenshots": 1
+        },
+        {
+          "type": "electron",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": null,
+          "screenshots": 0
+        }
+      ],
+      "research": {
+        "artifacts": [],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "656601a7-13b6-4d5f-87b3-c81bd92688bd",
+        "tasksTotal": 1,
+        "tasksCompleted": 1,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 1,
+        "reviewsApproved": 1,
+        "verificationsPassed": 2,
+        "verificationsFailed": 0,
+        "filesChanged": 2,
+        "commits": 2,
+        "agentSessions": 5,
+        "durationMs": 161406,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\ProgramData\\NexusSandbox\\worktrees\\5e2cf5e81c3b\\656601a7\\integration",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 940,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm.\n\n> notes@1.0.0 test\n> node --test\n\n✔ adding a then b gives exactly a, b (0.8289ms)\n✔ an empty note is not added (0.7641ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 135.0922\n"
+          }
+        ],
+        "costUsd": 0.6198743999999999
+      },
+      "result": {
+        "branch": "nexus/656601a7/integration",
+        "mainUntouched": true,
+        "fixed": true,
+        "test": true,
+        "checks": [
+          {
+            "command": "npm test",
+            "exitCode": 0
+          }
+        ]
+      }
+    }
+  },
+  "app": {
+    "version": "0.7.2",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "isolation": {
+    "requested": "STRONGEST",
+    "effective": "ISOLATED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.",
+    "sandboxAccount": true,
+    "isolated": {
+      "available": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.",
+      "checkedAt": "2026-10-12T01:16:33.090Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+      "checkedAt": "2026-10-12T01:16:32.539Z"
+    },
+    "protectedPaths": 0
+  },
+  "enrollment": {
+    "profile": "AUTONOMOUS_PROJECT",
+    "policyVersion": "0.8.0-autonomy.1",
+    "confirmations": [
+      {
+        "message": "Let NEXUS work in \"repo\" under the profile \"Autonomous project\"?",
+        "buttons": [
+          "Enable",
+          "Cancel"
+        ]
+      }
+    ]
+  },
+  "usageAfter": {
+    "capturedAt": "2026-10-12T01:20:27.335Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "AVAILABLE",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 5,
+      "turns": 58,
+      "inputTokens": 14571,
+      "outputTokens": 13007,
+      "cacheReadTokens": 657557,
+      "cacheCreationTokens": 34071,
+      "durationMs": 195717,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "d79258c6-f5b4-4bb8-ad34-f5297d42b846",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 23,
+        "resetAt": "2026-10-12T04:00:00.316228+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-12T01:20:27.334Z",
+        "updatedAt": "2026-10-12T01:20:27.334Z",
+        "stale": false
+      },
+      {
+        "id": "76b26528-15a9-4d3b-b8f6-da3bff01719b",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-12T01:20:27.334Z",
+        "updatedAt": "2026-10-12T01:20:27.334Z",
+        "stale": false
+      },
+      {
+        "id": "88db5f0d-8907-456e-a151-6e03a80e84d5",
+        "limitType": "seven_day",
+        "status": "allowed",
+        "utilizationPercent": 41,
+        "resetAt": "2026-10-17T04:00:00.316256+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-12T01:20:27.334Z",
+        "updatedAt": "2026-10-12T01:20:27.334Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 41,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-12T04:00:00.000Z",
+      "source": "SDK_EVENT",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "gates": {
+    "a containment was verified at start and is in effect": true,
+    "enrolling asked once": true,
+    "electron: enrolling the second project asked once": true,
+    "electron: the mission completed": true,
+    "electron: the user was asked nothing (0 tool approvals, 0 boundary requests, 0 dialogs)": true,
+    "electron: an Electron application was launched inside the containment, and stopped with the mission": true,
+    "electron: a screenshot was kept": true,
+    "electron: the fix and its test are on the mission's integration branch, the checks pass there, and main is untouched": true
+  },
+  "verdict": "PASS",
+  "finishedAt": "2026-10-12T01:20:27.338Z"
+}

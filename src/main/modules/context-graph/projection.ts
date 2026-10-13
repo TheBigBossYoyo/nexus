@@ -1,3 +1,4 @@
+import type { ResearchArtifact } from '@shared/research'
 import type { MemoryEntry, Project } from '@shared/domain'
 import {
   CONTEXT_SUMMARY_MAX_CHARS,
@@ -482,6 +483,67 @@ function addProgram(b: Builder, r: ProgramRecords): void {
   }
 }
 
+// ───────────────────────────── research (0.8) ─────────────────────────────
+
+/** How many characters of a page's own text a node shows. The page is not knowledge of the project; it is a source. */
+const RESEARCH_SUMMARY_CHARS = 360
+/** The most pages a graph lists. Older ones stay with the research store. */
+const MAX_RESEARCH_NODES = 300
+
+/**
+ * What was read on the public web for this project, as sources to find again: one node per page, under
+ * "research". A node says where the text came from, who published it, when it was read, until when it counts
+ * as fresh, the hash of what was read, and how to read more of it (the artifact's id). It never holds the page.
+ *
+ * Everything in such a node is UNTRUSTED_WEB_CONTENT: the trust is the lowest the graph has, whatever the
+ * source, and retrieval says so wherever the node is shown. A page read again takes the place of the earlier
+ * reading of the same address (SUPERSEDES); a page past its freshness is STALE.
+ */
+function addResearch(b: Builder, artifacts: readonly ResearchArtifact[], now: string): void {
+  if (artifacts.length === 0) return
+  b.section('research')
+  const latest = new Map<string, ResearchArtifact>()
+  const ordered = [...artifacts].sort((x, y) => x.retrievedAt.localeCompare(y.retrievedAt) || x.id.localeCompare(y.id)).slice(-MAX_RESEARCH_NODES)
+  for (const a of ordered) latest.set(a.canonicalUrl, a)
+  const paths = new Map<string, string>()
+  for (const a of ordered) {
+    const current = latest.get(a.canonicalUrl) === a
+    const flagged = a.screening.status === 'flagged'
+    const summary = [
+      a.canonicalUrl,
+      `Read on the web ${a.retrievedAt.slice(0, 10)} from ${a.publisher} (${a.sourceType.toLowerCase().replace(/_/g, ' ')}, ${a.authority.toLowerCase().replace(/_/g, ' ')}); fresh until ${a.staleAfter.slice(0, 10)}.`,
+      `Untrusted web content${flagged ? '; instruction-like text was taken out when it was read' : ''}. Research artifact ${a.id} (research_more reads its text).`,
+      a.query ? `Read for: ${a.query.slice(0, 160)}` : '',
+      a.summary.replace(/\s+/g, ' ').slice(0, RESEARCH_SUMMARY_CHARS),
+    ]
+      .filter((line) => line !== '')
+      .join('\n')
+    const path = b.add('research', `${a.publisher}-${(a.title ?? a.canonicalUrl).slice(0, 60)}-${a.id.slice(0, 6)}`, {
+      type: 'ARTIFACT',
+      title: (a.title ?? a.canonicalUrl).slice(0, 160),
+      summary,
+      originKind: 'research_artifact',
+      originId: a.id,
+      trust: 'AGENT_NOTE',
+      status: !current ? 'SUPERSEDED' : a.staleAfter < now ? 'STALE' : 'CURRENT',
+      confidence: a.authority === 'PRIMARY' ? 'medium' : 'low',
+      subjectKey: current ? subjectKey('research', a.canonicalUrl) : null,
+      programId: null,
+      provenance: { source: 'web', runId: a.runId, taskId: a.taskId, agentId: null, evidence: `sha256 ${a.contentHash}; ${a.backend}` },
+      sources: [{ kind: 'artifact', ref: `research:${a.id}`, hash: a.contentHash }],
+      sourceUpdatedAt: a.retrievedAt,
+    })
+    paths.set(a.id, path)
+  }
+  for (const a of ordered) {
+    const newer = latest.get(a.canonicalUrl)
+    if (newer === undefined || newer === a) continue
+    const from = paths.get(newer.id)
+    const to = paths.get(a.id)
+    if (from !== undefined && to !== undefined) b.edge({ fromPath: from, toPath: to, type: 'SUPERSEDES', trust: 'AGENT_NOTE', confidence: 'high', provenance: { source: 'web' } })
+  }
+}
+
 // ───────────────────────────── entry points ─────────────────────────────
 
 export interface ProjectRecords {
@@ -489,10 +551,14 @@ export interface ProjectRecords {
   facts: RepositoryFact[]
   memory: MemoryEntry[]
   programs: ProgramRecords[]
+  /** 0.8: pages read on the public web for the project. Absent: none. */
+  research?: ResearchArtifact[]
+  /** The time research freshness is judged against. Absent: now. */
+  now?: string
 }
 
 /** The origin kinds a project projection rebuilds. Notes and user nodes (`graph`) are never touched by it. */
-export const PROJECT_OWNED: ContextOriginKind[] = ['repository_fact', 'memory', 'program', 'program_memory', 'program_milestone', 'backlog_item']
+export const PROJECT_OWNED: ContextOriginKind[] = ['repository_fact', 'memory', 'program', 'program_memory', 'program_milestone', 'backlog_item', 'research_artifact']
 export const WORKSPACE_OWNED: ContextOriginKind[] = ['workspace_repository', 'workspace_contract', 'workspace_memory']
 
 export function projectProject(records: ProjectRecords): Projection {
@@ -500,6 +566,7 @@ export function projectProject(records: ProjectRecords): Projection {
   for (const s of ['architecture', 'modules', 'commands', 'decisions', 'hazards', 'memory', 'notes']) b.section(s)
   addFacts(b, records.facts)
   addMemory(b, records.memory)
+  addResearch(b, records.research ?? [], records.now ?? new Date().toISOString())
   for (const p of [...records.programs].sort((x, y) => x.program.createdAt.localeCompare(y.program.createdAt) || x.program.id.localeCompare(y.program.id))) addProgram(b, p)
   return b.result(PROJECT_OWNED)
 }

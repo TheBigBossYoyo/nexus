@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
 import { IntelligenceOperations } from '../modules/intelligence/operations'
@@ -8,7 +8,7 @@ import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
 import { WorkerCapacityRouting } from '../modules/capacity/worker-routing'
 import { release } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { PushMessage } from '@shared/events'
 import type { AppInfo } from '@shared/ipc'
 import { newId } from '@shared/ids'
@@ -21,7 +21,29 @@ import {
   type UiResponse,
 } from '@shared/runtime-protocol'
 import type { WorkersOverview } from '@shared/workers'
+import { TERMINAL_RUN_STATES } from '@shared/domain'
 import { ArenaService } from '../modules/arena'
+import { AutonomyService } from '../modules/autonomy/service'
+import { createHash, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
+import { ApplicationUnderTestManager } from '../modules/browser/app-manager'
+import { PlaywrightDirectProvider } from '../modules/browser/provider'
+import { createPackageConfigTools } from '../modules/agent-runtime/package-config-tool'
+import { combineExtensions, createAppTools } from '../modules/browser/tools'
+import type { GuardOptions } from '../modules/network/guard'
+import { renderPublicPage } from '../modules/research/browser'
+import { ExecutionBroker } from '../modules/isolation/execution-broker'
+import { Launcher } from '../modules/isolation/launcher'
+import { readSandboxAccount, sandboxStateDir, type SandboxAccount } from '../modules/isolation/sandbox-account'
+import { BoundaryResumer } from '../modules/autonomy/resume'
+import { setupSandboxAccount, verifySandboxSetup } from '../modules/isolation/sandbox-setup'
+import { IsolationService } from '../modules/isolation/service'
+import type { ContainmentSetting } from '../modules/isolation/session-containment'
+import { mirrorTools, type ToolMirrorState } from '../modules/isolation/tools'
+import { startPolicyProxy } from '../modules/network/proxy'
+import { policyForProjectCommands, policyForPurpose } from '../modules/network/policy'
+import { DEFAULT_SEARCH_URL, WebResearchProvider } from '../modules/research/provider'
+import { createResearchTools } from '../modules/research/tools'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
@@ -52,6 +74,7 @@ import {
   WorkspaceMissionWorkload,
 } from '../modules/overnight'
 import { buildTrayModel, type TrayAction } from '../modules/overnight/tray-model'
+import { AUTONOMY_CAPABILITIES, boundaryResumeResource, cleanAgentText, quotedAction } from '@shared/autonomy'
 import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
 import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
@@ -101,6 +124,16 @@ export interface RuntimeHost {
   isPackaged: boolean
   /** Electron's resources directory in a packaged app. */
   resourcesPath: string | undefined
+  /**
+   * 0.8: whether the user's credential stores (~/.claude, ~/.ssh and the like) are marked unreadable for
+   * contained code when a project is enrolled. The application sets it; a runtime started by a test does not,
+   * so that a test never changes a folder of the person running it. NEXUS's own data is marked either way.
+   */
+  protectUserStores?: boolean
+  /** 0.8: the directory of the sandbox account's setup scripts. Absent: the setup cannot be started from this runtime. */
+  sandboxSetupDir?: string
+  /** 0.8: where nexus-launch.exe is. Absent or missing: no containment exists, and enrolled projects run nothing until one does. */
+  launcherPath?: string
   /** Where the built-in Arena cases are. */
   casesDir: string
   tempDir: string
@@ -146,9 +179,37 @@ function testNumber(host: RuntimeHost, name: string): number | undefined {
  * manager, the schedules, the overnight supervisor, and the local server through which windows talk to it.
  * It needs no window, and a window that closes or crashes takes nothing with it.
  */
+/**
+ * A boundary request as an artifact of the task it came from (and of the task that one repairs): what was
+ * asked, that it was not done, and that it waits for the user. A reviewer or a verifier reads the task's
+ * artifacts; without this the only evidence of a refused action is the word of the session that tried it.
+ */
+export function recordBoundaryEvidence(repos: ReturnType<typeof createRepositories>, request: { id: string; runId: string | null; taskId: string | null; capability: string; action: string; occurrences: number }): void {
+  if (request.runId === null) return
+  const task = request.taskId !== null ? repos.tasks.get(request.taskId) : null
+  const taskIds = task ? [task.id, ...(task.parentTaskId ? [task.parentTaskId] : [])] : [null]
+  const label = (AUTONOMY_CAPABILITIES as Record<string, { label: string }>)[request.capability]?.label ?? request.capability
+  for (const taskId of taskIds) {
+    try {
+      repos.artifacts.insert({
+        id: randomUUID(),
+        runId: request.runId,
+        taskId,
+        agentId: null,
+        kind: 'boundary-request',
+        title: `Boundary request: ${label} (not done; waits for the user)`,
+        content: `NEXUS refused this action and put it to the user as boundary request ${request.id}: ${label}.\n${quotedAction(request.action)}\nIt was not carried out. Recorded at ${new Date().toISOString()}. A later attempt of the same action in this mission is the same request and is refused the same way.`,
+        createdAt: new Date().toISOString(),
+      })
+    } catch {
+      // Evidence for a checker; the request itself is on record whatever happens here.
+    }
+  }
+}
+
 export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> {
   const { dataDir, env } = host
-  const worktreesDir = join(dataDir, 'worktrees')
+  let worktreesDir = join(dataDir, 'worktrees')
   const dbPath = join(dataDir, 'nexus.db')
   mkdirSync(worktreesDir, { recursive: true })
   const logger = (line: string): void =>
@@ -199,11 +260,128 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   reclaimHostedLeases()
   // Read here, before the worker records of the earlier start are closed: the processes a new session waits for.
   const earlierWorkerPids = repos.workers.listLive().flatMap((w) => (w.bootId !== identity.bootId && w.pid !== null ? [w.pid] : []))
+  // 0.8: the containment of project code. Both profiles are run once here, before anything is dispatched, and
+  // what a session may rely on is what that run showed. Tests that drive the runtime with scripted agents may
+  // name the profile; a packaged build takes it from Settings only.
+  const containmentOverride = !host.isPackaged && ['STRONGEST', 'ISOLATED', 'RESTRICTED', 'STANDARD'].includes(env['NEXUS_CONTAINMENT'] ?? '') ? (env['NEXUS_CONTAINMENT'] as ContainmentSetting) : null
+  const launcher = new Launcher({ executable: host.launcherPath ?? join(dataDir, 'missing', 'nexus-launch.exe'), specDir: join(dataDir, 'sandbox', 'specs') })
+  // What project code may reach on the network when it installs dependencies: the approved registries, through
+  // a proxy of NEXUS's own. Under ISOLATED it is the only network the code has.
+  // The hosts on its list are for fetching: a connection that sends more than a few megabytes to one of them is not
+  // an install, and is cut. (The list has registries and github.com's downloads; what goes through is brokered
+  // here, host by host, and is no network of the contained code's own.)
+  const depsProxy = await startPolicyProxy({ policy: policyForProjectCommands({ network: true }), maxUploadBytesPerConnection: 4 * 1024 * 1024 }).catch(() => null)
+  const proxyUrl = depsProxy ? `http://${depsProxy.username}:${depsProxy.password}@127.0.0.1:${depsProxy.port}` : null
+  let toolState: ToolMirrorState | null = null
+  // 0.8: the account on record is looked at before it is used: that Windows has an account of that name with
+  // that identifier, made by NEXUS's setup, in no group but Users; that its folder is a real folder of this
+  // user's with the access the setup gives and nothing of anybody else's in it. When that does not hold, the
+  // isolated profile is not available, and says why.
+  let sandboxProblem: string | null = null
+  /** There is a record of the account, whether or not it passed: the isolated profile was set up on this machine. */
+  let sandboxRecorded = false
+  // The account that was looked at, and no other: the record is not read again when the account is used, so a
+  // record that changes while NEXUS runs changes nothing until it has been verified in its turn.
+  let sandboxAccount: SandboxAccount | null = null
+  const checkSandboxAccount = async (): Promise<void> => {
+    const recorded = readSandboxAccount(env)
+    sandboxRecorded = recorded !== null
+    let problem: string | null = null
+    if (recorded !== null) {
+      if (host.sandboxSetupDir === undefined) problem = 'this build cannot verify it (the verification script is not part of it)'
+      else {
+        // The AppContainer the launcher will use, by the launcher's own derivation: the machine's record, the
+        // sandbox root and the two folders above it must all be set up for that one.
+        const container = await Promise.all([launcher.appContainerSid(), launcher.capabilitySid()]).then(([sid, capabilitySid]) => ({ sid, capabilitySid }), () => null)
+        const verdict = container === null ? { ok: false, problems: ["the launcher could not derive the AppContainer's identifier"], notes: [] } : await verifySandboxSetup(recorded, host.sandboxSetupDir, env, container)
+        if (!verdict.ok) problem = verdict.problems.join('; ').slice(0, 600)
+        for (const note of verdict.notes) logger(`isolation: ${note}`)
+        logger(`isolation: sandbox account ${verdict.ok ? 'verified' : `NOT usable: ${problem}`}`)
+      }
+    }
+    sandboxAccount = recorded
+    sandboxProblem = problem
+  }
+  await checkSandboxAccount()
+  const executionBroker = new ExecutionBroker({
+    launcher,
+    sandboxDir: join(dataDir, 'sandbox'),
+    account: () => sandboxAccount,
+    accountProblem: () => sandboxProblem,
+    baseEnv: () => env,
+    // The POSIX shell of the isolated profile lies beside the launcher, in every build.
+    posixShell: () => {
+      const candidate = join(dirname(launcher.executable), 'busybox.exe')
+      return existsSync(candidate) ? candidate : null
+    },
+    gitIdentity: () => {
+      const g = repos.settings.get().git
+      return { name: g.commitAuthorName, email: g.commitAuthorEmail }
+    },
+    toolPath: (profile, path) => {
+      if (profile !== 'ISOLATED') return path
+      const account = sandboxAccount
+      if (account === null) return path
+      // The copies are made the first time a contained command needs them, and reused.
+      toolState ??= mirrorTools({ sandboxRoot: account.root, userProfile: env['USERPROFILE'] ?? homedir(), path })
+      return toolState.path
+    },
+    networkEnv: (): Record<string, string> =>
+      proxyUrl === null ? {} : { HTTP_PROXY: proxyUrl, HTTPS_PROXY: proxyUrl, npm_config_proxy: proxyUrl, npm_config_https_proxy: proxyUrl, NO_PROXY: 'localhost,127.0.0.1,::1', NODE_USE_ENV_PROXY: '1' },
+    onFailure: (info) => {
+      logger(`isolation: ${info.profile} could not be made: ${info.detail}`)
+      isolationFailed?.(info.projectId, info.detail)
+    },
+  })
+  let isolationFailed: ((projectId: string | null, detail: string) => void) | null = null
+  const isolation = new IsolationService({
+    broker: executionBroker,
+    launcher,
+    containment: () => containmentOverride ?? repos.settings.get().execution.containment,
+    enrolled: (projectId) => repos.enrollments.get(projectId) !== null,
+    gitWritable: async (worktree) => (await git.ownedGitLayout(worktree))?.writable ?? [],
+    dataDir,
+    sandboxStateDir: sandboxStateDir(env),
+    sandboxOnRecord: () => sandboxRecorded,
+    logger,
+  })
+  const isolationStatus = await isolation.start()
+  logger(`isolation: ${isolationStatus.effective} (${isolationStatus.usable ? 'verified' : 'NOT available'}): ${isolationStatus.detail}`)
+  // Under ISOLATED a worktree must be where the sandbox account can go: in its root, outside the user's profile.
+  const isolatedRoot = executionBroker.isolatedWorktreesRoot()
+  if (isolationStatus.effective === 'ISOLATED' && isolationStatus.usable && isolatedRoot !== null) {
+    worktreesDir = join(isolatedRoot, createHash('sha256').update(dataDir.toLowerCase()).digest('hex').slice(0, 12))
+    mkdirSync(worktreesDir, { recursive: true })
+  } else if (isolationStatus.effective === 'RESTRICTED' && isolationStatus.usable) {
+    // Under RESTRICTED a worktree must not lie inside NEXUS's data: that directory is closed to code at low
+    // integrity once a project is enrolled, and a program that looks at the directories above its own (Node
+    // does, for every file it loads) is refused there. Found by the first real mission under RESTRICTED: the
+    // tests of the project could not start. The worktrees go beside the data directory, in a directory that
+    // carries no mark of its own.
+    worktreesDir = `${dataDir.replace(/[\\/]+$/, '')}-worktrees`
+    mkdirSync(worktreesDir, { recursive: true })
+  }
+  executionBroker.sweep()
   const bus = new EventBus(repos.events, repos.transaction)
   const git = new GitService()
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
   // Git directory comes from the repository NEXUS's own record names for the worktree.
   git.setWorktreesRoot(worktreesDir)
+  // 0.8: NEXUS's own index of every worktree it created, where contained code cannot write; and a line of
+  // evidence for every commit NEXUS makes there: what it meant to commit and what the commit holds.
+  git.setTrustedIndexDir(join(dataDir, 'git-index'))
+  // A worktree's entry in the repository holds three files that say where the repository is and what
+  // configuration applies. They are made unwritable for project code when the worktree is created, before the
+  // first command of the project (its dependency setup) runs there.
+  if (process.platform === 'win32' && host.launcherPath !== undefined && existsSync(host.launcherPath)) git.onWorktreeCreated((gitDir) => executionBroker.pinGit(gitDir))
+  git.onCommitEvidence((evidence) => {
+    try {
+      appendFileSync(join(dataDir, 'commit-evidence.jsonl'), `${JSON.stringify(evidence)}
+`)
+    } catch (e) {
+      logger(`git: commit evidence could not be written: ${errorMessage(e)}`)
+    }
+  })
   git.setWorktreeResolver((worktreePath) => {
     const record = repos.worktrees.getByPath(worktreePath)
     const run = record ? repos.runs.get(record.runId) : null
@@ -241,9 +419,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     stateChanged()
   })
 
-  // UI tests answer confirmations through the window they drive. Only with the scripted runtime, never in a package.
+  // UI tests answer confirmations through the window they drive: with the scripted runtime, or in an acceptance
+  // run of a development build that says so. Never in a package: there the question is always the runtime's own.
   const confirmThroughWindow =
-    !host.isPackaged && env['NEXUS_FAKE_RUNTIME'] === '1' && env['NEXUS_FAKE_CONFIRM'] === 'window'
+    !host.isPackaged && ((env['NEXUS_FAKE_RUNTIME'] === '1' && env['NEXUS_FAKE_CONFIRM'] === 'window') || env['NEXUS_ACCEPT_CONFIRM'] === 'window')
   /**
    * A question to the user. A confirmation (power control, trusting a case, a settings change that starts a
    * program, stopping while work runs) is shown by the runtime process itself and never travels over the pipe:
@@ -354,6 +533,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
           logger,
         }),
         config: workerConfig,
+        workingState: (cwd) => git.workingState(cwd),
         // One worker per agent session the queue may run, and one more for probes and reasoning sessions.
         maxWorkers: () => control.limits().maxAgents + 1,
         context: (agentId) => {
@@ -473,6 +653,121 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   attachOutcomeRecording(bus, policy)
   attachAdviceOutcomes(bus, repos, logger)
 
+  // 0.8: enrolled projects, grants and boundary requests. A new request is one notification; the same need met
+  // again changes nothing the user sees but its count.
+  const autonomy = new AutonomyService({
+    repos,
+    contained: (projectId) => isolation.isolated(projectId),
+    confined: (projectId) => isolation.contained(projectId),
+    runActive: (runId) => {
+      const run = repos.runs.get(runId)
+      return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
+    },
+    onChange: (change) => {
+      const pending = repos.boundaryRequests.countPending()
+      push({ kind: 'autonomy', pending })
+      if (change.kind === 'enrollment') protectStores()
+      // 0.8: the user's answer restarts what waited for it. After the decision is stored, not inside its transaction.
+      if (change.kind === 'request' && change.created !== true && change.request && (change.request.state === 'GRANTED' || change.request.state === 'DENIED')) {
+        const decided = change.request
+        setImmediate(
+          () =>
+            void boundaryResumer
+              ?.decided(decided)
+              // What was done is part of what the inbox shows: the window reads it again.
+              .then(() => push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() }))
+              .catch((e: unknown) => logger(`autonomy: auto-resume failed: ${errorMessage(e)}`)),
+        )
+      }
+      if (change.kind === 'request' && change.created === true && change.request) {
+        // On the task's own record too, where whoever checks the task finds it: that the action was put to the
+        // user and did not happen is a fact of the task, not something to take from the session that asked.
+        recordBoundaryEvidence(repos, change.request)
+        const text = pending === 1 ? '1 boundary request is waiting for your decision.' : `${pending} boundary requests are waiting for your decision.`
+        announceBoundary?.(change.request.projectId, text)
+      }
+    },
+  })
+  let announceBoundary: ((projectId: string, text: string) => void) | null = null
+  let boundaryResumer: BoundaryResumer | null = null
+  // What contained code must not read is marked when there is a project whose code is contained, and not before.
+  function protectStores(): void {
+    // The sandbox account keeps its access to the Git data of the projects that are enrolled, and of no other.
+    const enrolledGitDirs = repos.projects.list().filter((p) => repos.enrollments.get(p.id) !== null).map((p) => join(p.rootPath, '.git'))
+    void executionBroker.revokeGitExcept(enrolledGitDirs).catch((e: unknown) => logger(`isolation: taking back Git access failed: ${errorMessage(e)}`))
+    if (repos.enrollments.count() === 0) {
+      void isolation.unprotect().catch((e: unknown) => logger(`isolation: removing the protection failed: ${errorMessage(e)}`))
+      return
+    }
+    void isolation.protect({ userStores: host.protectUserStores === true }).catch((e: unknown) => logger(`isolation: protection failed: ${errorMessage(e)}`))
+  }
+  protectStores()
+  let announceIsolationFailure: ((subject: string, detail: string) => void) | null = null
+  autonomy.watch(bus)
+  // A containment that was asked for and could not be made: on record, and worth telling the user, because
+  // work in that project now runs nothing until it is put right.
+  isolationFailed = (projectId, detail) => {
+    autonomy.record({ projectId, runId: null, taskId: null, agentId: null, severity: 'ISOLATION_FAILURE', action: 'containment', resource: 'execution profile', reason: detail })
+    announceIsolationFailure?.(projectId ?? 'machine', detail)
+  }
+  // 0.8: web research. NEXUS's own fetch under the public-research policy: no credential, no body, no local
+  // or private address, every redirect judged again. The texts and the quarantine are under the data directory,
+  // which no worktree is in.
+  const researchPolicy = policyForPurpose('PUBLIC_RESEARCH', {})
+  const browserProvider = new PlaywrightDirectProvider()
+  const research = new WebResearchProvider({
+    artifacts: repos.researchArtifacts,
+    downloads: repos.researchDownloads,
+    dir: join(dataDir, 'research'),
+    guard: () => ({ policy: researchPolicy }),
+    searchUrl: DEFAULT_SEARCH_URL,
+    // 0.8: pages that show nothing until their script has run are rendered in a browser of NEXUS's own, behind the
+    // same public-only filter, with a profile made for the page and thrown away.
+    ...(browserProvider.availability().browser !== null ? { render: (url: string, guard: GuardOptions) => renderPublicPage(browserProvider, url, guard, { artifactsDir: join(dataDir, 'research', 'browser') }) } : {}),
+    onNetwork: (context, event) => {
+      // What was refused is a denial worth keeping; what was reached is in the artifact that came of it.
+      if (!event.allowed) autonomy.record({ projectId: context.projectId, runId: context.runId, taskId: context.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `${event.via} ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the research network policy (${event.denial ?? 'policy'}).` })
+    },
+  })
+  bus.subscribe((event) => {
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') research.forget(event.runId)
+  })
+  // 0.8: the application a project builds, started inside its containment and looked at by a browser of
+  // NEXUS's own. The browser of a session reaches the endpoint the session registered and nothing else; the
+  // runtime's own loopback services are named so that no policy ever lets it reach them.
+  const apps = new ApplicationUnderTestManager({
+    broker: executionBroker,
+    browser: browserProvider,
+    profileFor: (projectId) => isolation.profileFor(projectId),
+    artifactsDir: join(dataDir, 'app-sessions'),
+    forbiddenLocalPorts: () => (depsProxy ? [depsProxy.port] : []),
+    onNetwork: (owner, event) => {
+      if (!event.allowed) autonomy.record({ projectId: owner.projectId, runId: owner.runId, taskId: owner.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `app browser ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the network policy of the application under test (${event.denial ?? 'policy'}).` })
+    },
+    onChange: () => push({ kind: 'apps' }),
+  })
+  bus.subscribe((event) => {
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled' || event.type === 'run.paused') void apps.stopForRun(event.runId).catch(() => undefined)
+  })
+  const researchTools = createResearchTools({
+    research,
+    gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+    legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
+    policy: () => researchPolicy,
+    record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
+  })
+  const appTools = createAppTools({
+    apps,
+    recordEvidence: (session, title, content) => {
+      const taskIds = session.task ? [session.task.id, ...(session.task.parentTaskId ? [session.task.parentTaskId] : [])] : [null]
+      for (const taskId of taskIds) repos.artifacts.insert({ id: randomUUID(), runId: session.run.id, taskId, agentId: session.agentId, kind: 'app-evidence', title: cleanAgentText(title), content: cleanAgentText(content), createdAt: new Date().toISOString() })
+    },
+    gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+  })
+  const packageConfigTools = createPackageConfigTools({
+    gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+  })
+  const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
@@ -486,8 +781,18 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     logger,
     strategies: policy,
     requireEngineeringAdmission: true,
+    autonomy,
+    extensions: extensionTools,
+    execution: isolation,
   })
   orchestrator.setDispatchGate(usage)
+  boundaryResumer = new BoundaryResumer({
+    repos,
+    orchestrator,
+    enrolled: (projectId) => repos.enrollments.get(projectId) !== null,
+    record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: boundaryResumeResource(request.id), reason: reason.slice(0, 600) }),
+    logger,
+  })
   // Runs that were active when the runtime last stopped are paused, never judged: what became of their
   // sessions is read from the worktrees when they are resumed.
   recoveryRecord.workloads = orchestrator.recoverOnStartup().length
@@ -828,6 +1133,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     repos.programs.listOpen().map((p) => p.id),
     repos.arenaCampaigns.listByState(['completed']).map((c) => c.id),
   )
+  announceBoundary = (projectId, text) => control.announce('boundary_request', projectId, text, 'Open NEXUS to decide. Work that does not depend on it goes on.')
+  announceIsolationFailure = (subject, detail) => control.announce('isolation_failure', subject, 'Project code could not be contained', `${detail.slice(0, 200)} Nothing was run outside the containment.`)
   const securityNotifier = notifier
   repos.securityDecisions.onRecord = (entry) => securityNotifier.onSecurityDecision(entry)
 
@@ -1053,6 +1360,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       // A probe in flight finishes before the sessions and the database go; nothing is resumed after dispose.
       await recovery.idle()
       await orchestrator.shutdown()
+      await apps.stopAll().catch(() => undefined)
       // Session admission closes only now. The orchestrator has given every unit of work its stop reason, so a
       // session refused from here on ends as stopped for shutdown. Closed earlier (it used to be the first step,
       // up to 30 s before), a session a running pipeline started in between ended stopped with no reason, which
@@ -1168,6 +1476,33 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     // page script: a script in the page cannot click it. Without anyone to ask, the answer is no.
     confirmPower: (message, detail) =>
       confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
+    autonomy,
+    confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
+    isolation: {
+      status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
+      setup: async () => {
+        if (host.sandboxSetupDir === undefined || host.launcherPath === undefined) return { ok: false, detail: 'This build cannot set up the sandbox account.' }
+        // The folder the account's credential is written to is closed to code at low integrity before the
+        // credential exists, not at some later start.
+        const stateDir = sandboxStateDir(env)
+        if (stateDir !== null) {
+          mkdirSync(stateDir, { recursive: true })
+          await launcher.label('protect', stateDir).catch((e: unknown) => logger(`isolation: the sandbox state folder could not be protected before the setup: ${errorMessage(e)}`))
+        }
+        const outcome = await setupSandboxAccount({ launcher: host.launcherPath, scriptsDir: host.sandboxSetupDir, workDir: join(dataDir, 'sandbox', 'setup'), env })
+        logger(`isolation: sandbox setup ${outcome.ok ? 'completed' : 'not completed'}`)
+        if (outcome.ok) {
+          // What the setup left is looked at as at a start, and the isolated profile is tried for real, now: the
+          // window is told what is so, not what will be so after a restart.
+          await checkSandboxAccount()
+          await executionBroker.verify('ISOLATED', true).catch(() => undefined)
+          await isolation.protect({ userStores: host.protectUserStores === true && repos.enrollments.count() > 0 }).catch((e: unknown) => logger(`isolation: protection failed: ${errorMessage(e)}`))
+        }
+        autonomy.record({ projectId: null, runId: null, taskId: null, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action: 'sandbox setup', resource: 'machine', reason: outcome.detail.slice(0, 400) })
+        return outcome
+      },
+      apps: () => apps.sessions(),
+    },
     confirmSettings: (changes) =>
       confirm(
         'NEXUS Settings',
@@ -1237,6 +1572,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     identity,
     // The dispatcher accepts a channel of the closed contract and an input that passes its schema, nothing else.
     dispatch: (channel, input) => dispatchIpc(handlers, channel, input),
+    // 0.8: only this user and the system open the pipe, and nothing below medium integrity: project code inside
+    // a containment finds the name by listing and cannot open what it names. Without a launcher there is no
+    // containment either, and no project code that this would keep out.
+    ...(process.platform === 'win32' && host.launcherPath !== undefined && existsSync(host.launcherPath) ? { protect: (name: string) => launcher.protectPipe(name) } : {}),
     onClientsChange: () => {
       push({ kind: 'runtime' })
       stateChanged()

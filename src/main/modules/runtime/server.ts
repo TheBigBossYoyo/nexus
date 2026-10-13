@@ -34,6 +34,12 @@ export interface RuntimeServerOptions {
   onClientsChange?: () => void
   logger?: (line: string) => void
   handshakeTimeoutMs?: number
+  /**
+   * 0.8: narrows who may open the pipe at all, once it listens: the user and the system, nothing below medium
+   * integrity. Called before the first connection is served. When it fails the server does not start: a
+   * runtime that contains project code must not be one that project code can connect to.
+   */
+  protect?: (pipe: string) => Promise<void>
 }
 
 interface Connection {
@@ -75,7 +81,14 @@ export class RuntimeServer {
         server.off('error', reject)
         server.on('error', (e) => this.log(`server error: ${errorMessage(e)}`))
         this.server = server
-        resolve()
+        if (!this.options.protect) return resolve()
+        // The opening that sets the protection is itself a connection: it says nothing and is dropped like any
+        // other that does not complete the handshake.
+        this.options.protect(this.options.pipe).then(resolve, (e: unknown) => {
+          this.server = null
+          server.close()
+          reject(e instanceof Error ? e : new Error(String(e)))
+        })
       })
     })
   }

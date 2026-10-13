@@ -10,7 +10,7 @@ import {
   type RunConfig,
   type CheckCommands,
 } from './domain'
-import { ExecutionProfileSchema } from './security'
+import { ContainmentSettingSchema, ExecutionProfileSchema } from './security'
 import { DEFAULT_USAGE_SETTINGS, UsageSettingsSchema } from './v3'
 import { DEFAULT_TOKEN_SETTINGS, TokenSettingsSchema } from './token'
 
@@ -62,6 +62,8 @@ export const SettingsSchema = z.object({
     checkTimeoutMinutes: z.number().int().min(1).max(120),
     /** 0.7: how strictly agent commands and scripts are gated. Not a sandbox in either mode. Old stored settings read as STANDARD. */
     profile: ExecutionProfileSchema.default('STANDARD'),
+    /** 0.8: the operating-system containment of project code in enrolled projects. Old stored settings read as STRONGEST. */
+    containment: ContainmentSettingSchema.default('STRONGEST'),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */
@@ -127,6 +129,7 @@ export const DEFAULT_SETTINGS: Settings = {
     leaseMinutes: 30,
     checkTimeoutMinutes: 15,
     profile: 'STANDARD',
+    containment: 'STRONGEST',
   },
   git: {
     removeWorktreesOnSuccess: false,
@@ -214,6 +217,14 @@ export function sensitiveSettingsChanges(before: Settings, after: Settings): str
   for (const prefix of after.permissions.safeCommandPrefixes) if (!prefixes.has(prefix)) changes.push(short(`Let agents run commands that begin with "${prefix}" without asking`))
   if (after.permissions.allowNetworkTools && !before.permissions.allowNetworkTools) changes.push('Let read-only agents fetch pages from the web')
   if (before.execution.profile === 'RESTRICTED' && after.execution.profile === 'STANDARD') changes.push('Lower the execution profile from RESTRICTED to STANDARD')
+  const strength = { STANDARD: 0, RESTRICTED: 1, STRONGEST: 2, ISOLATED: 3 } as const
+  if (strength[after.execution.containment] < strength[before.execution.containment]) {
+    changes.push(
+      after.execution.containment === 'STANDARD'
+        ? 'Run project code in enrolled projects with no containment at all (as you, with your files, credentials and network)'
+        : `Lower the containment of project code from ${before.execution.containment} to ${after.execution.containment}`,
+    )
+  }
   if (after.memory.autoApproveVerifierMemory && !before.memory.autoApproveVerifierMemory) changes.push('Keep what verifier agents propose for the project memory without your review')
   if (!after.claude.subscriptionMode && before.claude.subscriptionMode) changes.push('Let API keys from the environment reach the agent sessions')
   if (after.advanced.debugSdk && !before.advanced.debugSdk) changes.push('Write the debug output of the Claude runtime to the NEXUS log (it can contain prompts and tool input)')

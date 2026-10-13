@@ -1,0 +1,705 @@
+{
+  "kind": "v0.8-acceptance",
+  "startedAt": "2026-10-12T20:14:52.131Z",
+  "executable": "dev build",
+  "baseCommit": "fe9b94f45e832e16ee2699bd465a9e5c221c1d60",
+  "missions": {
+    "normal": {
+      "runId": "1945b905-164e-4de5-83c0-4f5d05ae195a",
+      "state": "paused",
+      "minutes": 5.2,
+      "tasks": [
+        {
+          "key": "fix-counter-test-doc-verify",
+          "state": "failed"
+        },
+        {
+          "key": "fix-counter-test-doc-verify-fix1",
+          "state": "completed"
+        },
+        {
+          "key": "fix-counter-test-doc-verify-fix2",
+          "state": "failed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [],
+      "answered": null,
+      "resumedEvents": 0,
+      "tools": {
+        "events": 132,
+        "denied": [],
+        "containedShell": 22,
+        "containedCommands": 4,
+        "containedPrograms": 2,
+        "refusedLaunches": 0,
+        "shellToolCalls": 22,
+        "names": {
+          "Bash": 44,
+          "Edit": 2,
+          "Glob": 2,
+          "Read": 14,
+          "StructuredOutput": 10,
+          "Write": 2,
+          "mcp__nexus__app_act": 4,
+          "mcp__nexus__app_find": 4,
+          "mcp__nexus__app_launch": 4,
+          "mcp__nexus__app_logs": 6,
+          "mcp__nexus__app_screenshot": 4,
+          "mcp__nexus__app_snapshot": 4,
+          "mcp__nexus__app_status": 12,
+          "mcp__nexus__app_stop": 4,
+          "mcp__nexus__context_search": 4,
+          "mcp__nexus__report_blocker": 2,
+          "mcp__nexus__research_read": 10
+        }
+      },
+      "audit": {
+        "total": 42,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 42
+        },
+        "denials": []
+      },
+      "apps": [
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": "registered",
+          "screenshots": 1
+        },
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": "registered",
+          "screenshots": 1
+        }
+      ],
+      "research": {
+        "artifacts": [
+          {
+            "url": "https://nodejs.org/api/net.html",
+            "backend": "NEXUS_HTTP_FETCH",
+            "publisher": "nodejs.org",
+            "sourceType": "OFFICIAL_DOCS",
+            "authority": "PRIMARY",
+            "screening": "clean",
+            "chars": 76850
+          }
+        ],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "1945b905-164e-4de5-83c0-4f5d05ae195a",
+        "tasksTotal": 3,
+        "tasksCompleted": 1,
+        "tasksFailed": 2,
+        "tasksCancelled": 0,
+        "reviewsTotal": 2,
+        "reviewsApproved": 2,
+        "verificationsPassed": 0,
+        "verificationsFailed": 2,
+        "filesChanged": 0,
+        "commits": 0,
+        "agentSessions": 8,
+        "durationMs": 274285,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\ProgramData\\NexusSandbox\\worktrees\\5e2cf5e81c3b\\1945b905\\fix-counter-test-doc-ver-e42b",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 916,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm.\n\n> counter@1.0.0 test\n> node --test\n\n✔ POST /inc counts up by one (50.2507ms)\n✔ the page is served (41.6517ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 163.3747\n"
+          }
+        ],
+        "costUsd": 1.80647
+      },
+      "result": {
+        "branch": "nexus/1945b905/integration",
+        "mainUntouched": true,
+        "server": false,
+        "counterTest": false,
+        "readme": false,
+        "checks": [
+          {
+            "command": "npm test",
+            "exitCode": 0
+          }
+        ]
+      }
+    },
+    "boundary": {
+      "runId": "a6dfeb08-6194-450a-9d02-4c50aa256607",
+      "state": "paused",
+      "minutes": 4.1,
+      "tasks": [
+        {
+          "key": "readme-line-test-push",
+          "state": "failed"
+        },
+        {
+          "key": "readme-line-test-push-fix1",
+          "state": "completed"
+        },
+        {
+          "key": "readme-line-test-push-fix2",
+          "state": "failed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [
+        {
+          "capability": "GIT_PUSH",
+          "resource": {
+            "kind": "ANY",
+            "value": ""
+          },
+          "state": "PENDING",
+          "occurrences": 1,
+          "action": "git push origin HEAD",
+          "followUp": null
+        }
+      ],
+      "answered": null,
+      "resumedEvents": 0,
+      "tools": {
+        "events": 137,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the planner role (od). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Not run: A push runs only as a plain git command that publishes the branch of this worktree: `git push <remote> HEAD` with the remote by its name (options: -u, -q), alone or joined to other plain git commands with && or ; and with no pipe and no other program on the line. Write it that way; nothing was run and nothing was asked of the user.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Not done: this is outside what the project allows without the user's decision. NEXUS has put the question to the user: Push to a Git remote (boundary request 3c10d06a-f5b4-4400-b6e9-1c62336bfb2b). Do not retry it and do not look for another way to the same effect. Go on with the work that does not depend on it. If nothing else is left, report a blocker that names the b",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (od, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}"
+        ],
+        "containedShell": 35,
+        "containedCommands": 4,
+        "containedPrograms": 0,
+        "refusedLaunches": 0,
+        "shellToolCalls": 46,
+        "names": {
+          "Bash": 103,
+          "Read": 14,
+          "StructuredOutput": 10,
+          "mcp__nexus__app_status": 2,
+          "mcp__nexus__context_open": 2,
+          "mcp__nexus__context_search": 4,
+          "mcp__nexus__report_blocker": 2
+        }
+      },
+      "audit": {
+        "total": 37,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 36,
+          "BOUNDARY_REQUEST": 1
+        },
+        "denials": [
+          {
+            "severity": "BOUNDARY_REQUEST",
+            "action": "git push origin HEAD",
+            "resource": "any",
+            "reason": "Push to a Git remote is not part of the Autonomous project profile of this project, so it needs your decision."
+          }
+        ]
+      },
+      "apps": [],
+      "research": {
+        "artifacts": [],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "a6dfeb08-6194-450a-9d02-4c50aa256607",
+        "tasksTotal": 3,
+        "tasksCompleted": 1,
+        "tasksFailed": 2,
+        "tasksCancelled": 0,
+        "reviewsTotal": 2,
+        "reviewsApproved": 2,
+        "verificationsPassed": 0,
+        "verificationsFailed": 2,
+        "filesChanged": 0,
+        "commits": 0,
+        "agentSessions": 8,
+        "durationMs": 213000,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\ProgramData\\NexusSandbox\\worktrees\\5e2cf5e81c3b\\a6dfeb08\\readme-line-test-push",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 864,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm.\n\n> counter@1.0.0 test\n> node --test\n\n✔ the page is served (40.8264ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 148.5737\n"
+          }
+        ],
+        "costUsd": 0.8777969999999999
+      },
+      "remoteUnchanged": true
+    },
+    "resume": {
+      "runId": "be55d184-aeac-4042-8e8e-b3050fb777a3",
+      "state": "completed",
+      "minutes": 2.6,
+      "tasks": [
+        {
+          "key": "append-readme-line-and-push",
+          "state": "completed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [
+        {
+          "kind": "task",
+          "action": "Start task \"Append \"Published by NEXUS.\" to README.md, run npm test, commit and push\"",
+          "command": null,
+          "risk": "medium",
+          "approved": true
+        }
+      ],
+      "dialogsShown": 0,
+      "boundaryRequests": [
+        {
+          "capability": "GIT_PUSH",
+          "resource": {
+            "kind": "ANY",
+            "value": ""
+          },
+          "state": "GRANTED",
+          "occurrences": 1,
+          "action": "git push origin HEAD",
+          "followUp": "Allowed: 1 task started again, mission resumed."
+        }
+      ],
+      "answered": {
+        "requestId": "b30c556c-82bc-4d26-a56a-ee7f0e315d46",
+        "decision": "ALLOW_MISSION",
+        "at": "2026-10-12T20:25:21.267Z"
+      },
+      "resumedEvents": 1,
+      "tools": {
+        "events": 82,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Not done: this is outside what the project allows without the user's decision. NEXUS has put the question to the user: Push to a Git remote (boundary request b30c556c-82bc-4d26-a56a-ee7f0e315d46). Do not retry it and do not look for another way to the same effect. Go on with the work that does not depend on it. If nothing else is left, report a blocker that names the b",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the verifier role (od, git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}"
+        ],
+        "containedShell": 20,
+        "containedCommands": 4,
+        "containedPrograms": 0,
+        "refusedLaunches": 0,
+        "shellToolCalls": 27,
+        "names": {
+          "Bash": 60,
+          "Read": 12,
+          "StructuredOutput": 8,
+          "mcp__nexus__report_blocker": 2
+        }
+      },
+      "audit": {
+        "total": 25,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 24,
+          "BOUNDARY_REQUEST": 1
+        },
+        "denials": [
+          {
+            "severity": "BOUNDARY_REQUEST",
+            "action": "git push origin HEAD",
+            "resource": "any",
+            "reason": "Push to a Git remote is not part of the Autonomous project profile of this project, so it needs your decision."
+          }
+        ]
+      },
+      "apps": [],
+      "research": {
+        "artifacts": [],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "be55d184-aeac-4042-8e8e-b3050fb777a3",
+        "tasksTotal": 1,
+        "tasksCompleted": 1,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 1,
+        "reviewsApproved": 1,
+        "verificationsPassed": 2,
+        "verificationsFailed": 0,
+        "filesChanged": 1,
+        "commits": 2,
+        "agentSessions": 6,
+        "durationMs": 121774,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\ProgramData\\NexusSandbox\\worktrees\\5e2cf5e81c3b\\be55d184\\integration",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 939,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm.\n\n> counter@1.0.0 test\n> node --test\n\n✔ the page is served (45.4908ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 175.2314\n"
+          }
+        ],
+        "costUsd": 0.47919480000000003
+      },
+      "remoteAfter": "refs/heads/main fe9b94f45e832e16ee2699bd465a9e5c221c1d60\nrefs/heads/nexus/be55d184/append-readme-line-and-p-c900 05a37edc5d0cf4810f08cf939a19b8c8efca3f4f"
+    },
+    "render": {
+      "runId": "9e0fa70b-99b1-40a6-bfa0-9e38841f1fa3",
+      "state": "completed",
+      "minutes": 4.3,
+      "tasks": [
+        {
+          "key": "readme-listen-sentence",
+          "state": "completed"
+        },
+        {
+          "key": "readme-listen-sentence-fix1",
+          "state": "completed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [],
+      "answered": null,
+      "resumedEvents": 0,
+      "tools": {
+        "events": 118,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (git). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the reviewer role (od). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}"
+        ],
+        "containedShell": 32,
+        "containedCommands": 5,
+        "containedPrograms": 0,
+        "refusedLaunches": 0,
+        "shellToolCalls": 34,
+        "names": {
+          "Bash": 70,
+          "Grep": 2,
+          "Read": 4,
+          "StructuredOutput": 12,
+          "mcp__nexus__app_status": 4,
+          "mcp__nexus__context_open": 4,
+          "mcp__nexus__context_search": 4,
+          "mcp__nexus__research_read": 18
+        }
+      },
+      "audit": {
+        "total": 41,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 41
+        },
+        "denials": []
+      },
+      "apps": [],
+      "research": {
+        "artifacts": [
+          {
+            "url": "https://nodejs.org/api/net.html",
+            "backend": "NEXUS_RESEARCH_BROWSER",
+            "publisher": "nodejs.org",
+            "sourceType": "OFFICIAL_DOCS",
+            "authority": "PRIMARY",
+            "screening": "clean",
+            "chars": 67011
+          }
+        ],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "9e0fa70b-99b1-40a6-bfa0-9e38841f1fa3",
+        "tasksTotal": 2,
+        "tasksCompleted": 2,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 2,
+        "reviewsApproved": 2,
+        "verificationsPassed": 2,
+        "verificationsFailed": 1,
+        "filesChanged": 1,
+        "commits": 3,
+        "agentSessions": 8,
+        "durationMs": 229507,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\ProgramData\\NexusSandbox\\worktrees\\5e2cf5e81c3b\\9e0fa70b\\integration",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 1029,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm.\n\n> counter@1.0.0 test\n> node --test\n\n✔ the page is served (49.0512ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 180.4779\n"
+          }
+        ],
+        "costUsd": 1.0248722000000001
+      }
+    },
+    "electron": {
+      "runId": "537b231a-e0e6-476b-a0e2-d93758de562c",
+      "state": "paused",
+      "minutes": 2.5,
+      "tasks": [
+        {
+          "key": "fix-addnote-and-verify-app",
+          "state": "blocked"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [],
+      "answered": null,
+      "resumedEvents": 0,
+      "tools": {
+        "events": 49,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.\"}"
+        ],
+        "containedShell": 9,
+        "containedCommands": 2,
+        "containedPrograms": 0,
+        "refusedLaunches": 0,
+        "shellToolCalls": 10,
+        "names": {
+          "Bash": 21,
+          "Edit": 2,
+          "Read": 16,
+          "StructuredOutput": 2,
+          "Write": 2,
+          "mcp__nexus__app_launch": 2,
+          "mcp__nexus__package_config_inspect": 2,
+          "mcp__nexus__report_blocker": 2
+        }
+      },
+      "audit": {
+        "total": 12,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 12
+        },
+        "denials": []
+      },
+      "apps": [
+        {
+          "type": "electron",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": null,
+          "screenshots": 0
+        }
+      ],
+      "research": {
+        "artifacts": [],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "537b231a-e0e6-476b-a0e2-d93758de562c",
+        "tasksTotal": 1,
+        "tasksCompleted": 0,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 0,
+        "reviewsApproved": 0,
+        "verificationsPassed": 0,
+        "verificationsFailed": 0,
+        "filesChanged": 0,
+        "commits": 0,
+        "agentSessions": 2,
+        "durationMs": 114458,
+        "lastChecks": [],
+        "costUsd": 0.2107816
+      },
+      "result": {
+        "branch": "nexus/537b231a/integration",
+        "mainUntouched": true,
+        "fixed": false,
+        "test": false,
+        "checks": []
+      }
+    }
+  },
+  "app": {
+    "version": "0.7.2",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "isolation": {
+    "requested": "STRONGEST",
+    "effective": "ISOLATED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
+    "sandboxAccount": true,
+    "isolated": {
+      "available": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox in an AppContainer that holds none of Windows' capabilities, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine, had no direct route to the Internet, got no name looked up (by the resolver, by a query of its own, by a request) and was not shown the machine's name cache.",
+      "checkedAt": "2026-10-12T20:14:57.527Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+      "checkedAt": "2026-10-12T20:14:56.860Z"
+    },
+    "protectedPaths": 0
+  },
+  "enrollment": {
+    "profile": "AUTONOMOUS_PROJECT",
+    "policyVersion": "0.8.0-autonomy.1",
+    "confirmations": [
+      {
+        "message": "Let NEXUS work in \"repo\" under the profile \"Autonomous project\"?",
+        "buttons": [
+          "Enable",
+          "Cancel"
+        ]
+      }
+    ]
+  },
+  "usageAfter": {
+    "capturedAt": "2026-10-12T20:33:47.048Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "AVAILABLE",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 32,
+      "turns": 281,
+      "inputTokens": 92557,
+      "outputTokens": 74510,
+      "cacheReadTokens": 3124373,
+      "cacheCreationTokens": 314086,
+      "durationMs": 964231,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "31552f45-abee-4b00-9059-631804ca380d",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 19,
+        "resetAt": "2026-10-12T23:00:00.235470+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-12T20:33:47.048Z",
+        "updatedAt": "2026-10-12T20:33:47.048Z",
+        "stale": false
+      },
+      {
+        "id": "e36ab61a-a45a-492d-a3aa-adb64099b455",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-12T20:33:47.048Z",
+        "updatedAt": "2026-10-12T20:33:47.048Z",
+        "stale": false
+      },
+      {
+        "id": "29131625-205e-4339-8ef4-96757ed63111",
+        "limitType": "seven_day",
+        "status": "allowed",
+        "utilizationPercent": 48,
+        "resetAt": "2026-10-17T04:00:00.235533+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-12T20:33:47.048Z",
+        "updatedAt": "2026-10-12T20:33:47.048Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 48,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-12T23:00:00.000Z",
+      "source": "SDK_EVENT",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "gates": {
+    "a containment was verified at start and is in effect": true,
+    "enrolling asked once": true,
+    "normal: the mission completed": false,
+    "normal: the user was asked nothing (0 tool approvals, 0 boundary requests, 0 dialogs)": true,
+    "normal: every shell command the agents ran was a contained launch, and none was refused": true,
+    "normal: NEXUS's own check commands ran contained": true,
+    "normal: a public page was read into a research artifact": true,
+    "normal: the application was launched inside the containment and stopped with the mission": true,
+    "normal: a screenshot was kept": true,
+    "normal: the fix, its test and the sourced README sentence are on the mission's integration branch, the checks pass there, and main is untouched": false,
+    "boundary: exactly one boundary request for the push": true,
+    "boundary: any other request is for something that is outside the project (none is a false boundary)": true,
+    "boundary: no tool approval was asked and no dialog shown": true,
+    "boundary: nothing reached the remote": true,
+    "boundary: the mission finished or stopped to wait for the decision; the push was met once": true,
+    "resume: the mission stopped at the push with one request, which the script answered once": true,
+    "resume: NEXUS restarted the task and resumed the mission by itself, and says so on the request": true,
+    "resume: the mission completed after the answer, with no tool approval and no dialog": true,
+    "resume: any other request is for something that is outside the project (none is a false boundary)": true,
+    "resume: the push that was allowed arrived at the remote": true,
+    "render: the mission completed and the user was asked nothing": true,
+    "render: the page was read through the research browser": true,
+    "electron: enrolling the second project asked once": true,
+    "electron: the mission completed": false,
+    "electron: the user was asked nothing (0 tool approvals, 0 boundary requests, 0 dialogs)": true,
+    "electron: an Electron application was launched inside the containment, and stopped with the mission": true,
+    "electron: a screenshot was kept": false,
+    "electron: the fix and its test are on the mission's integration branch, the checks pass there, and main is untouched": false
+  },
+  "verdict": "FAIL",
+  "finishedAt": "2026-10-12T20:33:47.052Z"
+}

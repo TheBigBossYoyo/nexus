@@ -33,6 +33,8 @@ import { unavailableV5Handlers, type V5Handlers } from './v5-handlers'
 import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
+import { createAutonomyHandlers, createIsolationHandlers, type IsolationHandlerContext } from './v8-handlers'
+import { AutonomyService } from '@main/modules/autonomy/service'
 import { createV71Handlers } from './v71-handlers'
 import { createV72Handlers } from './v72-handlers'
 import type { ChatGPTConnection } from '@main/modules/intelligence/connection'
@@ -88,6 +90,12 @@ export interface IpcContext {
   v6?: V6Handlers
   /** v0.7 handlers (the control plane). */
   v7?: V7Handlers
+  /** 0.8: enrolled projects, grants and boundary requests. Absent: one is made over the repositories, with nothing to notify. */
+  autonomy?: AutonomyService
+  /** 0.8: the native confirmation before lasting authority is given (enrolling, allowing for a whole project). Absent: no question. */
+  confirmAutonomy?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
+  /** 0.8: the containment as the runtime holds it. Absent (tests of other handlers): no containment exists and none can be set up. */
+  isolation?: Omit<IsolationHandlerContext, 'confirm'>
 }
 
 type Handlers = {
@@ -799,6 +807,29 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     ...(ctx.v6 ?? unavailableV6Handlers()),
     ...(ctx.v7 ?? unavailableV7Handlers()),
     ...createSecurityHandlers(repos),
+    ...createAutonomyHandlers({
+      autonomy:
+        ctx.autonomy ??
+        new AutonomyService({ repos, runActive: (runId) => {
+          const run = repos.runs.get(runId)
+          return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
+        } }),
+      projectName: (projectId) => repos.projects.get(projectId)?.name ?? null,
+      ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
+    }),
+    'research.list': ({ projectId, runId, limit }) => ({
+      // The path of the kept text and of a held file stays in the runtime.
+      artifacts: repos.researchArtifacts.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((a) => ({ ...a, textPath: null })),
+      downloads: repos.researchDownloads.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((d) => ({ id: d.id, projectId: d.projectId, runId: d.runId, url: d.url, finalUrl: d.finalUrl, fileName: d.suggestedName, sniffed: d.sniffed, bytes: d.bytes, sha256: d.sha256, state: d.state, refusal: d.refusal, downloadedAt: d.downloadedAt })),
+    }),
+    ...createIsolationHandlers({
+      ...(ctx.isolation ?? {
+        status: () => ({ requested: repos.settings.get().execution.containment, effective: 'STANDARD' as const, usable: false, detail: 'This runtime has no containment.', isolated: null, restricted: null, sandboxAccount: false, setupAvailable: false, protectedPaths: [], launches: { shell: 0, commands: 0, programs: 0, refused: 0 } }),
+        setup: () => Promise.resolve({ ok: false, detail: 'This runtime has no containment.' }),
+        apps: () => [],
+      }),
+      ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
+    }),
     ...createV71Handlers({ repos, git: ctx.git }),
   }
 }

@@ -1,7 +1,7 @@
 import type { AgentPurpose, AgentRole } from '@shared/domain'
 import { assertNever } from '@shared/result'
 
-const ENVIRONMENT = `Environment: native Windows 11 (no WSL). PowerShell may be the shell; use Windows paths and do not assume bash, sed, or other POSIX tools exist.`
+const ENVIRONMENT = `Environment: native Windows 11 (no WSL). PowerShell may be the shell; use Windows paths and do not assume bash, sed, or other POSIX tools exist. Where the Bash tool runs inside the isolated containment its shell is a POSIX sh (busybox ash) with the usual Unix tools, not bash: arrays do not exist there, and a command that uses one is refused as a whole with a message that says so; write it without. There is no /tmp there: a temporary file goes under "$TMPDIR" or in the worktree.`
 
 const PRINCIPLES = `Engineering principles (apply always):
 - Investigate before claiming. Read the relevant code and cite repository evidence (file path and line, command output) for every claim.
@@ -18,7 +18,8 @@ const NEXUS_TOOLS = `NEXUS tools (MCP server "nexus"):
 - mcp__nexus__report_blocker: report a concrete blocker with evidence.
 - mcp__nexus__record_decision: record a notable design decision with rationale.
 - mcp__nexus__propose_memory: propose a durable, evidence-backed project fact for project memory (user-approved before use).
-- mcp__nexus__propose_graph_change: propose a change to the task graph (only for the roles that have a "Changing the plan" section).`
+- mcp__nexus__propose_graph_change: propose a change to the task graph (only for the roles that have a "Changing the plan" section).
+- mcp__nexus__package_config_inspect: the package-manager configuration of the worktree as facts (ignore-scripts, registries, build-script allowlists, mirrors, lockfile, what applies to commands run in the task), with credentials left out. Use it first to diagnose dependency installs and install scripts. Do not cat, type or Get-Content .npmrc or other credential-bearing configuration: the raw file is a boundary that is put to the user.`
 
 const GRAPH_CHANGES = `Changing the plan (mcp__nexus__propose_graph_change):
 - Use it only when the plan itself is wrong, never to avoid hard work: (1) a prerequisite is missing and your task cannot be finished without it (ADD_TASK; set blocksProposer true so your task waits and is resumed after the prerequisite is merged), (2) your task or a task that has not started is too large for one session (SPLIT_TASK; the subtasks must carry over every acceptance criterion of the original), (3) a task is obsolete (CANCEL_TASK).

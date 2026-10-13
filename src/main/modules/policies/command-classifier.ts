@@ -49,6 +49,15 @@ export interface CommandClassification {
   commandClass: CommandClass
   /** Every distinct class seen, most severe last. */
   classes: CommandClass[]
+  /** 0.8: each finding with its own class and risk, for callers that decide per finding (the capability broker). */
+  findings: CommandFinding[]
+}
+
+export interface CommandFinding {
+  level: 'needs_approval' | 'forbidden'
+  risk: CommandRisk
+  reason: string
+  cls: CommandClass
 }
 
 export interface ClassifyOptions {
@@ -56,17 +65,17 @@ export interface ClassifyOptions {
   roots?: string[]
   /** Extra commands (word prefixes, e.g. "pnpm test:unit") that count as verification commands. */
   safeCommandPrefixes?: string[]
+  /**
+   * The enrolled repository. A command that does nothing but test whether paths exist may name paths in it
+   * that are outside the worktree (the repository's own `.git` directory, for one).
+   */
+  projectRoot?: string
 }
 
 const MAX_NESTING = 6
 const RISK_ORDER: Record<CommandRisk, number> = { low: 0, medium: 1, high: 2 }
 
-interface Finding {
-  level: 'needs_approval' | 'forbidden'
-  risk: CommandRisk
-  reason: string
-  cls: CommandClass
-}
+type Finding = CommandFinding
 
 class Analysis {
   readonly findings: Finding[] = []
@@ -112,6 +121,7 @@ export function classifyCommand(command: string, shell: Shell, opts: ClassifyOpt
   } catch (e) {
     a.add('forbidden', 'high', `command could not be analysed safely: ${e instanceof Error ? e.message : String(e)}`)
   }
+  if (shell === 'powershell' && a.findings.length > 0 && onlyTestsExistence(command)) dropExistenceFindings(a)
   const reasons = [...new Set(a.findings.map((f) => f.reason))]
   const segments = a.segments
   const all = [...a.segments.map((s) => s.class ?? 'UNKNOWN'), ...a.findings.map((f) => f.cls)]
@@ -119,14 +129,14 @@ export function classifyCommand(command: string, shell: Shell, opts: ClassifyOpt
   const commandClass = maxClass(all)
   if (a.findings.some((f) => f.level === 'forbidden')) {
     const forbidden = a.findings.filter((f) => f.level === 'forbidden')
-    return { level: 'forbidden', reasons: [...new Set(forbidden.map((f) => f.reason))], risk: 'high', segments, commandClass, classes }
+    return { level: 'forbidden', reasons: [...new Set(forbidden.map((f) => f.reason))], risk: 'high', segments, commandClass, classes, findings: forbidden }
   }
   if (a.findings.length > 0) {
     const risk = a.findings.reduce<CommandRisk>((m, f) => (RISK_ORDER[f.risk] > RISK_ORDER[m] ? f.risk : m), 'low')
-    return { level: 'needs_approval', reasons, risk, segments, commandClass, classes }
+    return { level: 'needs_approval', reasons, risk, segments, commandClass, classes, findings: a.findings }
   }
   const readOnly = segments.every((s) => s.kind === 'readonly')
-  return { level: readOnly ? 'safe' : 'write', reasons: [], risk: null, segments, commandClass, classes }
+  return { level: readOnly ? 'safe' : 'write', reasons: [], risk: null, segments, commandClass, classes, findings: [] }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -236,6 +246,109 @@ function commandNameCandidates(word: string): string[] {
  * `shutdown,/s` and `shutdown=/s` run shutdown.exe. Returns the name before such a delimiter when what follows is
  * a short switch (or nothing), which keeps paths and identifiers (`shutdown/index.ts`) out; null otherwise.
  */
+/**
+ * Whether a PowerShell command does nothing but test whether paths exist and print text: `Test-Path`, strings,
+ * variables, `foreach`, `if`. Read strictly, character by character; anything this does not know (a pipe, a
+ * redirection, an assignment, a call of a method, any other command) is a no. A real session (2026-10-12) was
+ * stopped for `foreach ($d in '<the repository's .git>') { "...$(Test-Path "$d/FETCH_HEAD")" }`, which was put
+ * to the user as a change of the Git configuration.
+ */
+export function onlyTestsExistence(command: string): boolean {
+  const n = command.length
+  let i = 0
+  let tested = false
+  const KEYWORDS = new Set(['foreach', 'in', 'if', 'else', 'elseif', '-and', '-or', '-not'])
+  const quoted = (): boolean => {
+    i += 1
+    while (i < n) {
+      const c = command[i]
+      if (c === '`') i += 2
+      else if (c === '"') {
+        if (command[i + 1] !== '"') {
+          i += 1
+          return true
+        }
+        i += 2
+      } else if (c === '$' && command[i + 1] === '(') {
+        i += 2
+        if (!code(true)) return false
+      } else i += 1
+    }
+    return false
+  }
+  const code = (nested: boolean): boolean => {
+    // Inside the arguments of a Test-Path: a bare word there is a path or a parameter, not a command.
+    let args = false
+    while (i < n) {
+      const c = command[i] ?? ''
+      if (c === ';' || c === '{' || c === '}' || c === '\n' || c === '\r') {
+        args = false
+        i += 1
+      } else if (c === ' ' || c === '\t' || c === ',') i += 1
+      else if (c === ')') {
+        if (!nested) return false
+        i += 1
+        return true
+      } else if (c === '(') {
+        i += 1
+        if (!code(true)) return false
+      } else if (c === "'") {
+        const end = command.indexOf("'", i + 1)
+        if (end < 0) return false
+        i = end + 1
+      } else if (c === '"') {
+        if (!quoted()) return false
+      } else if (c === '$') {
+        if (command[i + 1] === '(') {
+          i += 2
+          if (!code(true)) return false
+          continue
+        }
+        const m = /^\$[A-Za-z_]\w*/.exec(command.slice(i, i + 80))
+        if (m === null) return false
+        i += m[0].length
+        // `$x.Delete()`, `$x[0]`, `$env:X`, `$x::y`: more than a value.
+        if (/[.[:]/.test(command[i] ?? '')) return false
+      } else {
+        const m = /^[A-Za-z0-9_./\\:~*-]+/.exec(command.slice(i, i + 400))
+        if (m === null) return false
+        const word = m[0].toLowerCase()
+        i += m[0].length
+        if (args) continue
+        if (word === 'test-path') {
+          args = true
+          tested = true
+        } else if (!KEYWORDS.has(word)) return false
+      }
+    }
+    return !nested
+  }
+  return code(false) && tested
+}
+
+/** Of a command that only tests whether paths exist: naming Git's files changes nothing, and a path in the project is a read of the project. */
+function dropExistenceFindings(a: Analysis): void {
+  const project = a.opts.projectRoot
+  const base = a.roots[0]
+  const inProject = (value: string): boolean => {
+    if (project === undefined || base === undefined) return false
+    return value.split(',').every((part) => {
+      try {
+        return isPathInside(canonicalizePath(project, project), canonicalizePath(part.trim(), base))
+      } catch {
+        return false
+      }
+    })
+  }
+  const kept = a.findings.filter((f) => {
+    if (f.reason.startsWith("touching Git's own files: ")) return false
+    const outside = /^path outside the worktree: (.*)$/.exec(f.reason)
+    return !(outside !== null && inProject(outside[1] ?? ''))
+  })
+  a.findings.length = 0
+  a.findings.push(...kept)
+}
+
 export function cmdCommandName(word: string): string | null {
   const last = word.split('\\').pop() ?? word
   const m = /^([A-Za-z][\w.-]*)(?:[",;=]+|\/(?=[a-z]{1,2}(?:\b|\/|$)))/.exec(last)
@@ -531,7 +644,11 @@ function skipXargsFlags(words: string[], from: number): number {
 const GIT_ENTRY_WRITERS = new Set([...PROJECT_WRITE_CMDS, ...DELETE_CMDS, ...MOVE_CMDS, 'mklink', 'ln', 'out-file', 'sc', 'ac', 'cpi', 'xcopy', 'robocopy', 'set-itemproperty', 'clear-content', 'sed', 'dd', 'install'])
 /** Cmdlets whose first positional (or -Path/-FilePath/-LiteralPath/-Destination value) is the path; later words are content. */
 const PATH_FIRST_ONLY = new Set(['set-content', 'sc', 'add-content', 'ac', 'out-file', 'new-item', 'ni', 'tee-object', 'export-csv', 'export-clixml', 'clear-content'])
-const GIT_ENTRY_REASON = "writing, moving or deleting a worktree's own .git entry (touching Git's own files) is never allowed: it decides which repository NEXUS's later git commands act on"
+/** Commands whose arguments are text to print. */
+const TEXT_PRINTERS = new Set(['echo', 'printf', 'write-output', 'write-host'])
+/** Commands that only read the one file they are named. */
+const GIT_POINTER_READERS = new Set(['cat', 'type', 'get-content', 'gc', 'head', 'tail', 'wc', 'file', 'stat'])
+const GIT_ENTRY_REASON ="writing, moving or deleting a worktree's own .git entry (touching Git's own files) is never allowed: it decides which repository NEXUS's later git commands act on"
 
 function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boolean, isGit = false): void {
   const redirectTargets = new Set(seg.redirects.filter((r) => !r.op.startsWith('<')).map((r) => r.target))
@@ -566,13 +683,18 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
         a.add('forbidden', 'high', GIT_ENTRY_REASON, 'SYSTEM_CHANGE')
       } else if (destructive && namesGit) {
         a.ask('high', 'deleting or moving a .git directory', 'DESTRUCTIVE')
+      } else if (topGit && !isGit && GIT_POINTER_READERS.has(head[0] ?? '') && redirectTargets.size === 0) {
+        // Reading the worktree's own `.git` entry (in a worktree, a one-line file that says where the Git
+        // directory is) changes nothing and shows nothing git itself does not print. Only the entry itself:
+        // what is below a `.git` directory (the configuration, with the addresses of its remotes) is not read this way.
       } else if (namesGit && !isGit) {
         // Git's own files (a worktree's `.git` pointer, the repository's config and hooks) decide which
         // repository NEXUS's later git commands act on and what they run. No command but git itself has a
         // reason to name them.
         a.ask('high', `touching Git's own files: ${v}`, 'SYSTEM_CHANGE')
       }
-      const outside = outsideRoots(v, a)
+      // What echo and printf are given is text they print, not a place: only where their output is sent is one.
+      const outside = TEXT_PRINTERS.has(head[0] ?? '') && !redirectTargets.has(w) ? null : outsideRoots(v, a)
       if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
     }
   }
@@ -640,8 +762,11 @@ function variablePathRisk(v: string, a: Analysis): string | null {
 /** `[IO.File]::WriteAllText(path, ...)`, `[IO.Directory]::Delete(path)`, `New-Object IO.StreamWriter path`: the path argument is a write position. */
 function checkDotNetFileWrites(text: string, a: Analysis): void {
   const targets: string[] = []
-  for (const m of text.matchAll(/\[(?:System\.)?IO\.(?:File|Directory)\]::(?!(?:Read|Exists|Get|Open(?:Read)?\b))\w+\(\s*(?:\$\w+|"([^"]*)"|'([^']*)')\s*(?:,\s*(?:"([^"]*)"|'([^']*)'))?/gi)) {
-    targets.push(...[m[1], m[2], m[3], m[4]].filter((x): x is string => x !== undefined))
+  for (const m of text.matchAll(/\[(?:System\.)?IO\.(?:File|Directory)\]::(?!(?:Read|Exists|Get|Open(?:Read)?\b))(\w+)\(\s*(?:\$\w+|"([^"]*)"|'([^']*)')\s*(?:,\s*(?:"([^"]*)"|'([^']*)'))?/gi)) {
+    // The second argument is a path only where the method takes two (Copy, Move, Replace); elsewhere it is the
+    // text that is written, and text is not a place.
+    const twoPaths = /^(?:copy|move|replace)/i.test(m[1] ?? '')
+    targets.push(...[m[2], m[3], ...(twoPaths ? [m[4], m[5]] : [])].filter((x): x is string => x !== undefined))
   }
   for (const m of text.matchAll(/\bstreamwriter\b[\s(]*["']?([^"',)\s]+)/gi)) if (m[1] !== undefined) targets.push(m[1])
   for (const m of text.matchAll(/\[(?:System\.)?IO\.(?:File|Directory)\]::(?!Read|Exists|Get)\w+\(\s*(\$\w+)/gi)) if (m[1] !== undefined) targets.push(m[1])
@@ -762,7 +887,9 @@ function outsideRoots(v: string, a: Analysis): string | null {
   if (new RegExp(`^(\\$\\{?(env:)?|%)(${pathVars})(\\}|%|\\b)`, 'i').test(v)) {
     return `path from an environment variable may be outside the worktree: ${v}`
   }
-  if (/^[\\/]{2}[^\\/]/.test(v)) return `UNC path outside the worktree: ${v}`
+  // A UNC path names a server and something on it (`\\server\share`, `\\.\pipe\x`). Two backslashes before a
+  // word alone are not one: `'\\r'` is a pattern for grep (a real session, 2026-10-12, was stopped for it).
+  if (/^[\\/]{2}[^\\/]+[\\/]+[^\\/]/.test(v)) return `UNC path outside the worktree: ${v}`
   // A variable is not a directory name. Where a path is written, variablePathRisk expands it or asks.
   if (/\$[\w{(]|`|%\w+%/.test(v)) return null
 

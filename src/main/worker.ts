@@ -3,7 +3,6 @@ import { createDemoScript } from './modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from './modules/agent-runtime/fake-runtime'
 import { resolveClaudeExecutable } from './modules/agent-runtime/resolve-executable'
 import type { AgentRuntime, AgentSessionHandle, NexusToolHandlers, SessionSpec, ToolDecision } from './modules/agent-runtime/types'
-import { GitService } from './modules/git'
 import { CodexCliRuntime } from './modules/providers/codex-runtime'
 import { createProbeScript } from './modules/workers/probe-script'
 import type { RuntimeToWorker, WireSessionSpec, WorkerCallMethod, WorkerConfig, WorkerToRuntime } from './modules/workers/protocol'
@@ -84,9 +83,10 @@ function buildRuntimes(config: WorkerConfig): Map<string, AgentRuntime> {
     )
   }
   if (config.codex) {
-    const git = new GitService()
     const version = config.codex.version
-    runtimes.set('codex', new CodexCliRuntime({ version: () => version, snapshot: (cwd) => git.workingState(cwd) }))
+    // No git runs in this process: a session's working directory is written by the session, and a git started
+    // here would take the repository from the `.git` file in it. The runtime, which knows the worktree, answers.
+    runtimes.set('codex', new CodexCliRuntime({ version: () => version, snapshot: () => (activeLease === null ? Promise.resolve(null) : (call(activeLease, 'workingState', []) as Promise<string | null>).catch(() => null)) }))
   }
   return runtimes
 }
@@ -101,6 +101,7 @@ function toSpec(leaseId: string, wire: WireSessionSpec): SessionSpec {
         proposeMemory: (input) => call(leaseId, 'proposeMemory', [input]) as Promise<string>,
         ...(tools.proposeGraphChange ? { proposeGraphChange: (input: unknown) => call(leaseId, 'proposeGraphChange', [input]) as Promise<string> } : {}),
         ...(tools.contextTool ? { contextTool: (input: unknown) => call(leaseId, 'contextTool', [input]) as Promise<string> } : {}),
+        ...(tools.extensionGroups ? { extensionGroups: tools.extensionGroups, extensionTool: (input: unknown) => call(leaseId, 'extensionTool', [input]) as Promise<string> } : {}),
       }
     : undefined
   const { nexusTools: _flags, ...data } = wire
@@ -116,6 +117,8 @@ function toSpec(leaseId: string, wire: WireSessionSpec): SessionSpec {
 let runtimes = new Map<string, AgentRuntime>()
 let heartbeat: ReturnType<typeof setInterval> | null = null
 let current: { leaseId: string; handle: AgentSessionHandle } | null = null
+/** The assignment whose session is starting or running: what a call to the runtime is made under. */
+let activeLease: string | null = null
 
 async function run(leaseId: string, provider: string, wire: WireSessionSpec): Promise<void> {
   const runtime = runtimes.get(provider)
@@ -126,6 +129,7 @@ async function run(leaseId: string, provider: string, wire: WireSessionSpec): Pr
   }
   let ended = false
   try {
+    activeLease = leaseId
     const handle = runtime.startSession(toSpec(leaseId, wire))
     current = { leaseId, handle }
     for await (const event of handle.events) {

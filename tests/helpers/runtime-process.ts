@@ -33,7 +33,7 @@ export function buildRuntime(): Promise<void> {
       target: 'node22',
       alias: { '@shared': join(REPO, 'src', 'shared'), '@main': join(REPO, 'src', 'main') },
       // Native and vendor packages are loaded from node_modules at run time, as in the app.
-      external: ['better-sqlite3', '@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'electron'],
+      external: ['better-sqlite3', '@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'electron', 'playwright-core'],
       banner: { js: "import { createRequire as __nexusCreateRequire } from 'node:module'; const require = __nexusCreateRequire(import.meta.url);" },
       logLevel: 'silent',
     })

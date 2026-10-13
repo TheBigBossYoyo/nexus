@@ -12,7 +12,7 @@ export type ComposerIntent = 'overnight' | null
 /** Section of the Settings page to open (e.g. the Usage behavior section from the quota banner). */
 export type SettingsSection = string | null
 
-export type Drawer = 'approvals' | null
+export type Drawer = 'approvals' | 'boundary' | null
 export type PanelLayout = Record<string, number>
 
 interface UiState {

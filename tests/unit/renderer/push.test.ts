@@ -81,6 +81,16 @@ describe('push handler', () => {
     h.dispose()
   })
 
+  it('invalidates the autonomy queries on an autonomy push', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
+    const h = createPushHandler(qc, { debounceMs: 100, live: live() })
+    h.handle({ kind: 'autonomy', pending: 2 })
+    vi.advanceTimersByTime(100)
+    expect(spy.mock.calls.map(([f]) => f?.queryKey)).toContainEqual(['autonomy'])
+    h.dispose()
+  })
+
   it('still flushes during a continuous stream', () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()

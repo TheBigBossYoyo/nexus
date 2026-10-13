@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
 import { ACTIVE_AGENT_STATES } from '@shared/domain'
 import { useActiveOvernight, usePendingApprovals } from '../lib/queries'
+import { useAutonomyStatus } from '../lib/queries-autonomy'
 import { runStatus } from '../lib/status'
+import { boundaryCountShort } from '../views/autonomy/autonomyModel'
 import { cn } from '../lib/cn'
 import { overnightWord } from '../lib/wording'
 import { isArenaWorkload } from '../views/overnight/workloadModel'
@@ -173,6 +175,32 @@ function ApprovalsStatus() {
   )
 }
 
+/**
+ * Pending boundary decisions across all projects. Nothing is shown when there are none. The wrapper stays mounted
+ * so a screen reader hears the count change; the button never takes focus and never opens the inbox by itself.
+ */
+function BoundaryStatus() {
+  const count = useAutonomyStatus().data?.pendingBoundaryRequests ?? 0
+  const setDrawer = useUiStore((s) => s.setDrawer)
+  const label = boundaryCountShort(count)
+  return (
+    <span role="status" className="contents" data-testid="boundary-status">
+      {label ? (
+        <button
+          type="button"
+          data-testid="boundary-badge"
+          onClick={() => setDrawer('boundary')}
+          title="Open the boundary requests that are waiting for your decision"
+          className={ITEM_BUTTON}
+        >
+          <StatusDot tone="waiting" />
+          <span className="tnum">{label}</span>
+        </button>
+      ) : null}
+    </span>
+  )
+}
+
 function PaletteButton() {
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen)
   return (
@@ -204,6 +232,7 @@ export function GlobalStatus() {
       {showRun ? <RunStatus /> : null}
       <OvernightStatus showOff={showOvernightOff} />
       {showGit ? <GitStatus /> : null}
+      <BoundaryStatus />
       <ApprovalsStatus />
       <PaletteButton />
     </>

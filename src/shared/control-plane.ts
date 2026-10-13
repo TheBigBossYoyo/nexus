@@ -347,7 +347,7 @@ export function overallHealth(components: readonly ComponentHealth[]): HealthLev
 
 // ───────────────────────────── notifications ─────────────────────────────
 
-export const NOTIFICATION_KINDS = ['milestone_completed', 'quota_paused', 'quota_resumed', 'program_blocked', 'workload_blocked', 'arena_regression', 'overnight_completed', 'security_high', 'work_item_failed', 'schedule_started'] as const
+export const NOTIFICATION_KINDS = ['milestone_completed', 'quota_paused', 'quota_resumed', 'program_blocked', 'workload_blocked', 'arena_regression', 'overnight_completed', 'security_high', 'work_item_failed', 'schedule_started', 'boundary_request', 'isolation_failure'] as const
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
 export interface NotificationRecord {

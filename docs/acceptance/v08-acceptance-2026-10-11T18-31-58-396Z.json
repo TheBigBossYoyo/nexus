@@ -1,0 +1,378 @@
+{
+  "kind": "v0.8-acceptance",
+  "startedAt": "2026-10-11T18:27:31.381Z",
+  "executable": "dev build",
+  "baseCommit": "7ea3193d8913ba85e10309d46f3c8a22d6292218",
+  "missions": {
+    "normal": {
+      "runId": "37438351-48a3-44e5-a0a3-8e94edb0c5c5",
+      "state": "completed",
+      "minutes": 3.3,
+      "tasks": [
+        {
+          "key": "fix-counter-test-readme-verify-app",
+          "state": "completed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [],
+      "tools": {
+        "events": 81,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the planner role (cd). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.\"}"
+        ],
+        "containedShell": 7,
+        "containedCommands": 4,
+        "containedPrograms": 2,
+        "refusedLaunches": 0,
+        "shellToolCalls": 8,
+        "names": {
+          "Bash": 17,
+          "Edit": 4,
+          "Read": 16,
+          "StructuredOutput": 8,
+          "Write": 2,
+          "mcp__nexus__app_act": 4,
+          "mcp__nexus__app_find": 2,
+          "mcp__nexus__app_launch": 4,
+          "mcp__nexus__app_screenshot": 2,
+          "mcp__nexus__app_snapshot": 4,
+          "mcp__nexus__app_status": 6,
+          "mcp__nexus__app_stop": 4,
+          "mcp__nexus__research_read": 8
+        }
+      },
+      "audit": {
+        "total": 25,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 21,
+          "POLICY_DENIAL": 4
+        },
+        "denials": [
+          {
+            "severity": "POLICY_DENIAL",
+            "action": "app browser CONNECT",
+            "resource": "host: www.bing.com:443",
+            "reason": "Refused by the network policy of the application under test (PUBLIC_NOT_ALLOWED)."
+          },
+          {
+            "severity": "POLICY_DENIAL",
+            "action": "app browser CONNECT",
+            "resource": "host: www.bing.com:443",
+            "reason": "Refused by the network policy of the application under test (PUBLIC_NOT_ALLOWED)."
+          },
+          {
+            "severity": "POLICY_DENIAL",
+            "action": "app browser CONNECT",
+            "resource": "host: www.bing.com:443",
+            "reason": "Refused by the network policy of the application under test (PUBLIC_NOT_ALLOWED)."
+          },
+          {
+            "severity": "POLICY_DENIAL",
+            "action": "app browser CONNECT",
+            "resource": "host: www.bing.com:443",
+            "reason": "Refused by the network policy of the application under test (PUBLIC_NOT_ALLOWED)."
+          }
+        ]
+      },
+      "apps": [
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": "registered",
+          "screenshots": 0
+        },
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "ISOLATED",
+          "endpoint": "registered",
+          "screenshots": 1
+        }
+      ],
+      "research": {
+        "artifacts": [
+          {
+            "url": "https://nodejs.org/api/net.html",
+            "publisher": "nodejs.org",
+            "sourceType": "OFFICIAL_DOCS",
+            "authority": "PRIMARY",
+            "screening": "clean",
+            "chars": 76850
+          }
+        ],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "37438351-48a3-44e5-a0a3-8e94edb0c5c5",
+        "tasksTotal": 1,
+        "tasksCompleted": 1,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 1,
+        "reviewsApproved": 1,
+        "verificationsPassed": 2,
+        "verificationsFailed": 0,
+        "filesChanged": 3,
+        "commits": 2,
+        "agentSessions": 5,
+        "durationMs": 144054,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\ProgramData\\NexusSandbox\\worktrees\\5e2cf5e81c3b\\37438351\\integration",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 1321,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm.\n\n> counter@1.0.0 test\n> node --test\n\n✔ each POST /inc adds 1 (75.502ms)\n✔ the page is served (65.4888ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 234.1256\n"
+          }
+        ],
+        "costUsd": 1.0311278
+      },
+      "result": {
+        "mainMoved": false,
+        "server": false,
+        "readme": false,
+        "testsOnMain": "✔ the page is served (68.8798ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 196.2851\n"
+      }
+    },
+    "boundary": {
+      "runId": "fcfd3b63-e359-48d0-a8a3-1f921f47d2f6",
+      "state": "paused",
+      "minutes": 1,
+      "tasks": [
+        {
+          "key": "readme-line-test-push",
+          "state": "blocked"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [
+        {
+          "capability": "WRITE_OUTSIDE_PROJECT",
+          "resource": {
+            "kind": "ANY",
+            "value": ""
+          },
+          "state": "PENDING",
+          "occurrences": 1
+        }
+      ],
+      "tools": {
+        "events": 20,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the planner role (cd, od). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.\"}",
+          "{\"toolName\":\"Bash\",\"reason\":\"Not done: this is outside what the project allows without the user's decision. NEXUS has put the question to the user: Write or delete files outside the task roots (boundary request 8bd5a806-fce4-4c40-92cc-63ef6bdc2b7d). Do not retry it and do not look for another way to the same effect. Go on with the work that does not depend on it. If nothing else is left, report a "
+        ],
+        "containedShell": 2,
+        "containedCommands": 2,
+        "containedPrograms": 0,
+        "refusedLaunches": 0,
+        "shellToolCalls": 4,
+        "names": {
+          "Bash": 10,
+          "Read": 6,
+          "StructuredOutput": 2,
+          "mcp__nexus__report_blocker": 2
+        }
+      },
+      "audit": {
+        "total": 4,
+        "bySeverity": {
+          "BOUNDARY_REQUEST": 1,
+          "NORMAL_AUTONOMOUS_ACTION": 3
+        },
+        "denials": [
+          {
+            "severity": "BOUNDARY_REQUEST",
+            "action": "printf '\\r\\nMaintained with NEXUS.\\r\\n' >> README.md && git diff && npm test 2>&1 | tail -15",
+            "resource": "any",
+            "reason": "Write or delete files outside the task roots is outside what the AUTONOMOUS_PROJECT profile of this project allows."
+          }
+        ]
+      },
+      "apps": [],
+      "research": {
+        "artifacts": [],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "fcfd3b63-e359-48d0-a8a3-1f921f47d2f6",
+        "tasksTotal": 1,
+        "tasksCompleted": 0,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 0,
+        "reviewsApproved": 0,
+        "verificationsPassed": 0,
+        "verificationsFailed": 0,
+        "filesChanged": 0,
+        "commits": 0,
+        "agentSessions": 2,
+        "durationMs": 24848,
+        "lastChecks": [],
+        "costUsd": 0.131026
+      },
+      "remoteUnchanged": true
+    }
+  },
+  "app": {
+    "version": "0.7.2",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "isolation": {
+    "requested": "STRONGEST",
+    "effective": "ISOLATED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, and had no direct route to the Internet.",
+    "sandboxAccount": true,
+    "isolated": {
+      "available": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, and had no direct route to the Internet.",
+      "checkedAt": "2026-10-11T18:27:33.576Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault and unprotected files are within its reach.",
+      "checkedAt": "2026-10-11T18:27:33.084Z"
+    },
+    "protectedPaths": 0
+  },
+  "enrollment": {
+    "profile": "AUTONOMOUS_PROJECT",
+    "policyVersion": "0.8.0-autonomy.1",
+    "confirmations": [
+      {
+        "message": "Let NEXUS work in \"repo\" under the profile \"Autonomous project\"?",
+        "buttons": [
+          "Enable",
+          "Cancel"
+        ]
+      }
+    ]
+  },
+  "usageAfter": {
+    "capturedAt": "2026-10-11T18:31:58.392Z",
+    "provider": "claude",
+    "accountMode": {
+      "value": "subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "subscriptionType": {
+      "value": "Claude subscription",
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "status": "AVAILABLE",
+    "availability": "AVAILABLE",
+    "session": {
+      "sessions": 7,
+      "turns": 56,
+      "inputTokens": 18534,
+      "outputTokens": 14863,
+      "cacheReadTokens": 536759,
+      "cacheCreationTokens": 111504,
+      "durationMs": 201256,
+      "limitEvents": 0
+    },
+    "windows": [
+      {
+        "id": "cf39e03f-31d0-43ba-b2d5-5c5a5d9044c1",
+        "limitType": "five_hour",
+        "status": "allowed",
+        "utilizationPercent": 20,
+        "resetAt": "2026-10-11T23:00:00.415165+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-11T18:31:58.392Z",
+        "updatedAt": "2026-10-11T18:31:58.392Z",
+        "stale": false
+      },
+      {
+        "id": "36fdc628-e0f3-4fe7-b314-83fbf91b44cb",
+        "limitType": "iguana_necktie",
+        "status": "allowed",
+        "utilizationPercent": 0,
+        "resetAt": "2026-11-05T07:59:00+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-11T18:31:58.392Z",
+        "updatedAt": "2026-10-11T18:31:58.392Z",
+        "stale": false
+      },
+      {
+        "id": "c6dc12d6-8413-45bf-ae57-19d661d4760b",
+        "limitType": "seven_day",
+        "status": "allowed",
+        "utilizationPercent": 32,
+        "resetAt": "2026-10-17T04:00:00.415184+00:00",
+        "source": "RUNTIME",
+        "confidence": "EXACT",
+        "observedAt": "2026-10-11T18:31:58.392Z",
+        "updatedAt": "2026-10-11T18:31:58.392Z",
+        "stale": false
+      }
+    ],
+    "subscriptionUtilizationPercent": {
+      "value": 32,
+      "source": "RUNTIME",
+      "confidence": "EXACT"
+    },
+    "nextResetAt": {
+      "value": "2026-10-11T23:00:00.000Z",
+      "source": "SDK_EVENT",
+      "confidence": "EXACT"
+    },
+    "retryAfterMs": {
+      "value": null,
+      "source": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    },
+    "lastLimitAt": null,
+    "autoResume": {
+      "enabled": true,
+      "pause": null,
+      "nextCheckAt": {
+        "value": null,
+        "source": "UNKNOWN",
+        "confidence": "UNKNOWN"
+      },
+      "pausedRuns": 0
+    },
+    "usageReportSupported": true
+  },
+  "gates": {
+    "a containment was verified at start and is in effect": true,
+    "enrolling asked once": true,
+    "normal: the mission completed": true,
+    "normal: the user was asked nothing (0 tool approvals, 0 boundary requests, 0 dialogs)": true,
+    "normal: every shell command the agents ran was a contained launch, and none was refused": true,
+    "normal: NEXUS's own check commands ran contained": true,
+    "normal: a public page was read into a research artifact": true,
+    "normal: the application was launched inside the containment and stopped with the mission": true,
+    "normal: a screenshot was kept": true,
+    "normal: the fix is on main and the tests pass there": false,
+    "boundary: exactly one boundary request, for the push": false,
+    "boundary: no tool approval was asked and no dialog shown": true,
+    "boundary: nothing reached the remote": true,
+    "boundary: the mission did not hang on it": false
+  },
+  "verdict": "FAIL",
+  "finishedAt": "2026-10-11T18:31:58.396Z"
+}

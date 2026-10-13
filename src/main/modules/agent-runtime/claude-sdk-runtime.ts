@@ -21,6 +21,7 @@ import { nowIso } from '@shared/ids'
 import { NexusError, errorMessage } from '@shared/result'
 import { ProposalTypeSchema } from '@shared/v2'
 import { AsyncQueue } from './async-queue'
+import { extensionToolsFor } from './extension-tools'
 import { createTranslatorState, translateSdkMessage } from './translate'
 import type {
   AgentEvent,
@@ -296,7 +297,7 @@ class PolicyGate {
     const input = isRecord(hookInput.tool_input) ? hookInput.tool_input : {}
     const d = await this.decide(hookInput.tool_name, input, toolUseId)
     if (d.behavior === 'allow') {
-      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', ...(d.updatedInput ? { updatedInput: d.updatedInput } : {}) } }
     }
     if (d.behavior === 'deny') {
       this.denied(toolUseId, hookInput.tool_name, d.reason)
@@ -318,7 +319,7 @@ class PolicyGate {
     this.pendingAsk.delete(toolUseId)
     const d = pending ?? (await this.decide(toolName, input, toolUseId))
 
-    if (d.behavior === 'allow') return { behavior: 'allow', updatedInput: input }
+    if (d.behavior === 'allow') return { behavior: 'allow', updatedInput: d.updatedInput ?? input }
     if (d.behavior === 'deny') {
       this.denied(toolUseId, toolName, d.reason)
       return { behavior: 'deny', message: d.reason }
@@ -416,6 +417,8 @@ const contextPath = z.string().max(600)
 export function createNexusMcpServer(handlers: NexusToolHandlers, options: { alwaysLoad?: boolean } = {}): McpServerConfig {
   const propose = handlers.proposeGraphChange?.bind(handlers)
   const context = handlers.contextTool?.bind(handlers)
+  const extension = handlers.extensionTool?.bind(handlers)
+  const extensionDefs = extension ? extensionToolsFor(handlers.extensionGroups ?? []) : []
   return createSdkMcpServer({
     name: 'nexus',
     // Few, small definitions: loading them upfront saves the tool-search round trip. Decided per session by NEXUS.
@@ -467,6 +470,7 @@ export function createNexusMcpServer(handlers: NexusToolHandlers, options: { alw
             ),
           ]
         : []),
+      ...(extension ? extensionDefs.map((def) => tool(def.name, def.description, def.shape, (a) => guarded(() => extension({ name: def.name, args: a })))) : []),
       tool(
         'send_message',
         'Send a message to another task or role in this run (question, handoff, finding, warning).',

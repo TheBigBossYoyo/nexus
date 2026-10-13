@@ -3,6 +3,7 @@ import { ShellSlotsContext } from '../components/ui/PageHeader'
 import { useApplySavedAppearance } from './appearance'
 import { ApprovalBar, useAutoOpenApprovals } from '../views/approvals/ApprovalBar'
 import { ApprovalDrawer } from '../views/approvals/ApprovalDrawer'
+import { BoundaryInbox } from '../views/autonomy/BoundaryInbox'
 import { RecoveryDialog } from '../views/recovery/RecoveryDialog'
 import { AuthBanner } from './AuthBanner'
 import { CommandPalette } from './CommandPalette'
@@ -83,6 +84,7 @@ export function AppShell() {
       <ConnectionAnnouncer />
       <StartupState />
       <ApprovalDrawer />
+      <BoundaryInbox />
       <RecoveryDialog />
       <CommandPalette />
       <Toasts />

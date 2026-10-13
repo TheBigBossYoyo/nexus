@@ -91,6 +91,8 @@ export type ContextOriginKind =
   | 'workspace_contract'
   | 'workspace_repository'
   | 'decision'
+  /** 0.8: a page read on the public web (a research artifact). The node holds where it came from and a few lines; the text stays with the artifact. */
+  | 'research_artifact'
 
 export interface ContextProvenance {
   /** Who or what stated it: 'static_analysis', 'manifest', 'git', 'agent', 'verifier', 'user', 'engine', 'graph'. */

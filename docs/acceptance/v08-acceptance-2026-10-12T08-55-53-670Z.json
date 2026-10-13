@@ -1,0 +1,185 @@
+{
+  "kind": "v0.8-acceptance",
+  "startedAt": "2026-10-12T08:52:19.912Z",
+  "executable": "dev build",
+  "baseCommit": "382d455ea173734b5ceb1601ce0dc59ba11bb8fe",
+  "missions": {
+    "normal": {
+      "runId": "07afa6e8-27aa-4cc0-80fa-4619fe19f26f",
+      "state": "completed",
+      "minutes": 2.7,
+      "tasks": [
+        {
+          "key": "fix-counter-test-doc-verify",
+          "state": "completed"
+        }
+      ],
+      "toolApprovalsAsked": 0,
+      "approvals": [],
+      "dialogsShown": 0,
+      "boundaryRequests": [],
+      "answered": null,
+      "resumedEvents": 0,
+      "tools": {
+        "events": 97,
+        "denied": [
+          "{\"toolName\":\"Bash\",\"reason\":\"Command not permitted for the planner role (cd, for, do, done). Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.\"}",
+          "{\"toolName\":\"PowerShell\",\"reason\":\"Command not permitted for the verifier role (npm exit=$lastexitcode, get-ciminstance, where-object, $_.commandline). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}",
+          "{\"toolName\":\"PowerShell\",\"reason\":\"Command not permitted for the verifier role (npm exit=$lastexitcode). Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.\"}"
+        ],
+        "containedShell": 9,
+        "containedCommands": 4,
+        "containedPrograms": 3,
+        "refusedLaunches": 0,
+        "shellToolCalls": 12,
+        "names": {
+          "Bash": 21,
+          "Edit": 4,
+          "PowerShell": 6,
+          "Read": 14,
+          "StructuredOutput": 8,
+          "Write": 2,
+          "mcp__nexus__app_act": 6,
+          "mcp__nexus__app_find": 2,
+          "mcp__nexus__app_launch": 6,
+          "mcp__nexus__app_logs": 2,
+          "mcp__nexus__app_screenshot": 2,
+          "mcp__nexus__app_snapshot": 6,
+          "mcp__nexus__app_status": 6,
+          "mcp__nexus__app_stop": 6,
+          "mcp__nexus__research_read": 6
+        }
+      },
+      "audit": {
+        "total": 27,
+        "bySeverity": {
+          "NORMAL_AUTONOMOUS_ACTION": 27
+        },
+        "denials": []
+      },
+      "apps": [
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "RESTRICTED",
+          "endpoint": "registered",
+          "screenshots": 0
+        },
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "RESTRICTED",
+          "endpoint": "registered",
+          "screenshots": 0
+        },
+        {
+          "type": "web",
+          "state": "stopped",
+          "profile": "RESTRICTED",
+          "endpoint": "registered",
+          "screenshots": 1
+        }
+      ],
+      "research": {
+        "artifacts": [
+          {
+            "url": "https://nodejs.org/api/net.html",
+            "backend": "NEXUS_HTTP_FETCH",
+            "publisher": "nodejs.org",
+            "sourceType": "OFFICIAL_DOCS",
+            "authority": "PRIMARY",
+            "screening": "clean",
+            "chars": 76850
+          }
+        ],
+        "downloads": 0
+      },
+      "summary": {
+        "runId": "07afa6e8-27aa-4cc0-80fa-4619fe19f26f",
+        "tasksTotal": 1,
+        "tasksCompleted": 1,
+        "tasksFailed": 0,
+        "tasksCancelled": 0,
+        "reviewsTotal": 1,
+        "reviewsApproved": 1,
+        "verificationsPassed": 2,
+        "verificationsFailed": 0,
+        "filesChanged": 3,
+        "commits": 2,
+        "agentSessions": 5,
+        "durationMs": 124830,
+        "lastChecks": [
+          {
+            "name": "test",
+            "command": "npm test",
+            "cwd": "C:\\Users\\user\\Documents\\Nexus\\test-results\\v08\\accept\\data-worktrees\\07afa6e8\\integration",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 512,
+            "output": "npm warn Unknown env config \"store-dir\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\n\n> counter@1.0.0 test\n> node --test\n\n✔ each POST to /inc adds 1 (29.0824ms)\n✔ the page is served (27.1795ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 124.6092\n"
+          }
+        ],
+        "costUsd": 0.6177492
+      },
+      "result": {
+        "branch": "nexus/07afa6e8/integration",
+        "mainUntouched": true,
+        "server": true,
+        "counterTest": true,
+        "readme": true,
+        "checks": [
+          {
+            "command": "npm test",
+            "exitCode": 0
+          }
+        ]
+      }
+    }
+  },
+  "app": {
+    "version": "0.7.2",
+    "isPackaged": false,
+    "sdkVersion": "0.3.288",
+    "gitVersion": "2.53.0.windows.2",
+    "platform": "win32 x64"
+  },
+  "auth": {
+    "state": "authenticated",
+    "mode": "subscription",
+    "subscriptionType": "Claude subscription",
+    "apiKeyEnvDetected": false
+  },
+  "isolation": {
+    "requested": "RESTRICTED",
+    "effective": "RESTRICTED",
+    "usable": true,
+    "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+    "sandboxAccount": true,
+    "isolated": {
+      "available": true,
+      "detail": "Verified at this start: a contained process ran as desktop-host\\nexussandbox, wrote in its own directory, was refused beside it, was refused a protected file and a file in your profile, reached NEXUS on this machine and had no direct route to the Internet. Windows still looks up names for it: a name it asks for can be seen outside.",
+      "checkedAt": "2026-10-12T08:52:25.356Z"
+    },
+    "restricted": {
+      "available": true,
+      "detail": "Verified at this start: a contained process wrote in its own directory, was refused beside it, and was refused a protected file. It runs as you: your network, credential vault, unprotected files and screen are within its reach.",
+      "checkedAt": "2026-10-12T08:52:24.841Z"
+    },
+    "protectedPaths": 0
+  },
+  "enrollment": {
+    "profile": "AUTONOMOUS_PROJECT",
+    "policyVersion": "0.8.0-autonomy.1",
+    "confirmations": [
+      {
+        "message": "Let NEXUS work in \"repo\" under the profile \"Autonomous project\"?",
+        "buttons": [
+          "Enable",
+          "Cancel"
+        ]
+      }
+    ]
+  },
+  "error": "page.evaluate: Target page, context or browser has been closed\n    at call (C:\\Users\\user\\Documents\\Nexus\\scripts\\v08-acceptance.mjs:157:31)\n    at driveRun (C:\\Users\\user\\Documents\\Nexus\\scripts\\acceptance-common.mjs:120:20)\n    at async mission (C:\\Users\\user\\Documents\\Nexus\\scripts\\v08-acceptance.mjs:197:33)\n    at async file:///C:/Users/user/Documents/Nexus/scripts/v08-acceptance.mjs:280:15",
+  "finishedAt": "2026-10-12T08:55:53.670Z"
+}

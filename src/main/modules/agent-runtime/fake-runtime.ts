@@ -27,7 +27,7 @@ export interface FakeSessionContext {
    * Runs the same policy path as the real runtime (authorize, then requestApproval for `ask`) and emits
    * tool.started / tool.denied / tool.completed. Resolves true when the tool was allowed and ran.
    */
-  useTool(toolName: string, input: Record<string, unknown>, run?: () => Promise<string>): Promise<boolean>
+  useTool(toolName: string, input: Record<string, unknown>, run?: (effectiveInput: Record<string, unknown>) => Promise<string>): Promise<boolean>
   completeTurn(result: { text: string; structuredOutput?: unknown; outcome?: TurnOutcome }): Promise<void>
   /** Resolves with the next send() message, or null once end() or stop() was called. */
   nextMessage(): Promise<string | null>
@@ -467,7 +467,8 @@ class FakeHandle implements AgentSessionHandle {
           return false
         }
         try {
-          const output = run ? await run() : 'ok'
+          // The input the tool would run with: the agent's own, or what the policy put in its place.
+          const output = run ? await run(decision.behavior === 'allow' && decision.updatedInput ? decision.updatedInput : input) : 'ok'
           await this.emit({ type: 'tool.completed', toolUseId, isError: false, outputPreview: output.slice(0, 500) })
         } catch (e) {
           await this.emit({ type: 'tool.completed', toolUseId, isError: true, outputPreview: errorMessage(e).slice(0, 500) })

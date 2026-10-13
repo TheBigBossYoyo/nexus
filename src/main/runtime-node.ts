@@ -20,6 +20,8 @@ startRuntimeCore({
   version: process.env['NEXUS_VERSION'] ?? '0.0.0-node',
   isPackaged: false,
   resourcesPath: undefined,
+  sandboxSetupDir: join(process.cwd(), 'native', 'sandbox-setup'),
+  launcherPath: process.env['NEXUS_LAUNCHER'] ?? join(process.cwd(), 'out', 'native', 'nexus-launch.exe'),
   casesDir: process.env['NEXUS_CASES_DIR'] ?? join(process.cwd(), 'arena', 'cases'),
   tempDir: tmpdir(),
   sdkVersion: 'unknown',

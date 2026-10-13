@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { createHash, randomUUID } from 'node:crypto'
+import { basename, dirname, join, resolve } from 'node:path'
 import type {
   CheckCommands,
   MissionPlan,
@@ -16,6 +18,22 @@ import type {
   Worktree,
 } from '@shared/domain'
 import type { EventType, PushMessage, RunEvent } from '@shared/events'
+import { boundaryResumeResource, type AutonomyProfile } from '@shared/autonomy'
+import { TERMINAL_RUN_STATES } from '@shared/domain'
+import { BoundaryResumer, type BoundaryResumeOutcome } from '@main/modules/autonomy/resume'
+import { AutonomyService } from '@main/modules/autonomy/service'
+import { ExecutionBroker } from '@main/modules/isolation/execution-broker'
+import { Launcher } from '@main/modules/isolation/launcher'
+import { IsolationService } from '@main/modules/isolation/service'
+import type { Resolver } from '@main/modules/network/guard'
+import { policyForPurpose } from '@main/modules/network/policy'
+import { readSandboxAccount } from '@main/modules/isolation/sandbox-account'
+import { mirrorTools } from '@main/modules/isolation/tools'
+import { ApplicationUnderTestManager } from '@main/modules/browser/app-manager'
+import { PlaywrightDirectProvider } from '@main/modules/browser/provider'
+import { combineExtensions, createAppTools } from '@main/modules/browser/tools'
+import { WebResearchProvider } from '@main/modules/research/provider'
+import { createResearchTools } from '@main/modules/research/tools'
 import { newId, nowIso } from '@shared/ids'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
@@ -31,6 +49,7 @@ import {
 import { EventBus } from '@main/modules/events'
 import { createIpcHandlers, dispatchIpc } from '@main/modules/ipc/handlers'
 import { GitService, WorktreeManager } from '@main/modules/git'
+import type { CommitEvidence } from '@main/modules/git/git-service'
 import { Orchestrator } from '@main/modules/orchestrator'
 import { attachOutcomeRecording, PolicyService } from '@main/modules/policy'
 import { createRepositories, openDatabase, type Database, type Repositories } from '@main/modules/persistence'
@@ -69,6 +88,16 @@ export interface Harness {
   project: Project
   /** v0.3: present when the harness was created with `policy: true`. */
   policy: PolicyService | null
+  /** 0.8: the autonomy service of this app instance (always present; the project is enrolled only when asked). */
+  autonomy: AutonomyService
+  /** 0.8: what the auto-resume did after each boundary decision, in order. */
+  resumeOutcomes: BoundaryResumeOutcome[]
+  /** 0.8: present when the harness was created with `research`. */
+  research: WebResearchProvider | null
+  /** 0.8: present when the harness was created with `apps`. */
+  apps: ApplicationUnderTestManager | null
+  /** 0.8: what NEXUS committed in the worktrees it created, each with what it meant to commit. */
+  commitEvidence: CommitEvidence[]
   /** Every durable event emitted by this app instance (since it started). */
   events: RunEvent[]
   /** Ephemeral main → renderer pushes (streamed agent output) of this app instance. */
@@ -114,6 +143,26 @@ export interface HarnessOptions {
    * kernel is given.
    */
   capacity?: { maxAgents: number }
+  /**
+   * 0.8: enroll the scenario project with this profile, so its sessions meet the capability broker instead of
+   * approval requests. `contained` says whether their commands count as running in the ISOLATED profile.
+   */
+  autonomy?: { profile: AutonomyProfile; contained?: boolean }
+  /**
+   * 0.8: give sessions the research tools, over a stand-in for the public web: names resolve through
+   * `resolver`, and a connection to an address that passed the policy goes where `dial` says.
+   */
+  research?: { resolver: Resolver; dial: (address: string, port: number) => { host: string; port: number }; searchUrl?: string }
+  /**
+   * 0.8: run the project's commands through the real launcher under this profile (the launcher is built when
+   * it is missing). Without it, `autonomy.contained` only says that commands count as contained, and nothing
+   * is launched. `baseDir` puts the scenario's directory inside the checkout instead of the system's temporary
+   * directory.
+   */
+  containment?: { profile: 'RESTRICTED' | 'ISOLATED'; launcher: string }
+  /** 0.8: give sessions the application tools (needs `containment`): a real headless browser on a real proxy. */
+  apps?: boolean
+  baseDir?: string
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -124,10 +173,13 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
 
 export async function createHarness(options: HarnessOptions): Promise<Harness> {
   const fresh = !options.existing
-  const dir = options.existing?.dir ?? (await mkdtemp(join(tmpdir(), 'nexus-scn-')))
+  if (options.baseDir) await mkdir(options.baseDir, { recursive: true })
+  const dir = options.existing?.dir ?? (await mkdtemp(join(options.baseDir ?? tmpdir(), 'nexus-scn-')))
   const repoDir = join(dir, 'repo')
   const dbPath = join(dir, 'nexus.db')
-  const worktreesDir = join(dir, 'worktrees')
+  // Under ISOLATED the worktrees are where the sandbox account can go: in its root, as the runtime puts them.
+  const sandboxAccount = options.containment?.profile === 'ISOLATED' ? readSandboxAccount() : null
+  const worktreesDir = sandboxAccount ? join(sandboxAccount.root, 'worktrees', `scenario-${createHash('sha256').update(dir.toLowerCase()).digest('hex').slice(0, 12)}`) : join(dir, 'worktrees')
 
   if (fresh) {
     await git(dir, 'init', '-b', 'main', repoDir)
@@ -158,6 +210,14 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   })
 
   const gitService = new GitService()
+  // As the runtime does: NEXUS's own index of each worktree, outside the worktrees.
+  gitService.setTrustedIndexDir(join(dir, 'git-index'))
+  const commitEvidence: CommitEvidence[] = []
+  let pinGit: ((gitDir: string) => Promise<void>) | null = null
+  gitService.onWorktreeCreated(async (gitDir) => {
+    if (pinGit) await pinGit(gitDir)
+  })
+  gitService.onCommitEvidence((e) => void commitEvidence.push(e))
   const runtime = new FakeAgentRuntime({ script: options.script, ...(options.cache ? { cache: options.cache } : {}) })
   const policy = options.policy ? new PolicyService({ repos, nexusVersion: '0.3.0-test' }) : null
   if (policy) attachOutcomeRecording(bus, policy)
@@ -184,16 +244,101 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
       usage.dispose()
     }
   }
+  const containmentOptions = options.containment
+  let isolation: IsolationService | null = null
+  let executionBroker: ExecutionBroker | null = null
+  if (containmentOptions) {
+    const launcher = new Launcher({ executable: containmentOptions.launcher, specDir: join(dir, 'sandbox', 'specs') })
+    const mirrored = sandboxAccount ? mirrorTools({ sandboxRoot: sandboxAccount.root, userProfile: homedir(), path: process.env['PATH'] ?? '', names: ['node'] }) : null
+    const broker = new ExecutionBroker({
+      launcher,
+      sandboxDir: join(dir, 'sandbox'),
+      account: () => sandboxAccount,
+      baseEnv: () => process.env,
+      gitIdentity: () => ({ name: 'NEXUS Agent', email: 'nexus-agent@localhost' }),
+      toolPath: (profile, path) => (profile === 'ISOLATED' && mirrored ? mirrored.path : path),
+      posixShell: () => resolve('vendor', 'busybox', 'busybox.exe'),
+    })
+    executionBroker = broker
+    // As the runtime does: only where there is a launcher to do it with.
+    if (existsSync(containmentOptions.launcher)) pinGit = (gitDir) => broker.pinGit(gitDir)
+    isolation = new IsolationService({ broker, launcher, containment: () => containmentOptions.profile, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, gitWritable: async (worktree) => (await gitService.ownedGitLayout(worktree))?.writable ?? [], dataDir: dir })
+    await isolation.start()
+  }
+  const isolationService = isolation
+  let resumer: BoundaryResumer | null = null
+  const resumeOutcomes: BoundaryResumeOutcome[] = []
+  const autonomy = new AutonomyService({
+    repos,
+    runActive: (runId) => {
+      const run = repos.runs.get(runId)
+      return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
+    },
+    contained: (projectId) => (isolationService ? isolationService.isolated(projectId) : options.autonomy?.contained === true),
+    confined: (projectId) => (isolationService ? isolationService.contained(projectId) : options.autonomy?.contained === true),
+    onChange: (change) => {
+      void pushes.push({ kind: 'autonomy', pending: repos.boundaryRequests.countPending() })
+      // As the runtime does: the user's answer restarts what waited for it.
+      if (change.kind === 'request' && change.created !== true && change.request && (change.request.state === 'GRANTED' || change.request.state === 'DENIED')) {
+        const decided = change.request
+        setImmediate(() => void resumer?.decided(decided).then((outcome) => void resumeOutcomes.push(outcome)))
+      }
+    },
+  })
+  autonomy.watch(bus)
+  const researchPolicy = policyForPurpose('PUBLIC_RESEARCH', {})
+  const researchOptions = options.research
+  const research = researchOptions
+    ? new WebResearchProvider({
+        artifacts: repos.researchArtifacts,
+        downloads: repos.researchDownloads,
+        dir: join(dir, 'research'),
+        guard: () => ({ policy: researchPolicy, resolver: researchOptions.resolver, dial: researchOptions.dial }),
+        ...(researchOptions.searchUrl ? { searchUrl: researchOptions.searchUrl } : {}),
+      })
+    : null
+  const researchTools = research
+    ? createResearchTools({
+        research,
+        gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
+        legacyNetworkTools: () => repos.settings.get().permissions.allowNetworkTools,
+        policy: () => researchPolicy,
+        record: (session, severity, action, resource, reason) => autonomy.record({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, agentId: session.agentId, severity, action, resource, reason }),
+      })
+    : null
+  const apps =
+    options.apps && executionBroker && isolationService
+      ? new ApplicationUnderTestManager({
+          broker: executionBroker,
+          browser: new PlaywrightDirectProvider(),
+          profileFor: (projectId) => isolationService.profileFor(projectId),
+          artifactsDir: join(dir, 'app-sessions'),
+          onNetwork: (owner, event) => {
+            if (!event.allowed) autonomy.record({ projectId: owner.projectId, runId: owner.runId, taskId: owner.taskId, agentId: null, severity: 'POLICY_DENIAL', action: `app browser ${event.method}`, resource: `host: ${event.host}:${event.port}`, reason: `Refused by the network policy of the application under test (${event.denial ?? 'policy'}).` })
+          },
+        })
+      : null
+  if (apps) {
+    bus.subscribe((event) => {
+      if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled' || event.type === 'run.paused') void apps.stopForRun(event.runId).catch(() => undefined)
+    })
+  }
+  const appTools = apps ? createAppTools({ apps, recordEvidence: (session, title, content) => { for (const taskId of session.task ? [session.task.id, ...(session.task.parentTaskId ? [session.task.parentTaskId] : [])] : [null]) repos.artifacts.insert({ id: randomUUID(), runId: session.run.id, taskId, agentId: session.agentId, kind: 'app-evidence', title, content, createdAt: new Date().toISOString() }) }, gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }) }) : null
+  const extensionMakers = [researchTools, appTools].filter((m): m is NonNullable<typeof m> => m !== null)
   const orchestrator = new Orchestrator({
     repos,
     bus,
     runtime: admitted,
+    autonomy,
+    ...(isolationService ? { execution: isolationService } : {}),
+    ...(extensionMakers.length > 0 ? { extensions: combineExtensions(...extensionMakers) } : {}),
     ...(capacity ? { capacityReady: (taskId: string) => capacity.routing.taskReady(taskId) } : {}),
     git: gitService,
     worktrees: new WorktreeManager(gitService, worktreesDir),
     push: (message) => void pushes.push(message),
     ...(policy ? { strategies: policy } : {}),
   })
+  resumer = new BoundaryResumer({ repos, orchestrator, enrolled: (projectId) => repos.enrollments.get(projectId) !== null, record: (request, action, reason) => autonomy.record({ projectId: request.projectId, runId: request.runId, taskId: request.taskId, agentId: null, severity: 'NORMAL_AUTONOMOUS_ACTION', action, resource: boundaryResumeResource(request.id), reason }) })
 
   let project: Project
   if (fresh) {
@@ -228,6 +373,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
   } else {
     project = repos.projects.list()[0] as Project
   }
+  if (fresh && options.autonomy) autonomy.enroll(project.id, options.autonomy.profile)
 
   const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 150_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs
@@ -251,6 +397,11 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     capacity,
     project,
     policy,
+    autonomy,
+    resumeOutcomes,
+    research,
+    apps,
+    commitEvidence,
     events,
     pushes,
     async waitForState(runId, states, timeoutMs = 150_000) {
@@ -301,10 +452,16 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
         for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true })
         await rename(snapshot, dbPath)
       }
-      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}) })
+      return createHarness({ script: script ?? options.script, existing: { dir }, ...(options.policy ? { policy: true } : {}), ...(options.capacity ? { capacity: options.capacity } : {}), ...(options.autonomy ? { autonomy: options.autonomy } : {}), ...(options.research ? { research: options.research } : {}), ...(options.containment ? { containment: options.containment } : {}), ...(options.apps ? { apps: true } : {}), ...(options.baseDir ? { baseDir: options.baseDir } : {}) })
     },
     async dispose() {
       await orchestrator.shutdown().catch(() => undefined)
+      // What the sandbox account was given in the scenario's repository is taken back, and its worktrees removed.
+      if (sandboxAccount && executionBroker) {
+        await executionBroker.revokeGit().catch(() => undefined)
+        await rm(worktreesDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined)
+      }
+      await apps?.stopAll().catch(() => undefined)
       await closeCapacity().catch(() => undefined)
       if (db.open) db.close()
       for (let i = 0; i < 10; i++) {

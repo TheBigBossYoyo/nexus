@@ -224,3 +224,7 @@ export type PushMessage =
   | { kind: 'connection'; state: ConnectionState }
   /** v0.7. The runtime asks the window to come forward, optionally on a page. Handled by the window's main process. */
   | { kind: 'desktop'; action: 'show'; view: 'control' | null }
+  /** 0.8. A project was enrolled, a grant given or taken back, or a boundary request created or decided. */
+  | { kind: 'autonomy'; pending: number }
+  /** 0.8: an application under test was started or stopped. */
+  | { kind: 'apps' }

@@ -1,3 +1,5 @@
+import { basename, dirname } from 'node:path'
+import { extensionToolNames } from '@main/modules/agent-runtime/extension-tools'
 import {
   AgentMessageTypeSchema,
   emptyMetrics,
@@ -427,9 +429,18 @@ export class AgentRunner {
         runId: run.id,
         taskId: task?.id ?? null,
       },
+      // 0.8: the worktrees of one mission are one project's work. In an enrolled project a session may read its
+      // sibling tasks' worktrees (a verifier of the mission reads the task it checks): they lie in the mission's
+      // own directory, which NEXUS made, and are not "outside the project". Writing stays with each task.
+      ...(this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }) !== undefined && basename(dirname(input.worktreeRoot)) === run.id.slice(0, 8) ? { extraReadRoots: [dirname(input.worktreeRoot)] } : {}),
+      // 0.8: in an enrolled project the capability broker decides where this policy would ask the user.
+      autonomy: this.deps.autonomy?.gateFor({ projectId: run.projectId, runId: run.id, taskId: task?.id ?? null, role, provider: null, cwd: input.cwd }),
+      // 0.8: and its shell commands run inside the project's containment, or not at all.
+      containment: this.deps.execution?.shellFor({ projectId: run.projectId, sessionKey: `${run.id}:${task?.id ?? input.purpose}`, worktree: input.worktreeRoot, cwd: input.cwd }),
     })
 
     const contextTool = this.context?.contextTool({ run, task, agentId: agent.id, role }) ?? null
+    const extensions = this.deps.extensions?.({ run, task, agentId: agent.id, role, cwd: input.cwd }) ?? null
     const systemPromptAppend = rolePrompt(role, input.purpose)
     const builtinTools = toolsForRole(role, { allowNetworkTools })
     const mayPropose = !!task && canProposeGraphChange(role, input.purpose)
@@ -443,7 +454,7 @@ export class AgentRunner {
       cwd: input.cwd,
       systemText: systemPromptAppend,
       tools: builtinTools,
-      nexusToolNames: [...BASE_NEXUS_TOOLS, ...(mayPropose ? ['propose_graph_change'] : []), ...(contextTool ? CONTEXT_TOOLS : [])],
+      nexusToolNames: [...BASE_NEXUS_TOOLS, ...(mayPropose ? ['propose_graph_change'] : []), ...(contextTool ? CONTEXT_TOOLS : []), ...(extensions ? extensionToolNames(extensions.groups) : [])],
       externalServers: servers.map((s) => s.name),
       loadProjectSettings: run.config.respectProjectClaudeConfig,
       structuredOutput: input.outputSchema !== undefined,
@@ -535,6 +546,7 @@ export class AgentRunner {
           }
         : {}),
       ...(contextTool ? { contextTool } : {}),
+      ...(extensions && extensions.groups.length > 0 ? { extensionGroups: extensions.groups, extensionTool: extensions.call } : {}),
     }
 
     return {
