@@ -1,3 +1,4 @@
+import type { ConnectivitySnapshot } from './connectivity'
 import type { ProgressSnapshot } from './progress'
 import type {
   AgentState,
@@ -202,6 +203,8 @@ export type PushMessage =
   | { kind: 'auth.changed' }
   /** 0.9. The progress of a mission changed in a way worth showing, or its estimate was refreshed. */
   | { kind: 'progress'; snapshot: ProgressSnapshot }
+  /** 0.9. What the network supervisor sees changed. */
+  | { kind: 'connectivity'; snapshot: ConnectivitySnapshot }
   | { kind: 'overnight'; status: OvernightStatus }
   /** v0.3. The usage status changed (limit, wait, probe, resume) or observed totals moved. */
   | { kind: 'usage'; overview: UsageOverview }

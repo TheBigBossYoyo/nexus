@@ -46,6 +46,8 @@ import { DEFAULT_SEARCH_URL, WebResearchProvider } from '../modules/research/pro
 import { isSecretEnvName } from '../modules/process/contained-env'
 import { createResearchTools } from '../modules/research/tools'
 import { ProgressService } from '../modules/progress/service'
+import { sqliteOutageStore } from '../modules/connectivity/sqlite-outage-store'
+import { startNetworkResilience, type NetworkResilience } from './network-resilience'
 import type { FinishedTask } from '../modules/progress/estimator'
 import { DEFAULT_PROGRESS_REFRESH_SECONDS } from '@shared/progress'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
@@ -445,10 +447,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
   // What a run waits on beyond its own state: the network (set by the connectivity supervisor), or a decision
   // of the user's on a boundary request of that mission.
-  const networkWait: { current: { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_PROVIDER'; detail: string } | null } = { current: null }
+  let network: NetworkResilience | null = null
   const progressWaitOf = (run: Run): { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_PROVIDER' | 'WAITING_FOR_USER_BOUNDARY'; detail: string } | null => {
     if (TERMINAL_RUN_STATES.includes(run.state)) return null
-    if (networkWait.current !== null) return networkWait.current
+    const offline = network?.waitOf() ?? null
+    if (offline !== null) return offline
     // A request that some task waits on while others work is a blocker of that task, not a wait of the mission.
     if (repos.tasks.listByRun(run.id).some((t) => t.state === 'running' || t.state === 'assigned')) return null
     const pending = repos.boundaryRequests.listPending(run.projectId).filter((r) => r.runId === run.id)
@@ -840,6 +843,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     autonomy,
     extensions: extensionTools,
     execution: isolation,
+    // 0.9: a session that ended because the provider could not be reached is a wait. Judged by the network
+    // supervisor, which is started further down (and not at all where agents are scripted).
+    networkLoss: (error) => network?.networkLoss(error) ?? false,
   })
   orchestrator.setDispatchGate(usage)
   boundaryResumer = new BoundaryResumer({
@@ -908,14 +914,54 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       })
     : undefined
   let awake = false
+  // 0.9: held for an Overnight run as before, and also while any mission, Program or Workspace run is working or
+  // will resume by itself (the guard of the network module decides that, and lets go when nothing moves for hours).
+  let guardWantsAwake = false
   keepAwake = () => {
     // Windows must not suspend the runtime in the middle of unattended work.
-    const wanted = phase !== 'STOPPING' && (overnight?.hasActive() ?? false)
+    const wanted = phase !== 'STOPPING' && ((overnight?.hasActive() ?? false) || guardWantsAwake)
     if (wanted === awake) return
     awake = wanted
     host.setKeepAwake?.(wanted)
+    logger(`power: the idle-sleep request is ${wanted ? 'held' : 'released'}`)
   }
   keepAwake()
+  // Network resilience. Not where agents are scripted (the tests of the runtime make no connectivity check),
+  // unless a test asks for it.
+  const scripted = env['NEXUS_FAKE_RUNTIME'] === '1' || env['NEXUS_FAKE_WORKERS'] === '1'
+  if (process.platform === 'win32' && (!scripted || env['NEXUS_NETWORK_RESILIENCE'] === '1') && env['NEXUS_NETWORK_RESILIENCE'] !== '0') {
+    const lastProgress = db.prepare('SELECT MAX(finished_at) AS at FROM tasks WHERE run_id = ?')
+    const openRunRows = db.prepare("SELECT id FROM runs WHERE state NOT IN ('completed', 'failed', 'cancelled')")
+    network = startNetworkResilience({
+      ...(host.launcherPath !== undefined ? { wlanHelperPath: join(dirname(host.launcherPath), 'nexus-wlan.exe') } : {}),
+      providerHosts: () => ['api.anthropic.com'],
+      quota: () => null,
+      openRuns: () => (openRunRows.all() as { id: string }[]).flatMap((r) => repos.runs.get(r.id) ?? []),
+      workOf: (run) => {
+        const at = (lastProgress.get(run.id) as { at: string | null }).at
+        const kind = repos.overnight.getByRun(run.id) !== null ? 'OVERNIGHT' : 'LONG_MISSION'
+        const waitsOnBoundary = repos.boundaryRequests.listPending(run.projectId).some((r) => r.runId === run.id) && !repos.tasks.listByRun(run.id).some((t) => t.state === 'running' || t.state === 'assigned')
+        return { kind, lastProgressAt: Date.parse(at ?? run.startedAt ?? run.createdAt), waitsOnBoundary }
+      },
+      resumeRun: (runId) => orchestrator.resumeRun(runId),
+      setKeepAwake: (on) => {
+        guardWantsAwake = on
+        keepAwake()
+      },
+      policy: () => repos.settings.get().execution.networkRecovery ?? null,
+      store: sqliteOutageStore(db),
+      onState: (snapshot) => {
+        push({ kind: 'connectivity', snapshot })
+        for (const runId of progress.open()) progress.refresh(runId)
+      },
+      logger,
+    })
+    const networkOf = network
+    bus.subscribe((event) => {
+      if (event.type.startsWith('run.') || event.type === 'task.completed') networkOf.workChanged()
+    })
+    networkOf.workChanged()
+  }
 
   // Arena: controlled trials of the same task under different strategies. Each trial is an ordinary run
   // on its own throwaway repository; the hidden evaluators stay in the cases directory, outside every
@@ -1390,6 +1436,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     phase = 'STOPPING'
     intelligenceOperations.closeAdmission()
     clearInterval(capacityRecoveryTimer)
+    clearInterval(progressTick)
+    void network?.stop().catch(() => undefined)
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
     push({ kind: 'runtime' })
