@@ -34,6 +34,9 @@ extraResources:
     to: bin/nexus-sip.exe
   - from: vendor/linphone-sdk/win64
     to: linphone
+  # 0.9.1: the speech models of the voice line (scripts/fetch-speech-models.mjs), with their NOTICE.txt.
+  - from: vendor/speech-models
+    to: speech-models
   # The POSIX shell of the isolated profile (vendor/busybox, GPL-2.0): it runs inside the AppContainer.
   - from: out/native/busybox.exe
     to: bin/busybox.exe
@@ -49,6 +52,10 @@ asar: true
 asarUnpack:
   - "**/node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**"
   - "**/node_modules/better-sqlite3/**"
+  # 0.9.1: the speech engine of the voice line is a native module, and its worker is started as a file.
+  - "**/node_modules/sherpa-onnx-node/**"
+  - "**/node_modules/sherpa-onnx-win-x64/**"
+  - "out/main/speech-worker.js"
 # better-sqlite3 13 ships an N-API prebuild; no rebuild against Electron headers is needed.
 npmRebuild: false
 win:

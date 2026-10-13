@@ -54,6 +54,8 @@ export default defineConfig({
           index: resolve(import.meta.dirname, 'src/main/index.ts'),
           worker: resolve(import.meta.dirname, 'src/main/worker.ts'),
           'runtime-node': resolve(import.meta.dirname, 'src/main/runtime-node.ts'),
+          // 0.9.1: speech recognition of a call runs in a thread of its own.
+          'speech-worker': resolve(import.meta.dirname, 'src/main/modules/director-line/local-speech-worker.ts'),
         },
       },
     },

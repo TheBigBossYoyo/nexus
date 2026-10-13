@@ -54,6 +54,8 @@ import { DEFAULT_PROGRESS_REFRESH_SECONDS, type ProgressSnapshot } from '@shared
 import { createDirectorLineRuntime } from '../modules/director-line/runtime'
 import type { HttpFetch } from '../modules/director-line'
 import { createDirectorLineHost, protectedSecretStore } from './director-line-host'
+import { createDirectorVoiceHost, createLocalVoiceSpeech } from './director-voice-host'
+import { composeStatus } from '../modules/director-line/replies'
 import { DirectorLineReporter } from './director-line-reports'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
@@ -935,6 +937,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     logger(`power: the idle-sleep request is ${wanted ? 'held' : 'released'}`)
   }
   keepAwake()
+  let voiceNetworkChanged: () => void = () => undefined
   // Network resilience. Not where agents are scripted (the tests of the runtime make no connectivity check),
   // unless a test asks for it.
   const scripted = env['NEXUS_FAKE_RUNTIME'] === '1' || env['NEXUS_FAKE_WORKERS'] === '1'
@@ -962,6 +965,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       onState: (snapshot) => {
         push({ kind: 'connectivity', snapshot })
         for (const runId of progress.open()) progress.refresh(runId)
+        // 0.9.1: the voice line registers again when the network is back or has changed.
+        voiceNetworkChanged()
       },
       logger,
     })
@@ -1448,6 +1453,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     clearInterval(progressTick)
     clearInterval(lineTick)
     void directorLine.stop().catch(() => undefined)
+    void localSpeech.dispose().catch(() => undefined)
     void network?.stop().catch(() => undefined)
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
@@ -1606,6 +1612,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     subscribe: (listener) => bus.subscribe(listener),
     logger,
   })
+  // 0.9.1: speech for calls is recognised and made on this PC. Nothing of it is loaded where agents are scripted.
+  const localSpeech = createLocalVoiceSpeech({ launcherPath: useFake ? undefined : host.launcherPath, resourcesPath: useFake ? undefined : host.resourcesPath, languages: ['en', 'fr'], log: (line) => logger(`director line: ${line}`) })
   const directorLine = createDirectorLineRuntime({
     db,
     secrets: protectedSecretStore(join(dataDir, 'director-line'), host.protectedStorage),
@@ -1616,7 +1624,23 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     localNotify: async (title, text) => host.notify?.(title, text.slice(0, 400)),
     recordNote: (note) => logger(`director line: refused a remote request (${note.topic})`),
     log: (line) => logger(`director line: ${line}`),
+    // 0.9.1: the voice line (SIP). The session that words an answer is the plain runtime, not a worker session:
+    // a call takes no slot from the work in progress.
+    voice: createDirectorVoiceHost({
+      launcherPath: host.launcherPath,
+      resourcesPath: host.resourcesPath,
+      dataDir,
+      runtime: claudeRuntime,
+      model: () => repos.settings.get().models.tiers.fast,
+      subscriptionMode: () => repos.settings.get().claude.subscriptionMode,
+      admitted: () => usage.canDispatch(),
+      status: async () => composeStatus(await directorLineHost.reads.getStatus()),
+      speech: localSpeech.speech,
+      onCall: () => localSpeech.setHints(repos.projects.list().map((p) => p.name)),
+      log: (line) => logger(`director line: ${line}`),
+    }),
   })
+  voiceNetworkChanged = () => directorLine.networkChanged()
   const lineReporter = new DirectorLineReporter({ report: (event) => directorLine.line.report(event), now: () => Date.now() })
   progressListeners.push((snapshot) => {
     const run = repos.runs.get(snapshot.subject.id)
@@ -1627,6 +1651,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const lineTick = setInterval(() => lineReporter.tick(), 60_000)
   lineTick.unref()
   void directorLine.start().catch((e: unknown) => logger(`director line: could not start: ${errorMessage(e)}`))
+  // The models are loaded ahead only where the voice line is set up: they take some hundred megabytes.
+  void directorLine
+    .settingsView()
+    .then((view) => (view.enabled && view.voice.configured ? localSpeech.warm() : undefined))
+    .catch(() => logger('director line: the speech models could not be loaded ahead'))
 
   const handlers = createIpcHandlers({
     progress,
