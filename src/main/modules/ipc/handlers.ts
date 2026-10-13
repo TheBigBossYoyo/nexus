@@ -35,6 +35,7 @@ import { unavailableV6Handlers, type V6Handlers } from './v6-handlers'
 import { unavailableV7Handlers, type V7Handlers } from './v7-handlers'
 import { createSecurityHandlers } from './v7-security-handlers'
 import { createAutonomyHandlers, createIsolationHandlers, type IsolationHandlerContext } from './v8-handlers'
+import { createDirectorLineHandlers, type DirectorLineHandlerContext } from './v9-handlers'
 import { AutonomyService } from '@main/modules/autonomy/service'
 import { createV71Handlers } from './v71-handlers'
 import { createV72Handlers } from './v72-handlers'
@@ -97,6 +98,8 @@ export interface IpcContext {
   autonomy?: AutonomyService
   /** 0.8: the native confirmation before lasting authority is given (enrolling, allowing for a whole project). Absent: no question. */
   confirmAutonomy?: (title: string, message: string, detail: string, accept: string) => Promise<boolean>
+  /** 0.9: the remote operator channel. Its channels that open it to the outside or give a phone authority are confirmed natively. */
+  directorLine?: DirectorLineHandlerContext['directorLine']
   /** 0.8: the containment as the runtime holds it. Absent (tests of other handlers): no containment exists and none can be set up. */
   isolation?: Omit<IsolationHandlerContext, 'confirm'>
 }
@@ -828,6 +831,10 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       artifacts: repos.researchArtifacts.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((a) => ({ ...a, textPath: null })),
       downloads: repos.researchDownloads.list({ projectId, ...(runId ? { runId } : {}), limit: limit ?? 50 }).map((d) => ({ id: d.id, projectId: d.projectId, runId: d.runId, url: d.url, finalUrl: d.finalUrl, fileName: d.suggestedName, sniffed: d.sniffed, bytes: d.bytes, sha256: d.sha256, state: d.state, refusal: d.refusal, downloadedAt: d.downloadedAt })),
     }),
+    ...createDirectorLineHandlers({
+      directorLine: ctx.directorLine ?? unavailableDirectorLine(),
+      ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
+    }),
     ...createIsolationHandlers({
       ...(ctx.isolation ?? {
         status: () => ({ requested: repos.settings.get().execution.containment, effective: 'STANDARD' as const, usable: false, detail: 'This runtime has no containment.', isolated: null, restricted: null, sandboxAccount: false, setupAvailable: false, protectedPaths: [], launches: { shell: 0, commands: 0, programs: 0, refused: 0 } }),
@@ -866,4 +873,13 @@ export async function dispatchIpc(
     const code = e instanceof NexusError ? e.code : 'internal'
     return { ok: false, error: { code, message: errorMessage(e) } }
   }
+}
+
+/** A runtime without the Director Line (a test's): every channel says so. */
+function unavailableDirectorLine(): DirectorLineHandlerContext['directorLine'] {
+  return new Proxy({} as DirectorLineHandlerContext['directorLine'], {
+    get: () => () => {
+      throw new NexusError('runtime_unavailable', 'The Director Line is not part of this runtime.')
+    },
+  })
 }

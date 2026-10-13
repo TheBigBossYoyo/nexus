@@ -7,6 +7,7 @@ import { useUiStore } from '../../store/ui'
 import { Button, ErrorNote, Loading, PageHeader } from '../../components/ui'
 import { AutonomySettings } from '../autonomy/AutonomySettings'
 import { IsolationPanel } from '../autonomy/IsolationPanel'
+import { DirectorLineSettings } from './DirectorLineSettings'
 import { isSameSettings, normalizeSettings, validateSettings } from './settingsForm'
 import {
   AdvancedSection,
@@ -26,6 +27,7 @@ import {
 type SectionId =
   | 'claude'
   | 'autonomy'
+  | 'director-line'
   | 'models'
   | 'execution'
   | 'usage'
@@ -55,6 +57,12 @@ const SECTIONS: {
         <IsolationPanel />
       </div>
     ),
+  },
+  {
+    id: 'director-line',
+    label: 'Director Line',
+    prefix: 'directorLine',
+    render: () => <DirectorLineSettings />,
   },
   { id: 'models', label: 'Models', prefix: 'models', render: (p) => <ModelsSection {...p} /> },
   {

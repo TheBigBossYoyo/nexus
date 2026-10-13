@@ -99,9 +99,9 @@ try {
     const db = new Database(join(dataDir, 'nexus.db'), { readonly: true })
     evidence.migrations = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => row.version)
     db.close()
-    evidence.checks['the database is at the schema of this version (19 migrations)'] = evidence.migrations.length === 19 && evidence.migrations.at(-1) === 19
+    evidence.checks['the database is at the schema of this version (20 migrations)'] = evidence.migrations.length === 20 && evidence.migrations.at(-1) === 20
   } catch (e) {
-    evidence.checks['the database is at the schema of this version (19 migrations)'] = false
+    evidence.checks['the database is at the schema of this version (20 migrations)'] = false
     evidence.errors.push(`database: ${String(e)}`)
   }
   evidence.finishedAt = new Date().toISOString()

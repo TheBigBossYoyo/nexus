@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ipcInputs, type AppInfo, type IpcChannel, type IpcInput } from '@shared/ipc'
 import { DEFAULT_OVERNIGHT_POLICY, OVERNIGHT_CONFIRMATION_TEXT } from '@shared/overnight'
 import { DEFAULT_WORKSPACE_POLICY } from '@shared/workspace'
+import { DEFAULT_COMMUNICATION_POLICY } from '@shared/director-line'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { RunEvent } from '@shared/events'
 import type { PushMessage } from '@shared/events'
@@ -213,6 +214,15 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'isolation.setup': {},
   'isolation.apps': {},
   'isolation.appScreenshot': { appId: '0123456789ab' },
+  'directorLine.get': {},
+  'directorLine.setEnabled': { enabled: true },
+  'directorLine.setProvider': { kind: 'TELEGRAM', secret: '123456789:AAExampleExampleExampleExample' },
+  'directorLine.setPolicy': { policy: DEFAULT_COMMUNICATION_POLICY },
+  'directorLine.startPairing': { channel: 'TELEGRAM' },
+  'directorLine.setPin': { pin: '123456' },
+  'directorLine.unpair': {},
+  'directorLine.sendTestMessage': {},
+  'directorLine.testCall': {},
   'knowledge.health': { projectId: 'p1' },
   'knowledge.tree': {
     projectId: 'p1',

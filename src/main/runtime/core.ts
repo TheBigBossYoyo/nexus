@@ -22,6 +22,7 @@ import {
 } from '@shared/runtime-protocol'
 import type { WorkersOverview } from '@shared/workers'
 import { TERMINAL_RUN_STATES, type Run } from '@shared/domain'
+import { isReasoningRun } from '@shared/program'
 import { ArenaService } from '../modules/arena'
 import { AutonomyService } from '../modules/autonomy/service'
 import { createHash, randomUUID } from 'node:crypto'
@@ -49,7 +50,11 @@ import { ProgressService } from '../modules/progress/service'
 import { sqliteOutageStore } from '../modules/connectivity/sqlite-outage-store'
 import { startNetworkResilience, type NetworkResilience } from './network-resilience'
 import type { FinishedTask } from '../modules/progress/estimator'
-import { DEFAULT_PROGRESS_REFRESH_SECONDS } from '@shared/progress'
+import { DEFAULT_PROGRESS_REFRESH_SECONDS, type ProgressSnapshot } from '@shared/progress'
+import { createDirectorLineRuntime } from '../modules/director-line/runtime'
+import type { HttpFetch } from '../modules/director-line'
+import { createDirectorLineHost, protectedSecretStore } from './director-line-host'
+import { DirectorLineReporter } from './director-line-reports'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
 import { FakeAgentRuntime, FakeCacheSim } from '../modules/agent-runtime/fake-runtime'
@@ -429,6 +434,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // for the refresh of what is shown. No session is started for it and no model is asked.
   const finishedTaskRows = db.prepare("SELECT kind, complexity, started_at AS s, finished_at AS f FROM tasks WHERE state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?")
   const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
+  const progressListeners: ((snapshot: ProgressSnapshot, why: string) => void)[] = []
   const progress = new ProgressService({
     now: () => Date.now(),
     run: (runId) => repos.runs.get(runId) ?? null,
@@ -443,7 +449,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     parallelism: (run) => Math.max(1, run.config.maxParallelAgents),
     refreshSeconds: () => repos.settings.get().execution.progressRefreshSeconds ?? DEFAULT_PROGRESS_REFRESH_SECONDS,
     waitOf: (run) => progressWaitOf(run),
-    onChange: (snapshot) => push({ kind: 'progress', snapshot }),
+    onChange: (snapshot, why) => {
+      push({ kind: 'progress', snapshot })
+      for (const listener of progressListeners) listener(snapshot, why)
+    },
   })
   // What a run waits on beyond its own state: the network (set by the connectivity supervisor), or a decision
   // of the user's on a boundary request of that mission.
@@ -1437,6 +1446,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     intelligenceOperations.closeAdmission()
     clearInterval(capacityRecoveryTimer)
     clearInterval(progressTick)
+    clearInterval(lineTick)
+    void directorLine.stop().catch(() => undefined)
     void network?.stop().catch(() => undefined)
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
@@ -1564,8 +1575,62 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     isPackaged: host.isPackaged,
   })
 
+  // 0.9: the Director Line. It is given facts to read, pause and continue for the user's own missions, and the
+  // ordinary creation of a mission; nothing that grants. Off until the user turns it on in Settings, with a
+  // native confirmation; while off, nothing is polled and nothing is sent.
+  const openRunIds = db.prepare("SELECT id FROM runs WHERE state NOT IN ('completed', 'failed', 'cancelled') ORDER BY created_at")
+  const lastOvernightReport = db.prepare("SELECT run_id FROM overnight_runs WHERE final_report IS NOT NULL ORDER BY rowid DESC LIMIT 1")
+  const missionName = (run: Run): string => `${repos.projects.get(run.projectId)?.name ?? 'project'}: ${run.prompt.replace(/\s+/g, ' ').slice(0, 60)}`
+  let createMissionFromLine: (input: { projectId: string; prompt: string }) => Promise<{ id: string }> = async () => {
+    throw new Error('The runtime is still starting.')
+  }
+  const directorLineHost = createDirectorLineHost({
+    openRuns: () => (openRunIds.all() as { id: string }[]).flatMap((r) => repos.runs.get(r.id) ?? []).filter((r) => !isReasoningRun(r)),
+    projectName: (projectId) => repos.projects.get(projectId)?.name ?? null,
+    projects: () => repos.projects.list().map((p) => ({ id: p.id, name: p.name })),
+    progressOf: (runId) => progress.snapshot(runId),
+    eventsOf: (runId, afterSeq) => repos.events.listByRun(runId, afterSeq, 5000),
+    pendingBoundaryRequests: () => repos.boundaryRequests.countPending(),
+    isOnline: () => network?.isOnline() ?? true,
+    latestOvernightReport: () => {
+      try {
+        const row = lastOvernightReport.get() as { run_id: string } | undefined
+        return row === undefined ? null : (overnight?.report(row.run_id).text ?? null)
+      } catch {
+        return null
+      }
+    },
+    pauseRun: (runId, detail) => orchestrator.pauseRun(runId, 'user', detail),
+    resumeRun: (runId) => orchestrator.resumeRun(runId),
+    createMission: (input) => createMissionFromLine(input),
+    subscribe: (listener) => bus.subscribe(listener),
+    logger,
+  })
+  const directorLine = createDirectorLineRuntime({
+    db,
+    secrets: protectedSecretStore(join(dataDir, 'director-line'), host.protectedStorage),
+    fetch: ((url, init) => fetch(url, init as RequestInit)) as HttpFetch,
+    reads: directorLineHost.reads,
+    actions: directorLineHost.actions,
+    isOnline: () => network?.isOnline() ?? true,
+    localNotify: async (title, text) => host.notify?.(title, text.slice(0, 400)),
+    recordNote: (note) => logger(`director line: refused a remote request (${note.topic})`),
+    log: (line) => logger(`director line: ${line}`),
+  })
+  const lineReporter = new DirectorLineReporter({ report: (event) => directorLine.line.report(event), now: () => Date.now() })
+  progressListeners.push((snapshot) => {
+    const run = repos.runs.get(snapshot.subject.id)
+    if (!run || isReasoningRun(run)) return
+    const overnightText = snapshot.wait === 'FINISHED' && repos.overnight.getByRun(run.id) !== null ? (overnight?.report(run.id).text ?? null) : null
+    lineReporter.onProgress(snapshot, missionName(run), overnightText)
+  })
+  const lineTick = setInterval(() => lineReporter.tick(), 60_000)
+  lineTick.unref()
+  void directorLine.start().catch((e: unknown) => logger(`director line: could not start: ${errorMessage(e)}`))
+
   const handlers = createIpcHandlers({
     progress,
+    directorLine,
     chatgpt,
     intelligenceOperations,
     taskAdmission,
@@ -1668,6 +1733,14 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   })
 
   // ───────────────────────────── the local server ─────────────────────────────
+
+  // A task sent over the Director Line is created the way the window creates one: the same channel, the same
+  // admission, Task Compiler and capability broker. The line adds nothing to it.
+  createMissionFromLine = async ({ projectId, prompt }) => {
+    const result = await dispatchIpc(handlers, 'runs.create', { projectId, mode: 'build', preset: repos.settings.get().execution.defaultPreset, prompt })
+    if (!result.ok) throw new Error(result.error.message)
+    return { id: (result.value as Run).id }
+  }
 
   const token = newToken()
   const pipe = newPipeName(dataDir)

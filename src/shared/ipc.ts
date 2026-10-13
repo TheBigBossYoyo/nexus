@@ -254,6 +254,45 @@ const WorkspaceKey = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
 
 import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
 import type { WorkersOverview } from './workers'
+import { OPERATOR_CHANNEL_KINDS, REPORT_EVENT_KINDS, type DirectorLineSettingsView } from './director-line'
+
+/** 0.9: the Director Line. A secret is accepted as input once and is never part of any output. */
+const E164 = /^\+[1-9]\d{6,14}$/
+const DirectorLineEventPolicy = z
+  .object({
+    enabled: z.boolean(),
+    call: z.boolean(),
+    threshold: z.number().int().min(0).max(100_000).optional(),
+    thresholdUnit: z.enum(['MINUTES', 'PERCENT']).optional(),
+  })
+  .strict()
+const DirectorLinePolicy = z
+  .object({
+    events: z
+      .object(
+        Object.fromEntries(REPORT_EVENT_KINDS.filter((k) => k !== 'PROGRESS').map((k) => [k, DirectorLineEventPolicy])) as Record<
+          Exclude<(typeof REPORT_EVENT_KINDS)[number], 'PROGRESS'>,
+          typeof DirectorLineEventPolicy
+        >,
+      )
+      .strict(),
+    precedence: z.array(z.enum(['PHONE', 'MESSAGE', 'LOCAL_NOTIFICATION'])).min(1).max(3),
+    quietHours: z
+      .object({
+        enabled: z.boolean(),
+        startMinute: z.number().int().min(0).max(1439),
+        endMinute: z.number().int().min(0).max(1439),
+        timeZone: z.string().min(1).max(64),
+        criticalBreaksQuiet: z.boolean(),
+      })
+      .strict(),
+    maxCallAttempts: z.number().int().min(0).max(3),
+    minProgressIntervalMinutes: z.number().int().min(0).max(1440),
+    staleAfterMinutes: z.number().int().min(1).max(10_080),
+    requirePinForStatus: z.boolean(),
+  })
+  .strict()
+const DirectorLineChannel = z.enum(OPERATOR_CHANNEL_KINDS)
 
 export const ipcInputs = {
   'chatgpt.status': Empty,
@@ -1018,6 +1057,33 @@ export const ipcInputs = {
   'isolation.apps': z.object({ projectId: Id.optional() }).strict(),
   /** A screenshot of an application session, as a data URL. `index` counts from the newest (0). */
   'isolation.appScreenshot': z.object({ appId: z.string().regex(/^[0-9a-f]{12}$/), index: z.number().int().min(0).max(500).optional() }).strict(),
+  // 0.9: the Director Line (remote operator channel). Those that open a channel to the outside, give a phone
+  // authority or spend money are confirmed natively by the runtime process; no output carries a secret.
+  'directorLine.get': Empty,
+  'directorLine.setEnabled': z.object({ enabled: z.boolean() }).strict(),
+  'directorLine.setProvider': z
+    .object({
+      kind: z.enum(['TELEGRAM', 'TWILIO_VOICE']),
+      /** The bot token or the Twilio API key secret. Goes straight to protected storage; null clears it. */
+      secret: z.string().min(8).max(256).regex(/^\S+$/).nullable(),
+      extra: z
+        .object({
+          fromNumber: z.string().regex(E164).optional(),
+          operatorNumber: z.string().regex(E164).optional(),
+          accountSid: z.string().regex(/^AC[0-9a-fA-F]{32}$/).optional(),
+          apiKeySid: z.string().regex(/^SK[0-9a-fA-F]{32}$/).optional(),
+          relayBaseUrl: z.string().url().max(300).startsWith('https://').optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  'directorLine.setPolicy': z.object({ policy: DirectorLinePolicy }).strict(),
+  'directorLine.startPairing': z.object({ channel: DirectorLineChannel }).strict(),
+  'directorLine.setPin': z.object({ pin: z.string().regex(/^\d{6,12}$/) }).strict(),
+  'directorLine.unpair': z.object({ channel: DirectorLineChannel.optional() }).strict(),
+  'directorLine.sendTestMessage': Empty,
+  'directorLine.testCall': Empty,
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
   'knowledge.tree': z
@@ -1061,6 +1127,16 @@ export const ipcInputs = {
   'tokens.agent': z.object({ agentId: Id }).strict(),
   'tokens.run': z.object({ runId: Id }).strict(),
 } as const
+
+/** The Director Line settings view plus the words the screen shows for why something is off. Holds no secret. */
+export interface DirectorLineView extends DirectorLineSettingsView {
+  /** Why the connection is in the state it is in, in a sentence. */
+  statusReason: string
+  /** Why the test call is unavailable, or null when it is available. */
+  voiceReason: string | null
+  /** The machine's time zone, for the quiet-hours default. */
+  machineTimeZone: string
+}
 
 export type IpcChannel = keyof typeof ipcInputs
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcInputs)[C]>
@@ -1257,6 +1333,16 @@ export interface IpcOutputs {
   'isolation.setup': SandboxSetupOutcome
   'isolation.apps': AppSessionView[]
   'isolation.appScreenshot': { dataUrl: string; takenAt: string } | null
+  'directorLine.get': DirectorLineView
+  'directorLine.setEnabled': DirectorLineView
+  'directorLine.setProvider': DirectorLineView
+  'directorLine.setPolicy': DirectorLineView
+  /** The only time the pairing code is returned. */
+  'directorLine.startPairing': { displayCode: string; expiresAt: string }
+  'directorLine.setPin': { configured: true }
+  'directorLine.unpair': { removed: number }
+  'directorLine.sendTestMessage': { ok: boolean; errorClass: string | null }
+  'directorLine.testCall': { ok: boolean; errorClass: string | null }
   'knowledge.health': {
     spaces: {
       space: ContextSpace
