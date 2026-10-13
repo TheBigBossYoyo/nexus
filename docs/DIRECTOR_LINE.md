@@ -91,7 +91,9 @@ Voice over SIP costs nothing on a free sip.linphone.org account. NEXUS never sig
 
 ## Voice is SIP since 0.9.1
 
-Voice is standard SIP, carried by the Linphone SDK in a separate helper process: the owner's phone runs the Linphone app with a free sip.linphone.org account, NEXUS has its own SIP account, and either side can call the other. A call that comes in and a call NEXUS places end in the same live conversation. The Twilio voice path (a call that says a report and hangs up), the relay design and the relay protocol were removed; stored rows that name `TWILIO_VOICE` are read as not configured and nothing acts on them. The SIP password lives only in protected storage (`sip.password`); the non-secret configuration and the call records (never what was said; the newest 200) are in the tables of migration 021. The IPC channels are `directorLine.setSip`, `removeSip`, `setVoicePolicy`, `callMe` and `hangUpCall`.
+Voice is standard SIP, carried by the Linphone SDK in a separate helper process: the owner's phone runs the Linphone app with a free sip.linphone.org account, NEXUS has its own SIP account, and either side can call the other. A call that comes in and a call NEXUS places end in the same live conversation. The Twilio voice path (a call that says a report and hangs up), the relay design and the relay protocol were removed; stored rows that name `TWILIO_VOICE` are read as not configured and nothing acts on them. The SIP password lives only in protected storage (`sip.password`); the non-secret configuration and the call records (never what was said; the newest 200) are in the tables of migration 021. The IPC channels are `directorLine.setSip`, `removeSip`, `setVoicePolicy`, `callMe`, `hangUpCall` and `confirmCallSas`.
+
+What a call is trusted for (review of 0.9.1). A registered helper opens no listening socket (the transport in use is told not to bind, the others are off), so a request can only arrive on the connection to the SIP server; only then, and only when the helper has said so, is the caller `TRANSPORT_AUTHENTICATED`. UDP is refused for a registered account. TLS is the hop to the SIP server and nothing more. A call is `endToEnd` only for ZRTP whose four-character string was compared with the telephone's (Settings, "They match", confirmed natively) or whose retained secrets match an earlier verified call; SRTP keys are known to the server and DTLS-SRTP fingerprints travel through it. When the owner refuses calls that are not encrypted, nothing is said or heard until the media shows it is (5 s), and a call that does not is ended and recorded as failed. A call NEXUS places says only that it has something to tell until the PIN is accepted. Strangers are counted in memory only (five declined calls in 30 minutes, then hung up on without a record); the times of the calls NEXUS placed in the last day are kept (migration 022) so that the daily limit survives a restart.
 
 ## Implemented and designed
 
@@ -164,9 +166,10 @@ All inputs and outputs are zod-able plain objects; none carries a secret back to
 | `directorLine.sendTestMessage` | none | `{ ok, errorClass }` | no |
 | `directorLine.setSip` | `{ identity, password \| null (null keeps the stored one), operatorIdentity, mediaEncryption, mediaEncryptionMandatory, stunServer, ice }` | view | yes (it gives a phone authority) |
 | `directorLine.removeSip` | none | view | yes |
-| `directorLine.setVoicePolicy` | `{ requirePin, ringSeconds, maxPlacedCallsPerDay, minMinutesBetweenPlacedCalls }` | view | yes when `requirePin` is turned off |
+| `directorLine.setVoicePolicy` | `{ requirePin, ringSeconds, maxPlacedCallsPerDay, minMinutesBetweenPlacedCalls }` | view | yes when `requirePin` is turned off, the calls per day are raised above 6 or the interval is lowered below 10 minutes |
 | `directorLine.callMe` | none | `{ result }` | no (it calls only the paired address) |
 | `directorLine.hangUpCall` | none | view | no |
+| `directorLine.confirmCallSas` | none | view | yes (it shows the ZRTP verification code of the call in progress and asks whether the telephone shows the same four characters) |
 
 The view holds enabled, the paired operator without the provider id, the message and voice provider kind with `configured`, the last four characters of the token at most, the connection status, the policy, and the last delivery. It has no field that could hold a token, a PIN or a pairing code.
 

@@ -14,6 +14,7 @@ export interface SipConfig {
   identity: string
   /** The server to register with, `sip:<domain>;transport=tls` unless the owner's account says otherwise. */
   server: string
+  /** tls (the default) or tcp: a registered account is reached only through its connection to the server, which UDP does not have. */
   transport: 'tls' | 'tcp' | 'udp'
   mediaEncryption: VoiceMediaEncryption
   /** When true, a call whose media is not encrypted is refused. */
@@ -68,7 +69,6 @@ export interface VoiceHost {
 }
 
 const ENCRYPTIONS: readonly string[] = ['none', 'srtp', 'zrtp', 'dtls']
-const TRANSPORTS: readonly string[] = ['tls', 'tcp', 'udp']
 
 const clampInt = (v: unknown, min: number, max: number, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback
@@ -92,11 +92,13 @@ function sanitizeSip(raw: unknown): SipConfig | null {
   return {
     identity,
     server: typeof r.server === 'string' && r.server.length > 0 && r.server.length <= 300 ? r.server : defaultServerFor(identity),
-    transport: TRANSPORTS.includes(r.transport as string) ? (r.transport as SipConfig['transport']) : 'tls',
+    // UDP is not reachable only through the server's connection, which a registered account depends on: it reads as TLS.
+    transport: r.transport === 'tcp' ? 'tcp' : 'tls',
     mediaEncryption: ENCRYPTIONS.includes(r.mediaEncryption as string) ? (r.mediaEncryption as VoiceMediaEncryption) : 'zrtp',
     mediaEncryptionMandatory: typeof r.mediaEncryptionMandatory === 'boolean' ? r.mediaEncryptionMandatory : true,
     stunServer: typeof r.stunServer === 'string' && r.stunServer.length > 0 && r.stunServer.length <= 253 ? r.stunServer : null,
-    ice: typeof r.ice === 'boolean' ? r.ice : true,
+    // Only with a STUN server does ICE gather anything but this PC's own addresses.
+    ice: typeof r.ice === 'boolean' && r.stunServer ? r.ice : false,
     displayName: typeof r.displayName === 'string' && r.displayName.trim() !== '' ? r.displayName.trim().slice(0, 60) : 'NEXUS Director',
   }
 }

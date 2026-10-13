@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { interpretMessage } from '@main/modules/director-line/intent'
 import { DEFAULT_VOICE_LINE_POLICY, DirectorVoiceLine, type CallRecord, type VoiceLinePolicy } from '@main/modules/director-line/voice-line'
-import { normalizeSipIdentity, type CallEndReason, type DirectorVoiceProvider, type PlacedCall, type SpeechToTextProvider, type TextToSpeechProvider, type VoiceCall, type VoiceProviderState } from '@main/modules/director-line/voice-provider'
+import { normalizeSipIdentity, type CallEndReason, type CallSecurity, type DirectorVoiceProvider, type PlacedCall, type SpeechToTextProvider, type TextToSpeechProvider, type VoiceCall, type VoiceProviderState } from '@main/modules/director-line/voice-provider'
 
 // 0.9.1: the Director's voice line with a scripted provider, recogniser and synthesizer. No SIP, no sound, no model.
 const OPERATOR = 'sip:user@sip.example.test'
 const PIN = '482915'
 
-function fakeCall(direction: 'INBOUND' | 'OUTBOUND', remote: string, assurance: VoiceCall['identityAssurance'] = 'TRANSPORT_AUTHENTICATED') {
+function fakeCall(direction: 'INBOUND' | 'OUTBOUND', remote: string, assurance: VoiceCall['identityAssurance'] = 'TRANSPORT_AUTHENTICATED', media: CallSecurity['media'] = 'SRTP') {
   const played: string[] = []
   const log: string[] = []
-  let ended: (r: CallEndReason) => void = () => undefined
+  const negotiated: CallSecurity = { signalling: 'TLS', media, endToEnd: false, peerVerified: false, sas: media === 'ZRTP' ? 'AB12' : null }
+  const listeners: ((r: CallEndReason) => void)[] = []
+  const ended = (r: CallEndReason): void => void listeners.splice(0).forEach((l) => l(r))
   const call: VoiceCall = {
     id: `call-${Math.random().toString(36).slice(2, 8)}`,
     direction,
@@ -24,13 +26,18 @@ function fakeCall(direction: 'INBOUND' | 'OUTBOUND', remote: string, assurance: 
     drained: async () => undefined,
     onAudio: () => undefined,
     onDigit: () => undefined,
-    onEnded: (l) => (ended = l),
-    security: () => ({ signalling: 'TLS', media: 'SRTP', endToEnd: false }),
+    onEnded: (l) => void listeners.push(l),
+    security: () => ({ ...negotiated }),
+    confirmSas: () => {
+      log.push('confirmSas')
+      negotiated.peerVerified = true
+      negotiated.endToEnd = true
+    },
   }
-  return { call, played, log, said: () => played.join('').trim(), remoteHangUp: () => ended('REMOTE_HUNG_UP') }
+  return { call, played, log, negotiated, said: () => played.join('').trim(), remoteHangUp: () => ended('REMOTE_HUNG_UP') }
 }
 
-function rig(over: { paired?: string | null; policy?: Partial<VoiceLinePolicy>; placed?: () => PlacedCall; state?: VoiceProviderState } = {}) {
+function rig(over: { paired?: string | null; policy?: Partial<VoiceLinePolicy>; placed?: () => PlacedCall; state?: VoiceProviderState; mandatory?: boolean; placedCalls?: { add(at: Date): void; since(since: Date): Date[] } } = {}) {
   let incoming: (call: VoiceCall) => void = () => undefined
   let utter: (text: string) => void = () => undefined
   let nowMs = Date.parse('2026-10-14T08:00:00Z')
@@ -62,6 +69,9 @@ function rig(over: { paired?: string | null; policy?: Partial<VoiceLinePolicy>; 
     generalFacts: async () => 'x',
     directorVoice: () => null,
     policy: () => ({ ...DEFAULT_VOICE_LINE_POLICY, ...over.policy }),
+    mediaEncryptionMandatory: over.mandatory ?? true,
+    encryptionWaitMs: 150,
+    ...(over.placedCalls ? { placedCalls: over.placedCalls } : {}),
     fallback: async (text) => void messages.push(text),
     record: (r) => records.push(r),
     now: () => new Date(nowMs),
@@ -110,7 +120,7 @@ describe('calls that come in', () => {
     await w.settle()
     expect(w.line.inCall).toBe(false)
     expect(w.records).toHaveLength(1)
-    expect(w.records[0]).toMatchObject({ direction: 'INBOUND', outcome: 'CONVERSATION', endReason: 'REMOTE_HUNG_UP', authenticated: true, security: { signalling: 'TLS', media: 'SRTP', endToEnd: false } })
+    expect(w.records[0]).toMatchObject({ direction: 'INBOUND', outcome: 'CONVERSATION', endReason: 'REMOTE_HUNG_UP', authenticated: true, security: { signalling: 'TLS', media: 'SRTP', endToEnd: false, peerVerified: false, sas: null } })
     expect(JSON.stringify(w.records)).not.toContain('telemetry')
   })
 
@@ -123,7 +133,8 @@ describe('calls that come in', () => {
     expect(c.log).toEqual(['hangUp'])
     expect(c.played).toEqual([])
     expect(w.records[0]?.outcome).toBe('DECLINED_UNPAIRED')
-    expect(w.authTried).toEqual(['sip:mallory@evil.test'])
+    // A stranger is counted in memory only: the persistent attempts are never touched for it.
+    expect(w.authTried).toEqual([])
     expect(w.performed).toEqual([])
 
     const nobody = rig({ paired: null })
@@ -177,9 +188,12 @@ describe('calls NEXUS places', () => {
     expect(await w.line.callOperator({ report: 'RaceDeck is complete.', reason: 'EVENT' })).toBe('CONVERSATION')
     await w.settle()
     expect(w.placedTo).toEqual([OPERATOR])
-    expect(c.said()).toContain('This is NEXUS. RaceDeck is complete.')
+    // Whoever answered is not yet known to be the operator: the report waits for the PIN.
+    expect(c.said()).toContain('This is NEXUS. I have something to tell you. Say your PIN')
+    expect(c.said()).not.toContain('RaceDeck')
     w.utter('4 8 2 9 1 5')
     await w.settle()
+    expect(c.said()).toContain('Thank you. RaceDeck is complete. You can ask about it, or say goodbye.')
     w.utter('what is the status')
     await w.settle()
     expect(w.performed.map((p) => p.kind)).toEqual(['STATUS'])
@@ -238,5 +252,161 @@ describe('calls NEXUS places', () => {
     expect(c.log).toEqual(['answer', 'hangUp'])
     await busy.settle()
     expect(busy.line.inCall).toBe(false)
+  })
+})
+
+describe('nothing private before the media is known to be encrypted', () => {
+  it('a call that does not show encrypted media in time is ended when encryption is mandatory: nothing was said or heard', async () => {
+    const w = rig()
+    await w.line.start()
+    const c = fakeCall('INBOUND', OPERATOR, 'TRANSPORT_AUTHENTICATED', 'NONE')
+    w.ring(c.call)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(c.log).toEqual(['answer', 'hangUp'])
+    expect(c.played).toEqual([])
+    expect(w.records).toHaveLength(1)
+    expect(w.records[0]).toMatchObject({ outcome: 'FAILED', authenticated: false, security: { media: 'NONE' } })
+    expect(w.line.inCall).toBe(false)
+    // The line is free again.
+    const next = fakeCall('INBOUND', OPERATOR)
+    w.ring(next.call)
+    await w.settle()
+    expect(next.said()).toContain('What is the PIN?')
+    next.remoteHangUp()
+  })
+
+  it('keys that are agreed a moment after the call is up are waited for', async () => {
+    const w = rig()
+    await w.line.start()
+    const c = fakeCall('INBOUND', OPERATOR, 'TRANSPORT_AUTHENTICATED', 'NONE')
+    w.ring(c.call)
+    await new Promise((r) => setTimeout(r, 60))
+    expect(c.played).toEqual([])
+    c.negotiated.media = 'ZRTP'
+    c.negotiated.sas = 'AB12'
+    await new Promise((r) => setTimeout(r, 100))
+    expect(c.said()).toContain('What is the PIN?')
+    expect(c.said()).not.toContain('not encrypted')
+    expect(w.line.currentSecurity()).toMatchObject({ media: 'ZRTP', sas: 'AB12', endToEnd: false })
+    c.remoteHangUp()
+  })
+
+  it('where the owner allows calls that are not encrypted, the call opens by saying so, and still asks for the PIN', async () => {
+    const w = rig({ mandatory: false, policy: { requirePin: false } })
+    await w.line.start()
+    const c = fakeCall('INBOUND', OPERATOR, 'TRANSPORT_AUTHENTICATED', 'NONE')
+    w.ring(c.call)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(c.said()).toMatch(/^This call is not encrypted\. NEXUS Director\. What is the PIN\?/)
+    c.remoteHangUp()
+    await w.settle()
+    expect(w.records[0]).toMatchObject({ outcome: 'CONVERSATION', security: { media: 'NONE' } })
+  })
+
+  it('a call placed by NEXUS is held to the same rule', async () => {
+    const c = fakeCall('OUTBOUND', OPERATOR, 'TRANSPORT_AUTHENTICATED', 'NONE')
+    const w = rig({ placed: () => ({ outcome: 'ANSWERED', call: c.call }) })
+    await w.line.start()
+    expect(await w.line.callOperator({ report: 'RaceDeck is complete.', reason: 'EVENT' })).toBe('CONVERSATION')
+    await new Promise((r) => setTimeout(r, 400))
+    expect(c.played).toEqual([])
+    expect(c.log).toEqual(['hangUp'])
+    expect(w.records[0]).toMatchObject({ outcome: 'FAILED' })
+  })
+})
+
+describe('the verification code of a call', () => {
+  it('is applied only to the call in progress and only if it is still the code that was shown', async () => {
+    const w = rig()
+    await w.line.start()
+    const c = fakeCall('INBOUND', OPERATOR, 'TRANSPORT_AUTHENTICATED', 'ZRTP')
+    expect(w.line.confirmCallSas('AB12')).toBe(false)
+    w.ring(c.call)
+    await w.settle()
+    expect(w.line.confirmCallSas('ZZZZ')).toBe(false)
+    expect(c.log).not.toContain('confirmSas')
+    expect(w.line.confirmCallSas('AB12')).toBe(true)
+    expect(c.log).toContain('confirmSas')
+    expect(w.line.currentSecurity()).toMatchObject({ media: 'ZRTP', endToEnd: true, peerVerified: true })
+    c.remoteHangUp()
+    await w.settle()
+    expect(w.line.currentSecurity()).toBeNull()
+
+    // SRTP has no string to compare: nothing to confirm.
+    const s = fakeCall('INBOUND', OPERATOR, 'TRANSPORT_AUTHENTICATED', 'SRTP')
+    w.ring(s.call)
+    await w.settle()
+    expect(w.line.confirmCallSas('AB12')).toBe(false)
+    s.remoteHangUp()
+  })
+})
+
+describe('strangers, and the line while a call is prepared', () => {
+  it('callers that are not paired are counted in memory; after five, the rest are hung up on with no record', async () => {
+    const w = rig()
+    await w.line.start()
+    for (let i = 0; i < 8; i++) {
+      const c = fakeCall('INBOUND', 'sip:mallory@evil.test')
+      w.ring(c.call)
+      await w.settle()
+      expect(c.log).toEqual(['hangUp'])
+    }
+    expect(w.records).toHaveLength(5)
+    expect(w.authTried).toEqual([])
+    // Thirty minutes later it is counted afresh.
+    w.advanceMinutes(31)
+    const again = fakeCall('INBOUND', 'sip:mallory@evil.test')
+    w.ring(again.call)
+    await w.settle()
+    expect(w.records).toHaveLength(6)
+  })
+
+  it('remembers at most 500 strangers', async () => {
+    const w = rig()
+    await w.line.start()
+    for (let i = 0; i < 520; i++) {
+      const c = fakeCall('INBOUND', `sip:caller${i}@evil.test`)
+      w.ring(c.call)
+      await Promise.resolve()
+    }
+    await w.settle()
+    expect((w.line as unknown as { unpaired: Map<string, number[]> }).unpaired.size).toBeLessThanOrEqual(500)
+  })
+
+  it('a call from the paired phone that arrives while NEXUS is preparing to ring is declined busy, and no message says nobody answered', async () => {
+    const w = rig({ placed: () => ({ outcome: 'LINE_BUSY' }) })
+    await w.line.start()
+    const placing = w.line.callOperator({ report: 'RaceDeck is blocked.', reason: 'EVENT' })
+    const arriving = fakeCall('INBOUND', OPERATOR)
+    w.ring(arriving.call)
+    expect(await placing).toBe('LINE_BUSY')
+    await w.settle()
+    expect(arriving.log).toEqual(['hangUp'])
+    expect(w.messages).toEqual([])
+  })
+
+  it('a placeCall that fails because a call is already in progress is LINE_BUSY: no message, no record', async () => {
+    const w = rig({ placed: () => ({ outcome: 'LINE_BUSY', reason: 'A call is already in progress.' }) })
+    await w.line.start()
+    expect(await w.line.callOperator({ report: 'x', reason: 'EVENT' })).toBe('LINE_BUSY')
+    expect(w.messages).toEqual([])
+    expect(w.records).toEqual([])
+    // and the line can be used again
+    expect(await w.line.callOperator({ report: 'y', reason: 'OPERATOR_ASKED' })).toBe('LINE_BUSY')
+  })
+})
+
+describe('the times of the calls NEXUS placed are kept', () => {
+  it('the daily limit holds across a new line (a restart, or a change of settings)', async () => {
+    const kept: Date[] = []
+    const store = { add: (at: Date) => void kept.push(at), since: (since: Date) => kept.filter((d) => d >= since) }
+    const first = rig({ policy: { maxPlacedCallsPerDay: 1, minMinutesBetweenPlacedCalls: 0 }, placedCalls: store })
+    await first.line.start()
+    expect(await first.line.callOperator({ report: 'a', reason: 'EVENT' })).toBe('NO_ANSWER')
+    expect(kept).toHaveLength(1)
+    const second = rig({ policy: { maxPlacedCallsPerDay: 1, minMinutesBetweenPlacedCalls: 0 }, placedCalls: store })
+    await second.line.start()
+    expect(await second.line.callOperator({ report: 'b', reason: 'EVENT' })).toBe('SUPPRESSED')
+    expect(second.placedTo).toEqual([])
   })
 })

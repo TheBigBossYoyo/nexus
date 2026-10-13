@@ -165,16 +165,29 @@ describe('a live call', () => {
     await w.c.close()
   })
 
-  it('a call NEXUS placed: whoever answers hears the report and nothing else, and the model is not asked', async () => {
+  it('a call NEXUS placed: whoever answers hears that there is something to tell and nothing more, and the model is not asked', async () => {
     const prompts: string[] = []
     const w = call(model((p) => (prompts.push(p), ['x'])), { direction: 'OUTBOUND', report: 'RaceDeck is complete.' })
     await w.c.start()
-    expect(w.take()[0]).toContain('This is NEXUS. RaceDeck is complete.')
+    const opening = w.take()
+    expect(opening).toEqual(['This is NEXUS. I have something to tell you. Say your PIN or key it in, then press pound.'])
+    expect(opening.join(' ')).not.toContain('RaceDeck')
     await w.c.utterance('what is blocked')
     await w.c.utterance('what is the status')
     expect(w.take()).toEqual(['The PIN first, please.', 'The PIN first, please.'])
     expect(prompts).toEqual([])
     expect(w.performed).toEqual([])
+    await w.c.close()
+  })
+
+  it('a call NEXUS placed: the report is said once the PIN is accepted, and can be spoken over', async () => {
+    const w = call(null, { direction: 'OUTBOUND', report: 'RaceDeck is complete.' })
+    await w.c.start()
+    w.take()
+    await w.c.utterance('four eight two nine one five')
+    expect(w.take()).toEqual(['Thank you. RaceDeck is complete. You can ask about it, or say goodbye.'])
+    w.c.speechStarted()
+    expect(w.take()).toEqual(['<clear>'])
     await w.c.close()
   })
 

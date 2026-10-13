@@ -29,13 +29,24 @@ export type CallEndReason = 'REMOTE_HUNG_UP' | 'LOCAL_HUNG_UP' | 'NETWORK_LOST' 
 
 /** What was really negotiated for one call, as the transport reports it. UNKNOWN is said rather than assumed. */
 export interface CallSecurity {
+  /** TLS is the hop to the SIP server only: it says nothing about the other end of the call. */
   signalling: 'TLS' | 'NONE' | 'UNKNOWN'
   media: 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN'
-  /** True only when the media keys were agreed between the two ends themselves and that was verified. */
+  /**
+   * True ONLY for ZRTP whose short authentication string was verified (by a person comparing it with the other
+   * telephone's, or by the retained secrets of an earlier verified call). SRTP keys are known to the SIP server, and
+   * the DTLS-SRTP fingerprints travel through it, so neither is ever end to end. ZRTP not yet verified is encrypted,
+   * but whoever sits between the two ends could still be one of them.
+   */
   endToEnd: boolean
+  /** Whether the other end was verified: the ZRTP string was compared, or matched the retained secrets. */
+  peerVerified: boolean
+  /** The ZRTP short authentication string to compare with the one the other telephone shows; null when there is none. */
+  sas: string | null
 }
 
 export interface VoiceCall {
+  /** Unique across restarts of the transport: call records and the keys of confirmed commands are made of it. */
   readonly id: string
   readonly direction: 'INBOUND' | 'OUTBOUND'
   /** The other party as the transport names it, in one normal form (for SIP: `sip:user@domain`, lower case, no parameters). */
@@ -60,13 +71,19 @@ export interface VoiceCall {
   /** Called once. */
   onEnded(listener: (reason: CallEndReason) => void): void
   security(): CallSecurity
+  /**
+   * The person compared the ZRTP string with the other telephone's and it matched: the transport keeps that, so that
+   * later calls with the same peer are known by their keys. Absent on a transport that has no such string.
+   */
+  confirmSas?(): void
 }
 
 export type VoiceProviderState = 'STOPPED' | 'CONNECTING' | 'REGISTERED' | 'UNREACHABLE' | 'REJECTED'
 
 export type PlacedCall =
   | { outcome: 'ANSWERED'; call: VoiceCall }
-  | { outcome: 'NO_ANSWER' | 'BUSY' | 'DECLINED' | 'FAILED'; reason?: string }
+  /** LINE_BUSY: the transport already has a call, so nobody was rung. */
+  | { outcome: 'NO_ANSWER' | 'BUSY' | 'DECLINED' | 'FAILED' | 'LINE_BUSY'; reason?: string }
 
 export interface DirectorVoiceProvider {
   readonly kind: string

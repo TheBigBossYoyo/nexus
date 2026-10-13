@@ -30,7 +30,7 @@ function fakeCall(remote = OPERATOR) {
     onAudio: (l) => (audio = l),
     onDigit: (l) => (digit = l),
     onEnded: (l) => (ended = l),
-    security: () => ({ signalling: 'TLS', media: 'SRTP', endToEnd: false }),
+    security: () => ({ signalling: 'TLS', media: 'SRTP', endToEnd: false, peerVerified: false, sas: null }),
   }
   return { call, played, log, hear: (pcm: Buffer) => audio(pcm), press: (d: string) => digit(d), remoteHangUp: () => ended('REMOTE_HUNG_UP') }
 }

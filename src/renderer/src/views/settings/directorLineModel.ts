@@ -1,4 +1,4 @@
-import { normalizeSipIdentity, type CallRecordView, type CommunicationPolicy, type ConnectionStatus, type PlaceCallResult, type ReportEventKind, type VoiceMediaEncryption } from '@shared/director-line'
+import { normalizeSipIdentity, type CallRecordView, type CallSecurityView, type CommunicationPolicy, type ConnectionStatus, type PlaceCallResult, type ReportEventKind, type VoiceMediaEncryption } from '@shared/director-line'
 import type { DirectorLineView, IpcInput } from '@shared/ipc'
 
 /** Words and small pure helpers for the Director Line settings screen. */
@@ -117,7 +117,7 @@ export const ENCRYPTION_LABEL: Record<VoiceMediaEncryption, string> = { zrtp: 'Z
 export const ENCRYPTION_ORDER: readonly VoiceMediaEncryption[] = ['zrtp', 'srtp', 'dtls', 'none']
 
 export const ENCRYPTION_NOTE =
-  'ZRTP and DTLS agree keys between the two ends. NEXUS shows what a call actually negotiated; it does not claim more.'
+  'ZRTP agrees keys between the two telephones; comparing its four-character code with the one Linphone shows proves that nobody is between them. SRTP keys are known to the SIP server, and DTLS-SRTP fingerprints travel through it. NEXUS shows what a call actually negotiated; it does not claim more.'
 
 export const SIP_SETUP_STEPS: readonly string[] = [
   'Create two free accounts at sip.linphone.org by hand: one for your phone, one for NEXUS.',
@@ -127,7 +127,7 @@ export const SIP_SETUP_STEPS: readonly string[] = [
 ]
 
 export const PIN_OFF_NOTE =
-  'The paired SIP address alone then opens the line, and only when the SIP service itself establishes who is calling. An address that a service only passes on still needs the PIN.'
+  'A call from the paired SIP address that comes through the SIP server NEXUS is registered with is then trusted without a PIN. The server decides whose call it is: anyone who can sign in to it as that address, or who controls it, can do what the phone can do here, and NEXUS cannot tell them from you. A call that did not come through the server, or that is not encrypted, still needs the PIN.'
 
 export const NO_SPEECH_LINE = 'No speech engine is installed, so calls cannot be held yet.'
 
@@ -142,7 +142,7 @@ export interface SipForm {
   ice: boolean
 }
 
-export const EMPTY_SIP_FORM: SipForm = { identity: '', password: '', operatorIdentity: '', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: '', ice: true }
+export const EMPTY_SIP_FORM: SipForm = { identity: '', password: '', operatorIdentity: '', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: '', ice: false }
 
 /** The form as it starts: what is stored (never the password), or the defaults. */
 export function sipFormFromView(voice: Voice): SipForm {
@@ -261,10 +261,34 @@ export function speechLine(speech: Voice['speech']): string {
   return `Recogniser: ${speech.stt.kind} (${where(speech.stt)}). Voice: ${speech.tts.kind} (${where(speech.tts)}).`
 }
 
-/** What a call negotiated, as it was recorded: "TLS / ZRTP (end to end)". */
+/**
+ * What a call negotiated, as it was recorded, said exactly as it was the case. TLS is the hop to the SIP server and
+ * nothing more; only a ZRTP code that was compared makes a call end to end.
+ */
 export function securityText(security: CallRecordView['security']): string {
   if (security === null) return 'not recorded'
-  return `${security.signalling} / ${security.media.replace('_', '-')}${security.endToEnd ? ' (end to end)' : ''}`
+  if (security.media === 'NONE') return 'not encrypted'
+  const server = security.signalling === 'TLS' ? 'TLS to the server' : security.signalling === 'NONE' ? 'no TLS to the server' : 'link to the server unknown'
+  switch (security.media) {
+    case 'ZRTP': return `${server} / ZRTP, ${security.endToEnd ? 'verified end to end' : 'not verified'}`
+    case 'SRTP': return `${server} / SRTP (keys known to the server)`
+    case 'DTLS_SRTP': return `${server} / DTLS-SRTP (fingerprints through the server)`
+    default: return `${server} / media unknown`
+  }
+}
+
+/** What to show while a call is in progress: the verification code and whether it was compared, or what else is the case. */
+export function liveSecurityWords(security: CallSecurityView): { text: string; canConfirm: boolean } {
+  switch (security.media) {
+    case 'ZRTP':
+      if (security.sas === null) return { text: 'Encrypted (ZRTP). The keys are being agreed.', canConfirm: false }
+      if (security.peerVerified) return { text: `Encrypted (ZRTP), verified end to end. Verification code: ${security.sas}.`, canConfirm: false }
+      return { text: `Encrypted (ZRTP). Verification code: ${security.sas}. Compare it with the code Linphone shows on the telephone.`, canConfirm: true }
+    case 'SRTP': return { text: 'Encrypted (SRTP). The keys are known to the SIP server.', canConfirm: false }
+    case 'DTLS_SRTP': return { text: 'Encrypted (DTLS-SRTP). Its fingerprints travel through the SIP server.', canConfirm: false }
+    case 'NONE': return { text: 'Not encrypted.', canConfirm: false }
+    default: return { text: 'The encryption of this call is not known yet.', canConfirm: false }
+  }
 }
 
 const OUTCOME_WORDS: Record<CallRecordView['outcome'], string> = {

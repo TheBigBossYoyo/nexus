@@ -256,7 +256,7 @@ import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
 import type { WorkersOverview } from './workers'
 import {
   normalizeSipIdentity, OPERATOR_CHANNEL_KINDS, REPORT_EVENT_KINDS,
-  type CallRecordView, type DirectorLineSettingsView, type PlaceCallResult, type VoiceLinePolicyView, type VoiceLineState, type VoiceMediaEncryption,
+  type CallRecordView, type CallSecurityView, type DirectorLineSettingsView, type PlaceCallResult, type VoiceLinePolicyView, type VoiceLineState, type VoiceMediaEncryption,
 } from './director-line'
 
 /** 0.9: the Director Line. A secret is accepted as input once and is never part of any output. */
@@ -1099,6 +1099,8 @@ export const ipcInputs = {
     .strict(),
   'directorLine.callMe': Empty,
   'directorLine.hangUpCall': Empty,
+  /** The person compared the ZRTP verification code with the telephone's. The code itself is read by the runtime, never sent. */
+  'directorLine.confirmCallSas': Empty,
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
   'knowledge.tree': z
@@ -1160,6 +1162,8 @@ export interface DirectorLineView extends DirectorLineSettingsView {
     state: VoiceLineState
     stateDetail: string | null
     inCall: boolean
+    /** What the call in progress has negotiated so far, with its ZRTP verification code; null when there is no call. */
+    callSecurity: CallSecurityView | null
     mediaEncryption: VoiceMediaEncryption
     mediaEncryptionMandatory: boolean
     stunServer: string | null
@@ -1379,6 +1383,7 @@ export interface IpcOutputs {
   'directorLine.setVoicePolicy': DirectorLineView
   'directorLine.callMe': { result: PlaceCallResult }
   'directorLine.hangUpCall': DirectorLineView
+  'directorLine.confirmCallSas': DirectorLineView
   'knowledge.health': {
     spaces: {
       space: ContextSpace

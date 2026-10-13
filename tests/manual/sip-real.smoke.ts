@@ -125,10 +125,15 @@ it('a real call between the two accounts through their SIP service', async () =>
   await sleep(4500)
   result['audio'] = { phoneToNexus440: amplitudeAt(heardByNexus, 440), nexusToPhone880: amplitudeAt(heardByPhone, 880), sent: 16384, framesAtNexus: heardByNexus.length, framesAtPhone: heardByPhone.length }
   result['security'] = { nexus: callN.security(), phone: callP.security() }
+  // Whether the helpers opened any socket that accepts requests: they must not, when registered.
+  result['listening'] = { nexus: nexus.provider.diagnostics().listening, phone: phone.provider.diagnostics().listening }
   await callP.hangUp()
   await sleep(1500)
   write()
   console.log(JSON.stringify(result))
   expect((result['audio'] as { phoneToNexus440: number }).phoneToNexus440).toBeGreaterThan(4000)
   expect((result['audio'] as { nexusToPhone880: number }).nexusToPhone880).toBeGreaterThan(4000)
+  // Reached through the registration connection, with nothing listening: that is what makes the From worth believing.
+  expect(result['listening']).toEqual({ nexus: false, phone: false })
+  expect((result['incoming'] as { identityAssurance: string }).identityAssurance).toBe('TRANSPORT_AUTHENTICATED')
 }, 180_000)

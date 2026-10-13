@@ -222,11 +222,12 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'directorLine.setPin': { pin: '123456' },
   'directorLine.unpair': {},
   'directorLine.sendTestMessage': {},
-  'directorLine.setSip': { identity: 'sip:nexus@sip.linphone.org', password: null, operatorIdentity: 'sip:me@sip.linphone.org', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: true },
+  'directorLine.setSip': { identity: 'sip:nexus@sip.linphone.org', password: null, operatorIdentity: 'sip:me@sip.linphone.org', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: false },
   'directorLine.removeSip': {},
   'directorLine.setVoicePolicy': { requirePin: true, ringSeconds: 30, maxPlacedCallsPerDay: 6, minMinutesBetweenPlacedCalls: 10 },
   'directorLine.callMe': {},
   'directorLine.hangUpCall': {},
+  'directorLine.confirmCallSas': {},
   'knowledge.health': { projectId: 'p1' },
   'knowledge.tree': {
     projectId: 'p1',

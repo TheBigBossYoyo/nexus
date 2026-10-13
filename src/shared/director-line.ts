@@ -196,6 +196,16 @@ export interface VoiceLinePolicyView {
   minMinutesBetweenPlacedCalls: number
 }
 
+/** What a call negotiated. `endToEnd` only for ZRTP whose string was verified; TLS is the hop to the SIP server only. */
+export interface CallSecurityView {
+  signalling: 'TLS' | 'NONE' | 'UNKNOWN'
+  media: 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN'
+  endToEnd: boolean
+  peerVerified: boolean
+  /** The ZRTP verification code of a call in progress, to compare with the telephone's. Always null in a record of a past call. */
+  sas: string | null
+}
+
 /** What is kept of a call: when, which way, how it ended, what was negotiated. Never what was said. */
 export interface CallRecordView {
   callId: string
@@ -205,7 +215,7 @@ export interface CallRecordView {
   outcome: 'CONVERSATION' | 'DECLINED_UNPAIRED' | 'DECLINED_BUSY' | 'NO_ANSWER' | 'BUSY' | 'DECLINED' | 'FAILED' | 'SUPPRESSED'
   endReason: 'REMOTE_HUNG_UP' | 'LOCAL_HUNG_UP' | 'NETWORK_LOST' | 'FAILED' | null
   authenticated: boolean
-  security: { signalling: 'TLS' | 'NONE' | 'UNKNOWN'; media: 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN'; endToEnd: boolean } | null
+  security: CallSecurityView | null
   medianAnswerMs: number | null
 }
 
@@ -236,4 +246,5 @@ export const DIRECTOR_LINE_IPC = {
   setVoicePolicy: 'directorLine.setVoicePolicy',
   callMe: 'directorLine.callMe',
   hangUpCall: 'directorLine.hangUpCall',
+  confirmCallSas: 'directorLine.confirmCallSas',
 } as const

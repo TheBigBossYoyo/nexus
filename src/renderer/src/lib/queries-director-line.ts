@@ -1,4 +1,5 @@
-import type { QueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { DirectorLineView } from '@shared/ipc'
 import { useRead, useWrite } from './queries'
 
@@ -10,6 +11,16 @@ export const qkDirectorLine = {
 }
 
 export const useDirectorLine = () => useRead(qkDirectorLine.view(), 'directorLine.get', {})
+
+/** While a call is in progress the view is asked for again every two seconds: the verification code appears once the keys are agreed. */
+export function useDirectorLineLiveWhile(active: boolean): void {
+  const qc = useQueryClient()
+  useEffect(() => {
+    if (!active) return undefined
+    const timer = setInterval(() => void qc.invalidateQueries({ queryKey: qkDirectorLine.view() }), 2000)
+    return () => clearInterval(timer)
+  }, [active, qc])
+}
 
 /** A write that answers with the view replaces the cached view at once. */
 const replaceView = (qc: QueryClient, view: DirectorLineView): void => void qc.setQueryData(qkDirectorLine.view(), view)
@@ -28,3 +39,4 @@ export const useDirectorLineRemoveSip = () => useWrite('directorLine.removeSip',
 export const useDirectorLineSetVoicePolicy = () => useWrite('directorLine.setVoicePolicy', replaceView, { silent: true })
 export const useDirectorLineCallMe = () => useWrite('directorLine.callMe', refresh, { silent: true })
 export const useDirectorLineHangUp = () => useWrite('directorLine.hangUpCall', replaceView, { silent: true })
+export const useDirectorLineConfirmSas = () => useWrite('directorLine.confirmCallSas', replaceView, { silent: true })

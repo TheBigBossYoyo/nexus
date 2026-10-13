@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeSipIdentity } from '@shared/director-line'
+import { normalizeSipIdentity, type CallSecurityView } from '@shared/director-line'
 import type { DirectorLineView } from '@shared/ipc'
 import { normalizeSipIdentity as providerNormalize } from '@main/modules/director-line/voice-provider'
 import {
-  EMPTY_SIP_FORM, answerTimeWords, callMeDisabledReason, clock, isValidTimeZone, minuteToTime, moved, placeResultWords, sameVoicePolicy, secondsLeft, securityText, sipFormFromView, sipFormInput,
+  EMPTY_SIP_FORM, answerTimeWords, callMeDisabledReason, clock, isValidTimeZone, liveSecurityWords, minuteToTime, moved, placeResultWords, sameVoicePolicy, secondsLeft, securityText, sipFormFromView, sipFormInput,
   sipFormProblems, speechLine, timeToMinute, voicePolicyProblems, voiceStatus, type SipForm,
 } from '../../../src/renderer/src/views/settings/directorLineModel'
 
@@ -47,10 +47,11 @@ describe('voice (SIP) form and words', () => {
     state: 'REGISTERED',
     stateDetail: null,
     inCall: false,
+    callSecurity: null,
     mediaEncryption: 'zrtp',
     mediaEncryptionMandatory: true,
     stunServer: null,
-    ice: true,
+    ice: false,
     policy: { requirePin: true, ringSeconds: 30, maxPlacedCallsPerDay: 6, minMinutesBetweenPlacedCalls: 10 },
     speech: { stt: { kind: 'whisper', local: true }, tts: { kind: 'piper', local: true } },
     lastCalls: [],
@@ -77,14 +78,14 @@ describe('voice (SIP) form and words', () => {
   it('sends only what was typed: an empty password is null, an empty STUN server is null', () => {
     const form: SipForm = { ...EMPTY_SIP_FORM, identity: ' sip:nexus@sip.linphone.org ', operatorIdentity: 'sip:me@sip.linphone.org' }
     expect(sipFormInput(form)).toEqual({
-      identity: 'sip:nexus@sip.linphone.org', password: null, operatorIdentity: 'sip:me@sip.linphone.org', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: true,
+      identity: 'sip:nexus@sip.linphone.org', password: null, operatorIdentity: 'sip:me@sip.linphone.org', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: false,
     })
     expect(sipFormInput({ ...form, password: 'pw', stunServer: ' stun.example.org ' })).toMatchObject({ password: 'pw', stunServer: 'stun.example.org' })
   })
 
   it('the form starts from the view and never from a password', () => {
     expect(sipFormFromView(voice({ stunServer: 'stun.example.org', mediaEncryption: 'dtls' }))).toEqual({
-      identity: 'sip:nexus@sip.linphone.org', password: '', operatorIdentity: 'sip:me@sip.linphone.org', mediaEncryption: 'dtls', mediaEncryptionMandatory: true, stunServer: 'stun.example.org', ice: true,
+      identity: 'sip:nexus@sip.linphone.org', password: '', operatorIdentity: 'sip:me@sip.linphone.org', mediaEncryption: 'dtls', mediaEncryptionMandatory: true, stunServer: 'stun.example.org', ice: false,
     })
   })
 
@@ -121,10 +122,24 @@ describe('voice (SIP) form and words', () => {
     expect(callMeDisabledReason(voice({ state: 'UNREACHABLE' }))).toMatch(/not registered/)
   })
 
+  it('says what is the case in a call in progress, and offers the confirmation only for a ZRTP code that was not compared', () => {
+    const sec = (over: Partial<CallSecurityView>): CallSecurityView => ({ signalling: 'TLS', media: 'ZRTP', endToEnd: false, peerVerified: false, sas: 'AB12', ...over })
+    expect(liveSecurityWords(sec({}))).toEqual({ text: 'Encrypted (ZRTP). Verification code: AB12. Compare it with the code Linphone shows on the telephone.', canConfirm: true })
+    expect(liveSecurityWords(sec({ peerVerified: true, endToEnd: true })).canConfirm).toBe(false)
+    expect(liveSecurityWords(sec({ peerVerified: true, endToEnd: true })).text).toContain('verified end to end')
+    expect(liveSecurityWords(sec({ sas: null })).canConfirm).toBe(false)
+    expect(liveSecurityWords(sec({ media: 'SRTP', sas: null }))).toEqual({ text: 'Encrypted (SRTP). The keys are known to the SIP server.', canConfirm: false })
+    expect(liveSecurityWords(sec({ media: 'NONE', sas: null }))).toEqual({ text: 'Not encrypted.', canConfirm: false })
+    expect(EMPTY_SIP_FORM.ice).toBe(false)
+  })
+
   it('shows what a call negotiated exactly as it was recorded, and what speech leaves the PC', () => {
-    expect(securityText({ signalling: 'TLS', media: 'ZRTP', endToEnd: true })).toBe('TLS / ZRTP (end to end)')
-    expect(securityText({ signalling: 'TLS', media: 'SRTP', endToEnd: false })).toBe('TLS / SRTP')
-    expect(securityText({ signalling: 'NONE', media: 'UNKNOWN', endToEnd: false })).toBe('NONE / UNKNOWN')
+    expect(securityText({ signalling: 'TLS', media: 'ZRTP', endToEnd: true, peerVerified: true, sas: null })).toBe('TLS to the server / ZRTP, verified end to end')
+    expect(securityText({ signalling: 'TLS', media: 'ZRTP', endToEnd: false, peerVerified: false, sas: null })).toBe('TLS to the server / ZRTP, not verified')
+    expect(securityText({ signalling: 'TLS', media: 'SRTP', endToEnd: false, peerVerified: false, sas: null })).toBe('TLS to the server / SRTP (keys known to the server)')
+    expect(securityText({ signalling: 'TLS', media: 'NONE', endToEnd: false, peerVerified: false, sas: null })).toBe('not encrypted')
+    expect(securityText({ signalling: 'TLS', media: 'DTLS_SRTP', endToEnd: false, peerVerified: false, sas: null })).toBe('TLS to the server / DTLS-SRTP (fingerprints through the server)')
+    expect(securityText({ signalling: 'NONE', media: 'UNKNOWN', endToEnd: false, peerVerified: false, sas: null })).toBe('no TLS to the server / media unknown')
     expect(securityText(null)).toBe('not recorded')
     expect(speechLine({ stt: { kind: 'whisper', local: true }, tts: { kind: 'piper', local: true } })).toBe('Recogniser: whisper (on this PC). Voice: piper (on this PC).')
     expect(speechLine({ stt: { kind: 'deepgram', local: false }, tts: { kind: 'piper', local: true } })).toContain('sound goes to deepgram')

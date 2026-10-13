@@ -19,6 +19,7 @@ import { researchSchema } from './018-research'
 import { boundaryActionHashSchema } from './019-boundary-action-hash'
 import { operationalAutonomySchema } from './020-operational-autonomy'
 import { voiceLineSchema } from './021-voice-line'
+import { voiceLineVerificationSchema } from './022-voice-line-verification'
 
 export interface Migration {
   version: number
@@ -49,4 +50,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 19, name: 'boundary-action-hash', sql: boundaryActionHashSchema },
   { version: 20, name: 'operational-autonomy', sql: operationalAutonomySchema },
   { version: 21, name: 'voice-line', sql: voiceLineSchema },
+  { version: 22, name: 'voice-line-verification', sql: voiceLineVerificationSchema },
 ]

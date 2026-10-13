@@ -209,7 +209,7 @@ describe.skipIf(!available)('two real SIP helpers calling each other on 127.0.0.
   it('carries a 440 Hz tone, stops it on clear, drains, and hangs up', { timeout: 180_000 }, async () => {
     const { callA, callB, heardB, endsA, endsB } = await loopback('plain', 'none')
     await until('media', () => callA.security().media === 'NONE' && callB.security().media === 'NONE', 15_000)
-    expect(callA.security()).toEqual({ signalling: 'NONE', media: 'NONE', endToEnd: false })
+    expect(callA.security()).toEqual({ signalling: 'NONE', media: 'NONE', endToEnd: false, peerVerified: false, sas: null })
     await sleep(500)
 
     // ---- a tone from A is heard at B
@@ -267,11 +267,18 @@ describe.skipIf(!available)('two real SIP helpers calling each other on 127.0.0.
     expect(endsB).toEqual(['REMOTE_HUNG_UP'])
   })
 
-  it('negotiates ZRTP and reports it as end to end only once it has', { timeout: 180_000 }, async () => {
+  it('negotiates ZRTP and reports it as end to end only once its string was verified', { timeout: 180_000 }, async () => {
     const { callA, callB, heardB, endsA, endsB } = await loopback('zrtp', 'zrtp')
     await until('ZRTP on both ends', () => callA.security().media === 'ZRTP' && callB.security().media === 'ZRTP', 20_000)
-    expect(callA.security()).toEqual({ signalling: 'NONE', media: 'ZRTP', endToEnd: true })
-    expect(callB.security()).toEqual({ signalling: 'NONE', media: 'ZRTP', endToEnd: true })
+    // Encrypted, with a string to compare, and not end to end: nobody compared it.
+    await until('the string on both ends', () => callA.security().sas !== null && callB.security().sas !== null, 10_000)
+    expect(callA.security()).toMatchObject({ signalling: 'NONE', media: 'ZRTP', endToEnd: false, peerVerified: false })
+    expect(callB.security()).toMatchObject({ signalling: 'NONE', media: 'ZRTP', endToEnd: false, peerVerified: false })
+    expect(callA.security().sas).toMatch(/^[0-9A-Za-z]{4}$/)
+    // The person compared the strings: from then on it is end to end.
+    callA.confirmSas?.()
+    await until('verified on A', () => callA.security().peerVerified, 10_000)
+    expect(callA.security()).toMatchObject({ media: 'ZRTP', endToEnd: true, peerVerified: true })
     await sleep(500)
     const mark = heardB.length
     callA.sendAudio(tone(440, 2))
@@ -298,5 +305,70 @@ describe.skipIf(!available)('two real SIP helpers calling each other on 127.0.0.
     console.log(`sip-loopback: both providers stopped (call in progress) in ${ms.toFixed(0)} ms`)
     expect(ms).toBeLessThan(5000)
     expect(children.every((c) => c.exitCode !== null || c.signalCode !== null)).toBe(true)
+  })
+})
+
+describe.skipIf(!available)('what the real helper does with calls it does not manage', () => {
+  async function pair(): Promise<{ b: LinphoneSipProvider; portB: number; incoming: VoiceCall[]; make: (who: string, identity: string) => LinphoneSipProvider; logs: string[] }> {
+    const dir = join(root, `unmanaged-${Date.now()}`)
+    mkdirSync(dir, { recursive: true })
+    const out = join(root, 'native')
+    const built = spawnSync(process.execPath, [resolve('scripts/build-sip.mjs'), out], { encoding: 'utf8' })
+    expect(built.status, built.stderr).toBe(0)
+    const helperPath = join(out, 'nexus-sip.exe')
+    const logs: string[] = []
+    const make = (who: string, identity: string, port = -1): LinphoneSipProvider => {
+      const provider = new LinphoneSipProvider({ helperPath, runtimeDir, stateDir: join(dir, who), account: async () => account(identity, 'none'), spawn: childSpawn, register: false, sipPort: port, log: (m) => void logs.push(`${who}: ${m}`) })
+      providers.push(provider)
+      return provider
+    }
+    const portB = await freePort()
+    const incoming: VoiceCall[] = []
+    const b = make('b', 'sip:callee@nexus.test', portB)
+    await b.start({ incoming: (call) => void incoming.push(call), state: () => undefined })
+    await sleep(1500)
+    return { b, portB, incoming, make: (who, identity) => make(who, identity), logs }
+  }
+
+  it('a caller whose address is far too long is declined at once and never announced; the next caller gets through', { timeout: 120_000 }, async () => {
+    const { portB, incoming, make, logs } = await pair()
+    const long = make('long', `sip:${'a'.repeat(400)}@nexus.test`)
+    await long.start({ incoming: () => undefined, state: () => undefined })
+    await sleep(1000)
+    const t0 = Date.now()
+    const refused = await long.placeCall(`sip:127.0.0.1:${portB}`, { ringSeconds: 20 })
+    // Declined at once: not after the 45 s the helper lets a call ring.
+    expect(Date.now() - t0).toBeLessThan(15_000)
+    expect(refused.outcome).not.toBe('ANSWERED')
+    expect(incoming).toHaveLength(0)
+    expect(logs.join('\n')).not.toContain('printed something that is not an event')
+    // The helper is free for the next one.
+    const ok = make('ok', 'sip:caller@nexus.test')
+    await ok.start({ incoming: () => undefined, state: () => undefined })
+    await sleep(1000)
+    const pending = ok.placeCall(`sip:127.0.0.1:${portB}`, { ringSeconds: 20 })
+    await until('the incoming call at B', () => incoming.length === 1)
+    expect(incoming[0]?.remoteIdentity).toBe('sip:caller@nexus.test')
+    await incoming[0]?.hangUp()
+    await pending
+  })
+
+  it('a call while another is in progress is declined as busy, and the call in progress is not disturbed', { timeout: 120_000 }, async () => {
+    const { portB, incoming, make } = await pair()
+    const first = make('first', 'sip:one@nexus.test')
+    const second = make('second', 'sip:two@nexus.test')
+    await first.start({ incoming: () => undefined, state: () => undefined })
+    await second.start({ incoming: () => undefined, state: () => undefined })
+    await sleep(1000)
+    const pendingFirst = first.placeCall(`sip:127.0.0.1:${portB}`, { ringSeconds: 20 })
+    await until('the first call at B', () => incoming.length === 1)
+    await incoming[0]?.answer()
+    const placed = await pendingFirst
+    expect(placed.outcome).toBe('ANSWERED')
+    const refused = await second.placeCall(`sip:127.0.0.1:${portB}`, { ringSeconds: 20 })
+    expect(refused.outcome).toBe('BUSY')
+    expect(incoming).toHaveLength(1)
+    expect(incoming[0]?.security().media).not.toBe('UNKNOWN')
+    await incoming[0]?.hangUp()
   })
 })

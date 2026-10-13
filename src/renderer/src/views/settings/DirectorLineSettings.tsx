@@ -4,6 +4,8 @@ import type { DirectorLineView } from '@shared/ipc'
 import {
   useDirectorLine,
   useDirectorLineCallMe,
+  useDirectorLineConfirmSas,
+  useDirectorLineLiveWhile,
   useDirectorLineHangUp,
   useDirectorLineRemoveSip,
   useDirectorLineSetEnabled,
@@ -37,6 +39,7 @@ import {
   callOutcomeWords,
   placeResultWords,
   sameVoicePolicy,
+  liveSecurityWords,
   securityText,
   sipFormFromView,
   sipFormInput,
@@ -91,6 +94,7 @@ export function DirectorLineSettings() {
   const setVoicePolicy = useDirectorLineSetVoicePolicy()
   const callMe = useDirectorLineCallMe()
   const hangUp = useDirectorLineHangUp()
+  const confirmSas = useDirectorLineConfirmSas()
   const setPin = useDirectorLineSetPin()
   const [pin, setPinText] = useState('')
   const [pinAgain, setPinAgain] = useState('')
@@ -106,6 +110,7 @@ export function DirectorLineSettings() {
   const now = useNow(code !== null)
 
   const view: DirectorLineView | undefined = query.data
+  useDirectorLineLiveWhile(query.data?.voice.inCall === true)
   const paired = view?.pairedOperator ?? null
   const left = code ? secondsLeft(code.expiresAt, now) : 0
 
@@ -140,7 +145,7 @@ export function DirectorLineSettings() {
     setDraft(next)
   }
   const failure =
-    setEnabled.error ?? setProvider.error ?? setPolicy.error ?? startPairing.error ?? unpair.error ?? testMessage.error ?? setPin.error ?? setSip.error ?? removeSip.error ?? setVoicePolicy.error ?? callMe.error ?? hangUp.error
+    setEnabled.error ?? setProvider.error ?? setPolicy.error ?? startPairing.error ?? unpair.error ?? testMessage.error ?? setPin.error ?? setSip.error ?? removeSip.error ?? setVoicePolicy.error ?? callMe.error ?? hangUp.error ?? confirmSas.error
   const working = setEnabled.isPending || setProvider.isPending || setPolicy.isPending || startPairing.isPending
   const voice = view.voice
   const voiceReady = voice.available && voice.configured
@@ -289,6 +294,16 @@ export function DirectorLineSettings() {
             </Button>
           ) : null}
         </div>
+        {voice.inCall && voice.callSecurity !== null ? (
+          <div className="flex flex-wrap items-center gap-2" data-testid="director-line-call-security">
+            <span className="text-small">{liveSecurityWords(voice.callSecurity).text}</span>
+            {liveSecurityWords(voice.callSecurity).canConfirm ? (
+              <Button variant="primary" loading={confirmSas.isPending} onClick={() => confirmSas.mutate({}, { onSuccess: () => setAnnounce('The call is verified.') })} data-testid="director-line-confirm-sas">
+                They match
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
             <ol className="m-0 flex flex-col gap-0.5 pl-5 text-small text-text-secondary" data-testid="director-line-sip-help">
               {SIP_SETUP_STEPS.map((step) => (
                 <li key={step}>{step}</li>

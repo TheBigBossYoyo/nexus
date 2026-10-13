@@ -175,7 +175,7 @@ describe('migration 004 (v0.3)', () => {
 
     const db = openDatabase(path)
     open.push(db)
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 21 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 22 })
     const repos = createRepositories(db)
     expect(repos.runs.require(seeded.runId)).toMatchObject({ state: 'completed', prompt: `A schema-${version} mission` })
     expect(repos.tasks.listByRun(seeded.runId).map((t) => t.key)).toEqual(['api'])
@@ -194,7 +194,7 @@ describe('migration 004 (v0.3)', () => {
     open.pop()
     const again = openDatabase(path)
     open.push(again)
-    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 21 })
+    expect(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 22 })
 
     // The database as the older release left it was kept next to the upgraded one, complete and readable.
     const backup = `${path}.v${version}.bak`

@@ -14,24 +14,33 @@
 //   stdin  {"c":"configure","identity":"sip:u@d","password":"..","displayName":"..","server":"sip:d;transport=tls",
 //           "transport":"tls|tcp|udp","mediaEncryption":"none|srtp|zrtp|dtls","mediaEncryptionMandatory":true,
 //           "stunServer":"host"|null,"ice":false,"jitterMs":0,"register":true,"sipPort":-1}
-//          {"c":"call","to":"sip:.."}  {"c":"answer","call":id}  {"c":"decline","call":id}  {"c":"hangup","call":id}
+//          {"c":"call","to":"sip:.."}  {"c":"answer","call":id}  {"c":"decline"}  {"c":"decline","call":id}  {"c":"hangup","call":id}
 //          {"c":"audio","call":id,"pcm":"<base64>"}  {"c":"clear","call":id}  {"c":"mark","call":id,"name":".."}
-//          {"c":"refresh"}  {"c":"quit"}
+//          {"c":"verifySas","call":id}  {"c":"refresh"}  {"c":"quit"}
 //   stdout {"e":"ready","version":".."}  {"e":"registration","state":"none|progress|ok|cleared|failed","reason":".."}
-//          {"e":"incoming","call":id,"from":"sip:..","fromDisplayName":"..","viaRegisteredAccount":true}
+//          {"e":"listener","listening":false}   (after "configure": whether any socket of this program accepts requests)
+//          {"e":"incoming","call":id,"from":"sip:..","viaRegisteredAccount":true}
 //          {"e":"call","call":id,"state":"outgoing|ringing|connected|streams|ended|error","reason":".."}
-//          {"e":"media","call":id,"codec":"opus","clockRate":48000,"encryption":"none|srtp|zrtp|dtls","zrtpSas":"..","srtpSuite":".."}
+//          {"e":"media","call":id,"codec":"opus","clockRate":48000,"encryption":"none|srtp|zrtp|dtls","zrtpSas":"..","sasVerified":false,"srtpSuite":".."}
 //          {"e":"audio","call":id,"pcm":"<base64>"}  {"e":"dtmf","call":id,"digit":"5"}
 //          {"e":"played","call":id,"name":".."}  {"e":"error","message":".."}
 //
+// A registered account opens NO listening socket: the transport in use is told not to bind, the others are off, so a
+// request can only arrive on the connection this program made to its SIP server. Only an unregistered endpoint (tests,
+// two cores calling each other) listens, on "sipPort". UDP is refused for a registered account.
+//
 // An incoming call is never answered by this program: it rings until "answer" or "decline", and is declined after 45 s.
-// A second call while one is in progress is declined as busy.
+// A second call while one is in progress is declined as busy. Any call that is not the current one (a transfer's
+// target, a call the stack made by itself) is ended at once. A caller whose address is empty or longer than 320
+// characters is declined at once and no event is written for it. Only one version of the SDK is supported: the sound
+// card below writes native structures at offsets that are valid for it alone.
 //
 // Build (C# 5, the compiler that ships with Windows; scripts\build-sip.mjs does it):
 //   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /optimize+ /unsafe /platform:x64 /target:exe
 //       /out:nexus-sip.exe nexus-sip.cs
 //
-// Exit codes: 0 done, 2 wrong arguments, 3 the runtime could not be loaded, 1 self-test failed.
+// Exit codes: 0 done, 2 wrong arguments, 3 the runtime could not be loaded, 4 the runtime is not the supported version,
+// 1 self-test failed.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -112,6 +121,11 @@ static class N
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_transports_set_udp_port(IntPtr t, int port);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_transports_set_tcp_port(IntPtr t, int port);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_transports_set_tls_port(IntPtr t, int port);
+    [DllImport(LL, CallingConvention = C)] public static extern int linphone_transports_get_udp_port(IntPtr t);
+    [DllImport(LL, CallingConvention = C)] public static extern int linphone_transports_get_tcp_port(IntPtr t);
+    [DllImport(LL, CallingConvention = C)] public static extern int linphone_transports_get_tls_port(IntPtr t);
+    [DllImport(LL, CallingConvention = C)] public static extern int linphone_transports_get_dtls_port(IntPtr t);
+    [DllImport(LL, CallingConvention = C)] public static extern IntPtr linphone_core_get_transports_used(IntPtr core);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_transports_unref(IntPtr t);
     [DllImport(LL, CallingConvention = C)] public static extern int linphone_core_set_transports(IntPtr core, IntPtr t);
     [DllImport(LL, CallingConvention = C)] public static extern int linphone_core_start(IntPtr core);
@@ -147,6 +161,11 @@ static class N
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_set_push_notification_enabled(IntPtr core, byte b);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_enable_push_notification(IntPtr core, byte b);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_set_max_size_for_auto_download_incoming_files(IntPtr core, int size);
+    [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_disable_chat(IntPtr core, int reason);
+    [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_enable_conference_server(IntPtr core, byte b);
+    [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_set_max_calls(IntPtr core, int max);
+    [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_set_max_call_logs(IntPtr core, int max);
+    [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_clear_call_logs(IntPtr core);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_set_network_reachable(IntPtr core, byte b);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_core_refresh_registers(IntPtr core);
     [DllImport(LL, CallingConvention = C)] public static extern int linphone_core_terminate_all_calls(IntPtr core);
@@ -198,6 +217,8 @@ static class N
     [DllImport(LL, CallingConvention = C)] public static extern IntPtr linphone_call_get_remote_address(IntPtr call);
     [DllImport(LL, CallingConvention = C)] public static extern IntPtr linphone_call_get_to_address(IntPtr call);
     [DllImport(LL, CallingConvention = C)] public static extern IntPtr linphone_call_get_authentication_token(IntPtr call);
+    [DllImport(LL, CallingConvention = C)] public static extern byte linphone_call_get_authentication_token_verified(IntPtr call);
+    [DllImport(LL, CallingConvention = C)] public static extern void linphone_call_set_authentication_token_verified(IntPtr call, byte verified);
     [DllImport(LL, CallingConvention = C)] public static extern IntPtr linphone_call_ref(IntPtr call);
     [DllImport(LL, CallingConvention = C)] public static extern void linphone_call_unref(IntPtr call);
     [DllImport(LL, CallingConvention = C)] public static extern int linphone_call_params_get_media_encryption(IntPtr prm);
@@ -381,7 +402,12 @@ static class Json
             if (v == null) sb.Append("null");
             else if (v is bool) sb.Append((bool)v ? "true" : "false");
             else if (v is int || v is long) sb.Append(Convert.ToInt64(v).ToString(CultureInfo.InvariantCulture));
-            else sb.Append(Quote(v.ToString()));
+            else
+            {
+                // NEXUS cuts a line at 4000 characters and cannot read what is left: nothing here may grow without bound
+                string text = v.ToString();
+                sb.Append(Quote(text.Length > 400 ? text.Substring(0, 400) : text));
+            }
         }
         sb.Append('}');
         return sb.ToString();
@@ -905,6 +931,15 @@ class Endpoint
     volatile bool audioActive;
     string lastErr;
     public volatile bool QuitRequested;
+    // calls that were refused or ended because they are not the current one, so that each is dealt with once
+    readonly HashSet<IntPtr> refused = new HashSet<IntPtr>();
+    bool placing;
+    readonly List<IntPtr> toEnd = new List<IntPtr>();
+    DateTime clearLogsAt = DateTime.MinValue;
+    const int MaxFrom = 320;
+
+    public const string SupportedVersion = "5.5.32";
+    public static bool VersionSupported() { return N.S(N.linphone_core_get_version()) == SupportedVersion; }
 
     static readonly Dictionary<IntPtr, Endpoint> ByCore = new Dictionary<IntPtr, Endpoint>();
     static CallStateCb stateCb; static CallEncCb encCb; static RegCb regCb; static DtmfCb dtmfCb;
@@ -957,14 +992,18 @@ class Endpoint
     public void Configure(Dictionary<string, object> c)
     {
         if (core != IntPtr.Zero) { Err("already configured"); return; }
+        if (!VersionSupported()) throw new FormatException("unsupported-sdk: this program needs liblinphone " + SupportedVersion);
         string transport = Json.Str(c, "transport", false) ?? "udp";
         if (transport != "tls" && transport != "tcp" && transport != "udp") throw new FormatException("\"transport\" must be tls, tcp or udp");
+        // A registered account must be reachable only through the connection to its server; UDP has no connection.
+        if (Json.Bool(c, "register", true) && transport == "udp") throw new FormatException("\"transport\" udp is not allowed for a registered account (tls or tcp)");
         string enc = Json.Str(c, "mediaEncryption", false) ?? "none";
         menc = enc == "none" ? 0 : enc == "srtp" ? 1 : enc == "zrtp" ? 2 : enc == "dtls" ? 3 : -1;
         if (menc < 0) throw new FormatException("\"mediaEncryption\" must be none, srtp, zrtp or dtls");
         mandatory = Json.Bool(c, "mediaEncryptionMandatory", false);
         string stun = Json.Str(c, "stunServer", false);
-        bool ice = Json.Bool(c, "ice", false);
+        // ICE gathers candidates from the STUN server; without one it only publishes this PC's own addresses
+        bool ice = Json.Bool(c, "ice", false) && stun != null;
         int jitter = Json.Int(c, "jitterMs", 0, 0, 5000);
         wantRegister = Json.Bool(c, "register", true);
         int sipPort = Json.Int(c, "sipPort", -1, -1, 65535);
@@ -979,6 +1018,7 @@ class Endpoint
         IntPtr f = N.linphone_factory_get();
         SetupFactoryDirs(f);
         EnsureCallbacks();
+        PurgeHistory();   // what an earlier run left of call history and messages is gone before anything can read it
         core = N.linphone_factory_create_core_3(f, null, null, IntPtr.Zero);   // no configuration file: nothing is read, nothing kept
         if (core == IntPtr.Zero) { Err("the SIP core could not be created"); return; }
         ByCore[core] = this;
@@ -989,10 +1029,15 @@ class Endpoint
         N.linphone_core_cbs_set_dtmf_received(cbs, dtmfCb);
         N.linphone_core_add_callbacks(core, cbs);
 
+        // Registered: LC_SIP_TRANSPORT_DONTBIND (-2) for the transport in use and 0 (off) for the others, so that no
+        // socket of this program accepts a request and everything arrives on the connection made to the server. A
+        // request sent straight to this PC, with a From and a To forged to look like the proxy's, finds nothing there.
+        const int DontBind = -2;
+        int port = wantRegister ? DontBind : sipPort;
         IntPtr t = N.linphone_factory_create_transports(f);
-        N.linphone_transports_set_udp_port(t, transport == "udp" ? sipPort : 0);
-        N.linphone_transports_set_tcp_port(t, transport == "tcp" ? sipPort : 0);
-        N.linphone_transports_set_tls_port(t, transport == "tls" ? sipPort : 0);
+        N.linphone_transports_set_udp_port(t, transport == "udp" ? port : 0);
+        N.linphone_transports_set_tcp_port(t, transport == "tcp" ? port : 0);
+        N.linphone_transports_set_tls_port(t, transport == "tls" ? port : 0);
         N.linphone_core_set_transports(core, t);
         N.linphone_transports_unref(t);
 
@@ -1011,6 +1056,12 @@ class Endpoint
         N.linphone_core_set_push_notification_enabled(core, 0);
         N.linphone_core_enable_push_notification(core, 0);
         N.linphone_core_set_max_size_for_auto_download_incoming_files(core, -1);
+        // Instant messages are refused (reason "declined"), there is no conference server, and a second call is busy
+        // before it is anything else. Call transfer (REFER) has no switch in the API: the core starts the target as
+        // a new call by itself, and that call is ended the moment it appears (OnCallState), with max-calls 1 as well.
+        N.linphone_core_disable_chat(core, 3);
+        N.linphone_core_enable_conference_server(core, 0);
+        N.linphone_core_set_max_calls(core, 1);
 
         N.linphone_core_set_media_encryption(core, menc);
         N.linphone_core_set_media_encryption_mandatory(core, (byte)(mandatory ? 1 : 0));
@@ -1036,6 +1087,8 @@ class Endpoint
 
         int started = N.linphone_core_start(core);
         if (started != 0) { Err("the SIP core did not start"); return; }
+        N.linphone_core_clear_call_logs(core);
+        ReportListener();
 
         // With an identity there is an account. Without registration it is only what a call says it is from (a test
         // between two cores on this PC); with registration it is the account NEXUS is reachable at.
@@ -1086,6 +1139,42 @@ class Endpoint
         }
     }
 
+    /// <summary>Says whether any socket of this program accepts requests: the ports the stack really uses.</summary>
+    void ReportListener()
+    {
+        bool listening = true;
+        IntPtr used = N.linphone_core_get_transports_used(core);
+        if (used != IntPtr.Zero)
+        {
+            listening = N.linphone_transports_get_udp_port(used) > 0 || N.linphone_transports_get_tcp_port(used) > 0
+                || N.linphone_transports_get_tls_port(used) > 0 || N.linphone_transports_get_dtls_port(used) > 0;
+            N.linphone_transports_unref(used);
+        }
+        Emit(Json.Ev("listener", "listening", listening));
+    }
+
+    /// <summary>Call history and message databases are not wanted: they are removed where no one holds them open.</summary>
+    void PurgeHistory()
+    {
+        foreach (string sub in new string[] { "data", "cfg", "cache" })
+        {
+            string dir = Path.Combine(state, sub);
+            if (!Directory.Exists(dir)) continue;
+            try
+            {
+                foreach (string file in Directory.GetFiles(dir))
+                {
+                    string n = Path.GetFileName(file).ToLowerInvariant();
+                    if (n.EndsWith(".db") || n.EndsWith(".db-journal") || n.EndsWith(".db-wal") || n.EndsWith(".db-shm") || n.EndsWith(".sqlite") || n.EndsWith(".sqlite3"))
+                    {
+                        try { File.Delete(file); } catch (Exception) { }
+                    }
+                }
+            }
+            catch (Exception) { }
+        }
+    }
+
     // ---------------------------------------------------------------- commands
     /// <summary>Audio, clear and mark are queued in the order they arrive, straight from the reading thread.</summary>
     public bool HandleFast(string cmd, Dictionary<string, object> c)
@@ -1117,8 +1206,9 @@ class Endpoint
             case "configure": Configure(c); break;
             case "call": Place(Json.Str(c, "to", true)); break;
             case "answer": Answer(Json.Str(c, "call", true)); break;
-            case "decline": Decline(Json.Str(c, "call", true)); break;
+            case "decline": Decline(Json.Str(c, "call", false)); break;
             case "hangup": Hangup(Json.Str(c, "call", true)); break;
+            case "verifySas": VerifySas(Json.Str(c, "call", true)); break;
             case "refresh": Refresh(); break;
             case "quit": QuitRequested = true; break;
             default: throw new FormatException("unknown command");
@@ -1147,7 +1237,10 @@ class Endpoint
         if (!to.StartsWith("sip:", StringComparison.OrdinalIgnoreCase) && !to.StartsWith("sips:", StringComparison.OrdinalIgnoreCase)) throw new FormatException("\"to\" must be a SIP address");
         IntPtr prm = NewParams(IntPtr.Zero);
         if (account != IntPtr.Zero) N.linphone_call_params_set_account(prm, account);
-        IntPtr call = N.linphone_core_invite_with_params(core, N.U(to), prm);
+        placing = true;   // the one outgoing call this program makes of its own accord is adopted; any other is not
+        IntPtr call;
+        try { call = N.linphone_core_invite_with_params(core, N.U(to), prm); }
+        finally { placing = false; }
         N.linphone_call_params_unref(prm);
         if (call == IntPtr.Zero && cur == IntPtr.Zero) Emit(Json.Ev("call", "call", "none", "state", "error", "reason", "invalid"));
     }
@@ -1156,18 +1249,35 @@ class Endpoint
     {
         if (!NeedCore()) return;
         if (cur == IntPtr.Zero || id != curId || !incoming || lastState != null) { Err("no incoming call " + id); return; }
+        // Before the call is accepted: the stack reports connected and streams from inside the accept itself, and a
+        // state written afterwards would hide them (the media of the call was then only reported when its keys changed).
+        lastState = "answering";
         IntPtr prm = NewParams(cur);
         N.linphone_call_accept_with_params(cur, prm);
         N.linphone_call_params_unref(prm);
-        lastState = "answering";
     }
 
+    /// <summary>Declines the incoming call that is ringing. With no id it is the current one, whatever its id: the host
+    /// uses that when it could not read what this program said about the call.</summary>
     void Decline(string id)
     {
         if (!NeedCore()) return;
-        if (cur == IntPtr.Zero || id != curId || !incoming || lastState != null) { Err("no incoming call " + id); return; }
+        if (cur == IntPtr.Zero || (id != null && id != curId) || !incoming || lastState != null) { Err("no incoming call " + id); return; }
         localEnd = true;
         N.linphone_call_decline(cur, 3);
+    }
+
+    /// <summary>The person compared the short authentication string with the one on the other telephone and it
+    /// matched: liblinphone keeps that in its ZRTP cache, so that a later call with the same peer is known by its keys.</summary>
+    void VerifySas(string id)
+    {
+        if (!NeedCore()) return;
+        if (cur == IntPtr.Zero || id != curId || lastState != "streams") { Err("verifySas: no such call " + id + " (state " + lastState + ")"); return; }
+        IntPtr prm = N.linphone_call_get_current_params(cur);
+        if (prm == IntPtr.Zero || N.linphone_call_params_get_media_encryption(prm) != 2) { Err("the call is not encrypted with ZRTP"); return; }
+        N.linphone_call_set_authentication_token_verified(cur, 1);
+        lastMedia = null;
+        ReportMedia();
     }
 
     void Hangup(string id)
@@ -1194,6 +1304,22 @@ class Endpoint
         if (core == IntPtr.Zero) return;
         N.linphone_core_iterate(core);
         DateTime now = DateTime.UtcNow;
+        List<IntPtr> ending = null;
+        lock (toEnd) { if (toEnd.Count > 0) { ending = new List<IntPtr>(toEnd); toEnd.Clear(); } }
+        if (ending != null)
+        {
+            foreach (IntPtr extra in ending)
+            {
+                if (extra != cur) N.linphone_call_terminate(extra);
+                N.linphone_call_unref(extra);
+            }
+        }
+        if (clearLogsAt != DateTime.MinValue && now >= clearLogsAt && cur == IntPtr.Zero)
+        {
+            // the record of a call is written when it is released, a moment after it ended
+            clearLogsAt = DateTime.MinValue;
+            N.linphone_core_clear_call_logs(core);
+        }
         if (cur != IntPtr.Zero)
         {
             if (incoming && lastState == null && (now - incomingAt).TotalSeconds > 45)
@@ -1224,9 +1350,11 @@ class Endpoint
             }
             audioActive = false;
             if (pcm != null) { pcm.RxEnabled = false; pcm.Clear(); }
+            N.linphone_core_clear_call_logs(core);
             N.linphone_core_stop(core);     // unregisters the account
             ByCore.Remove(core);
             N.linphone_core_unref(core);
+            PurgeHistory();                 // the databases are closed now
         }
         catch (Exception e) { Diag.Log("shutdown: " + e.GetType().Name); }
         core = IntPtr.Zero;
@@ -1294,24 +1422,43 @@ class Endpoint
     {
         if (st == 1)   // IncomingReceived
         {
-            if (cur != IntPtr.Zero) { N.linphone_call_decline(call, 6); return; }   // one call at a time: busy
-            Adopt(call, true);
+            if (cur != IntPtr.Zero) { refused.Add(call); N.linphone_call_decline(call, 6); return; }   // one call at a time: busy
             IntPtr from = N.linphone_call_get_remote_address(call);
-            IntPtr uri = N.linphone_address_as_string_uri_only(from);
-            string fromText = N.S(uri);
-            if (uri != IntPtr.Zero) N.bctbx_free(uri);
-            string display = N.S(N.linphone_address_get_display_name(from));
-            Emit(Json.Ev("incoming", "call", curId, "from", fromText, "fromDisplayName", display, "viaRegisteredAccount", ViaRegisteredAccount(call)));
+            string fromText = null;
+            if (from != IntPtr.Zero)
+            {
+                IntPtr uri = N.linphone_address_as_string_uri_only(from);
+                fromText = N.S(uri);
+                if (uri != IntPtr.Zero) N.bctbx_free(uri);
+            }
+            // An address that is empty or longer than any real one is not a caller: it is declined at once, without
+            // an event (the host would not be able to read one that long, and the line would stay taken while it rings).
+            if (string.IsNullOrEmpty(fromText) || fromText.Length > MaxFrom) { refused.Add(call); N.linphone_call_decline(call, 3); Diag.Log("an incoming call with an unusable From was declined"); return; }
+            Adopt(call, true);
+            Emit(Json.Ev("incoming", "call", curId, "from", fromText, "viaRegisteredAccount", ViaRegisteredAccount(call)));
             return;
         }
-        if (st == 3 && cur == IntPtr.Zero)   // OutgoingInit
+        if (st == 3 && cur == IntPtr.Zero && placing)   // OutgoingInit of a call this program was asked to place
         {
             Adopt(call, false);
             lastState = "outgoing";
             CallEvent("outgoing", null);
             return;
         }
-        if (call != cur) return;
+        if (call != cur)
+        {
+            // Not the call this program manages (the target of a transfer, a call the stack made by itself): ended at
+            // once. A call that was refused above is already going away, and says nothing more.
+            if (st == 14 || st == 13 || st == 19) { refused.Remove(call); return; }
+            if (refused.Add(call))
+            {
+                Diag.Log("a call that is not the current one was ended (state " + st + ")");
+                // not from inside the callback: the stack is still building the call
+                lock (toEnd) { toEnd.Add(N.linphone_call_ref(call)); }
+            }
+            return;
+        }
+        if (st == 12) { Diag.Log("a transfer request was ignored"); return; }
         switch (st)
         {
             case 5: case 6: if (lastState != "ringing") { lastState = "ringing"; CallEvent("ringing", null); } break;
@@ -1339,6 +1486,7 @@ class Endpoint
                 N.linphone_call_unref(cur);
                 cur = IntPtr.Zero;
                 curId = null;
+                clearLogsAt = DateTime.UtcNow.AddSeconds(1);
                 break;
         }
     }
@@ -1382,10 +1530,14 @@ class Endpoint
         string codec = pt == IntPtr.Zero ? "unknown" : (N.S(N.linphone_payload_type_get_mime_type(pt)) ?? "unknown").ToLowerInvariant();
         int rate = pt == IntPtr.Zero ? 0 : N.linphone_payload_type_get_clock_rate(pt);
         string sas = null;
+        bool sasVerified = false;
         if (enc == 2)
         {
             sas = N.S(N.linphone_call_get_authentication_token(cur));
             if (string.IsNullOrEmpty(sas)) sas = null;
+            // true once a person compared the string with the other telephone's, or when the retained secrets of an
+            // earlier call that was verified match (liblinphone reads its ZRTP cache for that)
+            sasVerified = sas != null && N.linphone_call_get_authentication_token_verified(cur) != 0;
         }
         string suite = null;
         IntPtr stats = N.linphone_call_get_audio_stats(cur);
@@ -1396,10 +1548,10 @@ class Endpoint
             N.linphone_call_stats_unref(stats);
         }
         string encName = enc == 1 ? "srtp" : enc == 2 ? "zrtp" : enc == 3 ? "dtls" : "none";
-        string key = codec + "|" + rate + "|" + encName + "|" + sas + "|" + suite;
+        string key = codec + "|" + rate + "|" + encName + "|" + sas + "|" + sasVerified + "|" + suite;
         if (key == lastMedia) return;
         lastMedia = key;
-        Emit(Json.Ev("media", "call", curId, "codec", codec, "clockRate", rate, "encryption", encName, "zrtpSas", sas, "srtpSuite", suite));
+        Emit(Json.Ev("media", "call", curId, "codec", codec, "clockRate", rate, "encryption", encName, "zrtpSas", sas, "sasVerified", sasVerified, "srtpSuite", suite));
     }
 }
 
@@ -1446,6 +1598,7 @@ static class Program
     static readonly object queueLock = new object();
     static readonly List<KeyValuePair<string, Dictionary<string, object>>> pending = new List<KeyValuePair<string, Dictionary<string, object>>>();
     static volatile bool inputClosed;
+    static DateTime lastTickError = DateTime.MinValue;
 
     static Stream OwnStdout()
     {
@@ -1464,6 +1617,13 @@ static class Program
         LineWriter writer = new LineWriter(stdout);
         Endpoint ep = new Endpoint("nexus", runtimeDir, stateDir, writer.Post);
         string version = N.S(N.linphone_core_get_version());
+        if (!Endpoint.VersionSupported())
+        {
+            // the sound card writes native structures at offsets that are valid for one SDK version only
+            writer.Post(Json.Ev("error", "message", "unsupported-sdk: liblinphone " + version + " is loaded, this program needs " + Endpoint.SupportedVersion), false);
+            writer.Close(500);
+            return 4;
+        }
         writer.Post(Json.Ev("ready", "version", version), false);
 
         Thread reader = new Thread(delegate () { ReadInput(ep, writer); });
@@ -1485,7 +1645,12 @@ static class Program
                 }
             }
             if (writer.Broken) break;
-            try { ep.Tick(); } catch (Exception e) { Diag.Log("tick: " + e.GetType().Name); }
+            try { ep.Tick(); }
+            catch (Exception e)
+            {
+                // the loop runs every 5 ms: a fault that repeats is said once in ten seconds, not two hundred times a second
+                if (DateTime.UtcNow - lastTickError > TimeSpan.FromSeconds(10)) { lastTickError = DateTime.UtcNow; Diag.Log("tick: " + e.GetType().Name); }
+            }
             Thread.Sleep(5);
         }
         // Quit or end of input: whatever happens, the process is gone within 3 s.
@@ -1624,6 +1789,15 @@ static class SelfTest
     public static int Run(string runtime, string state, string enc)
     {
         Console.WriteLine("liblinphone " + N.S(N.linphone_core_get_version()) + ", encryption " + enc);
+        Check(Endpoint.VersionSupported(), "the SDK is the supported version " + Endpoint.SupportedVersion, null);
+        bool udpRefused = false;
+        try
+        {
+            Send(new Endpoint("x", runtime, state, delegate (string l, bool au) { }),
+                "{\"c\":\"configure\",\"register\":true,\"identity\":\"sip:u@nexus.test\",\"server\":\"sip:nexus.test\",\"password\":\"p\",\"transport\":\"udp\"}");
+        }
+        catch (FormatException) { udpRefused = true; }
+        Check(udpRefused, "UDP is refused for a registered account", null);
         Endpoint ea = new Endpoint("a", runtime, state, delegate (string l, bool au) { lock (a) a.Add(l); });
         Endpoint eb = new Endpoint("b", runtime, state, delegate (string l, bool au) { lock (b) b.Add(l); });
         int pa = FreePort(), pb = FreePort();
@@ -1632,6 +1806,7 @@ static class SelfTest
         Send(ea, cfg.Replace("IDENT", "caller") + pa + "}");
         Send(eb, cfg.Replace("IDENT", "callee") + pb + "}");
         Pump(ea, eb, 400, null);
+        Check(Find(b, "\"e\":\"listener\",\"listening\":true") != null, "an endpoint that does not register says it listens", Find(b, "\"e\":\"listener\""));
         Send(ea, "{\"c\":\"call\",\"to\":\"sip:127.0.0.1:" + pb + "\"}");
         bool inc = Pump(ea, eb, 8000, delegate { return Find(b, "\"e\":\"incoming\"") != null; });
         Check(inc, "incoming call reaches the other core", null);

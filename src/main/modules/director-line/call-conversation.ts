@@ -222,8 +222,8 @@ export class CallConversation {
       }
     } else if (reply.say !== '') {
       // NEXUS's own sentences are said whatever was heard meanwhile: the result of something done, a question that waits for a yes.
-      // The report that opens a call NEXUS placed may be cut short; a question that waits for a yes may not.
-      this.interruptible = (opening || reply.about !== undefined) && !this.o.session.awaitsConfirmation
+      // The report of a call NEXUS placed (said at the opening, or once the PIN is given) may be cut short; a question that waits for a yes may not.
+      this.interruptible = (opening || reply.about !== undefined || reply.report === true) && !this.o.session.awaitsConfirmation
       this.sayFixed(reply.say)
       this.keep('NEXUS', reply.say)
     }

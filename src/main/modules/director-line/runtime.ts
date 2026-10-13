@@ -13,7 +13,7 @@ import type { Database } from '../persistence/database'
 import { DirectorLine, type DirectorLineActions, type DirectorLineReads, type RefusalNote } from './line'
 import { PairingService } from './pairing'
 import type { HttpFetch, OperatorChannelProvider, SendResult } from './provider'
-import { SqliteCallStore, SqliteDeliveryStore, SqliteDirectorLineSettings, SqliteIdentityStore, SqliteOffsetStore, SqliteOutboxStore, SqlitePairingStateStore, SqlitePolicyStore, SqliteSeenStore, SqliteVoiceConfigStore } from './sqlite-stores'
+import { SqliteCallStore, SqliteDeliveryStore, SqliteDirectorLineSettings, SqliteIdentityStore, SqliteOffsetStore, SqliteOutboxStore, SqlitePairingStateStore, SqlitePlacedCallStore, SqlitePolicyStore, SqliteSeenStore, SqliteVoiceConfigStore } from './sqlite-stores'
 import type { PolicyStore } from './stores'
 import { TelegramProvider } from './telegram'
 import { defaultServerFor, sanitizeVoicePolicy, type SipAccount, type SipConfig, type VoiceHost } from './voice-config'
@@ -101,6 +101,8 @@ export interface DirectorLineRuntime {
   /** Rings the operator now and resolves when the call was answered or was not. */
   callMe(): Promise<PlaceResult | 'NOT_CONFIGURED'>
   hangUpCall(): Promise<void>
+  /** The person compared the ZRTP code (`sas`, as shown to them) with the telephone's. False when that is no longer the code of the call in progress. */
+  confirmCallSas(sas: string): Promise<boolean>
   /** The connection to the Internet changed: the voice line registers again. */
   networkChanged(): void
 }
@@ -175,6 +177,7 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
   }
   const voiceStore = new SqliteVoiceConfigStore(db)
   const calls = new SqliteCallStore(db)
+  const placedCalls = new SqlitePlacedCallStore(db)
 
   // ---- The voice line (0.9.1) ---------------------------------------------------------------------------------
   let voiceLine: DirectorVoiceLine | null = null
@@ -236,7 +239,8 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
         mediaEncryption: current.mediaEncryption,
         mediaEncryptionMandatory: current.mediaEncryptionMandatory,
         stunServer: current.stunServer,
-        ice: current.ice,
+        // ICE needs a STUN server to gather anything but this PC's own addresses.
+        ice: current.ice && current.stunServer !== null,
       }
       return account
     })
@@ -255,6 +259,9 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
       generalFacts: host.generalFacts,
       directorVoice: host.directorVoice,
       policy: () => voiceStore.get().policy,
+      // The line is rebuilt whenever the account's settings change, so this is the setting the call runs under.
+      mediaEncryptionMandatory: cfg.sip.mediaEncryptionMandatory,
+      placedCalls,
       // What replaces a call that did not take place: the Telegram message, or the notification on the PC.
       fallback: async (text) => {
         if (!(await line.sendToOperator(text))) throw new Error('nothing could deliver the message')
@@ -445,10 +452,11 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
         state: running ? (voiceLine?.state() ?? voiceState) : 'STOPPED',
         stateDetail: running ? await safeDetail(voiceDetailRaw) : unwanted,
         inCall: voiceLine?.inCall === true,
+        callSecurity: voiceLine?.currentSecurity() ?? null,
         mediaEncryption: cfg.sip?.mediaEncryption ?? 'zrtp',
         mediaEncryptionMandatory: cfg.sip?.mediaEncryptionMandatory ?? true,
         stunServer: cfg.sip?.stunServer ?? null,
-        ice: cfg.sip?.ice ?? true,
+        ice: cfg.sip?.ice ?? false,
         policy: cfg.policy,
         speech: {
           stt: host?.stt ? { kind: host.stt.kind, local: host.stt.local } : null,
@@ -539,7 +547,7 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
         mediaEncryption: input.mediaEncryption,
         mediaEncryptionMandatory: input.mediaEncryptionMandatory,
         stunServer: input.stunServer,
-        ice: input.ice,
+        ice: input.ice && input.stunServer !== null,
         displayName: previous.sip?.displayName ?? 'NEXUS Director',
       }
       voiceStore.set({ ...previous, sip })
@@ -571,6 +579,10 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
 
     async hangUpCall() {
       await voiceLine?.hangUp()
+    },
+
+    async confirmCallSas(sas) {
+      return voiceLine?.confirmCallSas(sas) ?? false
     },
 
     networkChanged() {

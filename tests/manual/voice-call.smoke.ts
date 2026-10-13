@@ -107,6 +107,7 @@ it('a whole call, with a stand-in for the telephone', async () => {
     generalFacts: async () => FACTS,
     directorVoice: () => new DirectorVoice({ runtime, cwd: join(out, 'cwd'), model: 'haiku', subscriptionMode: true, onTurn: (t) => void turns.push({ outcome: t.outcome, firstWordMs: t.firstWordMs }) }),
     policy: () => ({ ...DEFAULT_VOICE_LINE_POLICY, requirePin: false }),
+    mediaEncryptionMandatory: true,
     fallback: async (text) => void logs.push(`fallback message: ${text.length} characters`),
     record: (r) => void records.push(r),
     log: log('line'),

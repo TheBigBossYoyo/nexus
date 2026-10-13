@@ -48,8 +48,8 @@ function parseAttempts(json: string): Record<string, AttemptCounter> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
     const out: Record<string, AttemptCounter> = {}
     for (const [key, raw] of Object.entries(value)) {
-      const c = raw as { count?: unknown; lockedUntil?: unknown }
-      if (typeof c?.count === 'number') out[key] = { count: c.count, lockedUntil: typeof c.lockedUntil === 'string' ? c.lockedUntil : null }
+      const c = raw as { count?: unknown; lockedUntil?: unknown; at?: unknown }
+      if (typeof c?.count === 'number') out[key] = { count: c.count, lockedUntil: typeof c.lockedUntil === 'string' ? c.lockedUntil : null, ...(typeof c.at === 'string' ? { at: c.at } : {}) }
     }
     return out
   } catch {
@@ -261,27 +261,27 @@ export const MAX_CALL_RECORDS = 200
 
 interface CallRow {
   call_id: string; direction: string; started_at: string; ended_at: string; outcome: string; end_reason: string | null
-  authenticated: number; signalling: string | null; media: string | null; end_to_end: number | null; median_answer_ms: number | null
+  authenticated: number; signalling: string | null; media: string | null; end_to_end: number | null; peer_verified: number | null; median_answer_ms: number | null
 }
 
-/** What is kept of each call: when, which way, how it ended, what was negotiated. Never what was said. The newest 200 stay. */
+/** What is kept of each call: when, which way, how it ended, what was negotiated. Never what was said, and never the verification code. The newest 200 stay. */
 export class SqliteCallStore {
   constructor(private readonly db: Database) {}
 
   add(call: CallRecord): void {
     this.db
       .prepare(
-        `INSERT INTO director_line_calls (call_id, direction, started_at, ended_at, outcome, end_reason, authenticated, signalling, media, end_to_end, median_answer_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO director_line_calls (call_id, direction, started_at, ended_at, outcome, end_reason, authenticated, signalling, media, end_to_end, peer_verified, median_answer_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(call.callId, call.direction, call.startedAt, call.endedAt, call.outcome, call.endReason, call.authenticated ? 1 : 0, call.security?.signalling ?? null, call.security?.media ?? null, call.security ? (call.security.endToEnd ? 1 : 0) : null, call.medianAnswerMs === null ? null : Math.round(call.medianAnswerMs))
+      .run(call.callId, call.direction, call.startedAt, call.endedAt, call.outcome, call.endReason, call.authenticated ? 1 : 0, call.security?.signalling ?? null, call.security?.media ?? null, call.security ? (call.security.endToEnd ? 1 : 0) : null, call.security ? (call.security.peerVerified ? 1 : 0) : null, call.medianAnswerMs === null ? null : Math.round(call.medianAnswerMs))
     this.db.prepare('DELETE FROM director_line_calls WHERE seq <= (SELECT MAX(seq) FROM director_line_calls) - ?').run(MAX_CALL_RECORDS)
   }
 
   /** Newest first. */
   recent(limit: number): CallRecord[] {
     const rows = this.db
-      .prepare('SELECT call_id, direction, started_at, ended_at, outcome, end_reason, authenticated, signalling, media, end_to_end, median_answer_ms FROM director_line_calls ORDER BY seq DESC LIMIT ?')
+      .prepare('SELECT call_id, direction, started_at, ended_at, outcome, end_reason, authenticated, signalling, media, end_to_end, peer_verified, median_answer_ms FROM director_line_calls ORDER BY seq DESC LIMIT ?')
       .all(Math.max(0, Math.floor(limit))) as CallRow[]
     return rows.map((r) => ({
       callId: r.call_id,
@@ -291,12 +291,28 @@ export class SqliteCallStore {
       outcome: r.outcome as CallRecord['outcome'],
       endReason: r.end_reason as CallRecord['endReason'],
       authenticated: r.authenticated === 1,
-      security: r.signalling !== null && r.media !== null ? { signalling: r.signalling as 'TLS' | 'NONE' | 'UNKNOWN', media: r.media as 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN', endToEnd: r.end_to_end === 1 } : null,
+      security: r.signalling !== null && r.media !== null ? { signalling: r.signalling as 'TLS' | 'NONE' | 'UNKNOWN', media: r.media as 'SRTP' | 'ZRTP' | 'DTLS_SRTP' | 'NONE' | 'UNKNOWN', endToEnd: r.end_to_end === 1, peerVerified: r.peer_verified === 1, sas: null } : null,
       medianAnswerMs: r.median_answer_ms,
     }))
   }
 
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM director_line_calls').get() as { n: number }).n
+  }
+}
+
+/** The times of the calls NEXUS placed in the last day (migration 022), so that the daily limit survives a restart. */
+export class SqlitePlacedCallStore {
+  constructor(private readonly db: Database) {}
+
+  add(at: Date): void {
+    this.db.prepare('INSERT INTO director_line_placed_calls (placed_at) VALUES (?)').run(at.toISOString())
+  }
+
+  /** The times since `since`, oldest first. Older rows are dropped. */
+  since(since: Date): Date[] {
+    this.db.prepare('DELETE FROM director_line_placed_calls WHERE placed_at < ?').run(since.toISOString())
+    const rows = this.db.prepare('SELECT placed_at FROM director_line_placed_calls ORDER BY seq').all() as { placed_at: string }[]
+    return rows.map((r) => new Date(r.placed_at))
   }
 }

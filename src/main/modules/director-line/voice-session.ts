@@ -10,8 +10,9 @@ import type { PhoneAuthResult } from './pairing'
  * Who is on the line is established here and nowhere else, once per call:
  * - A call that comes IN must come from the paired number AND give the PIN, before anything is answered: a
  *   caller's number can be forged, so the number alone opens nothing, not even a status.
- * - A call NEXUS placed went to the paired number. It says its report, which is what the call is for, and then
- *   nothing more until the PIN: whoever picked up the phone is not thereby the operator.
+ * - A call NEXUS placed went to the paired number, but whoever picked up the phone is not thereby the operator: the
+ *   report, which is what the call is for, is not said until the PIN has been given. Until then only the fact that
+ *   there is something to tell is said.
  * - Until then the only thing listened for is the PIN. What an unauthenticated caller says is not interpreted,
  *   not kept and not given to any model.
  * - `requirePin: false` is for a service that itself establishes whose account is calling (not a telephone
@@ -41,6 +42,8 @@ export interface VoiceSessionStart {
   report?: string
   /** Default true. See the note on who is on the line. */
   requirePin?: boolean
+  /** The media of the call is not encrypted (the owner allows such calls): the first thing said is that it is not. */
+  notEncrypted?: boolean
 }
 
 export interface VoiceReply {
@@ -53,6 +56,8 @@ export interface VoiceReply {
    * voice may answer from the facts instead. Absent: `say` is said as it is.
    */
   about?: 'FACTS' | 'OPEN'
+  /** The report a call NEXUS placed is for, said once the caller is known: the caller may speak over it. */
+  report?: true
 }
 
 export const MAX_PIN_TRIES_PER_CALL = 3
@@ -92,6 +97,8 @@ export class VoiceSession {
   private readonly startedAt: number
   private lastAuthenticatedAt = 0
   private pendingTask: { text: string; command: OperatorCommand } | null = null
+  /** The report of a call NEXUS placed, kept until the caller is known. */
+  private heldReport: string | null = null
   private closed = false
 
   constructor(private readonly start: VoiceSessionStart, private readonly deps: VoiceSessionDeps) {
@@ -114,6 +121,12 @@ export class VoiceSession {
 
   /** What is said when the call is connected. */
   async open(): Promise<VoiceReply> {
+    const reply = await this.openInner()
+    // Said first, before anything else, whichever way the call goes.
+    return this.start.notEncrypted === true ? { ...reply, say: `This call is not encrypted. ${reply.say}` } : reply
+  }
+
+  private async openInner(): Promise<VoiceReply> {
     const paired = await this.deps.isPairedNumber(this.start.from)
     if (paired && this.start.requirePin === false) {
       this.authenticated = true
@@ -121,14 +134,16 @@ export class VoiceSession {
     }
     if (this.start.direction === 'OUTBOUND') {
       const report = (this.start.report ?? '').trim()
-      const then = this.authenticated ? 'You can ask about it, or say goodbye.' : 'To ask about it or to change anything, say your PIN or key it in, then press pound.'
-      return { say: `This is NEXUS. ${report === '' ? 'Nothing needs your attention.' : report} ${then}`, end: false }
+      if (this.authenticated) return { say: `This is NEXUS. ${report === '' ? 'Nothing needs your attention.' : report} You can ask about it, or say goodbye.`, end: false }
+      // Not yet known: whoever answered has not shown that they are the operator, so the report waits for the PIN.
+      this.heldReport = report
+      return { say: report === '' ? 'This is NEXUS. Say your PIN or key it in, then press pound.' : 'This is NEXUS. I have something to tell you. Say your PIN or key it in, then press pound.', end: false }
     }
     // An unknown number learns nothing: not that this is NEXUS, not whether a PIN exists.
     if (!paired) {
       this.deps.note?.('a call from a number that is not paired was ended')
-      // The attempt is counted against that number, so that it cannot be probed without bound.
-      await this.deps.authenticatePhone(this.start.from, null).catch(() => undefined)
+      // Not counted against the number here: the voice line counts such callers in memory, so that nothing a stranger
+      // invents is written to the persistent state.
       return this.end('This number is not available. Goodbye.')
     }
     if (this.authenticated) return { say: 'NEXUS Director. What would you like to know?', end: false }
@@ -158,6 +173,9 @@ export class VoiceSession {
     if (result === 'OK') {
       this.authenticated = true
       this.lastAuthenticatedAt = this.deps.now()
+      const report = this.heldReport
+      this.heldReport = null
+      if (report !== null && report !== '') return { say: `Thank you. ${report} You can ask about it, or say goodbye.`, end: false, report: true }
       return { say: 'Thank you. What would you like to know?', end: false }
     }
     this.pinTries += 1

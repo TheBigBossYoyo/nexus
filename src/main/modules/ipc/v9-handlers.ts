@@ -9,7 +9,7 @@ export type DirectorLineHandlers = { [C in DirectorLineChannel]: (input: IpcInpu
 /** The part of the runtime the handlers use. */
 export type DirectorLineControl = Pick<
   DirectorLineRuntime,
-  'settingsView' | 'setEnabled' | 'setProvider' | 'setPolicy' | 'startPairing' | 'setPin' | 'unpair' | 'sendTestMessage' | 'setSip' | 'removeSip' | 'setVoicePolicy' | 'callMe' | 'hangUpCall'
+  'settingsView' | 'setEnabled' | 'setProvider' | 'setPolicy' | 'startPairing' | 'setPin' | 'unpair' | 'sendTestMessage' | 'setSip' | 'removeSip' | 'setVoicePolicy' | 'callMe' | 'hangUpCall' | 'confirmCallSas'
 >
 
 export interface DirectorLineHandlerContext {
@@ -34,6 +34,13 @@ const WHAT_A_PHONE_CAN_DO = [
   '  • change settings, the sandbox or the autonomy profile;',
   '  • delete anything, run a command, or touch power.',
 ].join('\n')
+
+const ENCRYPTION_WORDS = {
+  none: 'none (the voice is sent in the clear)',
+  srtp: 'SRTP (the keys are known to the SIP server)',
+  zrtp: 'ZRTP (keys agreed between the two telephones; compare the verification code to be sure)',
+  dtls: 'DTLS-SRTP (its fingerprints travel through the SIP server)',
+} as const
 
 const REFUSED = 'Nothing was changed: the confirmation was declined or could not be shown.'
 
@@ -137,6 +144,9 @@ export function createDirectorLineHandlers(ctx: DirectorLineHandlerContext): Dir
         [
           `NEXUS will register as ${normalizeSipIdentity(input.identity) ?? input.identity} with its SIP server over the Internet, and keep the password in protected storage, never shown again.`,
           '',
+          `Encryption of the voice: ${ENCRYPTION_WORDS[input.mediaEncryption]}. ${input.mediaEncryptionMandatory ? 'Calls whose voice is not encrypted are refused.' : 'Calls whose voice is not encrypted are NOT refused: such a call opens by saying it is not encrypted.'}`,
+          input.stunServer === null ? 'No STUN server is used.' : `The STUN server ${input.stunServer} will be asked for this PC's public address.`,
+          '',
           `The one SIP address ${normalizeSipIdentity(input.operatorIdentity) ?? input.operatorIdentity} will be able to call NEXUS, and NEXUS will call it. On a call it can do what the paired chat can do, after the PIN.`,
           '',
           WHAT_A_PHONE_CAN_DO,
@@ -155,9 +165,25 @@ export function createDirectorLineHandlers(ctx: DirectorLineHandlerContext): Dir
 
     'directorLine.setVoicePolicy': async (policy) => {
       const current = (await directorLine.settingsView()).voice.policy
-      // Only a weakening is asked about: letting the SIP address alone open the line.
+      // Only a widening is asked about: the address alone opening the line, more calls a day, calls closer together.
       if (current.requirePin && !policy.requirePin) {
-        await mustConfirm('Change what a call may do', 'Stop asking for the PIN on calls?', 'The paired SIP address alone will open the line, and only when the SIP service itself establishes who is calling. An address that a service only passes on still needs the PIN.', 'Change')
+        await mustConfirm(
+          'Change what a call may do',
+          'Stop asking for the PIN on calls?',
+          [
+            'A call that comes through the SIP server NEXUS is registered with, from the paired address, will then be trusted without a PIN.',
+            'The server decides whose call that is: anyone who can sign in to that server as the paired address, or who controls the server, will be able to do what the phone can do here (status, pause and resume, add tasks) and NEXUS cannot tell them from you.',
+            'A call that did not come through the server, or whose voice is not encrypted, still needs the PIN.',
+          ].join('\n\n'),
+          'Change',
+        )
+      } else if ((policy.maxPlacedCallsPerDay > 6 && policy.maxPlacedCallsPerDay > current.maxPlacedCallsPerDay) || (policy.minMinutesBetweenPlacedCalls < 10 && policy.minMinutesBetweenPlacedCalls < current.minMinutesBetweenPlacedCalls)) {
+        await mustConfirm(
+          'Change how often NEXUS calls',
+          'Let NEXUS ring more often?',
+          `NEXUS may ring your phone up to ${policy.maxPlacedCallsPerDay} times a day, at least ${policy.minMinutesBetweenPlacedCalls} minutes apart. Each ring that is not answered is followed by a message.`,
+          'Change',
+        )
       }
       await directorLine.setVoicePolicy(policy)
       return directorLine.settingsView()
@@ -167,6 +193,23 @@ export function createDirectorLineHandlers(ctx: DirectorLineHandlerContext): Dir
 
     'directorLine.hangUpCall': async () => {
       await directorLine.hangUpCall()
+      return directorLine.settingsView()
+    },
+
+    'directorLine.confirmCallSas': async () => {
+      // The code is read here, by the runtime, and shown in the confirmation: it is not something the screen sends.
+      const sas = (await directorLine.settingsView()).voice.callSecurity?.sas ?? null
+      if (sas === null) throw new NexusError('invalid_state', 'There is no call with a ZRTP verification code to confirm.')
+      await mustConfirm(
+        'Verify the call',
+        'The telephone shows the same four characters?',
+        `The code on this PC is ${sas}.
+
+Open the call screen of Linphone on the telephone and read the code it shows. Confirm only if the four characters are the same. If they differ, hang up: someone may be between the two ends.`,
+        'They match',
+      )
+      // Applied only if that code is still the one of the call in progress.
+      if (!(await directorLine.confirmCallSas(sas))) throw new NexusError('invalid_state', 'The call changed while the question was open. Nothing was verified.')
       return directorLine.settingsView()
     },
   }

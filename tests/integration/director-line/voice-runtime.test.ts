@@ -53,7 +53,7 @@ function fakeCall(direction: 'INBOUND' | 'OUTBOUND', remote: string) {
     onAudio: () => undefined,
     onDigit: () => undefined,
     onEnded: (l) => (ended = l),
-    security: () => ({ signalling: 'TLS', media: 'ZRTP', endToEnd: true }),
+    security: () => ({ signalling: 'TLS', media: 'ZRTP', endToEnd: true, peerVerified: true, sas: 'AB12' }),
   }
   return { call, log, remoteHangUp: () => ended('REMOTE_HUNG_UP') }
 }
@@ -189,7 +189,7 @@ describe('the voice line is built only when everything is there', () => {
     await r.runtime.setEnabled(true)
     expect(spy.created).toBe(1)
     expect(spy.started).toBe(1)
-    expect(spy.accounts[0]).toMatchObject({ identity: NEXUS, password: PASSWORD, server: 'sip:sip.linphone.org;transport=tls', transport: 'tls', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: true, displayName: 'NEXUS Director' })
+    expect(spy.accounts[0]).toMatchObject({ identity: NEXUS, password: PASSWORD, server: 'sip:sip.linphone.org;transport=tls', transport: 'tls', mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: false, displayName: 'NEXUS Director' })
     const view = (await r.runtime.settingsView()).voice
     expect(view).toMatchObject({ available: true, unavailableReason: null, configured: true, identity: NEXUS, passwordSet: true, operatorIdentity: PHONE, state: 'REGISTERED', inCall: false })
     expect(view.speech).toEqual({ stt: { kind: 'fake-stt', local: true }, tts: { kind: 'fake-tts', local: false } })
@@ -465,4 +465,64 @@ describe('the call policy', () => {
     const again = rig({ db: r.db, secrets: r.secrets, voice: fakeVoice().host })
     expect((await again.runtime.settingsView()).voice).toMatchObject({ configured: true, identity: NEXUS, passwordSet: true, policy: { requirePin: false } })
   })
+})
+
+describe('the call in progress and its verification code', () => {
+  it('the view shows what the call negotiated with its code, and the code is confirmed only if it is still the one shown', async () => {
+    const { host, spy } = fakeVoice()
+    const r = rig({ voice: host })
+    await r.runtime.setEnabled(true)
+    await r.runtime.setSip(SIP)
+    expect((await r.runtime.settingsView()).voice.callSecurity).toBeNull()
+    const fc = fakeCall('INBOUND', PHONE)
+    let verified = false
+    const call: VoiceCall = {
+      ...fc.call,
+      security: () => ({ signalling: 'TLS', media: 'ZRTP', endToEnd: verified, peerVerified: verified, sas: 'WXYZ' }),
+      confirmSas: () => void (verified = true),
+    }
+    spy.ring(call)
+    await until(() => fc.log.includes('answer'), 'the call to be taken')
+    await settle()
+    expect((await r.runtime.settingsView()).voice.callSecurity).toEqual({ signalling: 'TLS', media: 'ZRTP', endToEnd: false, peerVerified: false, sas: 'WXYZ' })
+    expect(await r.runtime.confirmCallSas('AAAA')).toBe(false)
+    expect(verified).toBe(false)
+    expect(await r.runtime.confirmCallSas('WXYZ')).toBe(true)
+    expect((await r.runtime.settingsView()).voice.callSecurity).toMatchObject({ endToEnd: true, peerVerified: true })
+    fc.remoteHangUp()
+    await settle()
+    expect((await r.runtime.settingsView()).voice.callSecurity).toBeNull()
+    expect(await r.runtime.confirmCallSas('WXYZ')).toBe(false)
+  })
+
+  it('ICE is handed to the helper only together with a STUN server', async () => {
+    const { host, spy } = fakeVoice()
+    const r = rig({ voice: host })
+    await r.runtime.setEnabled(true)
+    await r.runtime.setSip({ ...SIP, ice: true, stunServer: null })
+    expect(spy.accounts.at(-1)).toMatchObject({ ice: false, stunServer: null })
+    await r.runtime.setSip({ ...SIP, password: null, ice: true, stunServer: 'stun.example.org' })
+    expect(spy.accounts.at(-1)).toMatchObject({ ice: true, stunServer: 'stun.example.org' })
+    expect((await r.runtime.settingsView()).voice).toMatchObject({ ice: true, stunServer: 'stun.example.org' })
+  })
+
+  it('the line is told whether the account refuses calls that are not encrypted', async () => {
+    for (const mandatory of [true, false]) {
+      const { host, spy } = fakeVoice()
+      const r = rig({ voice: host })
+      await r.runtime.setEnabled(true)
+      await r.runtime.setSip({ ...SIP, mediaEncryptionMandatory: mandatory })
+      const fc = fakeCall('INBOUND', PHONE)
+      const call: VoiceCall = { ...fc.call, security: () => ({ signalling: 'TLS', media: 'NONE', endToEnd: false, peerVerified: false, sas: null }) }
+      spy.ring(call)
+      // The media is given 5 s to show that it is encrypted. Refused (hung up, nothing said) when mandatory;
+      // kept, with a greeting that says so, when the owner allows it.
+      if (mandatory) await until(() => fc.log.includes('hangUp'), 'the call to be refused', 9000)
+      else {
+        await settle(5600)
+        expect(fc.log).toEqual(['answer'])
+        fc.remoteHangUp()
+      }
+    }
+  }, 20_000)
 })

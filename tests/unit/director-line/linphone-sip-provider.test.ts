@@ -82,6 +82,7 @@ function rig(options: Partial<Omit<LinphoneSipProviderOptions, 'account'>> & { a
     log: (m) => void logs.push(m),
     restartDelayMs: () => 5,
     quitGraceMs: 30,
+    nonce: () => 'nonce1',
     ...over,
   })
   const started = provider.start({ incoming: (c) => void incoming.push(c), state: (s, d) => void states.push([s, d]) })
@@ -96,6 +97,8 @@ function rig(options: Partial<Omit<LinphoneSipProviderOptions, 'account'>> & { a
 async function ready(r: ReturnType<typeof rig>): Promise<FakeHelper> {
   await r.started
   await vi.waitFor(() => expect(r.helper().sent('configure')).toHaveLength(1))
+  // A registered helper says that it listens on nothing; only then does the transport vouch for anything.
+  r.helper().emit({ e: 'listener', listening: false })
   r.helper().emit({ e: 'registration', state: 'ok' })
   expect(r.provider.state()).toBe('REGISTERED')
   return r.helper()
@@ -103,7 +106,7 @@ async function ready(r: ReturnType<typeof rig>): Promise<FakeHelper> {
 
 async function incomingCall(r: ReturnType<typeof rig>, h: FakeHelper, from = 'sip:user@sip.example.test', extra: Record<string, unknown> = {}): Promise<VoiceCall> {
   const before = r.incoming.length
-  h.emit({ e: 'incoming', call: 'c1', from, fromDisplayName: 'user', viaRegisteredAccount: true, ...extra })
+  h.emit({ e: 'incoming', call: 'c1', from, viaRegisteredAccount: true, ...extra })
   await vi.waitFor(() => expect(r.incoming.length).toBe(before + 1))
   return r.incoming[before] as VoiceCall
 }
@@ -193,6 +196,21 @@ describe('configuring the helper', () => {
     expect('password' in c).toBe(false)
     expect(r.provider.state()).toBe('REGISTERED')
   })
+
+  it('a registered helper is never told to listen, whatever port was asked for', async () => {
+    const r = track(rig({ sipPort: 5555 }))
+    const h = await ready(r)
+    expect(h.sent('configure')[0]).toMatchObject({ register: true, sipPort: -1 })
+  })
+
+  it('refuses UDP for a registered account: no helper is started and nothing is restarted', async () => {
+    const r = track(rig({ account: { ...ACCOUNT, transport: 'udp' } }))
+    await r.started
+    expect(r.provider.state()).toBe('REJECTED')
+    expect(r.states.at(-1)?.[1]).toMatch(/UDP is not allowed/)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(r.helpers).toHaveLength(0)
+  })
 })
 
 describe('registration', () => {
@@ -231,6 +249,8 @@ describe('an incoming call', () => {
     expect(call.remoteIdentity).toBe('sip:user@sip.example.test')
     expect(call.identityAssurance).toBe('TRANSPORT_AUTHENTICATED')
     expect(call.format).toEqual({ sampleRate: 16000 })
+    // not the helper's own name for it, which starts again at c1 whenever the helper does
+    expect(call.id).toBe('nonce1-1')
     expect(h.sent('answer')).toHaveLength(0)
   })
 
@@ -242,6 +262,30 @@ describe('an incoming call', () => {
     h.emit({ e: 'call', call: 'c1', state: 'ended', reason: 'remote' })
     const direct = await incomingCall(r, h, 'sip:user@sip.example.test', { call: 'c2', viaRegisteredAccount: false })
     expect(direct.identityAssurance).toBe('CLAIMED')
+  })
+
+  it('is only CLAIMED when the helper has not said that it listens on nothing, or says that it does listen', async () => {
+    const silent = track(rig())
+    await silent.started
+    await vi.waitFor(() => expect(silent.helper().sent('configure')).toHaveLength(1))
+    silent.helper().emit({ e: 'registration', state: 'ok' })
+    expect((await incomingCall(silent, silent.helper())).identityAssurance).toBe('CLAIMED')
+
+    const listening = track(rig())
+    await listening.started
+    await vi.waitFor(() => expect(listening.helper().sent('configure')).toHaveLength(1))
+    listening.helper().emit({ e: 'listener', listening: true })
+    listening.helper().emit({ e: 'registration', state: 'ok' })
+    expect((await incomingCall(listening, listening.helper())).identityAssurance).toBe('CLAIMED')
+  })
+
+  it('is always CLAIMED when the helper only listens (no registration): any packet can claim any From', async () => {
+    const r = track(rig({ register: false, sipPort: 5555, account: { ...ACCOUNT, password: '' } }))
+    await r.started
+    await vi.waitFor(() => expect(r.helper().sent('configure')).toHaveLength(1))
+    r.helper().emit({ e: 'listener', listening: true })
+    const call = await incomingCall(r, r.helper())
+    expect(call.identityAssurance).toBe('CLAIMED')
   })
 
   it('is only CLAIMED when the account is not registered at that moment', async () => {
@@ -421,15 +465,33 @@ describe('what was negotiated', () => {
     const r = track(rig())
     const h = await ready(r)
     const call = await incomingCall(r, h)
-    expect(call.security()).toEqual({ signalling: 'TLS', media: 'UNKNOWN', endToEnd: false })
-    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'none', zrtpSas: null, srtpSuite: null })
-    expect(call.security()).toEqual({ signalling: 'TLS', media: 'NONE', endToEnd: false })
-    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'srtp', zrtpSas: null, srtpSuite: 'AES_CM_128_HMAC_SHA1_80' })
-    expect(call.security()).toEqual({ signalling: 'TLS', media: 'SRTP', endToEnd: false })
-    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'zrtp', zrtpSas: 'ABCD', srtpSuite: 'AEAD_AES_128_GCM' })
-    expect(call.security()).toEqual({ signalling: 'TLS', media: 'ZRTP', endToEnd: true })
-    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'dtls', zrtpSas: null, srtpSuite: 'AEAD_AES_128_GCM' })
-    expect(call.security()).toEqual({ signalling: 'TLS', media: 'DTLS_SRTP', endToEnd: true })
+    const unverified = { endToEnd: false, peerVerified: false, sas: null }
+    expect(call.security()).toEqual({ signalling: 'TLS', media: 'UNKNOWN', ...unverified })
+    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'none', zrtpSas: null, sasVerified: false, srtpSuite: null })
+    expect(call.security()).toEqual({ signalling: 'TLS', media: 'NONE', ...unverified })
+    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'srtp', zrtpSas: null, sasVerified: false, srtpSuite: 'AES_CM_128_HMAC_SHA1_80' })
+    expect(call.security()).toEqual({ signalling: 'TLS', media: 'SRTP', ...unverified })
+    // ZRTP that nobody compared is encrypted, not end to end
+    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'zrtp', zrtpSas: 'ABCD', sasVerified: false, srtpSuite: 'AEAD_AES_128_GCM' })
+    expect(call.security()).toEqual({ signalling: 'TLS', media: 'ZRTP', endToEnd: false, peerVerified: false, sas: 'ABCD' })
+    // and end to end once the string was verified (or the retained secrets of an earlier verified call matched)
+    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'zrtp', zrtpSas: 'ABCD', sasVerified: true, srtpSuite: 'AEAD_AES_128_GCM' })
+    expect(call.security()).toEqual({ signalling: 'TLS', media: 'ZRTP', endToEnd: true, peerVerified: true, sas: 'ABCD' })
+    // DTLS-SRTP fingerprints travel through the server: never end to end, whatever the helper says
+    h.emit({ e: 'media', call: 'c1', codec: 'opus', clockRate: 48000, encryption: 'dtls', zrtpSas: null, sasVerified: true, srtpSuite: 'AEAD_AES_128_GCM' })
+    expect(call.security()).toEqual({ signalling: 'TLS', media: 'DTLS_SRTP', ...unverified })
+  })
+
+  it("tells the helper that the string was compared, by the helper's own name for the call", async () => {
+    const r = track(rig())
+    const h = await ready(r)
+    const call = await incomingCall(r, h)
+    h.emit({ e: 'call', call: 'c1', state: 'streams' })
+    call.confirmSas?.()
+    expect(h.sent('verifySas')).toEqual([{ c: 'verifySas', call: 'c1' }])
+    h.emit({ e: 'call', call: 'c1', state: 'ended', reason: 'remote' })
+    call.confirmSas?.()
+    expect(h.sent('verifySas')).toHaveLength(1)
   })
 
   it('says TLS only when the transport is tls and the account is registered', async () => {
@@ -438,7 +500,7 @@ describe('what was negotiated', () => {
     const call = await incomingCall(r, h)
     h.emit({ e: 'registration', state: 'failed', reason: 'timeout' })
     expect(call.security().signalling).toBe('UNKNOWN')
-    const udp = track(rig({ account: { ...ACCOUNT, transport: 'udp' } }))
+    const udp = track(rig({ account: { ...ACCOUNT, transport: 'tcp' } }))
     const hu = await ready(udp)
     const c = await incomingCall(udp, hu)
     expect(c.security().signalling).toBe('NONE')
@@ -539,7 +601,95 @@ describe('placing a call', () => {
     const h = await ready(r)
     void place(r)
     await vi.waitFor(() => expect(h.sent('call')).toHaveLength(1))
-    expect((await place(r)).outcome).toBe('FAILED')
+    // Nobody was rung: the voice line must not send "I called and there was no answer".
+    expect((await place(r)).outcome).toBe('LINE_BUSY')
+  })
+})
+
+describe('what the helper says that cannot be read', () => {
+  it('declines whatever rings when a line could not be read and no call is known, at most once in two seconds', async () => {
+    let now = 1_000_000
+    const r = track(rig({ now: () => now }))
+    const h = await ready(r)
+    h.handlers.stdout('{"e":"incoming","call":"c1","from":"sip:very-long')
+    expect(h.sent('decline')).toEqual([{ c: 'decline' }])
+    h.handlers.stdout('garbage again')
+    expect(h.sent('decline')).toHaveLength(1)
+    now += 2500
+    h.handlers.stdout('garbage once more')
+    expect(h.sent('decline')).toHaveLength(2)
+  })
+
+  it('does not decline anything when a call is known: the helper has the one that matters', async () => {
+    const r = track(rig({ now: () => 5_000_000 }))
+    const h = await ready(r)
+    await incomingCall(r, h)
+    h.handlers.stdout('{"e":')
+    expect(h.sent('decline')).toEqual([])
+  })
+})
+
+describe('call ids', () => {
+  it('do not repeat when the helper starts again and numbers its calls from c1 once more', async () => {
+    const nonces = ['aaa', 'bbb']
+    const r = track(rig({ nonce: () => nonces.shift() ?? 'zzz' }))
+    const h = await ready(r)
+    const first = await incomingCall(r, h)
+    h.exit()
+    await vi.waitFor(() => expect(r.helpers.length).toBe(2))
+    await vi.waitFor(() => expect(r.helper().sent('configure')).toHaveLength(1))
+    r.helper().emit({ e: 'listener', listening: false })
+    r.helper().emit({ e: 'registration', state: 'ok' })
+    const second = await incomingCall(r, r.helper())
+    expect(first.id).toBe('aaa-1')
+    expect(second.id).toBe('bbb-2')
+    expect(r.helper().sent('decline')).toEqual([])
+    void second.answer().catch(() => undefined)
+    expect(r.helper().sent('answer')).toEqual([{ c: 'answer', call: 'c1' }])
+  })
+
+  it('are random by default, per launch', async () => {
+    const a = track(rig({ nonce: undefined }))
+    const ha = await ready(a)
+    const b = track(rig({ nonce: undefined }))
+    const hb = await ready(b)
+    const ca = await incomingCall(a, ha)
+    const cb = await incomingCall(b, hb)
+    expect(ca.id).toMatch(/^[0-9a-f]{12}-1$/)
+    expect(cb.id).not.toBe(ca.id)
+  })
+})
+
+describe('a helper that cannot run, and one that keeps failing', () => {
+  it('an SDK of another version is not restarted in a loop, and the detail says why', async () => {
+    const r = track(rig({ autoReady: false }))
+    await vi.waitFor(() => expect(r.helpers).toHaveLength(1))
+    const h = r.helper()
+    h.emit({ e: 'error', message: 'unsupported-sdk: liblinphone 5.6.0 is loaded, this program needs 5.5.32' })
+    h.exit()
+    await vi.waitFor(() => expect(r.states.at(-1)?.[0]).toBe('UNREACHABLE'))
+    expect(r.states.at(-1)?.[1]).toMatch(/5\.5\.32/)
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(r.helpers).toHaveLength(1)
+  })
+
+  it('after five launches in a row that never become ready, the next is tried only after five minutes', async () => {
+    const r = track(rig({ autoReady: false, readyTimeoutMs: 10, slowRestartAfter: 2 }))
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    // two failures at 5 ms apart, then the slow rate
+    expect(r.helpers.length).toBe(2)
+  })
+})
+
+describe('the helper diagnostics', () => {
+  it('never keep the password, even when the helper writes it', async () => {
+    const r = track(rig())
+    const h = await ready(r)
+    h.handlers.stderr(`nexus-sip: register sip:nexus@sip.example.test password=${PASSWORD} (${encodeURIComponent(PASSWORD)})`)
+    const kept = JSON.stringify(r.provider.diagnostics())
+    expect(kept).not.toContain(PASSWORD)
+    expect(kept).toContain('***')
+    expect(JSON.stringify(r.logs)).not.toContain(PASSWORD)
   })
 })
 
@@ -622,7 +772,7 @@ describe('garbage on the helper output', () => {
     expect(r.logs.filter((l) => l.includes('not an event'))).toHaveLength(1)
     // and it still works
     const call = await incomingCall(r, h)
-    expect(call.id).toBe('c1')
+    expect(call.id).toBe('nonce1-1')
   })
 
   it('ignores an event whose fields have the wrong types', async () => {

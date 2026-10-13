@@ -217,3 +217,96 @@ describe('director line input schemas', () => {
     await r.close()
   })
 })
+
+describe('director line handlers: what the questions say, and when they are asked', () => {
+  const texts = (confirm: { mock: { calls: unknown[] } }): string[][] => confirm.mock.calls.map((c) => c as unknown as string[])
+
+  it('setSip says how the voice is encrypted, whether calls that are not are refused, and which STUN server is asked', async () => {
+    const confirm = vi.fn(async () => true)
+    const r = rig(confirm)
+    await r.handlers['directorLine.setSip']({ ...SIP, mediaEncryption: 'srtp', mediaEncryptionMandatory: false, stunServer: 'stun.example.org', ice: true })
+    const detail = texts(confirm)[0]?.[2] as string
+    expect(detail).toContain('SRTP (the keys are known to the SIP server)')
+    expect(detail).toContain('NOT refused')
+    expect(detail).toContain('The STUN server stun.example.org')
+    await r.handlers['directorLine.setSip']({ ...SIP, mediaEncryption: 'zrtp', mediaEncryptionMandatory: true, stunServer: null, ice: false })
+    const second = texts(confirm)[1]?.[2] as string
+    expect(second).toContain('ZRTP')
+    expect(second).toContain('are refused')
+    expect(second).not.toContain('NOT refused')
+    expect(second).toContain('No STUN server is used')
+    await r.close()
+  })
+
+  it('turning the PIN off does not promise more than the SIP server gives', async () => {
+    const confirm = vi.fn(async () => true)
+    const r = rig(confirm)
+    await r.handlers['directorLine.setVoicePolicy'](VOICE_POLICY_NO_PIN)
+    const detail = texts(confirm)[0]?.[2] as string
+    expect(detail).not.toMatch(/only when the SIP service itself establishes/)
+    expect(detail).toContain('The server decides whose call that is')
+    expect(detail).toContain('NEXUS cannot tell them from you')
+    expect(detail).toContain('still needs the PIN')
+    await r.close()
+  })
+
+  it('more calls a day than 6, or calls closer than 10 minutes, are asked about; fewer and wider are not', async () => {
+    const confirm = vi.fn(async () => true)
+    const r = rig(confirm)
+    const base = { requirePin: true, ringSeconds: 30, maxPlacedCallsPerDay: 6, minMinutesBetweenPlacedCalls: 10 }
+    await r.handlers['directorLine.setVoicePolicy'](base)
+    await r.handlers['directorLine.setVoicePolicy']({ ...base, maxPlacedCallsPerDay: 3, minMinutesBetweenPlacedCalls: 30 })
+    expect(confirm).not.toHaveBeenCalled()
+    await r.handlers['directorLine.setVoicePolicy']({ ...base, maxPlacedCallsPerDay: 7 })
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(texts(confirm)[0]?.[0]).toBe('Change how often NEXUS calls')
+    expect(texts(confirm)[0]?.[2]).toContain('7 times a day')
+    // from 7 (now stored) to 8 is a widening again; back to 7 or below is not
+    await r.handlers['directorLine.setVoicePolicy']({ ...base, maxPlacedCallsPerDay: 5 })
+    expect(confirm).toHaveBeenCalledTimes(1)
+    await r.handlers['directorLine.setVoicePolicy']({ ...base, minMinutesBetweenPlacedCalls: 5 })
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(texts(confirm)[1]?.[2]).toContain('5 minutes apart')
+    await r.handlers['directorLine.setVoicePolicy']({ ...base, minMinutesBetweenPlacedCalls: 5, maxPlacedCallsPerDay: 6 })
+    expect(confirm).toHaveBeenCalledTimes(2)
+    // declined: nothing changes
+    const no = rig(vi.fn(async () => false))
+    await expect(no.handlers['directorLine.setVoicePolicy']({ ...base, maxPlacedCallsPerDay: 24 })).rejects.toThrow(/Nothing was changed/)
+    expect((await no.runtime.settingsView()).voice.policy.maxPlacedCallsPerDay).toBe(6)
+    await r.close()
+    await no.close()
+  })
+
+  it('confirming a call code shows the code, applies it to that code only, and is refused when there is none', async () => {
+    const confirm = vi.fn(async () => true)
+    const applied: string[] = []
+    let sas: string | null = null
+    const view = (): unknown => ({ voice: { callSecurity: sas === null ? null : { signalling: 'TLS', media: 'ZRTP', endToEnd: false, peerVerified: false, sas } } })
+    const handlers = createDirectorLineHandlers({
+      directorLine: { settingsView: async () => view(), confirmCallSas: async (code: string) => (applied.push(code), code === sas) } as unknown as Parameters<typeof createDirectorLineHandlers>[0]['directorLine'],
+      confirm,
+    })
+    await expect(handlers['directorLine.confirmCallSas']({})).rejects.toThrow(/no call with a ZRTP verification code/)
+    expect(confirm).not.toHaveBeenCalled()
+    sas = 'QX7R'
+    await handlers['directorLine.confirmCallSas']({})
+    const asked = texts(confirm)[0] as string[]
+    expect(asked[0]).toBe('Verify the call')
+    expect(asked[1]).toBe('The telephone shows the same four characters?')
+    expect(asked[2]).toContain('QX7R')
+    expect(asked[3]).toBe('They match')
+    expect(applied).toEqual(['QX7R'])
+    // the call changed while the question was open
+    const changing = createDirectorLineHandlers({
+      directorLine: { settingsView: async () => view(), confirmCallSas: async () => false } as unknown as Parameters<typeof createDirectorLineHandlers>[0]['directorLine'],
+      confirm: async () => true,
+    })
+    await expect(changing['directorLine.confirmCallSas']({})).rejects.toThrow(/Nothing was verified/)
+    // and without a way to ask, nothing is verified
+    const mute = createDirectorLineHandlers({
+      directorLine: { settingsView: async () => view(), confirmCallSas: async (c: string) => (applied.push(`mute ${c}`), true) } as unknown as Parameters<typeof createDirectorLineHandlers>[0]['directorLine'],
+    })
+    await expect(mute['directorLine.confirmCallSas']({})).rejects.toThrow(/Nothing was changed/)
+    expect(applied).toEqual(['QX7R'])
+  })
+})

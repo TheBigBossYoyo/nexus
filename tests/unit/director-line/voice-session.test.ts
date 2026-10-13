@@ -109,8 +109,8 @@ describe('a call that comes in', () => {
     expect(opened.say).not.toMatch(/NEXUS|PIN/)
     expect(await w.s.onSpeech('status')).toEqual({ say: '', end: true })
     expect(w.performed).toEqual([])
-    // The attempt counts against that number.
-    expect(w.authCalls).toEqual([null])
+    // Not counted by the session: the voice line counts strangers in memory, so that nothing a stranger invents is stored.
+    expect(w.authCalls).toEqual([])
   })
 
   it('without a PIN set on the machine, nobody gets in', async () => {
@@ -233,11 +233,11 @@ describe('a yes is a yes and nothing else', () => {
 describe('a call NEXUS places', () => {
   const report = 'Overnight completed 16 of 18 tasks. Two tasks were delayed by a 19 minute Wi-Fi outage and resumed by themselves.'
 
-  it('says its report, and then answers nothing until the PIN: whoever picked up is not thereby the operator', async () => {
+  it('says only that it has something to tell until the PIN: whoever picked up is not thereby the operator', async () => {
     const w = session({ direction: 'OUTBOUND', report })
     const opened = await w.s.open()
-    expect(opened.say).toContain('This is NEXUS. Overnight completed 16 of 18 tasks.')
-    expect(opened.say).toContain('say your PIN')
+    expect(opened.say).toBe('This is NEXUS. I have something to tell you. Say your PIN or key it in, then press pound.')
+    expect(opened.say).not.toContain('Overnight')
     expect(opened.end).toBe(false)
     for (const ask of ['how long is left', 'what is the status', 'what is blocked', 'pause after the current task', 'after this add improve the telemetry panel']) {
       expect(await w.s.onSpeech(ask), ask).toEqual({ say: 'The PIN first, please.', end: false })
@@ -250,7 +250,7 @@ describe('a call NEXUS places', () => {
     const w = session({ direction: 'OUTBOUND', report })
     await w.s.open()
     await w.s.onSpeech('pause after the current task')
-    expect((await w.s.onSpeech('four eight two nine one five')).say).toBe('Thank you. What would you like to know?')
+    expect((await w.s.onSpeech('four eight two nine one five')).say).toBe(`Thank you. ${report} You can ask about it, or say goodbye.`)
     expect(w.performed).toEqual([])
     expect((await w.s.onSpeech('pause after the current task')).say).toBe('did PAUSE_AFTER_CURRENT_TASK')
   })
@@ -258,8 +258,38 @@ describe('a call NEXUS places', () => {
   it('the PIN said right away, before anything is asked, is taken as the PIN', async () => {
     const w = session({ direction: 'OUTBOUND', report })
     await w.s.open()
-    expect((await w.s.onSpeech('4 8 2 9 1 5')).say).toContain('Thank you')
+    const accepted = await w.s.onSpeech('4 8 2 9 1 5')
+    expect(accepted.say).toContain('Thank you')
+    // the report may be spoken over: the person already knows what it is about
+    expect(accepted.report).toBe(true)
     expect(w.s.isAuthenticated).toBe(true)
+  })
+
+  it('the report is said after a keyed PIN as well, once, and a call with nothing to report just asks what to know', async () => {
+    const w = session({ direction: 'OUTBOUND', report })
+    await w.s.open()
+    const keyed = await key(w.s, PIN)
+    expect(keyed?.say).toBe(`Thank you. ${report} You can ask about it, or say goodbye.`)
+    expect((await w.s.onSpeech('what is the status')).about).toBe('FACTS')
+
+    const none = session({ direction: 'OUTBOUND', report: '' })
+    expect((await none.s.open()).say).toBe('This is NEXUS. Say your PIN or key it in, then press pound.')
+    expect((await key(none.s, PIN))?.say).toBe('Thank you. What would you like to know?')
+  })
+
+  it('where the PIN is not asked, the report is said at once', async () => {
+    const w = session({ direction: 'OUTBOUND', report, requirePin: false, from: OPERATOR })
+    expect((await w.s.open()).say).toBe(`This is NEXUS. ${report} You can ask about it, or say goodbye.`)
+    expect(w.s.isAuthenticated).toBe(true)
+  })
+
+  it('a call whose media is not encrypted begins by saying so, whichever way it goes', async () => {
+    const outbound = session({ direction: 'OUTBOUND', report, notEncrypted: true })
+    expect((await outbound.s.open()).say).toBe('This call is not encrypted. This is NEXUS. I have something to tell you. Say your PIN or key it in, then press pound.')
+    const inbound = session({ notEncrypted: true })
+    expect((await inbound.s.open()).say).toMatch(/^This call is not encrypted. NEXUS Director. What is the PIN?/)
+    const plain = session()
+    expect((await plain.s.open()).say).not.toContain('not encrypted')
   })
 
   it('whoever picked up the phone and does not know the PIN changes nothing', async () => {
