@@ -217,14 +217,15 @@ export class DirectorVoiceLine {
     this.active = { call, engine }
     this.placing = false
     await engine.start()
-    // Read once the call is under way: what was negotiated, not what was asked for.
+    const endReason = await engine.ended
+    // Read when the call is over: what was negotiated in the end (a key exchange finishes after the call is up),
+    // not what was asked for.
     let security: CallSecurity | null
     try {
       security = call.security()
     } catch {
       security = null
     }
-    const endReason = await engine.ended
     if (this.active?.engine === engine) this.active = null
     this.o.record?.({ callId: call.id, direction: call.direction, startedAt, endedAt: this.now().toISOString(), outcome: 'CONVERSATION', endReason, authenticated: session.isAuthenticated, security, medianAnswerMs: median(timings) })
   }

@@ -22,6 +22,7 @@
     "smoke:power": "vitest run -c vitest.power-smoke.config.ts",
     "smoke:usage": "vitest run -c vitest.usage-smoke.config.ts",
     "fetch:linphone": "node scripts/fetch-linphone-sdk.mjs",
+    "smoke:voice-call": "vitest run -c vitest.voice-call-smoke.config.ts",
     "smoke:sip": "vitest run -c vitest.sip-real-smoke.config.ts",
     "smoke:voice-latency": "vitest run -c vitest.voice-latency-smoke.config.ts",
     "smoke:cache": "vitest run -c vitest.cache-smoke.config.ts",

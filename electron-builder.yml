@@ -56,6 +56,7 @@ asarUnpack:
   - "**/node_modules/sherpa-onnx-node/**"
   - "**/node_modules/sherpa-onnx-win-x64/**"
   - "out/main/speech-worker.js"
+  - "out/main/chunks/**"
 # better-sqlite3 13 ships an N-API prebuild; no rebuild against Electron headers is needed.
 npmRebuild: false
 win:

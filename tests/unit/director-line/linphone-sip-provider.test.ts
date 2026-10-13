@@ -603,7 +603,8 @@ describe('the helper dying and coming back', () => {
     const r = track(rig({ autoReady: false, readyTimeoutMs: 20 }))
     await r.started
     expect(r.helpers[0]?.killed).toBe(true)
-    await vi.waitFor(() => expect(r.helpers.length).toBe(2))
+    // Each one that does not say ready is replaced in turn; how many by now depends on the machine.
+    await vi.waitFor(() => expect(r.helpers.length).toBeGreaterThanOrEqual(2))
   })
 })
 
