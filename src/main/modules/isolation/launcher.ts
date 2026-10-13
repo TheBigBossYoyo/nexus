@@ -62,7 +62,16 @@ export interface LaunchSpec {
    * looks up no name for it, shows it nothing of the machine's name cache and lets none of its packets out.
    */
   appContainer?: string
+  /**
+   * 0.9, ISOLATED only: further capabilities of NEXUS's own, by name, that the command holds. The first is the
+   * session's own (see `sessionCapabilityName`): what only this session writes is opened to it, and the command's
+   * processes are closed to every other session. A second may be the project's.
+   */
+  capabilities?: readonly string[]
 }
+
+/** A capability name of NEXUS's own making: never one of Windows'. */
+const CAPABILITY_NAME = /^NexusSandbox\.[A-Za-z0-9.-]{1,51}$/
 
 /**
  * The AppContainer every command of the ISOLATED profile is started in. A name: Windows derives the same SID
@@ -122,7 +131,12 @@ export function renderSpec(spec: LaunchSpec): string {
       if (!/^[A-Za-z0-9.-]{1,64}$/.test(spec.appContainer)) throw new Error('An AppContainer name is letters, digits, dots and hyphens.')
       lines.push(`appcontainer=${spec.appContainer}`)
     }
-  } else if (spec.appContainer !== undefined) {
+    for (const name of spec.capabilities ?? []) {
+      if (spec.appContainer === undefined) throw new Error('A capability is held by an AppContainer only.')
+      if (!CAPABILITY_NAME.test(name) || name === spec.appContainer) throw new Error('A capability name is one of NEXUS\'s own.')
+      lines.push(`capability=${name}`)
+    }
+  } else if (spec.appContainer !== undefined || (spec.capabilities ?? []).length > 0) {
     throw new Error('An AppContainer is part of the ISOLATED profile only.')
   }
   return `${lines.join('\n')}\n`
@@ -180,7 +194,7 @@ export interface VerifyPlace {
 export class Launcher {
   private readonly checks = new Map<ContainmentProfile, ContainmentCheck>()
   private containerSid: string | null = null
-  private capability: string | null = null
+  private readonly capabilitySids = new Map<string, string>()
 
   constructor(private readonly options: LauncherOptions) {}
 
@@ -224,13 +238,18 @@ export class Launcher {
     return sid
   }
 
-  /** The SID of NEXUS's own capability, the one thing the AppContainer holds: what access lists name. */
-  async capabilitySid(): Promise<string> {
-    if (this.capability !== null) return this.capability
-    const result = await runProcess(this.options.executable, ['capability-sid', SANDBOX_APP_CONTAINER], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
+  /**
+   * The SID of a capability of NEXUS's own, as the launcher itself derives it from its name: what access lists
+   * name. Without a name, the one every command of the isolated profile holds (the AppContainer's own name).
+   */
+  async capabilitySid(name: string = SANDBOX_APP_CONTAINER): Promise<string> {
+    const known = this.capabilitySids.get(name)
+    if (known !== undefined) return known
+    if (name !== SANDBOX_APP_CONTAINER && !CAPABILITY_NAME.test(name)) throw new Error('A capability name is one of NEXUS\'s own.')
+    const result = await runProcess(this.options.executable, ['capability-sid', name], { cwd: dirname(this.options.executable), timeoutMs: 20_000, env: minimalEnv() })
     const sid = result.stdout.trim()
     if (result.exitCode !== 0 || !/^S-1-15-3-1024-[0-9-]{10,140}$/.test(sid)) throw new Error(`The sandbox's capability could not be derived: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
-    this.capability = sid
+    this.capabilitySids.set(name, sid)
     return sid
   }
 
@@ -238,8 +257,8 @@ export class Launcher {
    * Lets the AppContainer write in a directory tree of the sandbox, by its capability. Without an entry of its
    * own an AppContainer writes nowhere, whatever the account may do.
    */
-  async grantContainer(path: string): Promise<void> {
-    const sid = await this.capabilitySid()
+  async grantContainer(path: string, capability?: string): Promise<void> {
+    const sid = await this.capabilitySid(capability)
     const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
     const result = await runProcess(join(system32, 'icacls.exe'), [path, '/grant', `*${sid}:(OI)(CI)(M)`, '/Q'], { cwd: system32, timeoutMs: 10 * 60_000, env: minimalEnv(), maxOutputBytes: 64 * 1024 })
     if (result.exitCode !== 0) throw new Error(`The AppContainer could not be let into ${path}: ${(result.stderr.trim() || result.stdout.trim()).slice(-300)}`)

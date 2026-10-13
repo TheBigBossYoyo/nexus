@@ -221,6 +221,22 @@ function powershellGitGuard(kind: 'all' | 'refs'): string {
   return `function git { foreach ($a in $args) { if ("$a".StartsWith('-')) { continue }; if (@(${REF_CHANGING.map((c) => `'${c}'`).join(',')}) -contains "$a") { ${refuse} }; break }; & (Get-Command git -CommandType Application | Select-Object -First 1).Source @args }\n`
 }
 
+/**
+ * 0.9: the capability of one session, and the one of a project. Every command of the isolated profile runs in
+ * the same AppContainer as the same account; what tells one session from another, to Windows, is a capability
+ * only that session's commands hold. Its name is derived from the session (the same session, resumed, has the
+ * same name and nothing more), Windows derives its SID from the name, and nothing is registered anywhere: a
+ * capability exists as the entries that name it, on the session's own directories, and goes when they go.
+ */
+export function sessionCapabilityName(instance: string, session: { projectId: string; sessionKey: string; worktree: string }): string {
+  return `NexusSandbox.S.${shortHash(`${instance}|${session.projectId}|${session.sessionKey}|${session.worktree.toLowerCase()}`)}`
+}
+
+/** What the sessions of one project share and no other project's may write: its package cache. */
+export function projectCapabilityName(instance: string, projectId: string): string {
+  return `NexusSandbox.P.${shortHash(`${instance}|${projectId}`)}`
+}
+
 function shortHash(text: string): string {
   return createHash('sha256').update(text.toLowerCase()).digest('hex').slice(0, 16)
 }
@@ -480,16 +496,29 @@ export class ExecutionBroker {
     if (existsSync(this.grantsRecord())) writeFileSync(this.grantsRecord(), JSON.stringify(record, null, 2))
   }
 
-  private async ensureLow(dir: string): Promise<void> {
-    const key = dir.toLowerCase()
+  private async ensureLow(dir: string, capability?: string): Promise<void> {
+    const key = `${dir.toLowerCase()}|${capability ?? ''}`
     if (this.labeled.has(key)) return
     mkdirSync(dir, { recursive: true })
     await this.deps.launcher.label('low', dir)
-    // In the sandbox root the commands run in an AppContainer, which writes only where its capability has an
-    // entry: the root gives it reading, and the directories a command may write get the entry to write here.
+    // In the sandbox root the commands run in an AppContainer, which writes only where a capability it holds has
+    // an entry: the root gives reading, and a directory a command may write gets the entry to write here. Since
+    // 0.9 the entry names the capability of the one session (or project) the directory belongs to, and never
+    // the capability every session holds: a directory opened to that one is opened to every session.
     const account = this.deps.account()
-    if (account !== null && within(account.root, dir)) await this.deps.launcher.grantContainer(dir)
+    if (account !== null && within(account.root, dir)) {
+      if (capability === undefined) throw new Error(`No session was named for ${dir}: a directory of the sandbox is opened for writing to one session or one project, never to all.`)
+      await this.deps.launcher.withdrawContainerEntries(dir)
+      await this.deps.launcher.grantContainer(dir, capability)
+    }
     this.labeled.add(key)
+  }
+
+  /** The capabilities a session's commands hold beside the common one: its own, then its project's. Empty outside ISOLATED. */
+  capabilitiesOf(session: ContainSession & { sessionProfile?: ExecutionProfileName }): string[] {
+    // A command that is git alone runs as the user in an ISOLATED session: the directories are still that session's.
+    if (session.profile !== 'ISOLATED' && session.sessionProfile !== 'ISOLATED') return []
+    return [sessionCapabilityName(this.deps.sandboxDir, session), projectCapabilityName(this.deps.sandboxDir, session.projectId)]
   }
 
   /**
@@ -508,10 +537,11 @@ export class ExecutionBroker {
     // one, or two test processes) each sweep only what is their own.
     const base = join(stateRoot, 'sessions', shortHash(this.deps.sandboxDir), shortHash(`${session.projectId}|${session.sessionKey}|${session.worktree}`))
     const roots: SessionRoots = { worktree: session.worktree, temp: join(base, 'tmp'), home: join(base, 'home'), cache: join(stateRoot, 'cache', shortHash(session.projectId)) }
-    await this.ensureLow(roots.worktree)
-    await this.ensureLow(base)
+    const [own, project] = this.capabilitiesOf(session)
+    await this.ensureLow(roots.worktree, own)
+    await this.ensureLow(base, own)
     for (const dir of [roots.temp, join(roots.home, 'AppData', 'Roaming'), join(roots.home, 'AppData', 'Local'), roots.cache]) mkdirSync(dir, { recursive: true })
-    await this.ensureLow(roots.cache)
+    await this.ensureLow(roots.cache, project)
     return roots
   }
 
@@ -707,7 +737,7 @@ export class ExecutionBroker {
       env,
       maxProcesses: this.deps.limits?.maxProcesses ?? DEFAULT_MAX_PROCESSES,
       ...(this.deps.limits?.maxJobMemoryBytes !== undefined ? { maxJobMemoryBytes: this.deps.limits.maxJobMemoryBytes } : {}),
-      ...(sandbox ? { sandbox: sandbox.ref, appContainer: SANDBOX_APP_CONTAINER } : {}),
+      ...(sandbox ? { sandbox: sandbox.ref, appContainer: SANDBOX_APP_CONTAINER, capabilities: this.capabilitiesOf(session) } : {}),
       ...extra,
     }
   }

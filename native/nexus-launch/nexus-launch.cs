@@ -138,6 +138,11 @@ class Spec {
     // of the sandbox's folders name. It holds none of Windows' capabilities, so Windows looks up no name for it,
     // shows it nothing of the machine's name cache and lets none of its packets out.
     public string AppContainer = null;
+    // 0.9: further capabilities of NEXUS's own, by name, that the command holds beside the one of the AppContainer's
+    // name. The first is the session's: the directories only this session writes are opened to it and to nothing
+    // else, and the command's own process, threads and whatever it creates without saying who may open it are
+    // open to holders of it only. A second may be the project's (its package cache). None is one of Windows'.
+    public List<string> Capabilities = new List<string>();
 }
 
 static class Program {
@@ -182,6 +187,7 @@ static class Program {
                 else if (key == "account-sid") spec.AccountSid = value;
                 else if (key == "expect-sid") spec.ExpectSid = value;
                 else if (key == "appcontainer") spec.AppContainer = value;
+                else if (key == "capability") spec.Capabilities.Add(value);
                 // An unknown key is refused: a spec this launcher does not fully understand is not run.
                 else throw new Fail(EXIT_SPEC, "unknown spec key: " + key);
             } catch (Fail) { throw; } catch (Exception) { throw new Fail(EXIT_SPEC, "bad value for " + key); }
@@ -201,6 +207,17 @@ static class Program {
             if (spec.Profile == "RESTRICTED") throw new Fail(EXIT_SPEC, "an AppContainer is part of the ISOLATED profile only");
             if (spec.AppContainer.Length < 1 || spec.AppContainer.Length > 64) throw new Fail(EXIT_SPEC, "bad AppContainer name");
             foreach (char c in spec.AppContainer) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_SPEC, "bad AppContainer name");
+        }
+        // 0.9: the isolated profile is an AppContainer, always. A spec that leaves it out is not run as the account
+        // without one.
+        if ((spec.Profile == "ISOLATED" || spec.Profile == "STAGE2") && spec.AppContainer == null) throw new Fail(EXIT_SPEC, "the ISOLATED profile names its AppContainer");
+        if (spec.Capabilities.Count > 0 && spec.AppContainer == null) throw new Fail(EXIT_SPEC, "a capability is held by an AppContainer only");
+        if (spec.Capabilities.Count > 3) throw new Fail(EXIT_SPEC, "too many capabilities");
+        foreach (string name in spec.Capabilities) {
+            // Names of NEXUS's own making only: Windows derives the SID of one of its own capabilities (the network,
+            // the libraries) from that capability's name, and none of those is ever given.
+            if (name.Length < 14 || name.Length > 64 || !name.StartsWith("NexusSandbox.") || name == spec.AppContainer) throw new Fail(EXIT_SPEC, "bad capability name");
+            foreach (char c in name) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) throw new Fail(EXIT_SPEC, "bad capability name");
         }
         if (spec.Desktop != null) {
             if (spec.Desktop.Length < 1 || spec.Desktop.Length > 40) throw new Fail(EXIT_SPEC, "bad desktop name");
@@ -338,7 +355,9 @@ static class Program {
         // and the account's process is started from there. It never is on the desktop the user sees.
         string desktopName = spec.Desktop != null ? spec.Desktop : RandomDesktopName();
         // In an AppContainer a process opens a desktop only if the account and the AppContainer are both let in.
-        IntPtr desktop = MakeDesktop(desktopName, accountSid, spec.AppContainer != null ? SidText(AppContainerSid(spec.AppContainer)) : null);
+        // With a capability of the session's own, the desktop is open to holders of that capability and not to the
+        // whole AppContainer: another session's command cannot open it even if it learns its name.
+        IntPtr desktop = MakeDesktop(desktopName, accountSid, spec.Capabilities.Count > 0 ? SidText(CapabilitySid(spec.Capabilities[0])) : spec.AppContainer != null ? SidText(AppContainerSid(spec.AppContainer)) : null);
         // The identifier would let the account open the user's own desktop too, and read the screen from it
         // (measured). The account itself is refused there, and refused the screen and the clipboard of the window
         // station: a refusal by name outranks what the identifier allows.
@@ -356,6 +375,7 @@ static class Program {
         inner.Append("expect-sid=" + accountSid + "\n");
         inner.Append("desktop=" + desktopName + "\n");
         if (spec.AppContainer != null) inner.Append("appcontainer=" + spec.AppContainer + "\n");
+        foreach (string capability in spec.Capabilities) inner.Append("capability=" + capability + "\n");
         byte[] name = new byte[12]; using (RandomNumberGenerator rng = RandomNumberGenerator.Create()) rng.GetBytes(name);
         string innerPath = Path.Combine(spec.Stage2Dir, BitConverter.ToString(name).Replace("-", "").ToLowerInvariant() + ".spec");
         try { Directory.CreateDirectory(spec.Stage2Dir); File.WriteAllText(innerPath, inner.ToString(), new UTF8Encoding(false)); }
@@ -383,7 +403,10 @@ static class Program {
         // AppContainer the account's own profile is loaded (LOGON_WITH_PROFILE): Windows keeps an AppContainer's
         // record in the registry of the account that uses it, and starts no process in one that has no record
         // (measured: "file not found"). The command's home is still the session's directory, by its environment.
-        bool started = N.CreateProcessWithLogonW(credential[0], ".", credential[1], spec.AppContainer != null ? 1u : 0u, null, commandLine, flags, env, spec.Cwd, ref si, out pi);
+        // Its current directory is the folder of the launcher's copy, not the worktree: Windows looks in the current
+        // directory for a library it does not find elsewhere, and the worktree is written by contained code. The
+        // command itself is started in the worktree by the second step.
+        bool started = N.CreateProcessWithLogonW(credential[0], ".", credential[1], spec.AppContainer != null ? 1u : 0u, null, commandLine, flags, env, Path.GetDirectoryName(spec.Stage2), ref si, out pi);
         int startError = Marshal.GetLastWin32Error();
         credential[1] = null;
         if (!started) {
@@ -397,7 +420,12 @@ static class Program {
             try { File.Delete(innerPath); } catch (Exception) { }
             throw new Fail(EXIT_CONTAINMENT, "the sandbox account's process could not be put in its job: " + e);
         }
-        N.ResumeThread(pi.hThread);
+        if (N.ResumeThread(pi.hThread) == 0xFFFFFFFF) {
+            int e = Marshal.GetLastWin32Error();
+            N.TerminateJobObject(job, 1);
+            try { File.Delete(innerPath); } catch (Exception) { }
+            throw new Fail(EXIT_CONTAINMENT, "the sandbox account's process could not be let run: " + e);
+        }
         N.CloseHandle(pi.hThread);
         uint waited = N.WaitForSingleObject(pi.hProcess, spec.TimeoutMs == 0 ? 0xFFFFFFFF : spec.TimeoutMs);
         try { File.Delete(innerPath); } catch (Exception) { }
@@ -452,7 +480,7 @@ static class Program {
      * for and holds NEXUS's one capability and no other: not the call's word, the token's. A process that is
      * not, is not let run.
      */
-    static void RequireAppContainer(IntPtr process, IntPtr expected, IntPtr capability) {
+    static void RequireAppContainer(IntPtr process, IntPtr expected, List<IntPtr> capabilities) {
         IntPtr token;
         if (!N.OpenProcessToken(process, 0x8 /* TOKEN_QUERY */, out token)) throw new Fail(EXIT_CONTAINMENT, "the command's token could not be opened to check its AppContainer: " + Marshal.GetLastWin32Error());
         try {
@@ -463,8 +491,58 @@ static class Program {
             if (sid == IntPtr.Zero || !N.EqualSid(sid, expected)) throw new Fail(EXIT_CONTAINMENT, "the command is not in the AppContainer that was asked for");
             b = TokenInfo(token, 30 /* TokenCapabilities */, "its capabilities");
             // TOKEN_GROUPS { GroupCount, SID_AND_ATTRIBUTES[] }: the array begins at the pointer's alignment.
-            if (Marshal.ReadInt32(b) != 1 || !N.EqualSid(Marshal.ReadIntPtr(b, IntPtr.Size), capability)) throw new Fail(EXIT_CONTAINMENT, "the command's AppContainer does not hold NEXUS's capability alone");
+            int held = Marshal.ReadInt32(b);
+            if (held != capabilities.Count) throw new Fail(EXIT_CONTAINMENT, "the command's AppContainer does not hold exactly the capabilities it was given");
+            int entry = Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES));
+            for (int i = 0; i < held; i++) {
+                IntPtr sid2 = Marshal.ReadIntPtr(b, IntPtr.Size + i * entry);
+                bool known = false;
+                foreach (IntPtr given in capabilities) if (N.EqualSid(sid2, given)) known = true;
+                if (!known) throw new Fail(EXIT_CONTAINMENT, "the command's AppContainer holds a capability it was not given");
+            }
         } finally { N.CloseHandle(token); }
+    }
+
+    /**
+     * 0.9. Two commands of two sessions are the same account in the same AppContainer, and Windows lets such
+     * processes open one another: what a process is made with, and what it gives to everything it creates without
+     * a list of its own (its children, their threads, its pipes and events), names the account and the
+     * AppContainer. One session could end another's processes, read their memory and take their handles, and
+     * with them everything the other session holds.
+     *
+     * So the list is replaced by one that names the system, the account and the session's own capability, and
+     * not the AppContainer: on the process, on its first thread, and as the default of its token, which every
+     * process it starts inherits. A process is opened by code in an AppContainer only where the list names its
+     * AppContainer or a capability it holds; another session holds neither.
+     */
+    static void CloseToOtherSessions(IntPtr process, IntPtr thread, string accountSid, string sessionCapability) {
+        if (accountSid == null) throw new Fail(EXIT_CONTAINMENT, "the account of the command is not known, so its process cannot be closed to other sessions");
+        IntPtr sd; uint size;
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(A;;GA;;;SY)(A;;GA;;;" + accountSid + ")(A;;GA;;;" + sessionCapability + ")", 1, out sd, out size)) throw new Fail(EXIT_CONTAINMENT, "the session's access list could not be built: " + Marshal.GetLastWin32Error());
+        try {
+            bool present, defaulted; IntPtr dacl;
+            if (!N.GetSecurityDescriptorDacl(sd, out present, out dacl, out defaulted) || !present || dacl == IntPtr.Zero) throw new Fail(EXIT_CONTAINMENT, "the session's access list could not be read back");
+            // DACL | PROTECTED_DACL: exactly this list.
+            uint r = N.SetSecurityInfo(process, 6 /* SE_KERNEL_OBJECT */, 0x4 | 0x80000000, IntPtr.Zero, IntPtr.Zero, dacl, IntPtr.Zero);
+            if (r != 0) throw new Fail(EXIT_CONTAINMENT, "the command's process could not be closed to other sessions: " + r);
+            r = N.SetSecurityInfo(thread, 6, 0x4 | 0x80000000, IntPtr.Zero, IntPtr.Zero, dacl, IntPtr.Zero);
+            if (r != 0) throw new Fail(EXIT_CONTAINMENT, "the command's thread could not be closed to other sessions: " + r);
+            IntPtr token;
+            if (!N.OpenProcessToken(process, 0x8 | 0x80 /* TOKEN_QUERY | TOKEN_ADJUST_DEFAULT */, out token)) throw new Fail(EXIT_CONTAINMENT, "the command's token could not be opened to set what it gives to what it creates: " + Marshal.GetLastWin32Error());
+            try {
+                // TOKEN_DEFAULT_DACL { PACL DefaultDacl }
+                IntPtr info = Marshal.AllocHGlobal(IntPtr.Size);
+                Marshal.WriteIntPtr(info, dacl);
+                bool set = N.SetTokenInformation(token, 6 /* TokenDefaultDacl */, info, IntPtr.Size);
+                int e = Marshal.GetLastWin32Error();
+                Marshal.FreeHGlobal(info);
+                if (!set) throw new Fail(EXIT_CONTAINMENT, "the default access list of the command's token could not be set: " + e);
+                // Read back: the default the token now carries has three entries and none for the AppContainer.
+                IntPtr b = TokenInfo(token, 6, "its default access list");
+                IntPtr now = Marshal.ReadIntPtr(b);
+                if (now == IntPtr.Zero || Marshal.ReadInt16(now, 4) != 3) throw new Fail(EXIT_CONTAINMENT, "the default access list of the command's token is not the session's after it was set");
+            } finally { N.CloseHandle(token); }
+        } finally { N.LocalFree(sd); }
     }
 
     static string RandomDesktopName() {
@@ -563,7 +641,15 @@ static class Program {
         // and is in none. Only the second step of ISOLATED has one.
         IntPtr appContainer = inner && spec.AppContainer != null ? AppContainerSid(spec.AppContainer) : IntPtr.Zero;
         if (!inner && spec.AppContainer != null) throw new Fail(EXIT_SPEC, "an AppContainer is part of the ISOLATED profile only");
-        IntPtr capability = appContainer != IntPtr.Zero ? CapabilitySid(spec.AppContainer) : IntPtr.Zero;
+        List<IntPtr> capabilities = new List<IntPtr>();
+        if (appContainer != IntPtr.Zero) {
+            capabilities.Add(CapabilitySid(spec.AppContainer));
+            foreach (string name in spec.Capabilities) {
+                IntPtr sid = CapabilitySid(name);
+                foreach (IntPtr known in capabilities) if (N.EqualSid(known, sid)) throw new Fail(EXIT_SPEC, "a capability is named twice");
+                capabilities.Add(sid);
+            }
+        }
         int attributes = appContainer != IntPtr.Zero ? 2 : 1;
         IntPtr listSize = IntPtr.Zero;
         N.InitializeProcThreadAttributeList(IntPtr.Zero, attributes, 0, ref listSize);
@@ -578,10 +664,14 @@ static class Program {
             if (hr != 0 && (uint)hr != 0x800700B7 /* already exists */) throw new Fail(EXIT_CONTAINMENT, "the AppContainer could not be registered for the sandbox account: 0x" + hr.ToString("x"));
             // SECURITY_CAPABILITIES { AppContainerSid, Capabilities, CapabilityCount, Reserved }: NEXUS's own
             // capability and nothing of Windows' (no network, no library, no device).
-            SID_AND_ATTRIBUTES own = new SID_AND_ATTRIBUTES(); own.Sid = capability; own.Attributes = 0x4 /* SE_GROUP_ENABLED */;
-            IntPtr list1 = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES))); Marshal.StructureToPtr(own, list1, false);
+            int entrySize = Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES));
+            IntPtr list1 = Marshal.AllocHGlobal(entrySize * capabilities.Count);
+            for (int i = 0; i < capabilities.Count; i++) {
+                SID_AND_ATTRIBUTES own = new SID_AND_ATTRIBUTES(); own.Sid = capabilities[i]; own.Attributes = 0x4 /* SE_GROUP_ENABLED */;
+                Marshal.StructureToPtr(own, new IntPtr(list1.ToInt64() + i * entrySize), false);
+            }
             IntPtr caps = Marshal.AllocHGlobal(IntPtr.Size * 2 + 8);
-            Marshal.WriteIntPtr(caps, 0, appContainer); Marshal.WriteIntPtr(caps, IntPtr.Size, list1); Marshal.WriteInt32(caps, IntPtr.Size * 2, 1); Marshal.WriteInt32(caps, IntPtr.Size * 2 + 4, 0);
+            Marshal.WriteIntPtr(caps, 0, appContainer); Marshal.WriteIntPtr(caps, IntPtr.Size, list1); Marshal.WriteInt32(caps, IntPtr.Size * 2, capabilities.Count); Marshal.WriteInt32(caps, IntPtr.Size * 2 + 4, 0);
             if (!N.UpdateProcThreadAttribute(six.lpAttributeList, 0, new IntPtr(0x00020009) /* PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES */, caps, new IntPtr(IntPtr.Size * 2 + 8), IntPtr.Zero, IntPtr.Zero))
                 throw new Fail(EXIT_CONTAINMENT, "the AppContainer of the command could not be set: " + Marshal.GetLastWin32Error());
         }
@@ -598,7 +688,13 @@ static class Program {
             throw new Fail(EXIT_START, "the command could not be started: " + new Win32Exception(e).Message + " (" + e + ")");
         }
         if (appContainer != IntPtr.Zero) {
-            try { RequireAppContainer(pi.hProcess, appContainer, capability); }
+            try {
+                RequireAppContainer(pi.hProcess, appContainer, capabilities);
+                // The session's own capability, when there is one: this process, its first thread and everything it
+                // makes from now on without saying who may open it are for holders of that capability, not for the
+                // whole AppContainer. Done while the process is suspended and has run nothing.
+                if (spec.Capabilities.Count > 0) CloseToOtherSessions(pi.hProcess, pi.hThread, spec.ExpectSid, SidText(capabilities[1]));
+            }
             catch (Fail) { N.TerminateProcess(pi.hProcess, 1); throw; }
         }
         bool inJob = false;
@@ -613,7 +709,11 @@ static class Program {
             N.TerminateProcess(pi.hProcess, 1);
             throw new Fail(EXIT_CONTAINMENT, "the process could not be put in its job: " + e);
         }
-        N.ResumeThread(pi.hThread);
+        if (N.ResumeThread(pi.hThread) == 0xFFFFFFFF) {
+            int e = Marshal.GetLastWin32Error();
+            N.TerminateProcess(pi.hProcess, 1);
+            throw new Fail(EXIT_CONTAINMENT, "the command could not be let run: " + e);
+        }
         N.CloseHandle(pi.hThread);
 
         uint waited = N.WaitForSingleObject(pi.hProcess, spec.TimeoutMs == 0 ? 0xFFFFFFFF : spec.TimeoutMs);
@@ -713,7 +813,13 @@ static class Program {
         // No error dialog, ever: a child that cannot start fails with a code, not with a window on the user's screen.
         N.SetErrorMode(0x8003);
         try {
-            if (args.Length == 2 && args[0] == "--spec") return Run(ReadSpec(args[1]));
+            if (args.Length == 2 && args[0] == "--spec") {
+                Spec spec = ReadSpec(args[1]);
+                // The inner spec holds the command and its whole environment. Read, it is of no further use, and it
+                // is removed before the command exists: a launcher that is killed leaves none behind.
+                if (spec.Profile == "STAGE2") { try { File.Delete(args[1]); } catch (Exception) { } }
+                return Run(spec);
+            }
             if (args.Length == 3 && args[0] == "label") return Label(args[1], args[2]);
             if (args.Length == 3 && args[0] == "credential" && args[1] == "write") return CredentialWrite(args[2]);
             if (args.Length == 3 && args[0] == "credential" && args[1] == "check") { Console.Out.WriteLine(CredentialRead(args[2])[0]); return 0; }
