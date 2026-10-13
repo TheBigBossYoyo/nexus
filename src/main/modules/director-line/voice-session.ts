@@ -42,6 +42,12 @@ export interface VoiceReply {
   say: string
   /** The call ends after this is said. */
   end: boolean
+  /**
+   * FACTS: `say` is what NEXUS computed for a question, and may be put into spoken words by the Director voice.
+   * OPEN: what was said is outside the closed set of commands; `say` is the fixed answer to that, and the Director
+   * voice may answer from the facts instead. Absent: `say` is said as it is.
+   */
+  about?: 'FACTS' | 'OPEN'
 }
 
 export const MAX_PIN_TRIES_PER_CALL = 3
@@ -211,8 +217,10 @@ export class VoiceSession {
   private async run(text: string, command: OperatorCommand): Promise<VoiceReply> {
     if (this.authenticated) this.lastAuthenticatedAt = this.deps.now()
     this.turn += 1
-    if (commandRisk(command) === 'REFUSED') this.deps.note?.('a request that needs the machine was refused on a call')
+    const risk = commandRisk(command)
+    if (risk === 'REFUSED') this.deps.note?.('a request that needs the machine was refused on a call')
     const say = await this.deps.perform({ from: this.start.from, callId: this.start.callId, turnId: String(this.turn), text, command })
-    return { say: say === '' ? 'Done.' : say, end: false }
+    if (say === '') return { say: 'Done.', end: false }
+    return { say, end: false, ...(risk === 'READ_ONLY' ? { about: 'FACTS' as const } : command.kind === 'UNKNOWN' ? { about: 'OPEN' as const } : {}) }
   }
 }

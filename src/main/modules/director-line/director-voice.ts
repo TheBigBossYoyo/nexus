@@ -41,6 +41,8 @@ export interface SpokenTurn {
   said: string
   /** What NEXUS computed for it: the only source of figures. */
   facts: string
+  /** What is said when the model cannot be used. Without it, the facts are said as they are. */
+  fallback?: string
 }
 
 export interface SpokenAnswer {
@@ -253,8 +255,8 @@ export class DirectorVoice {
       speak(sentence)
     }
     const byFacts = (): SpokenAnswer => {
-      const facts = inert(input.facts.replace(/\n+/g, '. ').replace(/\.{2,}/g, '.'), 900)
-      for (const sentence of splitSentences(`${spoken.length > 0 ? 'The exact figures. ' : ''}${facts}`, true).ready) say(sentence)
+      const facts = inert((input.fallback ?? input.facts).replace(/\n+/g, '. ').replace(/\.{2,}/g, '.'), 900)
+      for (const sentence of splitSentences(`${input.fallback === undefined && spoken.length > 0 ? 'The exact figures. ' : ''}${facts}`, true).ready) say(sentence)
       return { text: spoken.join(' '), by: 'FACTS', interrupted: false }
     }
     if (!this.usable()) return byFacts()
