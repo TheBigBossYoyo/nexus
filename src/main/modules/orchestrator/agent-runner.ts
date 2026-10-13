@@ -797,13 +797,11 @@ export class AgentRunner {
     // task. What it was is asked of the connectivity supervisor, with the error it ended with.
     if ((outcome === 'crashed' || outcome === 'error') && this.deps.networkLoss !== undefined) {
       const said = [ended.error ?? '', ...(result?.errors ?? [])].join('\n')
-      let lost = false
       try {
-        lost = this.deps.networkLoss(said)
+        if (this.deps.networkLoss(said)) outcome = 'network'
       } catch {
-        lost = false
+        // A judgement that fails changes nothing: the session ended as it ended.
       }
-      if (lost) outcome = 'network'
     }
     if (outcome === 'crashed' && ended.error) appendOutput('error', ended.error)
 
