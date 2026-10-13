@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -119,6 +119,18 @@ d('two isolated sessions at once (0.9)', () => {
     const before = new Set(existsSync(dir) ? readdirSync(dir) : [])
     const result = await broker.run({ ...s, file: 'cmd', args: ['/c', 'echo', 'done'] }, { timeoutMs: 60_000 })
     expect(result.stdout).toContain('done')
-    expect((existsSync(dir) ? readdirSync(dir) : []).filter((name) => !before.has(name))).toEqual([])
+    // The folder is the machine's: other commands running at this moment have a spec in it for the instant between
+    // its writing and its reading. What must not be there is a spec that stays: one made since this test began
+    // and still there three seconds after it was written.
+    await new Promise((r) => setTimeout(r, 3000))
+    const stayed = (existsSync(dir) ? readdirSync(dir) : []).filter((name) => {
+      if (before.has(name)) return false
+      try {
+        return Date.now() - statSync(join(dir, name)).mtimeMs > 2500
+      } catch {
+        return false
+      }
+    })
+    expect(stayed).toEqual([])
   }, 120_000)
 })

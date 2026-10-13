@@ -18,7 +18,7 @@ State: OPEN, IN PROGRESS, CLOSED (with commit), STATED (a limit, written where i
 
 | # | Limit | Disposition | State | Notes |
 |---|---|---|---|---|
-| A1 | Every ISOLATED session holds the same capability: nothing but convention keeps one session out of another's directories | FIX_IN_0_9 | OPEN | A capability per session, derived from the session, granted on its directories only; made and removed deterministically; swept after a crash. Two hostile sessions at once as the test (also cross-repository: section 28 of the brief) |
+| A1 | Every ISOLATED session holds the same capability: nothing but convention keeps one session out of another's directories | FIX_IN_0_9 | CLOSED for writing and for processes (`f0868b6`, `tests/integration/isolation/cross-session.test.ts`); OPEN for reading | A capability per session, derived from the session, granted on its directories only; made and removed deterministically; swept after a crash. Two hostile sessions at once as the test (also cross-repository: section 28 of the brief) |
 | A2 | After git alone has run as the user for a session, the repository's `objects` directory stays writable to other low-integrity processes of the user; existing objects can be overwritten and git serves them | FIX_IN_0_9 | OPEN | An object store of the task's own, so that nothing an untrusted process can write is later read as committed history; what NEXUS takes into the user's repository is verified first |
 | A3 | No walk of the worktree for links before the user's git stages it | FIX_IN_0_9 | OPEN | Defence in depth: reparse points of any kind, a changed `.git` pointer or entry; nothing followed; refused when in doubt |
 | A4 | The launcher's AppContainer code was not read by a second reviewer | FIX_IN_0_9 | IN PROGRESS | Independent review started 2026-10-13 (three reviewers, section E) |
@@ -116,8 +116,8 @@ Severity as the reviewer gave it unless a note says otherwise. RM = release-mate
 | ID | Finding | Source | Confidence | State |
 |---|---|---|---|---|
 | W1-F1 / G-G-1 | Contained code of any session could write the sandbox's shared tools (the shell, the Node copy): the capability had an entry of its own to write on `tools` | The machine's access list; `execution-broker.ts:612` | Measured by W1; the entry read by G and by the author | CLOSED `ded0121`: the entry is taken away before the profile is judged; every start tries to write there from inside; test with a planted entry |
-| W2-F1 | One capability for every session and project: a session writes another's temp, home and worktree, can change the script another is about to run, poison a project's package cache, and read every worktree, spec and verification scratch | `execution-broker.ts:478-501`, `setup-sandbox.ps1:142` | Confirmed by reading and by the access lists | OPEN: this is A1; the fix is the per-session capability, with reading closed too |
-| W2-F2 | The inner spec of a contained command (its command line and whole environment) lies in `specs`, readable by every contained process, and stays when the launcher is killed: 48 were found | `nexus-launch.cs:361-403`, `execution-broker.ts:995` | Confirmed by reading and on the machine | OPEN, with A1 |
+| W2-F1 | One capability for every session and project: a session writes another's temp, home and worktree, can change the script another is about to run, poison a project's package cache, and read every worktree, spec and verification scratch | `execution-broker.ts:478-501`, `setup-sandbox.ps1:142` | Confirmed by reading and by the access lists | CLOSED for writing and for processes (`f0868b6`): a capability per session and per project, the command's process and what it creates closed to other sessions; two hostile sessions at once as the test. **OPEN for reading**: a session still reads another's worktree. Carried to the next release as MEDIUM |
+| W2-F2 | The inner spec of a contained command (its command line and whole environment) lies in `specs`, readable by every contained process, and stays when the launcher is killed: 48 were found | `nexus-launch.cs:361-403`, `execution-broker.ts:995` | Confirmed by reading and on the machine | CLOSED as far as leaving it behind goes (`f0868b6`): the second step deletes it as soon as it has read it, before the command exists; test. The folder is still readable for the instant between writing and reading: with the reading above |
 
 ### MEDIUM
 
@@ -132,9 +132,9 @@ Severity as the reviewer gave it unless a note says otherwise. RM = release-mate
 | W2-F5 | The password file's access list is set after the file is written, and the result of setting it is not checked | yes | OPEN |
 | W2-F6 | `%LOCALAPPDATA%\NexusSandbox` inherits its access list: on this machine other principals can replace the credential blob or the record | yes | OPEN |
 | W2-F7 | Entries given on a user's repository are recorded after they are made; a crash between leaves entries nothing takes back, the removal included | yes | OPEN |
-| W2-F8 | The launcher (which holds the account's password) and its second step start with the worktree as current directory: a library planted there could be loaded | yes | OPEN |
+| W2-F8 | The launcher (which holds the account's password) and its second step start with the worktree as current directory: a library planted there could be loaded | yes | HALF: the second step starts in the launcher's own folder (`e3b5543`); the first step still starts in the worktree. OPEN |
 | W2-F9 | A command for `cmd` passes the check for shell operators when they are inside single quotes or in an argument without spaces | yes (the promise is false, though inside the containment) | OPEN |
-| W2-F10 | The launcher accepts an ISOLATED spec without an AppContainer | yes | OPEN |
+| W2-F10 | The launcher accepts an ISOLATED spec without an AppContainer | yes | CLOSED `e3b5543`: refused |
 | W2-F12 | The removal deletes the sandbox root recursively, elevated, through a tree contained code wrote | yes | OPEN |
 | G-J-1 | The sandbox reads the whole Git directory of the user's repository, `config` included (addresses with tokens) | yes | OPEN |
 | G-E-1 | The package configuration reader prints a line without `=` as a key: a token alone on a line is shown | yes | OPEN |
@@ -190,3 +190,12 @@ bring back the interruptions 0.8 removed).
 | 5.5, 9.4, 10.4 | Fallback field in the routing record; a waiting session counted; text of provider requests in the inspector | DEFER_TO_POST_1_0 (no claim of 0.9 depends on them); 10.4 is taken up again under provider privacy as a statement of what is sent |
 | 6.5, 8.4, 9.6 | Prompt size: uncapped older section, text twice | Measured by the token work of 0.9; changed only with a campaign that shows no loss of quality |
 | 8.5 | Workspace runs read every workspace the project is in | Tested by the multi-repository acceptance; release-material if it crosses an authority boundary |
+
+## G. How 0.9.0 was closed (2026-10-13)
+
+At 18:33 the owner asked for 0.9.0 the same evening and said: leave the long items out, shortcuts are allowed.
+What that decision set aside is listed in `V0_9_RELEASE_REPORT.md` under "Left out by the owner's decision" and
+in `1_0_READINESS.md`. The findings still OPEN above (ten MEDIUM, the reading half of W2-F1, the LOW list) are
+carried to the next release with their severity unchanged; none of them is CRITICAL, and no HIGH is open for
+writing or for processes. The brief's rule that a release-material MEDIUM blocks PASS was set aside by the
+owner's decision, not met.
