@@ -53,15 +53,16 @@ export default defineConfig({
       {
         resolve: { alias },
         test: {
-          // The hidden evaluator of the performance case runs the unoptimized fixture, which by design needs most of
-          // its 120 s limit. Next to six other workers it runs out of time; alone it does not. This group starts when
-          // the others have finished.
+          // The built-in Arena cases run their fixtures' own test commands, one file in one worker of its own. They ran
+          // alone after every other test when the hidden evaluator of the performance case needed most of its 120 s
+          // limit; since 0.7.1 it fails the unoptimized fixture in about 40 s, so the group runs beside the
+          // integration tests (0.9.1: it was a serial tail of 2.5 to 4 minutes at the end of every full run).
           name: 'arena-cases',
           environment: 'node',
           include: ['tests/integration/arena/builtin-cases.test.ts'],
           testTimeout: 480_000,
           maxWorkers: 1,
-          sequence: { groupOrder: 2 },
+          sequence: { groupOrder: 1 },
           hookTimeout: 60_000,
         },
       },
