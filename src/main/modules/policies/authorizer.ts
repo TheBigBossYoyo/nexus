@@ -343,7 +343,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       ]
       const needs = [
         baseNeed,
-        ...needsForFindings(findings, { contained, confined }),
+        ...needsForFindings(findings, { contained, confined, localPorts: ctx.autonomy?.localPorts() ?? [] }),
         ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons.map((r) => needForExecutionReason(r, verdict.trust, { contained, confined })) : []),
       ]
       const reasons = [...(base.behavior === 'ask' ? [base.reason] : []), ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons : [])]

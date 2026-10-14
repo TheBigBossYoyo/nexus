@@ -17,6 +17,8 @@ export interface AutonomyGate {
   readonly contained: boolean
   /** Whether they run inside any containment (RESTRICTED included): writes held to the task's directories, environment an allowlist. */
   readonly confined: boolean
+  /** 0.9.1: the loopback ports of the applications NEXUS launched and registered for this session. */
+  localPorts(): readonly number[]
   resolve(request: ToolRequest, action: string, needs: CapabilityNeed[], trust?: TrustClass): ToolDecision
 }
 
@@ -30,6 +32,7 @@ export interface AutonomyGateContext {
   cwd: string | null
   contained: boolean
   confined?: boolean
+  localPorts?: () => readonly number[]
 }
 
 const ACTOR_OF_ROLE: Record<AgentRole, ActorKind> = {
@@ -62,6 +65,7 @@ export function createAutonomyGate(ctx: AutonomyGateContext): AutonomyGate {
   return {
     contained: ctx.contained,
     confined: ctx.confined === true || ctx.contained,
+    localPorts: () => ctx.localPorts?.() ?? [],
     resolve(request, action, needs, trust = 'UNTRUSTED_AGENT_AUTHORED') {
       const decisions: BrokerDecision[] = []
       // Computed from the whole call, before the text for the user is cleaned and cut.

@@ -1071,6 +1071,51 @@ const MEDIUM_ALWAYS: Record<string, string> = {
   'invoke-command': 'runs commands that cannot be inspected',
 }
 
+/**
+ * 0.9.1: `kill %1` and `kill $!` name jobs of the shell that runs the command, so only processes the same command
+ * line started: stopping the server a test just started is not a change to the machine. Signal options are allowed.
+ */
+function killsOwnJobs(cmd: string, args: string[]): boolean {
+  if (cmd !== 'kill') return false
+  const targets: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const x = args[i] ?? ''
+    if (x === '-s' || x === '-n') i++
+    else if (!/^-/.test(x)) targets.push(x)
+  }
+  return targets.length > 0 && targets.every((t) => /^%(?:\d+|%|\+|-)?$/.test(t) || t === '$!' || t === '"$!"')
+}
+
+/** Flags of curl and wget that only shape the request or what is printed: nothing reroutes it, follows it or reads options from a file. */
+const LOCAL_FETCH_SWITCHES = new Set(['-s', '-S', '-i', '-I', '-v', '-f', '--fail', '--silent', '--show-error', '--include', '--head', '--verbose', '-q', '-O-', '--quiet', '-qO-'])
+const LOCAL_FETCH_VALUED = new Set(['-X', '--request', '-H', '--header', '-d', '--data', '--data-raw', '--json', '-m', '--max-time', '-w', '--write-out'])
+const LOOPBACK_URL = /^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|\[::1\]):(\d{2,5})(?:[/?#][^\s]*)?$/i
+
+/**
+ * 0.9.1: the loopback ports a curl or wget command line fetches from, when that is all it does (every address is
+ * 127.0.0.1, localhost or [::1] with a port, and every flag is a plain one); null otherwise. Whether such a port is
+ * the project's own application is decided by the boundary: only the endpoints NEXUS registered for the session are.
+ */
+export function localFetchPorts(cmd: string, args: string[]): number[] | null {
+  if (cmd !== 'curl' && cmd !== 'wget') return null
+  const ports: number[] = []
+  for (let i = 0; i < args.length; i++) {
+    const x = args[i] ?? ''
+    if (LOCAL_FETCH_VALUED.has(x)) {
+      i++
+      continue
+    }
+    if (x.startsWith('-')) {
+      if (LOCAL_FETCH_SWITCHES.has(x) || /^-[sSiIvf]+$/.test(x)) continue
+      return null
+    }
+    const m = LOOPBACK_URL.exec(x)
+    if (m === null) return null
+    ports.push(Number(m[1]))
+  }
+  return ports.length > 0 ? [...new Set(ports)] : null
+}
+
 const NETWORK_HIGH = new Set(['ssh', 'scp', 'sftp', 'nc', 'ncat', 'netcat', 'telnet'])
 const EXEC_HIGH = new Set(['iex', 'invoke-expression', 'eval'])
 const PROCESS_KILL = new Set(['taskkill', 'stop-process', 'kill', 'pkill', 'killall', 'spps'])
@@ -1086,7 +1131,10 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
   const high = HIGH_ALWAYS[cmd]
   if (high !== undefined) a.ask('high', high, NETWORK_HIGH.has(cmd) ? 'NETWORK' : EXEC_HIGH.has(cmd) ? 'UNKNOWN' : 'SYSTEM_CHANGE')
   const medium = MEDIUM_ALWAYS[cmd]
-  if (medium !== undefined) a.ask('medium', medium, PROCESS_KILL.has(cmd) ? 'SYSTEM_CHANGE' : cmd === 'invoke-command' ? 'UNKNOWN' : 'NETWORK')
+  const local = medium !== undefined ? localFetchPorts(cmd, args) : null
+  if (medium !== undefined && !killsOwnJobs(cmd, args)) {
+    a.ask('medium', local !== null ? `${medium} to the local port${local.length > 1 ? 's' : ''} ${local.join(', ')}` : medium, PROCESS_KILL.has(cmd) ? 'SYSTEM_CHANGE' : cmd === 'invoke-command' ? 'UNKNOWN' : 'NETWORK')
+  }
   if (cmd === 'wmic' && lc.some((x) => /^(win32)?(shutdown|reboot)$/.test(x))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
 
   if (DELETE_CMDS.has(cmd)) analyzeDelete(cmd, args, lc, a)

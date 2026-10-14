@@ -310,6 +310,11 @@ export class ApplicationUnderTestManager {
     return { profile, contain: profile }
   }
 
+  /** 0.9.1: the loopback ports of the endpoints registered for a session (shown to be held by its application). */
+  portsOf(session: { projectId: string; runId: string | null; taskId: string | null }): number[] {
+    return this.endpoints.filter((e) => e.projectId === session.projectId && e.runId === session.runId && e.taskId === session.taskId).map((e) => e.port)
+  }
+
   /**
    * Starts the application of the project in the owner's worktree and opens a browser session on it. An
    * application already running for the owner is stopped first: one application per task.

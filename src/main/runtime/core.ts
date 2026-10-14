@@ -746,6 +746,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     repos,
     contained: (projectId) => isolation.isolated(projectId),
     confined: (projectId) => isolation.contained(projectId),
+    // The applications NEXUS launched for a session: a fetch from one of their ports is the project's own endpoint.
+    localPorts: (session) => apps.portsOf(session),
     runActive: (runId) => {
       const run = repos.runs.get(runId)
       return run !== null && !TERMINAL_RUN_STATES.includes(run.state)

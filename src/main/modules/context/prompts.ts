@@ -10,6 +10,7 @@ const PRINCIPLES = `Engineering principles (apply always):
 - Only modify scope relevant to the task. Do not refactor, reformat, or "improve" unrelated code.
 - Tests verify correctness; they do not define it. Never hard-code behaviour to satisfy a test, and never delete, skip, or weaken a legitimate test.
 - Change files with your file-editing tools (Edit, Write), not with scripts run through the shell (python, sed, heredocs): an edit tool shows exactly what changed and fails loudly when the text it replaces is not there.
+- To run the project's application and look at it, use the app tools when they are offered (mcp__nexus__app_launch, then app_act, app_snapshot, app_screenshot, app_stop): they start it inside the containment, prove the port is its own, and show nothing on the owner's screen. A server you start in the shell and fetch with curl is a request for network access that the owner has to answer.
 - Clean up temporary files and scripts you create.
 - When blocked, call mcp__nexus__report_blocker with the concrete blocker and evidence instead of pretending the work is complete.
 - Do not spawn subagents or delegate through the Task/Agent tool; NEXUS owns orchestration.`
