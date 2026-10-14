@@ -33,6 +33,34 @@ export class TechnicalAdvisoryError extends Error {
   }
 }
 
+/**
+ * The JSON object of an advisory answer. The session is asked for the object alone, and a model sometimes wraps it
+ * in a Markdown code fence or puts a sentence before it (met on the installed 0.9.1-development: "Technical
+ * advisory output is not valid JSON" when a mission was started). Accepted, in this order: the text itself, the
+ * text of one fenced block that is the whole answer, the span from the first "{" to the last "}". Nothing else is
+ * guessed; what comes out is validated against its schema by the caller all the same. Undefined: no JSON object.
+ */
+export function parseAdvisoryJson(text: string): unknown {
+  const attempt = (candidate: string): unknown => {
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      return undefined
+    }
+  }
+  const trimmed = text.trim()
+  const whole = attempt(trimmed)
+  if (whole !== undefined) return whole
+  const fenced = /^```(?:json|JSON)?[ \t]*\r?\n([\s\S]*?)\r?\n?```$/.exec(trimmed)
+  if (fenced?.[1] !== undefined) {
+    const inner = attempt(fenced[1].trim())
+    if (inner !== undefined) return inner
+  }
+  const first = trimmed.indexOf('{')
+  const last = trimmed.lastIndexOf('}')
+  return first >= 0 && last > first ? attempt(trimmed.slice(first, last + 1)) : undefined
+}
+
 /** An isolated advisory session. Production admission stays closed until real quality validation. */
 export class ClaudeTechnicalDirector implements AdvisoryProvider {
   private readonly sessions = new Set<AgentSessionHandle>()
@@ -126,12 +154,8 @@ export class ClaudeTechnicalDirector implements AdvisoryProvider {
               ? event.result.text
               : JSON.stringify(event.result.structuredOutput)
           if (serialized.length > 64000) throw new TechnicalAdvisoryError('OUTPUT_LIMIT')
-          let output: unknown
-          try {
-            output = JSON.parse(serialized)
-          } catch {
-            throw new TechnicalAdvisoryError('INVALID_JSON')
-          }
+          const output = parseAdvisoryJson(serialized)
+          if (output === undefined) throw new TechnicalAdvisoryError('INVALID_JSON')
           if (!output || Array.isArray(output) || typeof output !== 'object')
             throw new TechnicalAdvisoryError('INVALID_OBJECT')
           return output
