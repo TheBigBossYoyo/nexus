@@ -108,6 +108,18 @@ export function killProcessTree(pid: number): Promise<void> {
 const WITHHELD_ENV = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_OPTIONS', 'NODE_PATH', 'NEXUS_DATA_DIR'])
 
 /**
+ * 0.9.1: whether a variable is one of NEXUS's own switches (its data folder, how a test instance answers
+ * confirmations, scripted runtimes, the window off-screen...). A test instance's NEXUS_ACCEPT_CONFIRM reached the
+ * tests NEXUS ran on itself, which then ran as a test instance and failed. A project's own NEXUS_-named variables
+ * are not these and are kept.
+ */
+const NEXUS_SWITCH = /^NEXUS_(?:DATA_DIR|ACCEPT_\w*|FAKE_\w*|E2E_\w*|WINDOW_\w*|CAMPAIGN_\w*|USAGE_\w*|RUNTIME_\w*|WORKER_\w*|V0\w*|ARENA_\w*|PUBLISH_\w*|CONTAINMENT|NETWORK_RESILIENCE|OVERNIGHT_TICK_MS|PRESENCE_METER|PRIVILEGE_UNELEVATED_TEST|QUIET_COMMANDS|PROTECT_USER_STORES|PACKAGED_DIR|CASES_DIR|LAUNCHER|ENDPOINT|RESEARCH_BROWSER|UI_REVIEW|LIVE_STEPS|HTTP_FETCH|HTML_SEARCH)$/i
+
+export function isNexusSwitch(name: string): boolean {
+  return NEXUS_SWITCH.test(name)
+}
+
+/**
  * The environment for commands NEXUS itself runs in a project (dependency setup, check commands, Arena
  * evaluators): the process environment without Claude credentials and without variables that could redirect
  * the Node runtime. Agent-written code runs in these commands, so it must not see what agents do not see.
@@ -115,7 +127,8 @@ const WITHHELD_ENV = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAU
 export function projectCommandEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(base)) {
-    if (value !== undefined && !WITHHELD_ENV.has(key.toUpperCase())) env[key] = value
+    // 0.9.1: and none of NEXUS's own switches: a project's tests must not run as if inside NEXUS.
+    if (value !== undefined && !WITHHELD_ENV.has(key.toUpperCase()) && !isNexusSwitch(key)) env[key] = value
   }
   return env
 }

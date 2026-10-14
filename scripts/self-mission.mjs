@@ -15,7 +15,7 @@
 // It uses the real Claude (the owner's subscription) and needs `pnpm build` first.
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { waitForRuntime, stopNexus } from './acceptance-common.mjs'
 
@@ -40,6 +40,32 @@ execFileSync('git', ['clone', '-q', '--branch', branch, root, repo])
 execFileSync('git', ['-C', repo, 'config', 'user.name', 'NEXUS self-mission'])
 execFileSync('git', ['-C', repo, 'config', 'user.email', 'self-mission@nexus.local'])
 log(`clone of ${branch} at ${base.slice(0, 8)} in ${repo}`)
+
+// --chatgpt-from <the owner's NEXUS data folder>: the owner's ChatGPT connection (the strategic Director, needed by
+// the specification step), with the owner's consent (2026-10-14). The encrypted credential and the key that opens
+// it are copied in before the first start. After the run the credential is copied back if the test renewed it and
+// the owner's was not changed meanwhile (a renewal can make the older copy unusable), then removed from the test.
+const chatgptFrom = args['chatgpt-from'] ?? null
+let chatgptOriginal = null
+if (chatgptFrom !== null) {
+  const credential = join(chatgptFrom, 'chatgpt-credentials.protected')
+  chatgptOriginal = { path: credential, mtime: statSync(credential).mtimeMs, bytes: readFileSync(credential) }
+  mkdirSync(join(dataDir, 'runtime-profile'), { recursive: true })
+  copyFileSync(join(chatgptFrom, 'runtime-profile', 'Local State'), join(dataDir, 'runtime-profile', 'Local State'))
+  copyFileSync(credential, join(dataDir, 'chatgpt-credentials.protected'))
+}
+const returnChatgpt = () => {
+  if (chatgptOriginal === null) return
+  const used = join(dataDir, 'chatgpt-credentials.protected')
+  try {
+    const now = readFileSync(used)
+    if (!now.equals(chatgptOriginal.bytes) && statSync(chatgptOriginal.path).mtimeMs === chatgptOriginal.mtime) copyFileSync(used, chatgptOriginal.path)
+  } catch {
+    // Nothing to return.
+  }
+  rmSync(used, { force: true })
+  rmSync(join(dataDir, 'runtime-profile', 'Local State'), { force: true })
+}
 
 const report = { name, mode, branch, base, prompt, startedAt: new Date().toISOString(), samples: [], interventions: [], repairs: [], phases: {}, result: null }
 const env = { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_WINDOW_OFFSCREEN: '1', NEXUS_ACCEPT_CONFIRM: 'window' }
@@ -192,4 +218,5 @@ try {
   log('ERROR', e?.message ?? e)
 } finally {
   await stopNexus(app, dataDir).catch(() => undefined)
+  returnChatgpt()
 }

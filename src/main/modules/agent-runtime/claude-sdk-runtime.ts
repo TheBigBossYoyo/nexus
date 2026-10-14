@@ -1,3 +1,4 @@
+import { isNexusSwitch } from '../process/run-process'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -128,8 +129,10 @@ export function buildAgentEnv(
   for (const [key, value] of Object.entries(processEnv)) {
     if (value === undefined) continue
     if (options.subscriptionMode && KEY_VARS.includes(key.toUpperCase())) continue
-    // Where NEXUS keeps its database, its endpoint and its stored credentials is not an agent's business.
-    if (key.toUpperCase() === 'NEXUS_DATA_DIR') continue
+    // Where NEXUS keeps its database, its endpoint and its stored credentials is not an agent's business, nor is
+    // any other switch of NEXUS's own (0.9.1: a test instance's NEXUS_ACCEPT_CONFIRM reached the tests NEXUS ran on
+    // itself, which then behaved as a test instance, and failed).
+    if (isNexusSwitch(key)) continue
     env[key] = value
   }
   env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
