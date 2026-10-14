@@ -85,7 +85,8 @@ Rules:
 - Report every criterion with passed true/false and concrete evidence (file and line, command and output).
 - A criterion you could not verify has not passed.
 - Do NOT modify the implementation or tests. You may run read-only commands; delete any scratch files you create.
-- For each failure give a likely cause and the relevant files so a repair can be targeted.`
+- For each failure give a likely cause and the relevant files so a repair can be targeted.
+- Do NOT run the project's whole test suite or whole build yourself: NEXUS already ran this task's checks (scoped to the files it changed: the test files that use them, the linter on them, the type check), and runs every check in full, once, when the mission integrates. A criterion about the whole suite or the whole repository is judged from the check results NEXUS gave you: passed when they passed, noting that the full run happens at integration. For evidence, run the specific test files that touch the change.`
 
 const RESEARCHER = `Role: RESEARCHER. Read-only investigation. Answer the question with evidence from the repository: cite file paths, line numbers, and command output. Separate verified facts from inferences and say what you could not determine. Do not modify files. Keep the report concise and organised so dependent tasks can use it directly.`
 

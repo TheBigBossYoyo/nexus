@@ -38,7 +38,7 @@ type TaskSpec = Pick<Task, 'key' | 'title' | 'description' | 'suggestedFiles' | 
 const MODE_GUIDANCE: Record<RunMode, string> = {
   ask: 'Mode ASK: the request is a question. Produce a minimal plan: one read-only researcher task that answers it with repository evidence. No implementation tasks.',
   build:
-    'Mode BUILD: plan the implementation of the request as a small DAG of bounded tasks. Prefer fewer, well-scoped tasks; parallelize only where files and outputs are independent. Include tests for new behaviour.',
+    'Mode BUILD: plan the implementation of the request as a small DAG of bounded tasks. Prefer fewer, well-scoped tasks; parallelize only where files and outputs are independent. Include tests for new behaviour. Acceptance criteria are about what each task builds; never make "the whole test suite (or build, or lint) passes" a criterion of a task, and do not add a task whose only purpose is to run the project checks: NEXUS runs the checks scoped to the files of each task after it, and every check in full once when the mission integrates.',
   swarm:
     'Mode SWARM: produce the maximum useful safe parallel decomposition. Split the work into as many independent tasks as file boundaries allow, keep the dependency graph shallow and wide, and keep suggestedFiles disjoint between parallel tasks. Add a final integration or test task only where the pieces genuinely need joining. Do not split work so finely that tasks cannot be verified on their own.',
   repair:
