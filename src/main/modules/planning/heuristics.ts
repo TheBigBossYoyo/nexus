@@ -53,13 +53,48 @@ const LARGE_REPO_FILES = 500
 const VERY_LARGE_REPO_FILES = 2000
 const CONSENSUS_SCORE = 3
 
+const CONSTRAINT_HEADING = /^(?:constraints?|rules?|restrictions?|limits?|do not|don't|never|notes?|tests?|testing|verification|checks?|style)\b/i
+const INSTRUCTION_BULLET = /^(?:do not|don't|never|avoid|run|keep|follow|use|leave|no )\b/i
+/** File paths a prompt names (`src/x/y.ts`, `run.css`). */
+const FILE_MENTION = /(?:^|[\s`'"(])((?:[\w.-]+\/)*[\w.-]+\.(?:[cm]?[jt]sx?|css|scss|json|md|py|rs|go|java|kt|cs|cpp|h|vue|svelte|html|ya?ml|toml|sql))\b/g
+
+/**
+ * The part of a prompt that says what to build: the constraint sections and the instruction bullets left out
+ * ("Do not change the database migrations" is not a migration). Length and scope keywords are read from it.
+ */
+export function buildPart(prompt: string): string {
+  const kept: string[] = []
+  let constraints = false
+  for (const line of prompt.split(/\r?\n/)) {
+    const bullet = /^\s*(?:\d+[.)]|[-*•])\s+(\S.*)$/.exec(line)
+    if (bullet === null && /:\s*$/.test(line.trim())) {
+      constraints = CONSTRAINT_HEADING.test(line.trim())
+      if (!constraints) kept.push(line)
+      continue
+    }
+    if (constraints && (bullet !== null || line.trim() === '')) continue
+    if (constraints) constraints = false
+    if (bullet !== null && INSTRUCTION_BULLET.test(bullet[1] ?? '')) continue
+    kept.push(line)
+  }
+  return kept.join('\n')
+}
+
 /** Items in a numbered or bulleted list, or the longest short-phrase "a, b and c" list on one line. */
 export function countDeliverables(prompt: string): number {
   let markers = 0
   let longestList = 0
+  // 0.9.1: what a prompt forbids or asks to run is not something to build. A precise prompt lists its constraints
+  // as bullets too, and those made a detailed request look like a broad one (and pick the costly planning).
+  let constraints = false
   for (const line of prompt.split(/\r?\n/)) {
-    if (/^\s*(?:\d+[.)]|[-*•])\s+\S/.test(line)) {
-      markers++
+    const bullet = /^\s*(?:\d+[.)]|[-*•])\s+(\S.*)$/.exec(line)
+    if (bullet === null && /:\s*$/.test(line.trim())) {
+      constraints = CONSTRAINT_HEADING.test(line.trim())
+      continue
+    }
+    if (bullet !== null) {
+      if (!constraints && !INSTRUCTION_BULLET.test(bullet[1] ?? '')) markers++
       continue
     }
     const parts = line
@@ -80,8 +115,10 @@ export function recommendPlanningMode(
 ): PlanningRecommendation {
   const reasons: string[] = []
   let score = 0
+  // What to build, without the constraints: the length and the scope keywords are its.
+  const build = buildPart(prompt)
 
-  const length = prompt.trim().length
+  const length = build.trim().length
   if (length >= VERY_LONG_PROMPT_CHARS) {
     score += 2
     reasons.push(`Very long prompt (${length} characters).`)
@@ -103,7 +140,7 @@ export function recommendPlanningMode(
     reasons.push(`Few distinct deliverables (${deliverables}).`)
   }
 
-  const lower = prompt.toLowerCase()
+  const lower = build.toLowerCase()
   const hits = BREADTH_KEYWORDS.filter((k) => lower.includes(k))
   if (hits.length >= 2) {
     score += 2
@@ -111,6 +148,16 @@ export function recommendPlanningMode(
   } else if (hits.length === 1) {
     score += 1
     reasons.push(`Broad scope keyword: ${hits[0]}.`)
+  }
+
+  // 0.9.1: a prompt that names the files it is about has already done part of a planner's work.
+  const named = new Set([...prompt.matchAll(FILE_MENTION)].map((m) => m[1])).size
+  if (named >= 3) {
+    score -= 2
+    reasons.push(`Names the files to work on (${named}): the work is located.`)
+  } else if (named >= 1) {
+    score -= 1
+    reasons.push(`Names ${named} file(s) to work on.`)
   }
 
   if (profile === null) {

@@ -1,6 +1,7 @@
 import type { CompilationMode } from '@shared/intelligence'
 import type { StrategyStatistic } from '@shared/v3'
 import { fileMentions, profileTask } from '@main/modules/policy/profiler'
+import { buildPart } from '@main/modules/planning/heuristics'
 
 /**
  * The depth AUTO gives a request: the least that is enough for it.
@@ -48,23 +49,32 @@ export function compilationDepth(
   text: string,
   options: { workspace?: boolean; statistics?: readonly StrategyStatistic[] } = {},
 ): DepthDecision {
-  const profile = profileTask({ prompt: text, profile: null, facts: [], ids: { id: 'depth', projectId: null, runId: null, arenaTrialId: null, createdAt: '' } })
+  // 0.9.1: read from what the request asks to build, not from its constraints ("do not push or tag" is not a
+  // release, "do not change the migrations" is not a migration): those made a small, precise request a COUNCIL one.
+  const essential = buildPart(text)
+  const profile = profileTask({ prompt: essential, profile: null, facts: [], ids: { id: 'depth', projectId: null, runId: null, arenaTrialId: null, createdAt: '' } })
   const f = profile.features
   const category = f.category.value, complexity = f.complexity.value, risk = f.risk.value
   const scope = f.fileScope.value, ambiguity = f.ambiguity.value
-  const sensitive = f.securitySensitive.value || risk === 'high' || ATTACK_SURFACE.test(text)
-  const broad = complexity === 'large' || scope === 'many'
+  const sensitive = f.securitySensitive.value || risk === 'high' || ATTACK_SURFACE.test(essential)
   const design = category === 'architecture' || category === 'migration'
   // The request itself says where the work is: one to three files, named.
   const named = fileMentions(text).length
   const anchored = named >= 1 && named <= 3
+  // A request that names a few files and touches few is not large because it is long: its length is detail.
+  const located = named >= 1 && named <= 8 && scope !== 'many'
+  const broad = (complexity === 'large' && !located) || scope === 'many'
   // What was read from the request, kept with the specification: the decision can be checked, and outcomes can
   // later be compared by kind of task and depth.
   const read = `PROFILE:${profile.contextKey}:scope=${scope}:ambiguity=${ambiguity}${sensitive ? ':sensitive' : ''}`
 
   let mode: DepthDecision['mode']
   let reason: string
-  if (sensitive && (broad || design || RELEASE.test(text))) [mode, reason] = ['COUNCIL', 'MAJOR_HIGH_RISK_CHANGE']
+  if (sensitive && (broad || design || RELEASE.test(essential))) [mode, reason] = ['COUNCIL', 'MAJOR_HIGH_RISK_CHANGE']
+  // 0.9.1: a long request that names the files it changes and leaves little open is detailed, not broad: its
+  // length is precision. (A mission naming eight files of one panel took the technical depth, with several
+  // Director passes, for a change its worker made in a minute and a half.)
+  else if (!options.workspace && !design && named >= 1 && named <= 8 && ambiguity !== 'high' && !(anchored && ambiguity === 'low' && risk === 'low') && !(MECHANICAL.test(text) && text.length < 250)) [mode, reason] = ['STANDARD', 'NAMED_FILES_WELL_SPECIFIED']
   else if (options.workspace || design || complexity === 'large' || (scope === 'many' && ambiguity !== 'low')) [mode, reason] = ['TECHNICAL', 'REPOSITORY_DEPENDENT_BREADTH']
   else if (sensitive) [mode, reason] = ambiguity === 'high' ? ['TECHNICAL', 'HIGH_RISK_UNDERSPECIFIED'] : ['STANDARD', 'HIGH_RISK_BOUNDED']
   else if (MECHANICAL.test(text) && text.length < 250) [mode, reason] = ['LIGHT', 'LOCAL_MECHANICAL_TASK']

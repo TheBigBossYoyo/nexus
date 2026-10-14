@@ -1,0 +1,18 @@
+Add a "Test environment" panel to the mission page (src/renderer/src/views/run/RunView.tsx), next to ProgressPanel and PrivilegePanel.
+
+What it shows, for the run being viewed:
+- The applications under test of this run: from the existing IPC channel isolation.apps (filter by runId; see AppSessionsPanel.tsx for how it is read). For each: name, state (running/stopped/exited), presentation mode (for now: "Private desktop" for Electron, "Headless" for web), number of screenshots.
+- User disturbance for this run, from the existing IPC channel presentation.metrics { runId }: UAC prompts, visible windows, foreground steals, console flashes, unexpected dialogs, and "Notifications: not measured". If metrics.measured is false, say "Not measured" instead of zeros.
+- A "View latest screenshot" button per running app that opens the latest screenshot in a Dialog using the existing isolation.appScreenshot channel. Never open or show the application's own window.
+
+Also:
+- In src/renderer/src/lib/push.ts, handle the push message { kind: 'presentation', runIds } by invalidating the panel's queries for those runs.
+- Follow the style of ProgressPanel.tsx and PrivilegePanel.tsx (plain CSS classes in run.css, the ui components from components/ui).
+- Hide the panel entirely for a finished run that had no app and no disturbance.
+
+Tests: add a renderer unit test for the panel's model (what is shown for: no apps, measured zero, not measured, one running Electron app with 3 screenshots, a run with 2 foreground steals).
+
+Constraints:
+- Do not change anything under native/, src/main/modules/privilege/, electron-builder.yml, package.json or the database migrations.
+- Do not push, tag, or touch the v0.9.0 tag.
+- Run: pnpm typecheck, pnpm lint, and the vitest tests of the files you changed. Do not run pnpm test:e2e or pnpm package, and do not launch the app.
