@@ -92,11 +92,18 @@ export function milestoneLine(m: ProgressMilestone): string {
   return `${two(d.getHours())}:${two(d.getMinutes())} ${m.text}`
 }
 
+/** The stage while checks run: of a task (its title), or the mission's final ones (null). */
+function checksStage(title: string | null, commands: string[]): string {
+  return title === null ? `Final checks: ${commands.join(', ')}` : `Running checks of ${title.slice(0, 70)}: ${commands.join(', ')}`
+}
+
 interface Kept {
   snapshot: ProgressSnapshot
   seq: number
   /** When the mission's own final checks began (its integration's checks.started), or null. */
   finaleStartedAt: number | null
+  /** Checks in flight, by task id (null: the mission's), in start order. */
+  checking: Map<string | null, string[]>
   milestones: ProgressMilestone[]
   predictions: { at: number; lowSeconds: number; highSeconds: number }[]
   shownAt: number
@@ -154,14 +161,21 @@ export class ProgressService {
     const milestones = [...(before?.milestones ?? [])]
     let seq = before?.seq ?? 0
     let finaleStartedAt = before?.finaleStartedAt ?? null
+    const checking = new Map(before?.checking ?? [])
     for (const event of this.deps.events(runId, seq)) {
       seq = Math.max(seq, event.seq)
       if (event.type === 'checks.started' && event.taskId === null) finaleStartedAt = Date.parse(event.createdAt)
+      if (event.type === 'checks.started') {
+        const commands = (event.payload as { commands?: unknown }).commands
+        // Deleted first so that a restarted entry counts as the most recent.
+        checking.delete(event.taskId)
+        checking.set(event.taskId, Array.isArray(commands) ? commands.map(String) : [])
+      } else if (event.type === 'checks.completed') checking.delete(event.taskId)
       const m = milestoneOf(event, (id) => (id === null ? null : (titles.get(id) ?? null)))
       if (m !== null) milestones.push(m)
     }
     const now = this.deps.now()
-    const snapshot = estimateProgress({
+    const estimated = estimateProgress({
       now,
       run,
       tasks,
@@ -174,7 +188,9 @@ export class ProgressService {
       refreshSeconds: this.refreshMs() / 1000,
       finale: { stats: this.finaleStats(run.projectId), startedAt: finaleStartedAt },
     })
-    const kept: Kept = { snapshot, seq, finaleStartedAt, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
+    const latest = [...checking.entries()].at(-1)
+    const snapshot = estimated.wait === 'ACTIVE' && latest !== undefined ? { ...estimated, stage: checksStage(latest[0] === null ? null : (titles.get(latest[0]) ?? 'a task'), latest[1]) } : estimated
+    const kept: Kept = { snapshot, seq, finaleStartedAt, checking, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
     this.kept.set(runId, kept)
     return kept
   }

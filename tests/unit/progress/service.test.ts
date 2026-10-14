@@ -113,6 +113,28 @@ describe('the progress service', () => {
     expect(w.service.open()).toEqual([])
   })
 
+  it('names the checks of a task while they run, and goes back to the estimator\'s stage when they complete', () => {
+    const w = world()
+    w.task('a', 'running', { startedAt: iso(0) })
+    w.service.refresh('run-1')
+    w.emit('checks.started', { commands: ['pnpm run typecheck', 'pnpm test'] }, 'a')
+    w.service.refresh('run-1')
+    expect(w.changes.at(-1)).toMatchObject({ why: 'STAGE', snapshot: { stage: 'Running checks of Task a: pnpm run typecheck, pnpm test' } })
+    w.emit('checks.completed', { passed: true, failed: [] }, 'a')
+    w.service.refresh('run-1')
+    expect(w.service.snapshot('run-1')?.stage).toBe('Working on: Task a')
+  })
+
+  it('names the final checks of the mission while they run, but leaves a wait as it is', () => {
+    const w = world()
+    w.task('a', 'completed', { startedAt: iso(0), finishedAt: iso(10) })
+    w.run.state = 'verifying'
+    w.emit('checks.started', { commands: ['pnpm run build', 'pnpm test'] }, null)
+    expect(w.service.refresh('run-1')?.stage).toBe('Final checks: pnpm run build, pnpm test')
+    w.setWait({ kind: 'WAITING_FOR_NETWORK', detail: 'Wi-Fi disconnected' })
+    expect(w.service.refresh('run-1')?.stage).not.toContain('Final checks')
+  })
+
   it('keeps what it predicted and, at the end, how good that was', () => {
     const w = world()
     w.task('a', 'running', { startedAt: iso(0) })
