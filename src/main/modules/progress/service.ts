@@ -92,9 +92,25 @@ export function milestoneLine(m: ProgressMilestone): string {
   return `${two(d.getHours())}:${two(d.getMinutes())} ${m.text}`
 }
 
-/** The stage while checks run: of a task (its title), or the mission's final ones (null). */
-function checksStage(title: string | null, commands: string[]): string {
-  return title === null ? `Final checks: ${commands.join(', ')}` : `Running checks of ${title.slice(0, 70)}: ${commands.join(', ')}`
+/**
+ * A check command as the stage names it: what it runs, without the files a task's scoped command lists
+ * (`pnpm exec vitest run --passWithNoTests a.test.ts b.test.ts` is "vitest (2 files)").
+ */
+export function checkLabel(command: string): string {
+  const words = command.trim().split(/\s+/)
+  const at = words[1] === 'exec' || words[1] === 'run' ? 2 : 1
+  const tool = ['pnpm', 'npm', 'yarn', 'bun', 'npx'].includes(words[0] ?? '') ? (words[at] ?? words[0] ?? '') : (words[0] ?? '')
+  const files = words.filter((w) => /\.[cm]?[jt]sx?$|\.vue$|\.svelte$/i.test(w)).length
+  return files > 0 ? `${tool} (${files} file${files === 1 ? '' : 's'})` : words.slice(0, 3).join(' ')
+}
+
+/**
+ * The stage while checks run: of a task (its title), or the mission's final ones (null). The final checks keep what
+ * the estimate says of their length (`hint`, from "Verifying the whole mission (usually about 17 min ...)").
+ */
+function checksStage(title: string | null, commands: string[], hint: string | null): string {
+  const names = commands.map(checkLabel).join(', ').slice(0, 160)
+  return title === null ? `Final checks: ${names}${hint ? ` ${hint}` : ''}` : `Running checks of ${title.slice(0, 70)}: ${names}`
 }
 
 interface Kept {
@@ -189,7 +205,8 @@ export class ProgressService {
       finale: { stats: this.finaleStats(run.projectId), startedAt: finaleStartedAt },
     })
     const latest = [...checking.entries()].at(-1)
-    const snapshot = estimated.wait === 'ACTIVE' && latest !== undefined ? { ...estimated, stage: checksStage(latest[0] === null ? null : (titles.get(latest[0]) ?? 'a task'), latest[1]) } : estimated
+    const hint = /\((usually about [^)]*|its first time[^)]*)\)$/.exec(estimated.stage)?.[0] ?? null
+    const snapshot = estimated.wait === 'ACTIVE' && latest !== undefined ? { ...estimated, stage: checksStage(latest[0] === null ? null : (titles.get(latest[0]) ?? 'a task'), latest[1], hint) } : estimated
     const kept: Kept = { snapshot, seq, finaleStartedAt, checking, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
     this.kept.set(runId, kept)
     return kept

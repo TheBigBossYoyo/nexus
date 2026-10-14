@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Run, Task } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
 import { progressRows, type ProgressSnapshot } from '@shared/progress'
-import { ProgressService, milestoneLine, milestoneOf, type ProgressChange } from '@main/modules/progress/service'
+import { ProgressService, checkLabel, milestoneLine, milestoneOf, type ProgressChange } from '@main/modules/progress/service'
 
 // 0.9: the service that keeps the progress of missions current and says when a change is worth showing.
 const T0 = Date.parse('2026-10-13T19:00:00Z')
@@ -130,9 +130,17 @@ describe('the progress service', () => {
     w.task('a', 'completed', { startedAt: iso(0), finishedAt: iso(10) })
     w.run.state = 'verifying'
     w.emit('checks.started', { commands: ['pnpm run build', 'pnpm test'] }, null)
-    expect(w.service.refresh('run-1')?.stage).toBe('Final checks: pnpm run build, pnpm test')
+    // The estimate's word on their length stays (here a first mission of the project: not known yet).
+    expect(w.service.refresh('run-1')?.stage).toBe('Final checks: pnpm run build, pnpm test (its first time on this project, so its length is not known yet)')
     w.setWait({ kind: 'WAITING_FOR_NETWORK', detail: 'Wi-Fi disconnected' })
     expect(w.service.refresh('run-1')?.stage).not.toContain('Final checks')
+  })
+
+  it('names a check by what it runs, not by the files a scoped command lists', () => {
+    expect(checkLabel('pnpm exec vitest run --passWithNoTests tests/a.test.ts tests/b b.test.ts')).toBe('vitest (2 files)')
+    expect(checkLabel('pnpm exec eslint src/x.ts')).toBe('eslint (1 file)')
+    expect(checkLabel('pnpm typecheck')).toBe('pnpm typecheck')
+    expect(checkLabel('cargo test --all')).toBe('cargo test --all')
   })
 
   it('keeps what it predicted and, at the end, how good that was', () => {
