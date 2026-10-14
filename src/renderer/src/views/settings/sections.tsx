@@ -189,6 +189,24 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
         onChange={(v) => set('execution', { requirePlanApproval: v })}
         label="Require plan approval by default"
       />
+      <Field
+        label="Final tests of a mission"
+        hint="The whole suite proves every test passes on the merged code. Affected tests only runs the tests that name a changed file (type check, linter and build stay whole): much faster on a long suite, but a test that reaches a change through another module is not run. The record says which was used."
+        error={error('execution.finalTests')}
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={e.finalTests ?? 'FULL'}
+            onChange={(v) => set('execution', { finalTests: v })}
+            options={[
+              { value: 'FULL', label: 'Whole suite (recommended)' },
+              { value: 'AFFECTED', label: 'Affected tests only (faster)' },
+            ]}
+            data-testid="exec-finalTests"
+          />
+        )}
+      </Field>
       <Field label="Execution profile" hint="How strictly NEXUS gates the commands and scripts agents run." error={error('execution.profile')}>
         {(id) => (
           <Select

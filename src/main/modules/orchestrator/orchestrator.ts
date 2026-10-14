@@ -1077,8 +1077,11 @@ export class Orchestrator implements PipelineHost {
       const cycle = tasks.filter((t) => t.key.startsWith('mission-fix-')).length + 1
       // Under the merge lock: a task merging into the integration worktree must not race the checks
       // (or the cleaning that follows them).
+      // 0.9.1: the owner may have chosen the affected tests only for the final verification (Settings > Execution).
+      const affectedOnly = repos.settings.get().execution.finalTests === 'AFFECTED'
+      const changedFiles = affectedOnly ? await git.changedFiles(integration.path, run.baseCommit, 'HEAD').catch(() => null) : null
       const checks = await this.withMergeLock(runId, async () => {
-        const result = await this.core.runChecks(run, null, integration.path, cycle)
+        const result = await this.core.runChecks(run, null, integration.path, cycle, changedFiles === null ? undefined : { changedFiles })
         // Checks can leave files behind; only merges are committed in the integration worktree, so restore
         // it before a mission-fix task merges into it.
         await this.core.cleanWorktree(integration.path)
@@ -1108,6 +1111,7 @@ export class Orchestrator implements PipelineHost {
             diffStat: stat || '(no changes)',
             patch: diff.patch,
             repoFacts: await repositoryFacts(git, integration.path, run.baseCommit),
+            fullChecks: changedFiles === null,
             checkResults: checks.commands,
             checkOutputMode: checkOutputMode(this.deps.repos.settings.get().tokens),
             planSummary: run.plan?.summary,

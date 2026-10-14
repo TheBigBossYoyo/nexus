@@ -490,6 +490,10 @@ describe('other stage prompts', () => {
     expect(mv.prompt).toContain('Tags on HEAD: none')
     expect(mv.prompt).not.toContain('Run the project checks yourself')
     expect(mv.prompt).toContain('Do not run the whole suite')
+    // With the owner's choice of the affected tests only, the verifier is told the whole suite was not run.
+    const affected = buildMissionVerifierPrompt({ run: makeRun('mission'), missionCriteria: ['c'], diffStat: 'stat', checkResults: [], fullChecks: false }).prompt
+    expect(affected).toContain('only the tests that name a file the mission changed')
+    expect(affected).not.toContain('NEXUS ran every project check in full')
   })
 
   it('repair prompt renders findings, failed criteria and check output', () => {

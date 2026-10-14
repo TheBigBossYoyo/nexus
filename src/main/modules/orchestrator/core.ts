@@ -1,4 +1,4 @@
-import { scopeTaskChecks } from './check-scope'
+import { scopeFinalChecks, scopeTaskChecks } from './check-scope'
 import {
   TERMINAL_RUN_STATES,
   type CommandResult,
@@ -216,11 +216,14 @@ export class Core {
   /** Run the configured check commands and store every command with its result. */
   async runChecks(run: Run, taskId: string | null, cwd: string, attempt: number, scope?: { changedFiles: readonly string[] }): Promise<Verification> {
     const { repos, bus } = this.deps
-    // 0.9.1: a task's checks are about its own changes (check-scope.ts); the integration runs every command whole.
+    // 0.9.1: a task's checks are about its own changes (check-scope.ts); the integration runs every command whole,
+    // unless the owner chose the affected tests only for it (a scope is then given for the integration too).
     const commands =
       scope !== undefined && taskId !== null
         ? scopeTaskChecks({ checks: run.config.checks, order: CHECK_ORDER, cwd, changedFiles: scope.changedFiles })
-        : CHECK_ORDER.flatMap((name) => {
+        : scope !== undefined
+          ? scopeFinalChecks({ checks: run.config.checks, order: CHECK_ORDER, cwd, changedFiles: scope.changedFiles })
+          : CHECK_ORDER.flatMap((name) => {
             const command = run.config.checks[name]
             return command ? [{ name, command, scope: 'FULL' as const, skip: false, note: null }] : []
           })
@@ -237,11 +240,12 @@ export class Core {
     }
     const failed = results.filter((r) => r.exitCode !== 0 || r.timedOut)
     const passed = failed.length === 0
+    const partial = taskId === null && commands.some((c) => c.scope === 'CHANGED')
     const summary =
       commands.length === 0
         ? 'No check commands are configured for this project; nothing was run.'
         : passed
-          ? `${results.length} check command(s) passed.`
+          ? `${results.length} check command(s) passed${partial ? ' (tests: only those affected by the mission, as the owner set it; the whole suite was not run)' : ''}.`
           : `Failed: ${failed.map((r) => r.name).join(', ')}`
 
     return bus.transaction(() => {

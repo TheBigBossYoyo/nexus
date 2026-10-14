@@ -227,6 +227,8 @@ export interface MissionVerifierPromptInput {
   /** 0.9.1: the integrated patch against the base, and git facts measured by NEXUS (see VerifierPromptInput). */
   patch?: string
   repoFacts?: string | null
+  /** 0.9.1: false when the owner chose the affected tests only for the final verification. Absent: every check whole. */
+  fullChecks?: boolean
 }
 
 /** Final acceptance of the whole mission on the integration branch (the current working directory). */
@@ -254,7 +256,9 @@ export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): P
       name: 'Instructions',
       body: [
         // 0.9.1: "Run the project checks yourself" had final verifiers rerun what NEXUS had just run in full.
-        'Verify every mission acceptance criterion against the integrated code. NEXUS ran every project check in full on this tree; the results are above. Do not run the whole suite or the whole build again: judge criteria about them from those results, and run a specific test file only when a criterion needs evidence they do not give. The patch and the repository facts are measured by NEXUS: use them rather than asking git again. Return one entry per criterion with evidence and list a failure for each that did not pass.',
+        input.fullChecks === false
+          ? 'Verify every mission acceptance criterion against the integrated code. NEXUS ran the type check, the linter and the build in full on this tree, and only the tests that name a file the mission changed (the owner chose this for final verifications): the results are above. A criterion about the whole test suite is judged from those results and says that the whole suite was not run. Do not run the whole suite yourself; run a specific test file when a criterion needs evidence the results do not give. The patch and the repository facts are measured by NEXUS: use them rather than asking git again. Return one entry per criterion with evidence and list a failure for each that did not pass.'
+          : 'Verify every mission acceptance criterion against the integrated code. NEXUS ran every project check in full on this tree; the results are above. Do not run the whole suite or the whole build again: judge criteria about them from those results, and run a specific test file only when a criterion needs evidence they do not give. The patch and the repository facts are measured by NEXUS: use them rather than asking git again. Return one entry per criterion with evidence and list a failure for each that did not pass.',
         'The criteria were written with the first version of the plan. If the orchestration evidence lists graph revisions, the plan was changed during the run by a validated proposal: a criterion that only restates the scope of the original plan (for example an exact list of files or tasks) passes when the difference is the work a recorded revision added, and that work itself is correct. Say so in the evidence for that criterion.',
         'A criterion that depends on something you are not allowed to do (for example a command your role may not run) is not a defect of the work: check it by the means you have (read the code and the tests, use the recorded check results and the quoted records) and fail it only when you find evidence that it is not met.',
       ].join('\n'),

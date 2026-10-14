@@ -128,6 +128,20 @@ export function testsNaming(cwd: string, sources: readonly string[]): string[] |
 }
 
 /**
+ * 0.9.1: the checks of a mission's final verification when the owner chose its affected tests only
+ * (`execution.finalTests: AFFECTED`): the tests are chosen as for a task, from every file the mission changed; the
+ * type check, the linter and the build run whole. Each scoped check says in its note that the whole suite was not run.
+ */
+export function scopeFinalChecks(input: { checks: Partial<Record<CheckName, string | null>>; order: readonly CheckName[]; cwd: string; changedFiles: readonly string[] }): ScopedCheck[] {
+  return scopeTaskChecks(input).map((c) => {
+    if (c.name !== 'test') return { name: c.name, command: input.checks[c.name] as string, scope: 'FULL', skip: false, note: null }
+    if (c.scope === 'FULL') return c
+    const why = c.skip ? 'no test names a file the mission changed' : (c.note ?? '').replace(/; the whole suite runs when the mission integrates\.$/, '').replace(/this task/g, 'the mission')
+    return { ...c, note: `Affected tests only (Settings > Execution > Final tests): ${why}. The whole suite was not run.` }
+  })
+}
+
+/**
  * The checks of one task. `changedFiles` are the task's files relative to the worktree, as git names them (deleted
  * files may be among them; they are left out). The commands are read from the worktree's own package.json.
  */

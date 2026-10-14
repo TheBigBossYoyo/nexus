@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { scopeTaskChecks, scriptOf } from '@main/modules/orchestrator/check-scope'
+import { scopeFinalChecks, scopeTaskChecks, scriptOf } from '@main/modules/orchestrator/check-scope'
 
 // 0.9.1: a task's checks are about its own changes. Found when a mission on NEXUS itself ran the whole 15-minute
 // suite after a task, timed out, and sent a repair agent to fix code that had nothing wrong with it.
@@ -62,5 +62,27 @@ describe('scopeTaskChecks', () => {
     expect(scriptOf('npm run lint')).toEqual({ pm: 'npm', script: 'lint' })
     expect(scriptOf('make test')).toBeNull()
     expect(scriptOf('pnpm exec vitest')).toBeNull()
+  })
+})
+
+// 0.9.1: the owner's choice of the affected tests only for a mission's final verification.
+describe('scopeFinalChecks', () => {
+  beforeAll(() => mkdirSync(dir, { recursive: true }))
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('scopes only the tests, keeps the type check, linter and build whole, and says the whole suite was not run', () => {
+    project({ test: 'vitest run', lint: 'eslint .', typecheck: 'tsc --noEmit', build: 'vite build' }, ['src/panel.tsx'])
+    mkdirSync(join(dir, 'tests'), { recursive: true })
+    writeFileSync(join(dir, 'tests', 'panel.test.ts'), "import { x } from '../src/panel'\n")
+    const out = scopeFinalChecks({ checks, order: ORDER, cwd: dir, changedFiles: ['src/panel.tsx'] })
+    expect(out.map((c) => [c.name, c.scope, c.skip, c.command])).toEqual([
+      ['typecheck', 'FULL', false, 'pnpm typecheck'],
+      ['lint', 'FULL', false, 'pnpm lint'],
+      ['build', 'FULL', false, 'pnpm build'],
+      ['test', 'CHANGED', false, 'pnpm exec vitest run --passWithNoTests tests/panel.test.ts'],
+    ])
+    expect(out[3]?.note).toBe('Affected tests only (Settings > Execution > Final tests): The 1 test file(s) that name the files the mission changed. The whole suite was not run.')
+    const none = scopeFinalChecks({ checks, order: ORDER, cwd: dir, changedFiles: ['README.md'] })
+    expect(none[3]).toMatchObject({ skip: true, note: 'Affected tests only (Settings > Execution > Final tests): no test names a file the mission changed. The whole suite was not run.' })
   })
 })

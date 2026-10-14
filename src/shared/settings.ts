@@ -74,6 +74,13 @@ export const SettingsSchema = z.object({
      * Absent (older settings): on.
      */
     quietCommands: z.boolean().optional(),
+    /**
+     * 0.9.1: the tests of a mission's final verification. FULL (absent: older settings): the whole suite, so every
+     * test passed on the integrated code. AFFECTED: only the test files that name a file the mission changed (as a
+     * task's checks), the type check, linter and build still whole; faster on a project with a long suite, and what
+     * it can miss (a test that reaches a changed module through another one) is said in the record of the checks.
+     */
+    finalTests: z.enum(['FULL', 'AFFECTED']).optional(),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */
