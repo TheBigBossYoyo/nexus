@@ -1,0 +1,125 @@
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve, win32 } from 'node:path'
+import type { SecurityEventSeverity } from '@shared/autonomy'
+import type { PrivilegeSessionStatus, PrivilegedOperationRequest } from '@shared/privilege'
+import type { AdvisoryProvider } from '../modules/intelligence/compiler'
+import type { Database } from '../modules/persistence/database'
+import { ElevatedBrokerClient } from '../modules/privilege/broker-client'
+import { PrivilegedPolicyEngine } from '../modules/privilege/policy'
+import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '../modules/privilege/report'
+import { PrivilegedReviewPipeline } from '../modules/privilege/review'
+import { PrivilegeService } from '../modules/privilege/service'
+import { SqlitePrivilegeStore } from '../modules/privilege/store'
+import { createPrivilegeVerifier } from '../modules/privilege/verify'
+
+/**
+ * 0.9.1: what the runtime gives privilege sessions: the broker helper next to the other native helpers, NEXUS's own
+ * elevated scripts and the acceptance fixture's, the reviewers (the Technical Director and the strategic Director
+ * through the advisory routing), the receipts in the database, and the unelevated verification.
+ *
+ * `NEXUS_PRIVILEGE_UNELEVATED_TEST=1` (development builds only) starts the broker without elevation: the protocol,
+ * the reviews and the receipts are exercised with no UAC prompt, and nothing runs with rights the user lacks.
+ */
+
+export interface PrivilegeHostDeps {
+  db: Database
+  dataDir: string
+  launcherPath: string | undefined
+  resourcesPath: string | undefined
+  sandboxSetupDir: string | undefined
+  isPackaged: boolean
+  env: Record<string, string | undefined>
+  runtimePid: number
+  /** The worktrees and the project folder of a run: where a project's installer or repair script may come from. */
+  projectRoots: (runId: string | null) => string[]
+  /** The reviewers for one operation (the advisory routing), or none. */
+  reviewers: (projectId: string | null, operationId: string) => Promise<{ technical?: AdvisoryProvider; strategic?: AdvisoryProvider }>
+  securityEvent: (e: { severity: SecurityEventSeverity; runId: string | null; projectId: string | null; taskId: string | null; agentId: string | null; action: string; reason: string }) => void
+  onChange: (status: PrivilegeSessionStatus | null) => void
+  log: (line: string) => void
+}
+
+export interface PrivilegeHost {
+  service: PrivilegeService | null
+  /** Why there is no service. */
+  unavailableReason: string | null
+  /** The privileged activity of a run, short (the Overnight report) or full (the Activity screen). */
+  section(runId: string, full?: boolean): string
+}
+
+const sha256 = (path: string): string | null => {
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex')
+  } catch {
+    return null
+  }
+}
+
+export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
+  const helper = d.launcherPath !== undefined ? join(dirname(d.launcherPath), 'nexus-elevate.exe') : null
+  const store = new SqlitePrivilegeStore(d.db)
+  const sectionOf = (runId: string, full = false): string => {
+    const receipts = store.receipts({ runId, limit: 1000 })
+    const sessions = store.sessions({ runId, limit: 20 }).map((s) => ({ ...s, counts: store.counts(s.id) }))
+    if (receipts.length === 0 && sessions.length === 0) return ''
+    return full ? buildPrivilegedActivityReport(receipts, sessions) : buildPrivilegedActivitySummary(receipts, sessions)
+  }
+  let unavailableReason: string | null = null
+  if (process.platform !== 'win32') unavailableReason = 'Privilege sessions are a Windows feature.'
+  else if (helper === null || !existsSync(helper)) unavailableReason = 'The privilege broker is not part of this build.'
+  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf }
+  const helperPath: string = helper
+
+  const testMode = !d.isPackaged && d.env['NEXUS_PRIVILEGE_UNELEVATED_TEST'] === '1'
+  const systemRoot = d.env['SystemRoot'] ?? 'C:\\Windows'
+  const programFiles = d.env['ProgramFiles'] ?? 'C:\\Program Files'
+  const programFilesX86 = d.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
+  // Packaged: resources/privilege-fixture. From the source tree: native/privilege-fixture (the helpers are in out/native).
+  const fixtureDir = d.resourcesPath !== undefined ? join(d.resourcesPath, 'privilege-fixture') : d.launcherPath !== undefined ? resolve(dirname(d.launcherPath), '..', '..', 'native', 'privilege-fixture') : null
+  const scriptsDir = d.sandboxSetupDir ?? null
+
+  const service: PrivilegeService = new PrivilegeService({
+    store,
+    policy: new PrivilegedPolicyEngine((req) => ({
+      systemRoot,
+      programFiles,
+      programFilesX86,
+      nexusScriptsDir: scriptsDir !== null && existsSync(scriptsDir) ? scriptsDir : null,
+      fixtureDir: fixtureDir !== null && existsSync(fixtureDir) ? fixtureDir : null,
+      trustedHash: sha256,
+      projectRoots: req === null ? [] : d.projectRoots(req.runId),
+      sessionCapabilities: service.sessionCapabilities(),
+    })),
+    review: new PrivilegedReviewPipeline({ providers: (req) => d.reviewers(req.projectId, `privileged:${req.id}`) }),
+    startBroker: async (o) => {
+      const staging = join(d.dataDir, 'privilege', 'test-staging', o.session)
+      if (testMode) mkdirSync(staging, { recursive: true })
+      d.log(testMode ? 'privilege: starting the broker UNELEVATED (test mode, no UAC prompt)' : 'privilege: asking Windows for the administrator broker (one UAC prompt)')
+      return ElevatedBrokerClient.start({
+        helperPath,
+        runtimePid: d.runtimePid,
+        session: o.session,
+        expiresAt: o.expiresAt,
+        capabilities: o.capabilities,
+        cwd: systemRoot,
+        ...(testMode ? { unelevatedTest: { stagingDir: staging } } : {}),
+        log: d.log,
+        onEnded: o.onEnded,
+      })
+    },
+    verify: createPrivilegeVerifier({ systemRoot }),
+    // setup-sandbox.ps1 reads its checks from the file beside it: staged beside it, with its own hash.
+    companions: (req: PrivilegedOperationRequest) => {
+      if (scriptsDir === null || !/setup-sandbox\.ps1$/i.test(req.args[5] ?? '')) return []
+      const checks = win32.join(scriptsDir, 'sandbox-checks.ps1')
+      const hash = sha256(checks)
+      return hash === null ? [] : [{ path: checks, sha256: hash }]
+    },
+    securityEvent: d.securityEvent,
+    onChange: d.onChange,
+    log: d.log,
+  })
+  service.recover()
+  return { service, unavailableReason: null, section: sectionOf }
+}

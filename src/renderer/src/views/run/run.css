@@ -146,3 +146,60 @@
   color: var(--color-fg-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* 0.9.1: Admin access (privilege session) on the mission page. */
+.privilege-panel {
+  margin: 8px 16px 0;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  font-size: 13px;
+}
+.privilege-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.privilege-title {
+  font-weight: 600;
+}
+.privilege-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.privilege-note {
+  margin: 6px 0 0;
+  color: var(--color-fg-muted, var(--color-fg));
+  font-size: 12px;
+}
+.privilege-error {
+  margin: 6px 0 0;
+  color: var(--color-tone-danger, var(--color-fg));
+}
+.privilege-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.privilege-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.privilege-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg-muted, var(--color-fg));
+}
+.privilege-goal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

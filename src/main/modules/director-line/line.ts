@@ -34,6 +34,8 @@ export interface DirectorLineReads {
   getStatus(): Promise<StatusFacts>
   getOvernightReport(): Promise<string | null>
   getLatestChecks(): Promise<LatestChecks | null>
+  /** 0.9.1: what ran with administrator rights in the last day, from the receipts. Absent: nothing to say. */
+  getPrivilegedActivity?(): Promise<string>
 }
 
 export interface SubmitResult {
@@ -273,6 +275,8 @@ export class DirectorLine {
           return result.accepted ? `Task received and sent through the normal checks${result.reference ? ` (ref ${inert(result.reference, 40)})` : ''}.` : `The task was not accepted${result.reason ? `: ${inert(result.reason, 160)}` : ''}.`
         }
         case 'LATEST_TEST_RESULTS': return await this.phrase(composeChecks(await reads.getLatestChecks()), spoken)
+        // The receipts as they are, never reworded: what ran as administrator is said exactly.
+        case 'PRIVILEGED_ACTIVITY': return reads.getPrivilegedActivity ? inert(await reads.getPrivilegedActivity(), 1500) : 'Nothing ran as administrator.'
         default: {
           const facts = await reads.getStatus()
           const template =

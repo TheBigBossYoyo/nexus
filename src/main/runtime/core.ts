@@ -4,6 +4,9 @@ import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligenc
 import { IntelligenceOperations } from '../modules/intelligence/operations'
 import { TaskAdmissionService } from '../modules/intelligence/admission'
 import { createProductionAdvisoryRouting } from '../modules/intelligence/production-routing'
+import { createPrivilegedTools } from '../modules/privilege/tools'
+import { privilegedActivitySpoken } from '../modules/privilege/report'
+import { createPrivilegeHost } from './privilege-host'
 import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
 import { WorkerCapacityRouting } from '../modules/capacity/worker-routing'
@@ -837,7 +840,34 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const packageConfigTools = createPackageConfigTools({
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
   })
-  const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools)
+  // 0.9.1: privilege sessions: one UAC prompt for a mission or a night, a temporary broker that holds the elevated
+  // token, every privileged attempt checked, reviewed and recorded. The reviewers come from the advisory routing
+  // built further down (asked only when an operation is submitted).
+  const privilegeHost = createPrivilegeHost({
+    db,
+    dataDir,
+    launcherPath: host.launcherPath,
+    resourcesPath: host.resourcesPath,
+    sandboxSetupDir: host.sandboxSetupDir,
+    isPackaged: host.isPackaged,
+    env,
+    runtimePid: process.pid,
+    projectRoots: (runId) => {
+      const run = runId !== null ? repos.runs.get(runId) : null
+      if (!run) return []
+      const project = repos.projects.get(run.projectId)
+      return [...(project ? [project.rootPath] : []), ...repos.worktrees.listByRun(run.id).map((w) => w.path)]
+    },
+    reviewers: (projectId, operationId) => advisoryRouting.service.providers(projectId ?? 'nexus', operationId, 'DIRECTOR'),
+    securityEvent: (e) => autonomy.record({ projectId: e.projectId, runId: e.runId, taskId: e.taskId, agentId: e.agentId, severity: e.severity, action: e.action, resource: 'privilege session', reason: e.reason.slice(0, 600) }),
+    onChange: (status) => push({ kind: 'privilege', status }),
+    log: logger,
+  })
+  bus.subscribe((event) => {
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') void privilegeHost.service?.endForRun(event.runId, `the run ${event.type.slice(4)}`).catch(() => undefined)
+  })
+  const privilegedTools = createPrivilegedTools({ service: () => privilegeHost.service })
+  const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools, privilegedTools)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
@@ -918,6 +948,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
         reportsDir: join(dataDir, 'reports'),
         sealer: host.createSealer(dataDir),
         probe,
+        privilege: { endForRun: (runId, reason) => privilegeHost.service?.endForRun(runId, reason) ?? Promise.resolve(), section: (runId) => privilegeHost.section(runId) },
         ...(overnightTick !== undefined && overnightTick >= 100
           ? { tickIntervalMs: overnightTick }
           : {}),
@@ -1453,6 +1484,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     clearInterval(progressTick)
     clearInterval(lineTick)
     void directorLine.stop().catch(() => undefined)
+    // No administrator broker outlives the runtime (it would end with it anyway: it watches this process).
+    void privilegeHost.service?.dispose().catch(() => undefined)
     void localSpeech.dispose().catch(() => undefined)
     void network?.stop().catch(() => undefined)
     chatgpt.dispose()
@@ -1598,6 +1631,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     eventsOf: (runId, afterSeq) => repos.events.listByRun(runId, afterSeq, 5000),
     pendingBoundaryRequests: () => repos.boundaryRequests.countPending(),
     isOnline: () => network?.isOnline() ?? true,
+    privilegedActivity: () => privilegedActivitySpoken(privilegeHost.service?.receipts({ since: new Date(Date.now() - 24 * 3600_000).toISOString(), limit: 200 }) ?? []),
     latestOvernightReport: () => {
       try {
         const row = lastOvernightReport.get() as { run_id: string } | undefined
@@ -1677,6 +1711,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
     autonomy,
     confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
+    privilege: { service: () => privilegeHost.service, unavailableReason: privilegeHost.unavailableReason, projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null },
     isolation: {
       status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
       setup: async () => {

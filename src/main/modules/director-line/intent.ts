@@ -84,6 +84,9 @@ const CONTINUE = /^\s*(?:please\s+|s'il (?:te|vous) plait\s+)?(?:continue\w*|res
 // "Call me": the whole message, so that "call me a taxi" is not a request to ring. English and French.
 const CALL_ME = /^\s*(?:please\s+|s'il (?:te|vous) plait,?\s+)?(?:(?:can|could|will|would) you\s+)?(?:call|phone|ring)\s+me(?:\s+(?:now|back|up|please|right now|asap|right away))*\s*[.!?]*\s*$|^\s*(?:s'il (?:te|vous) plait,?\s+)?(?:rappelle|appelle|telephone)(?:-|\s+)moi(?:\s+(?:maintenant|tout de suite|s'il (?:te|vous) plait))*\s*[.!?]*\s*$/
 const HELP = /^\s*(?:help|aide|\?|\/help|\/start|menu|commands?|commandes?|what can you do)\b/
+// "What did you run as administrator?", "qu'as-tu lancé en administrateur ?": a question about the privileged
+// receipts. Only a question: anything that asks for elevation is refused above (BOUNDARY_REQUEST, RUN_COMMAND).
+const PRIVILEGED = /\b(?:as (?:an? )?admin\w*|with admin\w*|administrator|admin (?:rights?|operations?|access|commands?)|elevat\w*|privileg\w*|uac|en (?:tant qu')?admin\w*|administrateur|droits? (?:d')?admin\w*|eleve\w*)\b/
 
 function cleanProject(raw: string): string {
   return raw.replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 60)
@@ -122,6 +125,7 @@ export function interpretDeterministic(original: string): OperatorCommand {
   const refused = detectRefusedTopic(text)
   if (refused) return { kind: 'REFUSED_AT_MACHINE', topic: refused }
 
+  if (PRIVILEGED.test(text) && text.length <= 200) return { kind: 'PRIVILEGED_ACTIVITY' }
   if (CALL_ME.test(text)) return { kind: 'CALL_ME' }
   if (HELP.test(text)) return { kind: 'HELP' }
   if (CONTINUE.test(text) && !PAUSE.test(text)) return { kind: 'CONTINUE' }
@@ -153,7 +157,7 @@ function guardTask(command: Extract<OperatorCommand, { kind: 'CREATE_TASK' | 'AD
 }
 
 /** What the hook may return. REFUSED_AT_MACHINE is deliberately not choosable by a model. */
-const HOOK_KINDS: readonly OperatorCommandKind[] = ['STATUS', 'ETA', 'BLOCKERS', 'DETAILS', 'LATEST_TEST_RESULTS', 'PAUSE_AFTER_CURRENT_TASK', 'CONTINUE', 'CALL_ME', 'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'HELP', 'UNKNOWN']
+const HOOK_KINDS: readonly OperatorCommandKind[] = ['STATUS', 'ETA', 'BLOCKERS', 'DETAILS', 'LATEST_TEST_RESULTS', 'PRIVILEGED_ACTIVITY', 'PAUSE_AFTER_CURRENT_TASK', 'CONTINUE', 'CALL_ME', 'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'HELP', 'UNKNOWN']
 
 export type IntentClassifier = (text: string) => Promise<unknown>
 
@@ -209,7 +213,7 @@ export type CommandRisk = 'READ_ONLY' | 'LOW_RISK_CONTROL' | 'TASK_HANDOFF' | 'R
 
 export function commandRisk(command: OperatorCommand): CommandRisk {
   switch (command.kind) {
-    case 'STATUS': case 'ETA': case 'BLOCKERS': case 'DETAILS': case 'LATEST_TEST_RESULTS': return 'READ_ONLY'
+    case 'STATUS': case 'ETA': case 'BLOCKERS': case 'DETAILS': case 'LATEST_TEST_RESULTS': case 'PRIVILEGED_ACTIVITY': return 'READ_ONLY'
     case 'PAUSE_AFTER_CURRENT_TASK': case 'CONTINUE': case 'CALL_ME': return 'LOW_RISK_CONTROL'
     case 'ADD_TASK_AFTER_CURRENT': case 'CREATE_TASK': return 'TASK_HANDOFF'
     case 'REFUSED_AT_MACHINE': return 'REFUSED'

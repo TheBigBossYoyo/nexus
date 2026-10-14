@@ -34,6 +34,13 @@ extraResources:
     to: bin/nexus-sip.exe
   - from: vendor/linphone-sdk/win64
     to: linphone
+  # 0.9.1: the temporary administrator broker of a privilege session and its relay (native/nexus-elevate). Started
+  # elevated once per session, with the owner's UAC consent; never a service, never left running.
+  - from: out/native/nexus-elevate.exe
+    to: bin/nexus-elevate.exe
+  # The privilege acceptance fixture (a folder and a registry key of NEXUS's own name; never in a session by default).
+  - from: native/privilege-fixture
+    to: privilege-fixture
   # 0.9.1: the speech models of the voice line (scripts/fetch-speech-models.mjs), with their NOTICE.txt.
   - from: vendor/speech-models
     to: speech-models

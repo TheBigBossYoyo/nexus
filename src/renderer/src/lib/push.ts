@@ -187,6 +187,10 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
               : [qk.overnightActive(), qk.overnightReport(message.status.runId), qk.run(message.status.runId), qk.runsList()],
           )
           break
+        case 'privilege':
+          // The session or its receipts changed: the Admin access panels read them again.
+          void qc.invalidateQueries({ queryKey: ['privilege'] })
+          break
         case 'progress':
           // The push carries the whole snapshot: it is what the panel shows.
           qc.setQueryData(['progress', message.snapshot.subject.id], message.snapshot)

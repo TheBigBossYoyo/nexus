@@ -20,6 +20,7 @@ import { boundaryActionHashSchema } from './019-boundary-action-hash'
 import { operationalAutonomySchema } from './020-operational-autonomy'
 import { voiceLineSchema } from './021-voice-line'
 import { voiceLineVerificationSchema } from './022-voice-line-verification'
+import { privilegeSessionsSchema } from './023-privilege-sessions'
 
 export interface Migration {
   version: number
@@ -51,4 +52,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 20, name: 'operational-autonomy', sql: operationalAutonomySchema },
   { version: 21, name: 'voice-line', sql: voiceLineSchema },
   { version: 22, name: 'voice-line-verification', sql: voiceLineVerificationSchema },
+  { version: 23, name: 'privilege-sessions', sql: privilegeSessionsSchema },
 ]

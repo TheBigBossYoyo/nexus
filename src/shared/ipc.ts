@@ -1,3 +1,4 @@
+import { PrivilegePrepareInputSchema, type PrivilegeSessionStatus, type PrivilegedOperationReceipt } from './privilege'
 import type { ProgressSnapshot } from './progress'
 import { z } from 'zod'
 import type { BuildIdentity } from './build-identity'
@@ -594,6 +595,8 @@ export const ipcInputs = {
       reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
       /** v0.3. Absent: BUILD, which configures the run exactly as before 0.3 and lets its outcome be recorded. */
       strategy: StrategySchema.optional(),
+      /** 0.9.1: prepare a temporary administrator broker for this night (one UAC prompt now). */
+      adminRecovery: z.boolean().optional(),
     })
     .strict(),
   /**
@@ -1056,6 +1059,11 @@ export const ipcInputs = {
   'research.list': z.object({ projectId: Id, runId: Id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
   'isolation.status': Empty,
   'isolation.setup': Empty,
+  /** 0.9.1: privilege sessions. Preparing one raises ONE UAC prompt; revoking ends its broker. */
+  'privilege.status': Empty,
+  'privilege.prepare': PrivilegePrepareInputSchema,
+  'privilege.revoke': Empty,
+  'privilege.activity': z.object({ runId: Id.optional(), sessionId: Id.optional() }).strict(),
   'isolation.apps': z.object({ projectId: Id.optional() }).strict(),
   /** A screenshot of an application session, as a data URL. `index` counts from the newest (0). */
   'isolation.appScreenshot': z.object({ appId: z.string().regex(/^[0-9a-f]{12}$/), index: z.number().int().min(0).max(500).optional() }).strict(),
@@ -1263,7 +1271,7 @@ export interface IpcOutputs {
   'intelligence.list': RepositoryFact[]
   'intelligence.refresh': { facts: number; stale: number }
   'context.packs': ContextPack[]
-  'overnight.start': { run: Run; overnight: OvernightStatus }
+  'overnight.start': { run: Run; overnight: OvernightStatus; privilege?: { ok: boolean; reason: string | null } }
   'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
   'overnight.startProgram': { programId: string; overnight: OvernightStatus }
   'overnight.startWorkspaceMission': { missionId: string; overnight: OvernightStatus }
@@ -1367,6 +1375,10 @@ export interface IpcOutputs {
   'research.list': { artifacts: ResearchArtifact[]; downloads: ResearchDownloadView[] }
   'isolation.status': IsolationStatusView
   'isolation.setup': SandboxSetupOutcome
+  'privilege.status': { available: boolean; unavailableReason: string | null; active: PrivilegeSessionStatus | null; recent: PrivilegeSessionStatus[] }
+  'privilege.prepare': { ok: boolean; reason: string | null; status: PrivilegeSessionStatus | null }
+  'privilege.revoke': { ok: boolean }
+  'privilege.activity': { receipts: PrivilegedOperationReceipt[]; report: string }
   'isolation.apps': AppSessionView[]
   'isolation.appScreenshot': { dataUrl: string; takenAt: string } | null
   'directorLine.get': DirectorLineView

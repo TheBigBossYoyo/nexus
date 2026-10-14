@@ -50,6 +50,7 @@ import {
   type CompiledTaskSpec,
 } from '@shared/intelligence'
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
+import { createPrivilegeHandlers, type PrivilegeHandlerContext } from './privilege-handlers'
 
 export interface IpcContext {
   /** 0.9: progress and time remaining of missions. Absent: the channel answers null. */
@@ -102,6 +103,8 @@ export interface IpcContext {
   directorLine?: DirectorLineHandlerContext['directorLine']
   /** 0.8: the containment as the runtime holds it. Absent (tests of other handlers): no containment exists and none can be set up. */
   isolation?: Omit<IsolationHandlerContext, 'confirm'>
+  /** 0.9.1: privilege sessions. Absent: none can be prepared. */
+  privilege?: PrivilegeHandlerContext
 }
 
 type Handlers = {
@@ -619,6 +622,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       confirmation,
       compilationMode,
       compiledTaskSpecId,
+      adminRecovery,
       ...input
     }) =>
       intelligenceOperations.run(async () => {
@@ -663,6 +667,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
             p.endAction !== 'NONE' && p.failsafeEnabled
               ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
               : 'Failsafe: none',
+            ...(adminRecovery === true ? ['Administrator recovery: one Windows UAC prompt follows now, for a temporary broker that ends with this run.'] : []),
           ].join('\n')
           const ok = await ctx.confirmPower(
             p.endAction === 'NONE'
@@ -672,13 +677,21 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           )
           if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
         }
-        return supervisor.start({
+        const started = await supervisor.start({
           ...defined,
           confirmed,
           confirmation,
           compiledTaskSpec: spec,
           ...(snapshot && snapshot !== 'no-head' ? { expectedHead: snapshot } : {}),
         })
+        if (adminRecovery !== true) return started
+        // 0.9.1: the one UAC prompt of the night, now, while the owner is here (never at 03:00). Declined or
+        // unavailable, the night goes on without administrator recovery, and the report says so.
+        const service = ctx.privilege?.service() ?? null
+        const prepared = service
+          ? await service.prepare({ scope: 'OVERNIGHT', runId: started.run.id, projectId: input.projectId })
+          : { ok: false as const, reason: ctx.privilege?.unavailableReason ?? 'Privilege sessions are not available.' }
+        return { ...started, privilege: { ok: prepared.ok, reason: prepared.ok ? null : prepared.reason } }
       }),
     'overnight.startArena': async ({ campaign, policy: p, confirmed, confirmation }) => {
       const supervisor = overnight()
@@ -844,6 +857,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
     }),
     ...createV71Handlers({ repos, git: ctx.git }),
+    ...createPrivilegeHandlers(ctx.privilege ?? { service: () => null, unavailableReason: 'This runtime has no privilege broker.', projectOfRun: () => null }),
   }
 }
 

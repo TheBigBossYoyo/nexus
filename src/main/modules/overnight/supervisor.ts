@@ -96,6 +96,11 @@ export interface OvernightDeps {
    * check and no power action is taken. Without a sealer the stored row is trusted (tests).
    */
   sealer?: { sign(payload: string): string }
+  /**
+   * 0.9.1: the run's privilege session. Finalization ends it (its administrator broker exits) before the report is
+   * written, and the report carries the privileged activity of the run.
+   */
+  privilege?: { endForRun(runId: string, reason: string): Promise<void>; section(runId: string): string }
   logger?: (line: string) => void
 }
 
@@ -1050,6 +1055,8 @@ export class OvernightSupervisor {
       // 1. No new work, then stop what is running. Pausing keeps a failed or unfinished run resumable.
       const workload = this.workloadOf(record)
       await this.stopWorkload(workload, terminalReason)
+      // 1b. No administrator broker outlives the night.
+      await this.deps.privilege?.endForRun(runId, `Overnight ended (${terminalReason})`).catch((e: unknown) => this.log(`privilege end ${runId}: ${errorMessage(e)}`))
       // 2. Preserve unfinished work and capture what there is to report (for a mission: what Git looks like now).
       const finalization = await within(workload.getFinalizationState({ commitWork: record.policy.commitCompletedWork }), this.deps.gitTimeoutMs ?? 180_000, null)
       // 3. Everything so far reaches the database file.
@@ -1066,6 +1073,8 @@ export class OvernightSupervisor {
       let text: string
       try {
         text = workload.summarize({ record: repos.overnight.require(record.id), reason: terminalReason, detail: terminalDetail, finishedAt, finalization, powerPlan })
+        const privileged = this.deps.privilege?.section(runId)
+        if (privileged) text = `${text.trimEnd()}\n\n${privileged.trim()}\n`
       } catch (e) {
         // A report must exist even if a section cannot be built.
         text = `# NEXUS Overnight ${WORKLOAD_NOUN[record.workloadType]}\n\n- Workload ID: ${runId}\n- Finished: ${finishedAt}\n- Outcome: ${terminalReason}\n\nThe full report could not be built: ${errorMessage(e)}\n\n## Power action\n\n${powerPlan}\n`

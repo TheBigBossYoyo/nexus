@@ -84,6 +84,8 @@ export interface OvernightForm {
   quotaPolicy: OvernightPolicy['quotaPolicy']
   saveFinalReport: boolean
   commitCompletedWork: boolean
+  /** 0.9.1: prepare a temporary administrator broker for this night (one UAC prompt when it starts). Never on by default. */
+  adminRecovery: boolean
   /** The authorization box. */
   authorized: boolean
 }
@@ -118,6 +120,7 @@ export function defaultOvernightForm(): OvernightForm {
     quotaPolicy: d.quotaPolicy,
     saveFinalReport: d.saveFinalReport,
     commitCompletedWork: d.commitCompletedWork,
+    adminRecovery: false,
     authorized: false,
   }
 }
@@ -291,6 +294,7 @@ export function summarizeOvernight(form: OvernightForm, now: number = Date.now()
     lines.push('Failsafe shutdown: off')
   }
   lines.push(`Force close applications: ${form.forceCloseApplications ? 'yes' : 'no'}`)
+  lines.push(form.adminRecovery ? 'Administrator recovery: one Windows UAC prompt now; the broker ends with this run' : 'Administrator recovery: off')
   lines.push(authorizationSentence(form.endAction))
   return lines
 }
@@ -311,5 +315,6 @@ export function buildOvernightStartInput(
     maxIterations: form.maxRepairs,
   }
   if (form.maxAgents !== null) input.maxParallelAgents = form.maxAgents
+  if (form.adminRecovery) input.adminRecovery = true
   return input
 }

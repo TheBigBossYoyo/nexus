@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PrivilegedOperationProposalSchema } from '@shared/privilege'
 
 /**
  * 0.8: tools NEXUS offers a session beyond the base ones, by group: web research, and the application and
@@ -8,7 +9,7 @@ import { z } from 'zod'
  * automation library's seventy.
  */
 
-export const EXTENSION_GROUPS = ['research', 'app', 'package'] as const
+export const EXTENSION_GROUPS = ['research', 'app', 'package', 'privileged'] as const
 export type ExtensionGroup = (typeof EXTENSION_GROUPS)[number]
 
 export interface ExtensionToolDef {
@@ -106,7 +107,17 @@ export const PACKAGE_TOOLS: ExtensionToolDef[] = [
   },
 ]
 
-export const EXTENSION_TOOLS: readonly ExtensionToolDef[] = [...RESEARCH_TOOLS, ...APP_TOOLS, ...PACKAGE_TOOLS]
+export const PRIVILEGED_TOOLS: ExtensionToolDef[] = [
+  {
+    name: 'privileged_request',
+    group: 'privileged',
+    description:
+      "Ask for ONE operation to run with Windows administrator rights, through the temporary broker the owner authorized for this mission or night (if none is active the request is refused and recorded). There is no administrator shell: name the program by its absolute path, its arguments as a list, the capability it falls under, and why it is needed, why it needs elevation and why nothing unelevated would do. PowerShell runs only as -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> with the script's SHA-256 in inputs; a program outside Program Files/System32 needs its SHA-256; installers run silently. It is checked by a fixed policy, reviewed by the Technical Director (and the Council for broad effects), run, verified and recorded for the owner's morning report; refused requests are recorded too. Never ask for anything that touches UAC, antivirus, accounts, passwords, credentials, boot, drivers or NEXUS's own policy: it is refused whatever the reason. If an operation fails, a repair may follow as a new request with followsOperationId.",
+    shape: PrivilegedOperationProposalSchema.shape,
+  },
+]
+
+export const EXTENSION_TOOLS: readonly ExtensionToolDef[] = [...RESEARCH_TOOLS, ...APP_TOOLS, ...PACKAGE_TOOLS, ...PRIVILEGED_TOOLS]
 
 export function extensionToolsFor(groups: readonly string[]): ExtensionToolDef[] {
   return EXTENSION_TOOLS.filter((t) => groups.includes(t.group))

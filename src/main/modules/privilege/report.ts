@@ -1,0 +1,110 @@
+import type { PrivilegeSessionStatus, PrivilegedOperationReceipt, PrivilegedOperationReview, PrivilegedOutcome } from '@shared/privilege'
+
+/**
+ * 0.9.1: the PRIVILEGED ACTIVITY report (B12 to B14). Every privileged attempt of a run or a session, what it was
+ * for, why it needed administrator rights, what the reviews and the policy said, the exact command as it may be
+ * shown (secrets replaced), what was expected and what was seen, how it ended. The morning report carries the short
+ * form; the Activity screen the full one. Nothing here is a model's words except the reviews' short reasons.
+ */
+
+const OUTCOME_TEXT: Record<PrivilegedOutcome, string> = {
+  EXECUTED: 'SUCCESS',
+  FAILED: 'FAILED',
+  TIMEOUT: 'TIMED OUT',
+  ABORTED: 'ABORTED',
+  REJECTED_BY_POLICY: 'REJECTED BY POLICY',
+  REJECTED_BY_DIRECTOR: 'REJECTED BY REVIEW',
+}
+
+const time = (iso: string): string => {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** A command as it may be shown: arguments quoted where they need it. */
+export function shownCommand(r: Pick<PrivilegedOperationReceipt, 'executable' | 'args'>): string {
+  const q = (a: string): string => (a === '' || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)
+  return [r.executable, ...r.args].map(q).join(' ')
+}
+
+function reviewLine(reviews: readonly PrivilegedOperationReview[], councilRequired: boolean): string {
+  const technical = reviews.find((r) => r.reviewer === 'CLAUDE_TECHNICAL_DIRECTOR')
+  const council = reviews.find((r) => r.reviewer === 'DIRECTOR_COUNCIL')
+  const t = technical ? `Claude Technical Director ${technical.failed ? 'gave no valid review' : `${technical.verdict === 'APPROVE' ? 'APPROVED' : technical.verdict} (risk ${technical.risk})`}` : 'Not reviewed (refused before review)'
+  const c = council ? `Council ${council.failed ? 'gave no valid review' : `${council.verdict === 'APPROVE' ? 'APPROVED' : council.verdict} (risk ${council.risk})`}` : councilRequired ? 'Council required, not reached' : 'Council not required'
+  return `${t}. ${c}.`
+}
+
+export function countsOf(receipts: readonly PrivilegedOperationReceipt[]): Record<PrivilegedOutcome, number> {
+  const out: Record<PrivilegedOutcome, number> = { EXECUTED: 0, FAILED: 0, TIMEOUT: 0, ABORTED: 0, REJECTED_BY_POLICY: 0, REJECTED_BY_DIRECTOR: 0 }
+  for (const r of receipts) out[r.outcome]++
+  return out
+}
+
+function headline(receipts: readonly PrivilegedOperationReceipt[]): string {
+  const c = countsOf(receipts)
+  const ran = c.EXECUTED + c.FAILED + c.TIMEOUT
+  const refused = c.REJECTED_BY_POLICY + c.REJECTED_BY_DIRECTOR
+  const parts = [`${ran} run`, ...(c.FAILED + c.TIMEOUT > 0 ? [`${c.FAILED + c.TIMEOUT} of them failed`] : []), ...(refused > 0 ? [`${refused} refused`] : []), ...(c.ABORTED > 0 ? [`${c.ABORTED} aborted`] : [])]
+  return `${receipts.length} privileged attempt${receipts.length === 1 ? '' : 's'}: ${parts.join(', ')}.`
+}
+
+function sessionLines(sessions: readonly PrivilegeSessionStatus[]): string[] {
+  return sessions.map(
+    (s) =>
+      `- Session ${s.id.slice(0, 8)} (${s.scope.toLowerCase().replace(/_/g, ' ')}): ${s.state.toLowerCase()}; UAC prompts: ${s.uacPrompts}; prepared ${time(s.createdAt)}${s.endedAt ? `, ended ${time(s.endedAt)} (${s.endReason ?? 'no reason recorded'})` : ', still active'}${s.elevated ? '' : s.state === 'ACTIVE' || s.state === 'ENDED' ? ' — NOT elevated (protocol test)' : ''}.`,
+  )
+}
+
+/** The full report: every attempt with every field (the Activity screen, the report file). */
+export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[]): string {
+  const out = ['## Privileged activity', '']
+  if (sessions.length === 0 && receipts.length === 0) return [...out, 'No privilege session was prepared and no administrator operation was asked for.', ''].join('\n')
+  out.push(headline(receipts), '', ...sessionLines(sessions), '')
+  for (const r of receipts) {
+    out.push(`### ${time(r.requestedAt)} — ${r.capability} — ${OUTCOME_TEXT[r.outcome]}`, '')
+    out.push(`- Mission: ${r.missionTitle ?? r.runId ?? '—'}`, `- Task: ${r.taskTitle ?? r.taskId ?? '—'}`, `- Requested by: ${r.role}${r.agentId ? ` (${r.agentId.slice(0, 8)})` : ''}; provenance: ${r.provenance}`)
+    if (r.followsOperationId) out.push(`- Follows operation: ${r.followsOperationId}`)
+    out.push(`- Goal: ${r.goal}`, `- Why it was required: ${r.whyRequired}`, `- Why elevation was required: ${r.whyElevation}`, `- Why no unelevated alternative: ${r.whyNoUnelevatedAlternative}`)
+    out.push(`- Security review: ${reviewLine(r.reviews, r.precheck.councilRequired)}`)
+    for (const v of r.reviews) out.push(`  - ${v.reviewer === 'DIRECTOR_COUNCIL' ? 'Council' : 'Technical'}: ${v.reason}${v.restrictions.length ? ` Restrictions: ${v.restrictions.join('; ')}.` : ''}`)
+    out.push(`- Deterministic policy: precheck ${r.precheck.verdict} (${r.precheck.reason})${r.finalPolicy ? `; final ${r.finalPolicy.verdict} (${r.finalPolicy.reason})` : ''}`)
+    if (r.precheck.councilWhy.length) out.push(`- Council asked because: ${r.precheck.councilWhy.join('; ')}`)
+    out.push(`- Command: \`${shownCommand(r)}\``, `- Working directory: ${r.cwd ?? '(the broker\'s own staging folder)'}`, `- Environment set: ${r.envNames.length ? r.envNames.join(', ') : 'none beyond the machine\'s own'}`)
+    out.push(`- Expected: files ${r.expected.files.join(', ') || 'none'}; registry ${r.expected.registry.join(', ') || 'none'}; services/tasks ${r.expected.services.join(', ') || 'none'}; network ${r.expected.network}`)
+    out.push(`- Observed: ${r.observed.length ? r.observed.join(' ') : 'nothing recorded'}`)
+    out.push(`- Result: ${OUTCOME_TEXT[r.outcome]} — ${r.outcomeReason}${r.exitCode !== null ? ` Exit code ${r.exitCode}.` : ''}${r.durationMs !== null ? ` Duration ${(r.durationMs / 1000).toFixed(1)} s.` : ''}`)
+    if (r.rollback) out.push(`- Rollback: ${r.rollback}`)
+    out.push(`- Evidence: receipt ${r.id}${r.stagedSha256 ? `; program SHA-256 ${r.stagedSha256}` : ''}`)
+    if (r.stderr.trim()) out.push('', '```', r.stderr.trim().slice(0, 1500), '```')
+    out.push('')
+  }
+  return out.join('\n')
+}
+
+/** The short form for the morning report and the Director Line: one block per attempt, the essentials. */
+export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[]): string {
+  const out = ['## Privileged activity', '']
+  if (sessions.length === 0 && receipts.length === 0) return [...out, 'No administrator access was prepared for this run.', ''].join('\n')
+  const uac = sessions.reduce((n, s) => n + s.uacPrompts, 0)
+  out.push(`${headline(receipts)} UAC prompts: ${uac}.${sessions.some((s) => s.state === 'ACTIVE') ? ' A broker is still active.' : ' No broker is left running.'}`, '')
+  for (const r of receipts) {
+    out.push(`**${time(r.requestedAt)} — ${r.goal}** (${r.capability})`)
+    out.push(`Why admin: ${r.whyElevation}`)
+    out.push(`Security review: ${reviewLine(r.reviews, r.precheck.councilRequired)} Deterministic policy: ${r.finalPolicy?.verdict ?? r.precheck.verdict}.`)
+    out.push(`Command: \`${shownCommand(r)}\``)
+    out.push(`Result: ${OUTCOME_TEXT[r.outcome]}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''} — ${r.outcomeReason}${r.observed.length ? ` Changed/seen: ${r.observed.join(' ')}` : ''}`, '')
+  }
+  return out.join('\n')
+}
+
+/** What the Director says when asked what ran as administrator. */
+export function privilegedActivitySpoken(receipts: readonly PrivilegedOperationReceipt[]): string {
+  if (receipts.length === 0) return 'Nothing ran as administrator.'
+  const ran = receipts.filter((r) => r.outcome === 'EXECUTED' || r.outcome === 'FAILED' || r.outcome === 'TIMEOUT')
+  const refused = receipts.filter((r) => r.outcome === 'REJECTED_BY_POLICY' || r.outcome === 'REJECTED_BY_DIRECTOR')
+  const parts = [`${ran.length} administrator operation${ran.length === 1 ? '' : 's'} ran${refused.length ? ` and ${refused.length} request${refused.length === 1 ? ' was' : 's were'} refused` : ''}.`]
+  for (const r of ran.slice(-5)) parts.push(`At ${time(r.requestedAt)}: ${r.goal} — ${OUTCOME_TEXT[r.outcome].toLowerCase()}.`)
+  if (refused.length) parts.push(`Refused: ${refused.slice(-3).map((r) => `${r.goal} (${r.outcomeReason})`).join(' ')}`)
+  return parts.join(' ')
+}

@@ -1,3 +1,4 @@
+import type { PrivilegeSessionStatus } from './privilege'
 import type { ConnectivitySnapshot } from './connectivity'
 import type { ProgressSnapshot } from './progress'
 import type {
@@ -203,6 +204,8 @@ export type PushMessage =
   | { kind: 'auth.changed' }
   /** 0.9. The progress of a mission changed in a way worth showing, or its estimate was refreshed. */
   | { kind: 'progress'; snapshot: ProgressSnapshot }
+  /** 0.9.1: the privilege session changed (prepared, an operation recorded, ended). */
+  | { kind: 'privilege'; status: PrivilegeSessionStatus | null }
   /** 0.9. What the network supervisor sees changed. */
   | { kind: 'connectivity'; snapshot: ConnectivitySnapshot }
   | { kind: 'overnight'; status: OvernightStatus }

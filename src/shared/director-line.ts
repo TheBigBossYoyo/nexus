@@ -53,11 +53,13 @@ export interface OperatorCall {
 export const OPERATOR_COMMAND_KINDS = [
   'STATUS', 'ETA', 'BLOCKERS', 'DETAILS', 'LATEST_TEST_RESULTS', 'PAUSE_AFTER_CURRENT_TASK', 'CONTINUE',
   'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'CALL_ME', 'HELP', 'REFUSED_AT_MACHINE', 'UNKNOWN',
+  /** 0.9.1: what ran with administrator rights (read only: a remote message never creates that authority). */
+  'PRIVILEGED_ACTIVITY',
 ] as const
 export type OperatorCommandKind = (typeof OPERATOR_COMMAND_KINDS)[number]
 
 export type OperatorCommand =
-  | { kind: 'STATUS' | 'ETA' | 'BLOCKERS' | 'LATEST_TEST_RESULTS' | 'PAUSE_AFTER_CURRENT_TASK' | 'CONTINUE' | 'CALL_ME' | 'HELP' | 'UNKNOWN' }
+  | { kind: 'STATUS' | 'ETA' | 'BLOCKERS' | 'LATEST_TEST_RESULTS' | 'PAUSE_AFTER_CURRENT_TASK' | 'CONTINUE' | 'CALL_ME' | 'HELP' | 'UNKNOWN' | 'PRIVILEGED_ACTIVITY' }
   | { kind: 'DETAILS'; subject: string }
   | { kind: 'ADD_TASK_AFTER_CURRENT'; text: string }
   | { kind: 'CREATE_TASK'; project: string; text: string }
