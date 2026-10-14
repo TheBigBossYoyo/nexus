@@ -62,6 +62,7 @@ export function renderProfile(profile: ProjectProfile): string {
   ]
   const scripts = Object.keys(profile.scripts)
   if (scripts.length > 0) lines.push(`Scripts: ${scripts.join(', ')}`)
+  if (profile.testLayout && profile.testLayout.length > 0) lines.push(...profile.testLayout)
   if (profile.docs.length > 0) lines.push(`Docs: ${profile.docs.join(', ')}`)
   if (profile.hasClaudeMd) lines.push('CLAUDE.md present')
   if (profile.generatedPaths.length > 0) {

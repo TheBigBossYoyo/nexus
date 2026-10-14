@@ -1,7 +1,8 @@
 import { lstat, readFile, readdir } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import type { CheckCommands, ProjectProfile } from '@shared/domain'
 import { nowIso } from '@shared/ids'
+import { describeTestLayout } from './test-layout'
 
 /** Minimal read-only git surface the profiler needs; the real GitService adapts to it. */
 export interface ProfilerGit {
@@ -10,6 +11,8 @@ export interface ProfilerGit {
   currentBranch(path: string): Promise<string | null>
   headCommit(path: string): Promise<string | null>
   status(path: string): Promise<{ dirty: boolean }>
+  /** 0.9.1: the files git tracks (what the test layout is read from: an ignored folder of results is not the project). */
+  trackedFiles?(path: string): Promise<string[] | null>
 }
 
 export interface ProfileOptions {
@@ -146,11 +149,15 @@ interface WalkResult {
   languageCounts: Map<string, number>
   fileCount: number
   sizeBytes: number
+  /** Paths relative to the root, with forward slashes; the first MAX_LISTED_FILES only. */
+  files: string[]
 }
+
+const MAX_LISTED_FILES = 20_000
 
 /** Bounded breadth-first walk. Symlinks (and junctions) are never followed or counted. */
 async function walk(root: string, maxEntries: number, maxMillis: number): Promise<WalkResult> {
-  const result: WalkResult = { languageCounts: new Map(), fileCount: 0, sizeBytes: 0 }
+  const result: WalkResult = { languageCounts: new Map(), fileCount: 0, sizeBytes: 0, files: [] }
   const deadline = Date.now() + maxMillis
   const queue: string[] = [root]
   let visited = 0
@@ -188,6 +195,7 @@ async function walk(root: string, maxEntries: number, maxMillis: number): Promis
       batch.forEach((name, idx) => {
         result.fileCount++
         result.sizeBytes += sizes[idx] ?? 0
+        if (result.files.length < MAX_LISTED_FILES) result.files.push(relative(root, join(dir, name)).split('\\').join('/'))
         const dot = name.lastIndexOf('.')
         const lang = dot > 0 ? LANGUAGE_BY_EXT[name.slice(dot + 1).toLowerCase()] : undefined
         if (lang) result.languageCounts.set(lang, (result.languageCounts.get(lang) ?? 0) + 1)
@@ -332,6 +340,7 @@ export async function profileProject(
   const frameworks = new Set<string>()
   const commandSets: CheckCommands[] = []
   let scripts: Record<string, string> = {}
+  let nodeDeps: Record<string, string> = {}
 
   // Node
   const pkg = parseJsonObject(await readSmall(join(root, 'package.json')))
@@ -350,6 +359,7 @@ export async function profileProject(
       ...stringRecord(pkg['devDependencies']),
       ...stringRecord(pkg['peerDependencies']),
     }
+    nodeDeps = deps
     for (const [dep, fw] of Object.entries(NODE_FRAMEWORKS)) if (dep in deps) frameworks.add(fw)
     commandSets.push(nodeCommands(pm, scripts, rootFiles.has('tsconfig.json') && 'typescript' in deps))
   } else {
@@ -421,6 +431,14 @@ export async function profileProject(
     for (const [re, fw] of CONFIG_FRAMEWORKS) if (re.test(name)) frameworks.add(fw)
   }
 
+  const runnerConfigs: { name: string; text: string }[] = []
+  for (const name of rootNames.filter((n) => /^(vitest|vite|jest)\.config\.[cm]?[jt]s$/.test(n)).sort()) {
+    const text = await readSmall(join(root, name))
+    if (text !== null) runnerConfigs.push({ name, text })
+  }
+  const tracked = isGitRepo && git.trackedFiles ? await safe(() => git.trackedFiles?.(root) ?? Promise.resolve(null), null) : null
+  const testLayout = describeTestLayout({ files: tracked ?? walked.files, deps: nodeDeps, runnerConfigs })
+
   const languages = [...walked.languageCounts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([l]) => l)
@@ -443,6 +461,7 @@ export async function profileProject(
     generatedPaths: GENERATED_DIRS.filter(
       (d) => d !== '.git' && rootEntries.some((e) => e.name === d && e.isDirectory()),
     ),
+    ...(testLayout.length > 0 ? { testLayout } : {}),
     profiledAt: nowIso(),
   }
 }

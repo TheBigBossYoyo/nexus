@@ -261,6 +261,8 @@ export interface ProjectProfile {
   fileCount: number
   sizeBytes: number
   generatedPaths: string[]
+  /** 0.9.1: how the project tests (where, named how, environment, DOM library, examples); absent in older profiles. */
+  testLayout?: string[]
   profiledAt: string
 }
 
