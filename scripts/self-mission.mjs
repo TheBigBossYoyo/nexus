@@ -1,7 +1,7 @@
 // NEXUS on itself, measured: a real mission on a clone of this repository, through the same path as the composer
 // (compilation.preview, the planning recommendation, runs.create), driven to its end with no help, and judged.
 //
-//   node scripts/self-mission.mjs --task <file.md> [--mode standard|enrolled] [--name <label>] [--timeout-min 90] [--chatgpt]
+//   node scripts/self-mission.mjs --task <file.md> [--repo <git repository>] [--mode standard|enrolled] [--name <label>] [--timeout-min 90] [--chatgpt]
 //   node scripts/self-mission.mjs --chatgpt-signin   (once: the tests' own ChatGPT connection)
 //
 // Everything it makes is under test-results/self-missions/<label>-<time>/ (the project folder the owner excluded
@@ -44,11 +44,13 @@ const repo = join(dir, 'repo')
 const dataDir = join(dir, 'data')
 mkdirSync(dataDir, { recursive: true })
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
-const branch = execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8' }).trim()
-const base = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+// --repo <path>: a mission on another project (a git repository); by default NEXUS on itself.
+const source = args.repo ? resolve(args.repo) : root
+const branch = execFileSync('git', ['-C', source, 'branch', '--show-current'], { encoding: 'utf8' }).trim()
+const base = execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 
 // A clone of the committed branch, as the owner's repository would be: its own branches, the same history.
-execFileSync('git', ['clone', '-q', '--branch', branch, root, repo])
+execFileSync('git', ['clone', '-q', '--branch', branch, source, repo])
 execFileSync('git', ['-C', repo, 'config', 'user.name', 'NEXUS self-mission'])
 execFileSync('git', ['-C', repo, 'config', 'user.email', 'self-mission@nexus.local'])
 log(`clone of ${branch} at ${base.slice(0, 8)} in ${repo}`)
