@@ -255,6 +255,13 @@ export class ExecutionBroker {
   private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
   private sharedClosed = false
   private readonly counts = { shell: 0, commands: 0, programs: 0, refused: 0 }
+  /** 0.9.1: commands of projects that are not contained, started quietly (presentShell). */
+  private quietLaunches = 0
+
+  /** How many commands of projects that are not contained were started on a desktop of their own. */
+  quietCount(): number {
+    return this.quietLaunches
+  }
   /** Paths of repositories the sandbox account was given access to at this start, by path and kind of access. */
   private readonly granted = new Set<string>()
 
@@ -829,6 +836,44 @@ export class ExecutionBroker {
       return { ok: true, profile: input.profile, file, args, specPath, roots, withheldEnv: withheld }
     } catch (e) {
       return this.fail(input.projectId, input.profile, `The containment could not be set up, so the command was not run: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  /**
+   * 0.9.1: how an agent's shell command of a project that is NOT contained runs without disturbing the user. Not a
+   * containment: the command is the user's, with the user's rights and the agent shell's own environment, exactly
+   * as it would have run. The launcher only starts it on a desktop of its own (whatever window it, a test or an
+   * application under test opens is on no screen and takes no focus), with no console window, in a job that ends
+   * it with the launcher. The text is written to a script, as for a contained command, never spliced into a line.
+   */
+  async presentShell(input: { sessionKey: string; worktree: string; cwd: string; shell: ShellKind; command: string }): Promise<{ ok: true; file: string; args: string[]; specPath: string } | { ok: false; reason: string }> {
+    try {
+      const shells = await this.findShells()
+      const dir = join(this.deps.sandboxDir, 'present', input.sessionKey.replace(/[^A-Za-z0-9-]/g, '_').slice(0, 80))
+      mkdirSync(dir, { recursive: true })
+      const id = randomBytes(8).toString('hex')
+      let commandLine: string
+      if (input.shell === 'bash') {
+        if (shells.gitRoot === null) return { ok: false, reason: 'Git Bash was not found.' }
+        const bash = [join(shells.gitRoot, 'usr', 'bin', 'bash.exe'), join(shells.gitRoot, 'bin', 'bash.exe')].find((p) => existsSync(p))
+        if (bash === undefined) return { ok: false, reason: 'Git Bash was not found.' }
+        const script = join(dir, `nx-${id}.sh`)
+        writeFileSync(script, `${input.command}\n`, { flag: 'wx' })
+        commandLine = `${quoteArg(bash)} --noprofile --norc ${quoteArg(script)}`
+      } else {
+        const script = join(dir, `nx-${id}.ps1`)
+        writeFileSync(script, `${String.fromCharCode(0xfeff)}${input.command}\nexit $LASTEXITCODE\n`, { flag: 'wx' })
+        commandLine = `${quoteArg(shells.powershell)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${quoteArg(script)}`
+      }
+      const cwd = existsSync(input.cwd) ? input.cwd : input.worktree
+      // No UI limits: they are no boundary for a command that runs as the user anyway, and a job that sets them
+      // cannot hold the job a browser engine makes for itself (the tests of an Electron project start one).
+      const specPath = this.deps.launcher.writeSpec({ profile: 'PRESENT', cwd, commandLine, env: {}, inheritEnv: true, uiLimits: 0, maxProcesses: 4096 })
+      const { file, args } = this.deps.launcher.invocation(specPath)
+      this.quietLaunches += 1
+      return { ok: true, file, args, specPath }
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message.slice(0, 200) : 'the quiet launch could not be prepared' }
     }
   }
 

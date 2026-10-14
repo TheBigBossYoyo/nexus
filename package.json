@@ -9,7 +9,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && electron-vite build",
+    "build": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && node scripts/build-presence.mjs && electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration --project arena-cases",
-    "test:e2e": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && electron-vite build && playwright test",
+    "test:e2e": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && node scripts/build-presence.mjs && electron-vite build && playwright test",
     "smoke:claude": "vitest run -c vitest.smoke.config.ts",
     "smoke:power": "vitest run -c vitest.power-smoke.config.ts",
     "smoke:usage": "vitest run -c vitest.usage-smoke.config.ts",
@@ -43,9 +43,9 @@
     "accept:director": "vitest run -c vitest.director.config.ts",
     "stress": "vitest run -c vitest.stress.config.ts",
     "supervisor:build": "esbuild scripts/dev-supervisor/development-overnight-supervisor.ts --bundle --platform=node --format=esm --alias:@shared=./src/shared --alias:@main=./src/main --outfile=out/dev-supervisor/development-overnight-supervisor.mjs",
-    "launcher:build": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs",
+    "launcher:build": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && node scripts/build-presence.mjs",
     "sandbox:setup": "node scripts/sandbox-setup.mjs",
-    "package": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && electron-vite build && electron-builder --win nsis"
+    "package": "node scripts/build-launcher.mjs && node scripts/build-wlan.mjs && node scripts/build-sip.mjs && node scripts/build-elevate.mjs && node scripts/build-presence.mjs && electron-vite build && electron-builder --win nsis"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.288",

@@ -13,6 +13,11 @@ export interface ShellContainment {
   readonly profile: ExecutionProfileName
   /** Why the profile cannot be used now, or null. A session whose profile is unusable runs no command. */
   readonly unavailable: string | null
+  /**
+   * 0.9.1, STANDARD only: the commands still run as written and as the user, but on a desktop of their own, so
+   * that what they open is on no screen and takes no focus (presentation, not containment).
+   */
+  readonly quiet?: boolean
   /** `gitScript`: for a command that is git and nothing else, the script NEXUS wrote from its parsed invocations. It is what runs; the command's text is not. */
   /**
    * `grantedPush`: the command is git invocations with a push among them, and the user allowed the push (the
@@ -50,14 +55,30 @@ export function createShellContainment(input: {
   cwd: string
   /** The directories of the repository a contained git of this session may write, from NEXUS's record of the worktree. */
   gitWritable?: () => Promise<string[]>
+  /** 0.9.1, STANDARD: start the commands quietly (a desktop of their own). */
+  quiet?: boolean
+  /** A quiet start that could not be prepared: the command then runs as written, visibly, and this is told why. */
+  onVisible?: (reason: string) => void
 }): ShellContainment {
   const { broker, profile } = input
   const state = broker.usable(profile)
+  const quiet = profile === 'STANDARD' && input.quiet === true
   return {
     profile,
     unavailable: state.usable ? null : state.detail,
+    quiet,
     async wrap(shell, command, options) {
-      if (profile === 'STANDARD') return { ok: true, command }
+      if (profile === 'STANDARD') {
+        if (!quiet) return { ok: true, command }
+        const present = await broker.presentShell({ sessionKey: input.sessionKey, worktree: input.worktree, cwd: input.cwd, shell, command })
+        if (!present.ok) {
+          // Presentation is not a boundary: a command that cannot be started quietly still runs, as it always did.
+          input.onVisible?.(present.reason)
+          return { ok: true, command }
+        }
+        const [spec] = present.args.slice(-1)
+        return { ok: true, command: shell === 'bash' ? `${singleQuoted(present.file)} --spec ${singleQuoted(spec as string)}` : `& ${psQuoted(present.file)} --spec ${psQuoted(spec as string)}; exit $LASTEXITCODE` }
+      }
       const gitWritable = input.gitWritable ? await input.gitWritable().catch(() => []) : []
       const objects = gitWritable.find((dir) => basename(dir).toLowerCase() === 'objects')
       const gitDir = objects !== undefined ? gitWritable.find((dir) => basename(dirname(dir)).toLowerCase() === 'worktrees' && dirname(dirname(dir)).toLowerCase() === dirname(objects).toLowerCase()) : undefined

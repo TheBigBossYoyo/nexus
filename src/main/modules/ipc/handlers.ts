@@ -51,6 +51,7 @@ import {
 } from '@shared/intelligence'
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
 import { createPrivilegeHandlers, type PrivilegeHandlerContext } from './privilege-handlers'
+import type { UserDisturbanceMetrics } from '@shared/presentation'
 
 export interface IpcContext {
   /** 0.9: progress and time remaining of missions. Absent: the channel answers null. */
@@ -105,6 +106,8 @@ export interface IpcContext {
   isolation?: Omit<IsolationHandlerContext, 'confirm'>
   /** 0.9.1: privilege sessions. Absent: none can be prepared. */
   privilege?: PrivilegeHandlerContext
+  /** 0.9.1: the disturbance metrics. Absent: nothing was measured. */
+  presentation?: { metrics: (runId: string) => UserDisturbanceMetrics }
 }
 
 type Handlers = {
@@ -857,6 +860,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
     }),
     ...createV71Handlers({ repos, git: ctx.git }),
+    'presentation.metrics': ({ runId }) =>
+      ctx.presentation?.metrics(runId) ?? { runId, measured: false, uacPrompts: 0, visibleWindows: 0, foregroundSteals: 0, consoleFlashes: 0, unexpectedDialogs: 0, notifications: null, recent: [], quietCommands: 0 },
     ...createPrivilegeHandlers(ctx.privilege ?? { service: () => null, unavailableReason: 'This runtime has no privilege broker.', projectOfRun: () => null }),
   }
 }

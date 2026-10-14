@@ -68,6 +68,12 @@ export const SettingsSchema = z.object({
     profile: ExecutionProfileSchema.default('STANDARD'),
     /** 0.8: the operating-system containment of project code in enrolled projects. Old stored settings read as STRONGEST. */
     containment: ContainmentSettingSchema.default('STRONGEST'),
+    /**
+     * 0.9.1: the commands of projects that are not contained run on a desktop of their own (as the user, nothing
+     * else changed), so that tests and applications they open show nothing on the screen and take no focus.
+     * Absent (older settings): on.
+     */
+    quietCommands: z.boolean().optional(),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */

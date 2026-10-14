@@ -7,6 +7,7 @@ import { createProductionAdvisoryRouting } from '../modules/intelligence/product
 import { createPrivilegedTools } from '../modules/privilege/tools'
 import { privilegedActivitySpoken } from '../modules/privilege/report'
 import { createPrivilegeHost } from './privilege-host'
+import { createPresentationHost } from './presentation-host'
 import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
 import { WorkerCapacityRouting } from '../modules/capacity/worker-routing'
@@ -359,6 +360,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     dataDir,
     sandboxStateDir: sandboxStateDir(env),
     sandboxOnRecord: () => sandboxRecorded,
+    // 0.9.1: the commands of projects that are not contained start on a desktop of their own (zero-disturbance).
+    quietCommands: () => process.platform === 'win32' && host.launcherPath !== undefined && existsSync(host.launcherPath) && repos.settings.get().execution.quietCommands !== false && (host.isPackaged || env['NEXUS_QUIET_COMMANDS'] !== '0'),
+    onVisibleCommand: (reason) => logger(`presentation: a command ran visibly (${reason})`),
     logger,
   })
   const isolationStatus = await isolation.start()
@@ -867,6 +871,20 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') void privilegeHost.service?.endForRun(event.runId, `the run ${event.type.slice(4)}`).catch(() => undefined)
   })
   const privilegedTools = createPrivilegedTools({ service: () => privilegeHost.service })
+  // 0.9.1: zero-disturbance testing: the presence meter and the per-mission metrics of what NEXUS's work did to the
+  // owner's screen.
+  const presentationHost = createPresentationHost({
+    db,
+    launcherPath: host.launcherPath,
+    isPackaged: host.isPackaged,
+    scripted: !host.isPackaged && (env['NEXUS_FAKE_RUNTIME'] === '1' || env['NEXUS_FAKE_WORKERS'] === '1'),
+    env,
+    runtimePid: process.pid,
+    uacPrompts: (runId) => privilegeHost.uacPrompts(runId),
+    quietCommands: () => executionBroker.quietCount(),
+    onChange: (runIds) => push({ kind: 'presentation', runIds }),
+    log: logger,
+  })
   const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools, privilegedTools)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
@@ -948,7 +966,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
         reportsDir: join(dataDir, 'reports'),
         sealer: host.createSealer(dataDir),
         probe,
-        privilege: { endForRun: (runId, reason) => privilegeHost.service?.endForRun(runId, reason) ?? Promise.resolve(), section: (runId) => privilegeHost.section(runId) },
+        privilege: { endForRun: (runId, reason) => privilegeHost.service?.endForRun(runId, reason) ?? Promise.resolve(), section: (runId) => `${privilegeHost.section(runId)}\n\n${presentationHost.service.section(runId)}` },
         ...(overnightTick !== undefined && overnightTick >= 100
           ? { tickIntervalMs: overnightTick }
           : {}),
@@ -1486,6 +1504,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     void directorLine.stop().catch(() => undefined)
     // No administrator broker outlives the runtime (it would end with it anyway: it watches this process).
     void privilegeHost.service?.dispose().catch(() => undefined)
+    void presentationHost.stop().catch(() => undefined)
     void localSpeech.dispose().catch(() => undefined)
     void network?.stop().catch(() => undefined)
     chatgpt.dispose()
@@ -1711,6 +1730,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
     autonomy,
     confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
+    presentation: { metrics: (runId) => presentationHost.service.metrics(runId) },
     privilege: { service: () => privilegeHost.service, unavailableReason: privilegeHost.unavailableReason, projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null },
     isolation: {
       status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),

@@ -46,6 +46,8 @@ export interface PrivilegeHost {
   unavailableReason: string | null
   /** The privileged activity of a run, short (the Overnight report) or full (the Activity screen). */
   section(runId: string, full?: boolean): string
+  /** The UAC prompts the privilege sessions of a run caused. */
+  uacPrompts(runId: string): number
 }
 
 const sha256 = (path: string): string | null => {
@@ -68,7 +70,8 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   let unavailableReason: string | null = null
   if (process.platform !== 'win32') unavailableReason = 'Privilege sessions are a Windows feature.'
   else if (helper === null || !existsSync(helper)) unavailableReason = 'The privilege broker is not part of this build.'
-  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf }
+  const uacPrompts = (runId: string): number => store.sessions({ runId, limit: 50 }).reduce((n, s) => n + s.uacPrompts, 0)
+  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf, uacPrompts }
   const helperPath: string = helper
 
   const testMode = !d.isPackaged && d.env['NEXUS_PRIVILEGE_UNELEVATED_TEST'] === '1'
@@ -121,5 +124,5 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
     log: d.log,
   })
   service.recover()
-  return { service, unavailableReason: null, section: sectionOf }
+  return { service, unavailableReason: null, section: sectionOf, uacPrompts }
 }

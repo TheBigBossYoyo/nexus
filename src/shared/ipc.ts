@@ -1,4 +1,5 @@
 import { PrivilegePrepareInputSchema, type PrivilegeSessionStatus, type PrivilegedOperationReceipt } from './privilege'
+import type { UserDisturbanceMetrics } from './presentation'
 import type { ProgressSnapshot } from './progress'
 import { z } from 'zod'
 import type { BuildIdentity } from './build-identity'
@@ -1064,6 +1065,8 @@ export const ipcInputs = {
   'privilege.prepare': PrivilegePrepareInputSchema,
   'privilege.revoke': Empty,
   'privilege.activity': z.object({ runId: Id.optional(), sessionId: Id.optional() }).strict(),
+  /** 0.9.1: what NEXUS's work did to the owner's screen during a mission. */
+  'presentation.metrics': z.object({ runId: Id }).strict(),
   'isolation.apps': z.object({ projectId: Id.optional() }).strict(),
   /** A screenshot of an application session, as a data URL. `index` counts from the newest (0). */
   'isolation.appScreenshot': z.object({ appId: z.string().regex(/^[0-9a-f]{12}$/), index: z.number().int().min(0).max(500).optional() }).strict(),
@@ -1379,6 +1382,7 @@ export interface IpcOutputs {
   'privilege.prepare': { ok: boolean; reason: string | null; status: PrivilegeSessionStatus | null }
   'privilege.revoke': { ok: boolean }
   'privilege.activity': { receipts: PrivilegedOperationReceipt[]; report: string }
+  'presentation.metrics': UserDisturbanceMetrics
   'isolation.apps': AppSessionView[]
   'isolation.appScreenshot': { dataUrl: string; takenAt: string } | null
   'directorLine.get': DirectorLineView

@@ -603,7 +603,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
    */
   async function containShell(req: ToolRequest, outcome: Outcome): Promise<Outcome> {
     const containment = ctx.containment
-    if (containment === undefined || containment.profile === 'STANDARD' || outcome.tool.behavior !== 'allow' || outcome.shell === undefined) return outcome
+    if (containment === undefined || (containment.profile === 'STANDARD' && containment.quiet !== true) || outcome.tool.behavior !== 'allow' || outcome.shell === undefined) return outcome
     const refuse = (detail: string): Outcome => {
       const reason = `Not run: ${detail} Nothing is run outside the containment in this project.`
       return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }

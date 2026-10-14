@@ -44,6 +44,10 @@ export interface IsolationServiceDeps {
   sandboxStateDir?: string | null
   /** Whether this machine has a record of the sandbox account, usable or not: the isolated profile was set up here. */
   sandboxOnRecord?: () => boolean
+  /** 0.9.1: whether the commands of projects that are not contained start quietly (a desktop of their own). */
+  quietCommands?: () => boolean
+  /** 0.9.1: a quiet start could not be prepared and the command ran visibly. */
+  onVisibleCommand?: (reason: string) => void
   logger?: (line: string) => void
 }
 
@@ -80,9 +84,15 @@ export class IsolationService {
     return this.profileFor(projectId) === 'ISOLATED' && this.deps.broker.usable('ISOLATED').usable
   }
 
-  /** The shell containment of a session; undefined for a project that is not enrolled. */
+  /**
+   * The shell containment of a session. A project that is not enrolled has none, except that its commands are
+   * started quietly (a desktop of their own, as the user) when that is on (0.9.1).
+   */
   shellFor(session: { projectId: string; sessionKey: string; worktree: string; cwd: string }): ShellContainment | undefined {
-    if (!this.deps.enrolled(session.projectId)) return undefined
+    if (!this.deps.enrolled(session.projectId)) {
+      if (this.deps.quietCommands?.() !== true) return undefined
+      return createShellContainment({ broker: this.deps.broker, profile: 'STANDARD', ...session, quiet: true, ...(this.deps.onVisibleCommand ? { onVisible: this.deps.onVisibleCommand } : {}) })
+    }
     const gitWritable = this.deps.gitWritable
     return createShellContainment({ broker: this.deps.broker, profile: this.profileFor(session.projectId), ...session, ...(gitWritable ? { gitWritable: () => gitWritable(session.worktree) } : {}) })
   }

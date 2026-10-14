@@ -216,6 +216,7 @@ const VALID_INPUTS: { [C in IpcChannel]: IpcInput<C> } = {
   'privilege.prepare': { scope: 'MISSION', runId: 'r1' },
   'privilege.revoke': {},
   'privilege.activity': { runId: 'r1' },
+  'presentation.metrics': { runId: 'r1' },
   'isolation.apps': {},
   'isolation.appScreenshot': { appId: '0123456789ab' },
   'directorLine.get': {},

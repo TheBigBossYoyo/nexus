@@ -206,6 +206,8 @@ export type PushMessage =
   | { kind: 'progress'; snapshot: ProgressSnapshot }
   /** 0.9.1: the privilege session changed (prepared, an operation recorded, ended). */
   | { kind: 'privilege'; status: PrivilegeSessionStatus | null }
+  /** 0.9.1: NEXUS's work did something on the owner's screen during these runs (the disturbance metrics changed). */
+  | { kind: 'presentation'; runIds: string[] }
   /** 0.9. What the network supervisor sees changed. */
   | { kind: 'connectivity'; snapshot: ConnectivitySnapshot }
   | { kind: 'overnight'; status: OvernightStatus }

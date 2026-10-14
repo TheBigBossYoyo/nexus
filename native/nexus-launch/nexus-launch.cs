@@ -143,6 +143,8 @@ class Spec {
     // else, and the command's own process, threads and whatever it creates without saying who may open it are
     // open to holders of it only. A second may be the project's (its package cache). None is one of Windows'.
     public List<string> Capabilities = new List<string>();
+    // 0.9.1, PRESENT only: the command gets this launcher's own environment (the agent's shell's), not a list.
+    public bool InheritEnv = false;
 }
 
 static class Program {
@@ -188,12 +190,18 @@ static class Program {
                 else if (key == "expect-sid") spec.ExpectSid = value;
                 else if (key == "appcontainer") spec.AppContainer = value;
                 else if (key == "capability") spec.Capabilities.Add(value);
+                else if (key == "inherit-env") spec.InheritEnv = value == "1";
                 // An unknown key is refused: a spec this launcher does not fully understand is not run.
                 else throw new Fail(EXIT_SPEC, "unknown spec key: " + key);
             } catch (Fail) { throw; } catch (Exception) { throw new Fail(EXIT_SPEC, "bad value for " + key); }
         }
         if (!version) throw new Fail(EXIT_SPEC, "the spec has no version");
-        if (spec.Profile != "ISOLATED" && spec.Profile != "RESTRICTED" && spec.Profile != "STAGE2") throw new Fail(EXIT_SPEC, "the spec names no known profile");
+        if (spec.Profile != "ISOLATED" && spec.Profile != "RESTRICTED" && spec.Profile != "STAGE2" && spec.Profile != "PRESENT") throw new Fail(EXIT_SPEC, "the spec names no known profile");
+        // 0.9.1: PRESENT is not a containment. It is the user's own command, as the user, on a desktop of its own so
+        // that nothing it shows reaches the user's screen or takes the user's focus, in a job that ends it with this
+        // launcher. Nothing of the containment profiles may be asked of it, and nothing of it of them.
+        if (spec.Profile == "PRESENT" && (spec.Credential != null || spec.Stage2 != null || spec.Stage2Dir != null || spec.AccountSid != null || spec.ExpectSid != null || spec.AppContainer != null || spec.Capabilities.Count > 0)) throw new Fail(EXIT_SPEC, "the PRESENT profile is the user's own: it names no account, AppContainer or capability");
+        if (spec.InheritEnv && spec.Profile != "PRESENT") throw new Fail(EXIT_SPEC, "only the PRESENT profile inherits the launcher's environment");
         if (spec.Profile == "ISOLATED" && (string.IsNullOrEmpty(spec.Credential) || string.IsNullOrEmpty(spec.Stage2) || string.IsNullOrEmpty(spec.Stage2Dir))) throw new Fail(EXIT_SPEC, "the ISOLATED profile needs the sandbox account's credential and launcher");
         if (string.IsNullOrEmpty(spec.Command)) throw new Fail(EXIT_SPEC, "the spec has no command");
         if (string.IsNullOrEmpty(spec.Cwd) || !Directory.Exists(spec.Cwd)) throw new Fail(EXIT_SPEC, "the working directory does not exist");
@@ -241,6 +249,23 @@ static class Program {
             byte count = Marshal.ReadByte(N.GetSidSubAuthorityCount(sid));
             return (uint)Marshal.ReadInt32(N.GetSidSubAuthority(sid, (uint)(count - 1)));
         } finally { Marshal.FreeHGlobal(buf); }
+    }
+
+    /**
+     * 0.9.1, PRESENT: this process's own rights, unchanged: a restricted copy of its token that restricts nothing
+     * (Windows lets a process start another with such a copy, which it does not with a plain duplicate). Refused
+     * when this launcher runs elevated, as for the other profiles.
+     */
+    static IntPtr BuildPresentToken() {
+        IntPtr current;
+        if (!N.OpenProcessToken(N.GetCurrentProcess(), 0xF01FF, out current)) throw new Fail(EXIT_CONTAINMENT, "OpenProcessToken failed: " + Marshal.GetLastWin32Error());
+        if (IntegrityOf(current) > 0x2000) throw new Fail(EXIT_CONTAINMENT, "nexus-launch was started elevated; it only runs as an ordinary user process");
+        IntPtr same;
+        if (!N.CreateRestrictedToken(current, 0, 0, IntPtr.Zero, 0, IntPtr.Zero, 0, IntPtr.Zero, out same)) throw new Fail(EXIT_CONTAINMENT, "CreateRestrictedToken failed: " + Marshal.GetLastWin32Error());
+        IntPtr token;
+        if (!N.DuplicateTokenEx(same, 0xF01FF, IntPtr.Zero, 2, 1 /* primary */, out token)) throw new Fail(EXIT_CONTAINMENT, "DuplicateTokenEx failed: " + Marshal.GetLastWin32Error());
+        N.CloseHandle(same); N.CloseHandle(current);
+        return token;
     }
 
     /** A copy of this process's token with every privilege but "bypass traverse checking" removed, at low integrity. */
@@ -613,8 +638,8 @@ static class Program {
             if (spec.ExpectSid == null || !string.Equals(spec.ExpectSid, self, StringComparison.OrdinalIgnoreCase)) throw new Fail(EXIT_CONTAINMENT, "the inner step does not run as the sandbox account it was started for");
         }
         IntPtr job = inner ? IntPtr.Zero : BuildJob(spec);
-        IntPtr token = BuildToken(spec);
-        IntPtr env = BuildEnvironment(spec);
+        IntPtr token = spec.Profile == "PRESENT" ? BuildPresentToken() : BuildToken(spec);
+        IntPtr env = spec.InheritEnv ? IntPtr.Zero : BuildEnvironment(spec);
 
         STARTUPINFOEX six = new STARTUPINFOEX();
         six.StartupInfo.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFOEX));
