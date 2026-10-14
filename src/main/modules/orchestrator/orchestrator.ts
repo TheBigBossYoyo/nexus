@@ -223,7 +223,7 @@ export class Orchestrator implements PipelineHost {
           status: async (p) => ({ dirty: !(await git.status(p)).clean }),
           trackedFiles: async (p) => {
             const r = await git.run(p, ['ls-files', '-z'], { maxOutputBytes: 8 * 1024 * 1024, timeoutMs: 30_000 }).catch(() => null)
-            return r === null || r.exitCode !== 0 ? null : r.stdout.split(' ').filter((f) => f !== '')
+            return r === null || r.exitCode !== 0 ? null : r.stdout.split('\0').filter((f) => f !== '')
           },
         })
         Object.assign(project, repos.projects.update(project.id, { profile }))
