@@ -378,6 +378,13 @@ export class Launcher {
       writeFileSync(join(secret, 'sentinel.txt'), 'nexus-verify-sentinel')
       if (userOnly !== null) {
         mkdirSync(userOnly, { recursive: true })
+        // 0.9.1: the user's own file, wherever the folder is: its access list is narrowed to the user and the system,
+        // without what it would inherit. The check assumed the folder was in the user's profile; a NEXUS checkout in a
+        // mission's worktree (under ProgramData, which the sandbox account may read) made every containment test
+        // report "the sandbox account read a file in the user's profile" when it read a file anyone may read.
+        const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+        const user = `${process.env['USERDOMAIN'] ?? ''}\\${process.env['USERNAME'] ?? ''}`
+        await runProcess(join(system32, 'icacls.exe'), [userOnly, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '/Q'], { cwd: system32, timeoutMs: 30_000, env: minimalEnv(), maxOutputBytes: 16 * 1024 })
         writeFileSync(join(userOnly, 'sentinel.txt'), 'nexus-verify-user-sentinel')
       }
       await this.label('low', inside)
