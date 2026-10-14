@@ -53,8 +53,12 @@ export function createLocalVoiceSpeech(deps: { launcherPath: string | undefined;
   } catch {
     return none('The speech engine is not part of this build.')
   }
-  const workerPath = unpacked(join(import.meta.dirname, 'speech-worker.js'))
-  if (!existsSync(workerPath)) return none('The speech worker is not part of this build.')
+  // The worker is an entry of its own in out/main; this code may be in a shared chunk beside it (out/main/chunks).
+  const workerPath = [join(import.meta.dirname, 'speech-worker.js'), join(import.meta.dirname, '..', 'speech-worker.js')].map(unpacked).find((p) => existsSync(p))
+  if (workerPath === undefined) {
+    deps.log('the speech worker was not found next to the runtime')
+    return none('The speech worker is not part of this build.')
+  }
   try {
     const local = LocalSpeech.create({ sherpa, modelsDir, threads: 4, workerPath, log: deps.log })
     local.tts.setLanguages(deps.languages)
