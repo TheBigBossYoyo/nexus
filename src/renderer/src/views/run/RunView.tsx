@@ -12,6 +12,7 @@ import { MissionHeader } from './MissionHeader'
 import { OvernightBanner } from './OvernightBanner'
 import { ProgressPanel } from './ProgressPanel'
 import { PrivilegePanel } from './PrivilegePanel'
+import { TestEnvironmentPanel } from './TestEnvironmentPanel'
 import { PlanInspector } from './PlanInspector'
 import { PlanPanel, PlannerActivity } from './PlanPanel'
 import { RunsList } from './RunsList'
@@ -317,6 +318,7 @@ function RunWorkspace({ runId }: { runId: string }) {
         <OvernightBanner runId={runId} />
         <ProgressPanel runId={runId} />
         <PrivilegePanel runId={runId} live={!['completed', 'failed', 'cancelled'].includes(query.data.run.state)} />
+        <TestEnvironmentPanel runId={runId} live={!['completed', 'failed', 'cancelled'].includes(query.data.run.state)} />
         <div className="relative min-h-0 flex-1">
           {narrow ? (
             <>
