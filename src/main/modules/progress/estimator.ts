@@ -43,13 +43,13 @@ function quantile(sorted: readonly number[], q: number): number {
   return (sorted[lo] as number) + ((sorted[hi] as number) - (sorted[lo] as number)) * (at - lo)
 }
 
-function statsOf(seconds: readonly number[]): DurationStats {
+export function statsOf(seconds: readonly number[]): DurationStats {
   const sorted = [...seconds].sort((a, b) => a - b)
   return { n: sorted.length, p25: quantile(sorted, 0.25), median: quantile(sorted, 0.5), p75: quantile(sorted, 0.75), p90: quantile(sorted, 0.9) }
 }
 
 /** History and prior together: the fewer the samples, the more of the prior. Never a history of three believed as it is. */
-function blend(history: DurationStats | undefined, prior: DurationStats): DurationStats {
+export function blend(history: DurationStats | undefined, prior: DurationStats): DurationStats {
   if (history === undefined || history.n === 0) return prior
   const w = Math.min(1, history.n / TRUSTED_SAMPLES)
   const mix = (a: number, b: number): number => a * w + b * (1 - w)
@@ -105,7 +105,16 @@ export interface ProgressInput {
   activeWorkers?: number
   waitingWorkers?: number
   refreshSeconds?: number
+  /**
+   * 0.9.1: the mission's own verification after its tasks (the integration's full checks, the mission verifier):
+   * how long it takes on this project, and when it began (null: not yet). Without it the estimate said "finishing"
+   * through a 17-minute full test suite, and never counted that suite while the tasks ran.
+   */
+  finale?: { stats: DurationStats; startedAt: number | null } | null
 }
+
+/** What a mission's final verification takes when this project has none on record (seconds). Deliberately wide. */
+export const FINALE_PRIOR: DurationStats = { n: 0, p25: 180, median: 600, p75: 1200, p90: 1800 }
 
 interface Remaining {
   low: number
@@ -206,7 +215,18 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
   }
   // Running tasks have done part of their work: what they usually take, less what they still need.
   for (const t of tasks) if (RUNNING.has(t.state)) done += Math.max(0, model.of(t.kind, t.complexity).median - (remaining.get(t.id)?.expected ?? 0))
-  const left = [...remaining.values()].reduce((sum, r) => sum + r.expected, 0)
+  // The final verification: after every task, once. Running, it is what remains of it; not begun, all of it.
+  let finale: Remaining | null = null
+  if (input.finale != null && !finished && !(run.state === 'planning' || run.state === 'awaiting_approval' || tasks.length === 0)) {
+    const d = input.finale.stats
+    if (input.finale.startedAt !== null) {
+      const elapsed = Math.max(0, (now - input.finale.startedAt) / 1000)
+      const overrun = elapsed > d.p90
+      finale = { low: Math.max(d.p25 - elapsed, overrun ? d.median * 0.1 : d.median * 0.05), expected: Math.max(d.median - elapsed, overrun ? elapsed * 0.25 : d.median * 0.15), high: Math.max(d.p90 - elapsed, overrun ? elapsed * 0.6 : d.median * 0.3) }
+      done += Math.min(elapsed, d.median)
+    } else finale = { low: d.p25, expected: d.median, high: d.p90 }
+  }
+  const left = [...remaining.values()].reduce((sum, r) => sum + r.expected, 0) + (finale?.expected ?? 0)
   // Work that is not in the graph yet but usually comes: repairs of the implementation tasks still to be verified.
   const unverified = tasks.filter((t) => (t.kind === 'implement' || t.kind === 'repair') && !DONE.has(t.state) && t.state !== 'failed' && t.repairCycles === 0).length
   const repairAllowance = unverified * model.repairRate * model.of('repair', 'small').median
@@ -217,8 +237,8 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
   const path = criticalPath(tasks, input.dependencies, remaining)
   const parallel = Math.max(1, input.parallelism)
   const sum = (pick: (r: Remaining) => number): number => [...remaining.values()].reduce((s, r) => s + pick(r), 0)
-  const low = Math.max(path.low, sum((r) => r.low) / parallel)
-  const high = Math.max(path.high, sum((r) => r.high) / parallel) + repairAllowance * 1.5
+  const low = Math.max(path.low, sum((r) => r.low) / parallel) + (finale?.low ?? 0)
+  const high = Math.max(path.high, sum((r) => r.high) / parallel) + repairAllowance * 1.5 + (finale?.high ?? 0)
 
   let confidence: ProgressConfidence = 'MEDIUM'
   let uncertainty: string | null = null
@@ -241,7 +261,7 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
   }
 
   const wait: ProgressWait = finished ? 'FINISHED' : input.wait != null ? input.wait.kind : run.state === 'paused' ? (run.pauseReason === 'quota' || run.pauseReason === 'capacity' ? 'WAITING_FOR_PROVIDER' : 'WAITING_FOR_USER') : 'ACTIVE'
-  const nothingLeft = finished || (!planning && open.length === 0)
+  const nothingLeft = finished || (!planning && open.length === 0 && finale === null)
   const eta: EtaEstimate = nothingLeft
     ? { lowSeconds: 0, highSeconds: 0, text: finished ? 'done' : 'finishing', confidence: 'HIGH', uncertainty: null }
     : planning
@@ -268,7 +288,7 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
     subject: { kind: 'run', id: run.id },
     at: new Date(now).toISOString(),
     percent,
-    stage: wait !== 'ACTIVE' && wait !== 'FINISHED' ? WAIT_TEXT[wait] : stageOf(input, counts),
+    stage: wait !== 'ACTIVE' && wait !== 'FINISHED' ? WAIT_TEXT[wait] : finale !== null && input.finale?.startedAt != null && open.length === 0 ? `Verifying the whole mission (usually about ${Math.max(1, Math.round((input.finale.stats.median) / 60))} min on this project)` : stageOf(input, counts),
     elapsedSeconds: Math.max(0, Math.round((elapsedTo - elapsedFrom) / 1000)),
     eta,
     wait,

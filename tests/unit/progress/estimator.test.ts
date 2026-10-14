@@ -168,3 +168,27 @@ describe('how good the estimates were', () => {
     expect(etaAccuracy([], end)).toBeNull()
   })
 })
+
+// 0.9.1: the mission's own final verification (the integration's full checks). The first mission NEXUS ran on
+// itself said "finishing" through a 17-minute full suite, and never counted it while its tasks ran.
+describe('the final verification of the mission', () => {
+  const finale = { stats: { n: 5, p25: 900, median: 1020, p75: 1100, p90: 1300 }, startedAt: null }
+
+  it('is counted after the tasks while they run', () => {
+    const tasks = [task('a', 'running', { kind: 'implement', complexity: 'small', startedAt: at(29) })]
+    const without = snap(tasks)
+    const withFinale = snap(tasks, { finale })
+    expect((withFinale.eta.lowSeconds ?? 0) - (without.eta.lowSeconds ?? 0)).toBe(900)
+    expect((withFinale.eta.highSeconds ?? 0) - (without.eta.highSeconds ?? 0)).toBe(1300)
+  })
+
+  it('is what remains once every task is done, with its own stage, instead of "finishing"', () => {
+    const tasks = [task('a', 'completed', { kind: 'implement', complexity: 'small', startedAt: at(1), finishedAt: at(10) })]
+    const s = snap(tasks, { run: run('verifying'), finale: { ...finale, startedAt: T0 + 25 * 60_000 } })
+    expect(s.eta.text).not.toBe('finishing')
+    expect(s.eta.lowSeconds).toBe(600)
+    expect(s.eta.highSeconds).toBe(1000)
+    expect(s.stage).toBe('Verifying the whole mission (usually about 17 min on this project)')
+    expect(s.percent).toBeLessThan(99)
+  })
+})

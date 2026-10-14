@@ -444,6 +444,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const finishedTaskRows = db.prepare("SELECT kind, complexity, started_at AS s, finished_at AS f FROM tasks WHERE state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?")
   const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
   const progressListeners: ((snapshot: ProgressSnapshot, why: string) => void)[] = []
+  const finaleRows = db.prepare("SELECT v.commands FROM verification_results v JOIN runs r ON r.id = v.run_id WHERE r.project_id = ? AND v.task_id IS NULL AND v.kind = 'checks' ORDER BY v.created_at DESC LIMIT 20")
   const progress = new ProgressService({
     now: () => Date.now(),
     run: (runId) => repos.runs.get(runId) ?? null,
@@ -458,6 +459,16 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     parallelism: (run) => Math.max(1, run.config.maxParallelAgents),
     refreshSeconds: () => repos.settings.get().execution.progressRefreshSeconds ?? DEFAULT_PROGRESS_REFRESH_SECONDS,
     waitOf: (run) => progressWaitOf(run),
+    // 0.9.1: how long the final checks of this project's earlier missions took (the integration's checks).
+    finaleSeconds: (projectId) =>
+      (finaleRows.all(projectId) as { commands: string }[]).flatMap((r) => {
+        try {
+          const total = (JSON.parse(r.commands) as { durationMs?: number }[]).reduce((n, c) => n + (c.durationMs ?? 0), 0) / 1000
+          return total > 0 ? [total] : []
+        } catch {
+          return []
+        }
+      }),
     onChange: (snapshot, why) => {
       push({ kind: 'progress', snapshot })
       for (const listener of progressListeners) listener(snapshot, why)

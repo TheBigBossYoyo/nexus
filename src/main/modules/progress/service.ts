@@ -1,7 +1,7 @@
 import type { Run, Task, TaskDependency } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
 import { DEFAULT_PROGRESS_REFRESH_SECONDS, MAX_PROGRESS_REFRESH_SECONDS, MIN_PROGRESS_REFRESH_SECONDS, type ProgressMilestone, type ProgressSnapshot, type ProgressWait } from '@shared/progress'
-import { DurationModel, estimateProgress, etaAccuracy, type FinishedTask } from './estimator'
+import { blend, DurationModel, estimateProgress, etaAccuracy, FINALE_PRIOR, statsOf, type FinishedTask } from './estimator'
 
 /**
  * 0.9: the progress of the missions that are going on, kept current. It reads what the runtime already has
@@ -29,6 +29,8 @@ export interface ProgressServiceDeps {
   /** Kept for learning: what was predicted, and at the end how good it was. */
   record?: (entry: { runId: string; at: number; lowSeconds: number; highSeconds: number; percent: number; confidence: string; wait: ProgressWait }) => void
   recordAccuracy?: (entry: { runId: string; finishedAt: number; samples: number; coverage: number; bias: number; meanWidthRatio: number }) => void
+  /** 0.9.1: how long the final verification of earlier missions of this project took, in seconds, most recent first. */
+  finaleSeconds?: (projectId: string) => number[]
 }
 
 export type ProgressChange = 'STAGE' | 'BLOCKER' | 'WAIT' | 'RECOVERY' | 'SCOPE' | 'COMPLETION' | 'REFRESH'
@@ -93,6 +95,8 @@ export function milestoneLine(m: ProgressMilestone): string {
 interface Kept {
   snapshot: ProgressSnapshot
   seq: number
+  /** When the mission's own final checks began (its integration's checks.started), or null. */
+  finaleStartedAt: number | null
   milestones: ProgressMilestone[]
   predictions: { at: number; lowSeconds: number; highSeconds: number }[]
   shownAt: number
@@ -121,6 +125,21 @@ export class ProgressService {
     return this.model
   }
 
+  private readonly finales = new Map<string, { at: number; stats: ReturnType<typeof statsOf> }>()
+
+  /** How long this project's final verification takes: its history blended with a wide prior, read every ten minutes. */
+  private finaleStats(projectId: string): ReturnType<typeof statsOf> {
+    const now = this.deps.now()
+    const known = this.finales.get(projectId)
+    if (known !== undefined && now - known.at < 10 * 60_000) return known.stats
+    const seconds = (this.deps.finaleSeconds?.(projectId) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
+    // Few missions of one project: three of them are already its best measure, so the history is trusted sooner than for tasks.
+    const history = seconds.length > 0 ? statsOf(seconds) : undefined
+    const stats = history !== undefined && history.n >= 3 ? history : blend(history !== undefined ? { ...history, n: history.n * 3 } : undefined, FINALE_PRIOR)
+    this.finales.set(projectId, { at: now, stats })
+    return stats
+  }
+
   /** The snapshot of a run as of now, or null when there is no such run. Computing it tells nobody. */
   snapshot(runId: string): ProgressSnapshot | null {
     return this.compute(runId)?.snapshot ?? null
@@ -134,8 +153,10 @@ export class ProgressService {
     const titles = new Map(tasks.map((t) => [t.id, t.title]))
     const milestones = [...(before?.milestones ?? [])]
     let seq = before?.seq ?? 0
+    let finaleStartedAt = before?.finaleStartedAt ?? null
     for (const event of this.deps.events(runId, seq)) {
       seq = Math.max(seq, event.seq)
+      if (event.type === 'checks.started' && event.taskId === null) finaleStartedAt = Date.parse(event.createdAt)
       const m = milestoneOf(event, (id) => (id === null ? null : (titles.get(id) ?? null)))
       if (m !== null) milestones.push(m)
     }
@@ -151,8 +172,9 @@ export class ProgressService {
       previous: before?.snapshot ?? null,
       milestones: milestones.slice(-40),
       refreshSeconds: this.refreshMs() / 1000,
+      finale: { stats: this.finaleStats(run.projectId), startedAt: finaleStartedAt },
     })
-    const kept: Kept = { snapshot, seq, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
+    const kept: Kept = { snapshot, seq, finaleStartedAt, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
     this.kept.set(runId, kept)
     return kept
   }
