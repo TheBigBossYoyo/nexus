@@ -26,7 +26,7 @@ import {
   type SelectOption,
 } from '../../components/ui'
 import { PROFILE_EXPLANATION } from '../security/securityModel'
-import { buildMcpServer, type McpDraft } from './settingsForm'
+import { buildMcpServer, isQuietCommandsOn, quietCommandsPatch, type McpDraft } from './settingsForm'
 
 export interface SectionProps {
   draft: Settings
@@ -188,6 +188,13 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
         checked={e.requirePlanApproval}
         onChange={(v) => set('execution', { requirePlanApproval: v })}
         label="Require plan approval by default"
+      />
+      <Toggle
+        checked={isQuietCommandsOn(e)}
+        onChange={(v) => set('execution', quietCommandsPatch(v))}
+        label="Run commands quietly (on a hidden desktop)"
+        description="Commands of projects that are not enrolled still run as you; only their windows go to a desktop nobody sees. Turn off only if a command must show a window."
+        data-testid="exec-quietCommands"
       />
       <Field
         label="Final tests of a mission"
