@@ -116,6 +116,15 @@ export interface ProgressInput {
 /** What a mission's final verification takes when this project has none on record (seconds). Deliberately wide. */
 export const FINALE_PRIOR: DurationStats = { n: 0, p25: 180, median: 600, p75: 1200, p90: 1800 }
 
+/**
+ * The stage while the mission's final checks run. A duration is named only when this project's own missions measured
+ * it: the prior is a wide guess, and "usually about 10 min on this project" for a suite of 20 min was not true (0.9.1).
+ */
+export function finaleStage(stats: DurationStats): string {
+  if (stats.n === 0) return 'Verifying the whole mission (its first time on this project, so its length is not known yet)'
+  return `Verifying the whole mission (usually about ${Math.max(1, Math.round(stats.median / 60))} min on this project)`
+}
+
 interface Remaining {
   low: number
   expected: number
@@ -288,7 +297,7 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
     subject: { kind: 'run', id: run.id },
     at: new Date(now).toISOString(),
     percent,
-    stage: wait !== 'ACTIVE' && wait !== 'FINISHED' ? WAIT_TEXT[wait] : finale !== null && input.finale?.startedAt != null && open.length === 0 ? `Verifying the whole mission (usually about ${Math.max(1, Math.round((input.finale.stats.median) / 60))} min on this project)` : stageOf(input, counts),
+    stage: wait !== 'ACTIVE' && wait !== 'FINISHED' ? WAIT_TEXT[wait] : finale !== null && input.finale?.startedAt != null && open.length === 0 ? finaleStage(input.finale.stats) : stageOf(input, counts),
     elapsedSeconds: Math.max(0, Math.round((elapsedTo - elapsedFrom) / 1000)),
     eta,
     wait,

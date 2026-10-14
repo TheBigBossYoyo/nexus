@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Complexity, TaskDependency, TaskKind, TaskState } from '@shared/domain'
 import { formatElapsed, formatEtaRange } from '@shared/progress'
-import { DurationModel, estimateProgress, etaAccuracy, type FinishedTask, type ProgressInput } from '@main/modules/progress/estimator'
+import { DurationModel, estimateProgress, FINALE_PRIOR, etaAccuracy, type FinishedTask, type ProgressInput } from '@main/modules/progress/estimator'
 
 // 0.9: progress and time remaining are computed from the task graph and from how long tasks took before.
 const T0 = Date.parse('2026-10-13T19:00:00Z')
@@ -190,5 +190,11 @@ describe('the final verification of the mission', () => {
     expect(s.eta.highSeconds).toBe(1000)
     expect(s.stage).toBe('Verifying the whole mission (usually about 17 min on this project)')
     expect(s.percent).toBeLessThan(99)
+  })
+
+  it('names no duration before this project measured one (the prior is a guess, not this project)', () => {
+    const tasks = [task('a', 'completed', { kind: 'implement', complexity: 'small', startedAt: at(1), finishedAt: at(10) })]
+    const s = snap(tasks, { run: run('verifying'), finale: { stats: FINALE_PRIOR, startedAt: T0 + 25 * 60_000 } })
+    expect(s.stage).toBe('Verifying the whole mission (its first time on this project, so its length is not known yet)')
   })
 })
