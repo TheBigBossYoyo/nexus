@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { insideSandboxRoot } from '../../helpers/sandbox-location'
 import { ExecutionBroker, type ContainSession } from '@main/modules/isolation/execution-broker'
 import { LAUNCH_EXIT, Launcher, type ContainmentProfile } from '@main/modules/isolation/launcher'
 import { readSandboxAccount } from '@main/modules/isolation/sandbox-account'
@@ -23,7 +24,8 @@ import { buildLauncher } from '../../../scripts/build-launcher.mjs'
 // so that a program that cannot start fails with a code and not with a dialog.
 
 const WINDOWS = process.platform === 'win32'
-const d = WINDOWS ? describe : describe.skip
+// 0.9.1: not from inside the sandbox's own folder (a mission worktree): see tests/helpers/sandbox-location.ts
+const d = WINDOWS && !insideSandboxRoot() ? describe : describe.skip
 const account = WINDOWS ? readSandboxAccount() : null
 const SCRATCH = resolve('test-results', 'isolation-tests')
 const SENTINEL = 'NEXUS-ISOLATION-SENTINEL-9d2e'

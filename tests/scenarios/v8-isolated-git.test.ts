@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { insideSandboxRoot } from '../helpers/sandbox-location'
 import type { FakeScript } from '@main/modules/agent-runtime/fake-runtime'
 import { readSandboxAccount } from '@main/modules/isolation/sandbox-account'
 // @ts-expect-error a build script, plain JavaScript
@@ -16,7 +17,8 @@ import { createHarness, git, plan, plannedTask, scenarioScript, writeFiles, type
 // Runs only where the sandbox account is set up (node scripts/sandbox-setup.mjs).
 
 const account = process.platform === 'win32' ? readSandboxAccount() : null
-const d = account ? describe : describe.skip
+// 0.9.1: not from inside the sandbox's own folder (a mission worktree): see tests/helpers/sandbox-location.ts
+const d = account && !insideSandboxRoot() ? describe : describe.skip
 const BASE = resolve('test-results', 'scenario-isolated-git')
 const BASH = 'C:\\Program Files\\Git\\bin\\bash.exe'
 const POWERSHELL = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')

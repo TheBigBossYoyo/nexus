@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { insideSandboxRoot } from '../../helpers/sandbox-location'
 import { ExecutionBroker } from '@main/modules/isolation/execution-broker'
 import { Launcher, type ContainmentProfile } from '@main/modules/isolation/launcher'
 import { readSandboxAccount } from '@main/modules/isolation/sandbox-account'
@@ -22,7 +23,8 @@ import { buildLauncher } from '../../../scripts/build-launcher.mjs'
 // protocol: an opener that somehow got in proves nothing without the token, which it cannot read.
 
 const WINDOWS = process.platform === 'win32'
-const d = WINDOWS ? describe : describe.skip
+// 0.9.1: not from inside the sandbox's own folder (a mission worktree): see tests/helpers/sandbox-location.ts
+const d = WINDOWS && !insideSandboxRoot() ? describe : describe.skip
 const account = WINDOWS ? readSandboxAccount() : null
 const SCRATCH = resolve('test-results', 'pipe-tests')
 const PROFILES: ContainmentProfile[] = account ? ['RESTRICTED', 'ISOLATED'] : ['RESTRICTED']
