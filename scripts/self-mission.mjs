@@ -1,7 +1,8 @@
 // NEXUS on itself, measured: a real mission on a clone of this repository, through the same path as the composer
 // (compilation.preview, the planning recommendation, runs.create), driven to its end with no help, and judged.
 //
-//   node scripts/self-mission.mjs --task <file.md> [--mode standard|enrolled] [--name <label>] [--timeout-min 90]
+//   node scripts/self-mission.mjs --task <file.md> [--mode standard|enrolled] [--name <label>] [--timeout-min 90] [--chatgpt]
+//   node scripts/self-mission.mjs --chatgpt-signin   (once: the tests' own ChatGPT connection)
 //
 // Everything it makes is under test-results/self-missions/<label>-<time>/ (the project folder the owner excluded
 // from the antivirus): the clone, NEXUS's data folder, report.json and report.md. The owner's NEXUS, its data and
@@ -15,13 +16,24 @@
 // It uses the real Claude (the owner's subscription) and needs `pnpm build` first.
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { waitForRuntime, stopNexus } from './acceptance-common.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? 'true' : all[i + 1]]] : acc), []))
+// --chatgpt-signin: opens NEXUS on the screen with the tests' own data folder, for the owner to connect ChatGPT
+// once (Settings); it ends when that window is closed. Nothing else is done.
+if (args['chatgpt-signin'] === 'true') {
+  const home = join(root, 'test-results', 'self-missions', '.chatgpt')
+  mkdirSync(home, { recursive: true })
+  const signin = await electron.launch({ args: ['.'], cwd: root, env: { ...process.env, NEXUS_DATA_DIR: home } })
+  await new Promise((done) => signin.on('close', done))
+  console.log(existsSync(join(home, 'chatgpt-credentials.protected')) ? 'The tests have their ChatGPT connection.' : 'No ChatGPT connection was saved.')
+  process.exit(0)
+}
 if (!args.task) throw new Error('--task <file> is required')
+if (args['chatgpt-from'] !== undefined) throw new Error("--chatgpt-from is withdrawn: sharing the owner's sign-in revokes it. Use --chatgpt (sign in once with --chatgpt-signin).")
 const mode = args.mode ?? 'standard'
 const name = args.name ?? args.task.replace(/^.*[\\/]/, '').replace(/\.\w+$/, '')
 const timeoutMs = Number(args['timeout-min'] ?? 90) * 60_000
@@ -41,30 +53,31 @@ execFileSync('git', ['-C', repo, 'config', 'user.name', 'NEXUS self-mission'])
 execFileSync('git', ['-C', repo, 'config', 'user.email', 'self-mission@nexus.local'])
 log(`clone of ${branch} at ${base.slice(0, 8)} in ${repo}`)
 
-// --chatgpt-from <the owner's NEXUS data folder>: the owner's ChatGPT connection (the strategic Director, needed by
-// the specification step), with the owner's consent (2026-10-14). The encrypted credential and the key that opens
-// it are copied in before the first start. After the run the credential is copied back if the test renewed it and
-// the owner's was not changed meanwhile (a renewal can make the older copy unusable), then removed from the test.
-const chatgptFrom = args['chatgpt-from'] ?? null
-let chatgptOriginal = null
-if (chatgptFrom !== null) {
-  const credential = join(chatgptFrom, 'chatgpt-credentials.protected')
-  chatgptOriginal = { path: credential, mtime: statSync(credential).mtimeMs, bytes: readFileSync(credential) }
+// --chatgpt: a ChatGPT connection of the tests' own (the strategic Director, needed by the specification step),
+// kept in test-results/self-missions/.chatgpt and signed in once with --chatgpt-signin. Never the owner's: NEXUS
+// holds its credential in memory and the provider rotates refresh tokens, so two instances sharing one sign-in end
+// with one of them presenting a token already used, and the provider then revokes the sign-in. That is what
+// happened to the owner's connection with the earlier --chatgpt-from (2026-10-14); it is refused now.
+const chatgptHome = join(root, 'test-results', 'self-missions', '.chatgpt')
+const chatgptFiles = ['chatgpt-credentials.protected', join('runtime-profile', 'Local State')]
+const chatgptLock = join(chatgptHome, 'in-use')
+const useChatgpt = args.chatgpt === 'true'
+if (useChatgpt) {
+  if (!existsSync(join(chatgptHome, chatgptFiles[0]))) throw new Error('The tests have no ChatGPT connection yet: run with --chatgpt-signin once.')
+  // One run at a time: two would share the sign-in, as above.
+  writeFileSync(chatgptLock, String(process.pid), { flag: 'wx' })
   mkdirSync(join(dataDir, 'runtime-profile'), { recursive: true })
-  copyFileSync(join(chatgptFrom, 'runtime-profile', 'Local State'), join(dataDir, 'runtime-profile', 'Local State'))
-  copyFileSync(credential, join(dataDir, 'chatgpt-credentials.protected'))
+  for (const f of chatgptFiles) copyFileSync(join(chatgptHome, f), join(dataDir, f))
 }
+// The test's own connection goes back whatever its state (renewed, or cleared by a refusal: then it says so).
 const returnChatgpt = () => {
-  if (chatgptOriginal === null) return
-  const used = join(dataDir, 'chatgpt-credentials.protected')
+  if (!useChatgpt) return
   try {
-    const now = readFileSync(used)
-    if (!now.equals(chatgptOriginal.bytes) && statSync(chatgptOriginal.path).mtimeMs === chatgptOriginal.mtime) copyFileSync(used, chatgptOriginal.path)
-  } catch {
-    // Nothing to return.
+    for (const f of chatgptFiles) if (existsSync(join(dataDir, f))) copyFileSync(join(dataDir, f), join(chatgptHome, f))
+  } finally {
+    for (const f of chatgptFiles) rmSync(join(dataDir, f), { force: true })
+    rmSync(chatgptLock, { force: true })
   }
-  rmSync(used, { force: true })
-  rmSync(join(dataDir, 'runtime-profile', 'Local State'), { force: true })
 }
 
 const report = { name, mode, branch, base, prompt, startedAt: new Date().toISOString(), samples: [], interventions: [], repairs: [], phases: {}, result: null }
@@ -216,6 +229,7 @@ try {
   report.verdict = 'FAIL'
   save()
   log('ERROR', e?.message ?? e)
+  if (/AUTH_REQUIRES_RECONNECT/.test(String(e?.message ?? e))) log("The tests' ChatGPT connection was refused by the provider: sign it in again with --chatgpt-signin.")
 } finally {
   await stopNexus(app, dataDir).catch(() => undefined)
   returnChatgpt()
