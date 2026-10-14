@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { canonicalizePath, isPathInside, isSecretPath, isTopLevelGit, pathNamesGit } from './paths'
 import { EXEC_API, hasPowerApiText, NEXUS_DATA_TEXT, POWER_COMMAND_NAMES, POWER_WORDS } from './power-patterns'
-import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, neutralizeInertHeredocs, separateProgramHeredocs, tokenize } from './shell-tokenizer'
 import type { Segment, Shell } from './shell-tokenizer'
 
 export type CommandLevel = 'safe' | 'write' | 'needs_approval' | 'forbidden'
@@ -196,7 +196,14 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
     a.ask('medium', 'network operation (.NET web client / BITS transfer)', 'NETWORK')
   }
   checkDotNetFileWrites(text, a)
-  const segs = tokenize(text, shell)
+  // A program read from a quoted heredoc by python, node & co. is judged as that program given with -c: the
+  // text checks above saw it, the power and NEXUS-data checks of an inline program apply, and it is not shell.
+  const separated = shell === 'bash' ? separateProgramHeredocs(text) : { text, programs: [] }
+  for (const program of separated.programs) {
+    if (POWER_WORDS.test(squash(program)) || hasPowerApiText(squash(program))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+    if (NEXUS_DATA.test(program) || NEXUS_DATA.test(squash(program))) a.add('forbidden', 'high', NEXUS_DATA_REASON, 'SYSTEM_CHANGE')
+  }
+  const segs = tokenize(separated.text, shell)
   segs.forEach((seg, i) => {
     const next = segs[i + 1]
     if (['get-childitem', 'gci', 'ls', 'dir'].includes(normalizeName(seg.words[0] ?? '')) && seg.words.some((w) => /^-(hidden|force|attributes|h)$/i.test(w)) && next?.sep === '|' && GIT_ENTRY_WRITERS.has(normalizeName(next.words[0] ?? ''))) {
@@ -205,8 +212,9 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
   })
   for (const seg of segs) analyzeSegment(seg, shell, a, depth)
   // Adjacent literals joined ('.gi'+'t') are read as one word by the shell: look at that text too.
-  const joined = squash(text)
-  if (joined !== text && /(["'])\s*\+\s*(["'])|(["'])(["'])/.test(text)) {
+  const shellText = separated.text
+  const joined = squash(shellText)
+  if (joined !== shellText && /(["'])\s*\+\s*(["'])|(["'])(["'])/.test(shellText)) {
     for (const seg of tokenize(joined, shell)) {
       const n = normalizeName(seg.words[0] ?? '')
       checkWords(seg, seg.words, a, DELETE_CMDS.has(n) || MOVE_CMDS.has(n), n === 'git')

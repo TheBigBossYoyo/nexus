@@ -429,3 +429,45 @@ export function neutralizeInertHeredocs(text: string): string {
   }
   return out
 }
+
+/** Start of a command, then an interpreter that is not a shell, with plain arguments (`python3 -`, `node`, `py -X utf8 -`). */
+const PROGRAM_PREFIX = new RegExp(String.raw`(?:^|[\n;&|])[ \t]*(?:[\w.:~-]*[\\/])?(?:python3?|py|node|perl|ruby|php|lua|bun)(?:\.exe)?(?:[ \t]+[\w./=:+-]+)*[ \t]*$`, 'i')
+
+/**
+ * 0.9.1: a quoted heredoc read by an interpreter that is not a shell (`python3 - <<'E'`) is a program in that
+ * language, or data for it: never shell. Its body is taken out of the text analysed as shell and returned on
+ * its own, so the classifier can judge it as it judges `python3 -c "<program>"`. As shell, a line such as
+ * `a: 1` read as the drive A:, and `Map<string | null>` as a redirection and a pipe, and an agent editing a file
+ * with a short script had to wait for the owner's approval. Only quoted delimiters (an unquoted body expands
+ * `$(...)` in the shell) and only these interpreters: a heredoc read by sh, bash, PowerShell or cmd stays shell.
+ */
+export function separateProgramHeredocs(text: string): { text: string; programs: string[] } {
+  if (!text.includes('<<')) return { text, programs: [] }
+  let out = text
+  const programs: string[] = []
+  let scanFrom = 0
+  for (let guard = 0; guard < 64; guard++) {
+    ANY_OPENER.lastIndex = scanFrom
+    const m = ANY_OPENER.exec(out)
+    if (m === null) break
+    const before = out.slice(0, m.index)
+    if (!quotesBalanced(before)) break
+    const openerEnd = m.index + m[0].length
+    const nl = out.indexOf('\n', openerEnd)
+    if (nl < 0) break
+    const restLine = out.slice(openerEnd, nl).replace(/\r$/, '')
+    if (/<<(?!<)/.test(restLine.replace(/(['"]).*?\1/g, ''))) break // several heredocs on one line: give up
+    const quoted = m[2] !== undefined || m[3] !== undefined
+    const delim = m[2] ?? m[3] ?? m[4] ?? ''
+    const end = delim === '' ? -1 : heredocEnd(out, nl + 1, delim, m[1] === '-')
+    if (end < 0) break
+    if (quoted && PROGRAM_PREFIX.test(before) && OPENER_REST.test(restLine)) {
+      programs.push(out.slice(nl + 1, end))
+      out = `${before.replace(/[ \t]+$/, '')}${restLine}\n${out.slice(end)}`
+      scanFrom = 0
+      continue
+    }
+    scanFrom = end
+  }
+  return { text: out, programs }
+}
