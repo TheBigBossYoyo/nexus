@@ -227,9 +227,21 @@ export class TaskPipeline {
         this.host.setStage(taskId, 'checks')
         if (task.state !== 'running') task = this.core.setTaskState(taskId, 'running')
         await this.commitLeftovers(run, task, worktree)
-        const checks = await this.core.runChecks(run, taskId, worktree.path, cycle)
+        // The task's own files: what its checks are scoped to (the integration checks everything).
+        const changedFiles = await git.changedFiles(worktree.path, worktree.baseCommit, 'HEAD').catch(() => null)
+        const checks = await this.core.runChecks(run, taskId, worktree.path, cycle, changedFiles === null ? undefined : { changedFiles })
         lastChecks = checks.commands
         if (this.halted(runId, control)) return
+        const unfinished = checks.commands.filter((c) => c.exitCode !== 0 || c.timedOut)
+        if (!checks.passed && unfinished.length > 0 && unfinished.every((c) => c.timedOut)) {
+          // A check that ran out of time says nothing about the task's code: no repair agent is sent to fix it.
+          const reason = `The ${unfinished.map((c) => c.name).join(', ')} check did not finish within the check time limit (${repos.settings.get().execution.checkTimeoutMinutes} min), so the task's code was neither passed nor failed. Raise "Check timeout" in Settings > Execution, or fix the test that hangs, then retry the task.`
+          bus.transaction(() => {
+            this.core.setTaskState(task.id, 'blocked', { blockedReason: reason })
+            bus.emit({ runId: run.id, taskId: task.id, type: 'task.blocked', payload: { reason } })
+          })
+          return
+        }
         if (!checks.passed) {
           const repaired = await this.repair(run, task, worktree, control, {
             kind: 'checks',

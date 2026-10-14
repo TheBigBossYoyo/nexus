@@ -1,0 +1,66 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { scopeTaskChecks, scriptOf } from '@main/modules/orchestrator/check-scope'
+
+// 0.9.1: a task's checks are about its own changes. Found when a mission on NEXUS itself ran the whole 15-minute
+// suite after a task, timed out, and sent a repair agent to fix code that had nothing wrong with it.
+
+const dir = resolve('test-results', 'check-scope')
+const ORDER = ['typecheck', 'lint', 'build', 'test'] as const
+const checks = { typecheck: 'pnpm typecheck', lint: 'pnpm lint', build: 'pnpm build', test: 'pnpm test' }
+
+function project(scripts: Record<string, string>, files: string[]): void {
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(join(dir, 'src', 'a b'), { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts }))
+  for (const f of files) writeFileSync(join(dir, f), 'export {}\n')
+}
+
+describe('scopeTaskChecks', () => {
+  beforeAll(() => mkdirSync(dir, { recursive: true }))
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('runs the related vitest tests and the linter on the changed files, the type check whole, and no build', () => {
+    project({ test: 'vitest run', lint: 'eslint .', typecheck: 'tsc --noEmit', build: 'vite build' }, ['src/panel.tsx', 'src/a b/model.ts'])
+    mkdirSync(join(dir, 'tests'), { recursive: true })
+    writeFileSync(join(dir, 'tests', 'panel.test.ts'), "import { x } from '../src/panel'\n")
+    writeFileSync(join(dir, 'tests', 'other.test.ts'), "import { y } from '../src/unrelated'\n")
+    const out = scopeTaskChecks({ checks, order: ORDER, cwd: dir, changedFiles: ['src/panel.tsx', 'src/a b/model.ts', 'README.md', 'src/deleted.ts'] })
+    expect(out.map((c) => [c.name, c.skip, c.command])).toEqual([
+      ['typecheck', false, 'pnpm typecheck'],
+      ['lint', false, 'pnpm exec eslint src/panel.tsx "src/a b/model.ts"'],
+      ['build', true, 'pnpm build'],
+      ['test', false, 'pnpm exec vitest run --passWithNoTests tests/panel.test.ts'],
+    ])
+  })
+
+  it('skips tests and lint for a task that changed no source file', () => {
+    project({ test: 'vitest run', lint: 'eslint .' }, [])
+    const out = scopeTaskChecks({ checks, order: ORDER, cwd: dir, changedFiles: ['docs/notes.md'] })
+    expect(out.find((c) => c.name === 'test')).toMatchObject({ skip: true })
+    expect(out.find((c) => c.name === 'lint')).toMatchObject({ skip: true })
+  })
+
+  it('leaves alone what it cannot read exactly, and jest gets --findRelatedTests', () => {
+    project({ test: 'vitest run && node check.js', lint: 'eslint --fix .' }, ['src/x.ts'])
+    let out = scopeTaskChecks({ checks, order: ORDER, cwd: dir, changedFiles: ['src/x.ts'] })
+    expect(out.find((c) => c.name === 'test')).toMatchObject({ scope: 'FULL', command: 'pnpm test' })
+    expect(out.find((c) => c.name === 'lint')).toMatchObject({ scope: 'FULL', command: 'pnpm lint' })
+    project({ test: 'jest' }, ['src/x.ts'])
+    out = scopeTaskChecks({ checks: { test: 'npm test' }, order: ORDER, cwd: dir, changedFiles: ['src/x.ts'] })
+    expect(out[0]?.command).toBe('npm exec jest --passWithNoTests --findRelatedTests src/x.ts')
+  })
+
+  it('keeps the build when there is no type check', () => {
+    project({ build: 'vite build' }, [])
+    expect(scopeTaskChecks({ checks: { build: 'pnpm build' }, order: ORDER, cwd: dir, changedFiles: [] })[0]).toMatchObject({ skip: false, scope: 'FULL' })
+  })
+
+  it('reads which script a check command runs', () => {
+    expect(scriptOf('pnpm test')).toEqual({ pm: 'pnpm', script: 'test' })
+    expect(scriptOf('npm run lint')).toEqual({ pm: 'npm', script: 'lint' })
+    expect(scriptOf('make test')).toBeNull()
+    expect(scriptOf('pnpm exec vitest')).toBeNull()
+  })
+})
