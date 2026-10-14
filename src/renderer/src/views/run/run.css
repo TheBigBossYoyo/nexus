@@ -203,3 +203,64 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Test environment (applications under test and user disturbance) on the mission page. */
+.test-env-panel {
+  margin: 8px 16px 0;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  font-size: 13px;
+}
+.test-env-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.test-env-title {
+  font-weight: 600;
+}
+.test-env-apps {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.test-env-apps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.test-env-app-name {
+  font-weight: 500;
+}
+.test-env-disturbance {
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+.test-env-row {
+  display: flex;
+  gap: 6px;
+}
+.test-env-row dt {
+  color: var(--color-fg-muted, var(--color-fg));
+}
+.test-env-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.test-env-note {
+  margin: 6px 0 0;
+  color: var(--color-fg-muted, var(--color-fg));
+  font-size: 12px;
+}
+.test-env-image {
+  max-width: 100%;
+  height: auto;
+}
