@@ -8,6 +8,7 @@ import { qkv5 } from './queries-v5'
 import { qkv6 } from './queries-v6'
 import { qkControl, qkRuntime } from './queries-v7'
 import { qkAutonomy, qkIsolation } from './queries-autonomy'
+import { testEnvironmentKeys } from '../views/run/testEnvironmentModel'
 import { useConnectionStore } from '../store/connection'
 import { useUiStore } from '../store/ui'
 import { quotaWaitActive } from './usageModel'
@@ -235,6 +236,10 @@ export function createPushHandler(qc: QueryClient, options: PushOptions = {}): P
         case 'apps':
           // An application under test started or stopped.
           schedule([qkIsolation.appsRoot()])
+          break
+        case 'presentation':
+          // The user-disturbance measurements of these runs changed.
+          schedule(message.runIds.flatMap((runId) => [testEnvironmentKeys.metrics(runId), testEnvironmentKeys.apps(runId)]))
           break
         case 'connection':
           // A new connection or a restarted runtime: everything cached is old, so everything is read again.
