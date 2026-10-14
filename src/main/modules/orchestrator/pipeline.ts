@@ -1,3 +1,4 @@
+import { repositoryFacts } from './repo-facts'
 import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import type { ZodType } from 'zod'
@@ -745,8 +746,9 @@ export class TaskPipeline {
     attempt: number,
     control: SessionControl,
   ): Promise<{ status: 'passed' } | { status: 'failed'; failure: Failure } | { status: 'halt' }> {
-    const { repos, bus } = this.core.deps
+    const { repos, bus, git } = this.core.deps
     bus.emit({ runId: run.id, taskId: task.id, type: 'verification.started', payload: { attempt } })
+    const repoFacts = await repositoryFacts(git, worktree.path, worktree.baseCommit)
     const gate = await this.gate(run, task, worktree, control, {
       role: 'verifier',
       purpose: 'verify',
@@ -756,6 +758,8 @@ export class TaskPipeline {
         instructions: renderInstructionsInForce(repos, run, task, { withRequest: true }),
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
+        patch: diff.patch,
+        repoFacts,
         checkResults: checks,
         checkOutputMode: checkOutputMode(this.core.deps.repos.settings.get().tokens),
         reviewSummary,

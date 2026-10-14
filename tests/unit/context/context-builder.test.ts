@@ -480,6 +480,18 @@ describe('other stage prompts', () => {
     expect(without.sections.map((s) => s.name)).not.toContain('Review summary')
   })
 
+  // 0.9.1: verifiers of real missions began with `git diff` and `git tag --points-at`, and the final one reran the suite.
+  it('verifier prompts carry the patch and the measured git facts; the final one does not rerun the suite', () => {
+    const v = buildVerifierPrompt({ task: makeTask(), missionCriteria: [], diffStat: 'x', checkResults: [], patch: '+added line', repoFacts: 'HEAD: abc' })
+    expect(v.prompt).toContain('+added line')
+    expect(v.prompt).toContain('HEAD: abc')
+    const mv = buildMissionVerifierPrompt({ run: makeRun('mission'), missionCriteria: ['c'], diffStat: 'stat', checkResults: [], patch: '+other', repoFacts: 'Tags on HEAD: none' })
+    expect(mv.prompt).toContain('+other')
+    expect(mv.prompt).toContain('Tags on HEAD: none')
+    expect(mv.prompt).not.toContain('Run the project checks yourself')
+    expect(mv.prompt).toContain('Do not run the whole suite')
+  })
+
   it('repair prompt renders findings, failed criteria and check output', () => {
     const { prompt } = buildRepairPrompt({
       task: makeTask(),

@@ -9,6 +9,7 @@ const PRINCIPLES = `Engineering principles (apply always):
 - No speculative abstractions or over-engineering. Do the simplest thing that satisfies the requirement.
 - Only modify scope relevant to the task. Do not refactor, reformat, or "improve" unrelated code.
 - Tests verify correctness; they do not define it. Never hard-code behaviour to satisfy a test, and never delete, skip, or weaken a legitimate test.
+- Change files with your file-editing tools (Edit, Write), not with scripts run through the shell (python, sed, heredocs): an edit tool shows exactly what changed and fails loudly when the text it replaces is not there.
 - Clean up temporary files and scripts you create.
 - When blocked, call mcp__nexus__report_blocker with the concrete blocker and evidence instead of pretending the work is complete.
 - Do not spawn subagents or delegate through the Task/Agent tool; NEXUS owns orchestration.`

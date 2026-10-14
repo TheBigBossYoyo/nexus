@@ -1,3 +1,4 @@
+import { repositoryFacts } from './repo-facts'
 import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import {
@@ -1101,6 +1102,8 @@ export class Orchestrator implements PipelineHost {
             instructions: renderInstructionsInForce(repos, run, null, { withRequest: false }),
             missionCriteria: criteria.map((c) => c.text),
             diffStat: stat || '(no changes)',
+            patch: diff.patch,
+            repoFacts: await repositoryFacts(git, integration.path, run.baseCommit),
             checkResults: checks.commands,
             checkOutputMode: checkOutputMode(this.deps.repos.settings.get().tokens),
             planSummary: run.plan?.summary,
