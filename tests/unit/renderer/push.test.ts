@@ -91,6 +91,19 @@ describe('push handler', () => {
     h.dispose()
   })
 
+  it('invalidates the test environment keys of exactly the runs of a presentation push', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
+    const h = createPushHandler(qc, { debounceMs: 100, live: live() })
+    h.handle({ kind: 'presentation', runIds: ['r1', 'r2'] })
+    vi.advanceTimersByTime(100)
+    const keys = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(keys).toContain(JSON.stringify(['presentation', 'metrics', 'r1']))
+    expect(keys).toContain(JSON.stringify(['presentation', 'metrics', 'r2']))
+    expect(keys.filter((k) => k.includes('presentation') && !k.includes('r1') && !k.includes('r2'))).toEqual([])
+    h.dispose()
+  })
+
   it('still flushes during a continuous stream', () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
