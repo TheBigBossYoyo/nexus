@@ -5,7 +5,7 @@ import { DASH, formatCost, formatDuration } from '../../lib/format'
 import { useResumeRun, useRetryTask, useRunSummary } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
 import { CandidatesSection } from './CandidatesSection'
-import { capacityWaitLines, pauseDetailFromEvents } from './eventText'
+import { capacityWaitLines, pauseCauseFromEvents, pauseDetailFromEvents } from './eventText'
 import { useRunCtx } from './runContext'
 
 const PAUSE_LABEL = {
@@ -69,7 +69,7 @@ export function RunStatePanel() {
   if (run.state === 'paused' && run.pauseReason === 'quota') return <QuotaPaused />
 
   if (run.state === 'paused') {
-    const reason = run.pauseReason ? PAUSE_LABEL[run.pauseReason] : 'Paused'
+    const reason = pauseCauseFromEvents(events) === 'intervention' ? 'Needs your attention' : run.pauseReason ? PAUSE_LABEL[run.pauseReason] : 'Paused'
     const waitingOn = run.pauseReason === 'capacity' ? capacityWaitLines(events) : []
     // A capacity wait says what it waits on in words; the raw routing reasons stay in the event log.
     const detailText = waitingOn.length > 0 ? null : pauseDetailFromEvents(events)

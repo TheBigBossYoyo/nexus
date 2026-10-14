@@ -159,7 +159,8 @@ const WAIT_TEXT: Record<Exclude<ProgressWait, 'ACTIVE' | 'FINISHED'>, string> = 
   WAITING_FOR_NETWORK: 'Waiting for the Internet',
   WAITING_FOR_PROVIDER: 'Waiting for the provider',
   WAITING_FOR_USER_BOUNDARY: 'Waiting for your decision on a boundary request',
-  WAITING_FOR_USER: 'Paused by you',
+  // A pause NEXUS made itself (failed or blocked tasks) is not the owner's: the words fit both.
+  WAITING_FOR_USER: 'Paused, waiting for you',
   WAITING_FOR_EXTERNAL_PROCESS: 'Waiting for an external process',
 }
 

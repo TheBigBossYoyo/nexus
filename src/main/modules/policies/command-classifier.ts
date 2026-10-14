@@ -87,6 +87,8 @@ class Analysis {
   hiddenGlob = false
   /** Literal variable assignments found in the command text, lowercase name to value. */
   readonly vars = new Map<string, string>()
+  /** 0.9.1: where relative paths are read from, once a `cd` of the same command moved inside the roots. */
+  cwd: string | null = null
 
   constructor(readonly opts: ClassifyOptions) {
     this.roots = []
@@ -342,7 +344,7 @@ function dropExistenceFindings(a: Analysis): void {
   }
   const kept = a.findings.filter((f) => {
     if (f.reason.startsWith("touching Git's own files: ")) return false
-    const outside = /^path outside the worktree: (.*)$/.exec(f.reason)
+    const outside = /^(?:reads )?path outside the worktree: (.*)$/.exec(f.reason)
     return !(outside !== null && inProject(outside[1] ?? ''))
   })
   a.findings.length = 0
@@ -493,6 +495,22 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
   }
 
   checkWords(seg, words, a, DELETE_CMDS.has(normalizeName(words[i] ?? '')) || MOVE_CMDS.has(normalizeName(words[i] ?? '')), normalizeName(words[i] ?? '') === 'git')
+
+  // 0.9.1: `cd dir; head ../x` reads `x` from where the cd went, not from the worktree's top. Only a literal
+  // directory inside the roots moves the base; anything else leaves it where it was (and was checked above).
+  if (['cd', 'chdir', 'set-location', 'sl', 'pushd'].includes(normalizeName(words[i] ?? ''))) {
+    const target = words.slice(i + 1).filter((w) => !w.startsWith('-'))
+    const dir = target[0]
+    if (target.length === 1 && dir !== undefined && !/[$`%*?~]/.test(dir)) {
+      try {
+        const msys = /^\/(?:mnt\/)?([a-zA-Z])(?:\/(.*))?$/.exec(dir)
+        const next = canonicalizePath(msys?.[1] !== undefined ? `${msys[1].toUpperCase()}:\\${msys[2] ?? ''}` : dir, a.cwd ?? a.roots[0] ?? dir)
+        if (a.roots.some((r) => r.toLowerCase() === next.toLowerCase() || isPathInside(r, next))) a.cwd = next
+      } catch {
+        // An unreadable directory leaves the base where it was.
+      }
+    }
+  }
 
   const nameWord = words[i]
   if (nameWord === undefined) {
@@ -665,6 +683,7 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
     for (const w of positional) writePositions.add(w)
   }
   const candidates = [...words, ...seg.redirects.map((r) => r.target)]
+  const commandWord = words.find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && w !== '&' && w !== '.')
   for (const w of candidates) {
     if (w === '') continue
     if ((writePositions.has(w) || /^of=/.test(w)) && !HARMLESS_REDIRECT_TARGET.has(w.toLowerCase())) {
@@ -695,7 +714,11 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
       }
       // What echo and printf are given is text they print, not a place: only where their output is sent is one.
       const outside = TEXT_PRINTERS.has(head[0] ?? '') && !redirectTargets.has(w) ? null : outsideRoots(v, a)
-      if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
+      // 0.9.1: a path outside that nothing writes to (not a redirect target, not a word of a writing or deleting
+      // command, not the program being run) is a read, and is said to be one: `ls /c/Program Files/nodejs` was put
+      // to the owner as "write or delete files outside the task roots".
+      const reading = outside !== null && !destructive && !writer && !writePositions.has(w) && !/^of=/.test(w) && w !== commandWord
+      if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : reading ? 'reads ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
     }
   }
   for (const r of seg.redirects) {
@@ -877,8 +900,9 @@ function escapesThroughLink(v: string, base: string, a: Analysis): string | null
 
 /** Returns a description when `v` refers to a location outside every root, otherwise null. */
 function outsideRoots(v: string, a: Analysis): string | null {
-  const base = a.roots[0]
-  if (base === undefined) return null
+  if (a.roots[0] === undefined) return null
+  // Relative paths are read from where a `cd` of this command went (inside the roots), else from the worktree.
+  const base = a.cwd ?? a.roots[0]
   if (/^[a-z][a-z0-9+.-]+:\/\//i.test(v)) return null
   if (v === '/dev/null' || v === '/dev/stdin' || v === '/dev/stdout' || v === '/dev/stderr') return null
   if (/^\/[A-Za-z?](:.*)?$/.test(v)) return null // cmd switches such as /s /q /c

@@ -31,7 +31,7 @@ import { MissionAdmissionInspector } from '../projects/CompiledTaskInspector'
 import { CompilationPreview } from '../projects/CompilationPreview'
 import { defaultIntentMetadata, type CompilationMode, type CompiledTaskSpec } from '@shared/intelligence'
 import { missionTitle, policyView, strategyChip, type PolicyView } from './missionModel'
-import { pauseDetailFromEvents } from './eventText'
+import { pauseCauseFromEvents, pauseDetailFromEvents, pauseLabel } from './eventText'
 import { useNow, useRunCtx } from './runContext'
 
 function WhyStrategyBody({ view }: { view: PolicyView }) {
@@ -369,7 +369,7 @@ export function MissionHeader() {
       <MissionAdmissionInspector key={run.id} run={run} />
       {run.state === 'paused' && pauseDetail ? (
         <div className="border-b bg-warning-subtle px-5 py-1.5 text-small text-warning" data-testid="pause-reason">
-          {run.pauseReason === 'user' ? 'Paused by you' : run.pauseReason === 'recovery' ? 'Paused after a restart' : 'Paused'}: {pauseDetail}
+          {pauseLabel(run.pauseReason, pauseCauseFromEvents(events))}: {pauseDetail}
         </div>
       ) : null}
 
