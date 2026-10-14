@@ -213,7 +213,7 @@ export interface SherpaVad {
 }
 export interface SherpaOfflineTts {
   readonly sampleRate: number
-  generateAsync(request: { text: string; sid: number; speed: number; onProgress?: (info: { samples: Float32Array; progress: number }) => number | boolean | void }): Promise<{ samples: Float32Array; sampleRate: number }>
+  generateAsync(request: { text: string; sid: number; speed: number; enableExternalBuffer?: boolean; onProgress?: (info: { samples: Float32Array; progress: number }) => number | boolean | void }): Promise<{ samples: Float32Array; sampleRate: number }>
 }
 
 export interface SttSettings {

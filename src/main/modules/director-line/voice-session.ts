@@ -150,6 +150,11 @@ export class VoiceSession {
     return { say: 'NEXUS Director. What is the PIN? You can say it or key it in, then press pound.', end: false }
   }
 
+  /** How many digits have been keyed and not yet submitted (never which). */
+  get keyedCount(): number {
+    return this.keyed.length
+  }
+
   /** A key pressed. Digits are collected until the pound key; nothing is said back for a single digit. */
   async onDigit(digit: string): Promise<VoiceReply | null> {
     // Once the caller is known, keys are nothing: a stray pound must not count as a wrong PIN.

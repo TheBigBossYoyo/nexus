@@ -38,6 +38,10 @@ extraResources:
   # elevated once per session, with the owner's UAC consent; never a service, never left running.
   - from: out/native/nexus-elevate.exe
     to: bin/nexus-elevate.exe
+  # 0.9.1: the meter of what NEXUS's work shows on the owner's screen (native/nexus-presence): reads window classes
+  # and the foreground, changes nothing.
+  - from: out/native/nexus-presence.exe
+    to: bin/nexus-presence.exe
   # The privilege acceptance fixture (a folder and a registry key of NEXUS's own name; never in a session by default).
   - from: native/privilege-fixture
     to: privilege-fixture

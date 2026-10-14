@@ -173,7 +173,10 @@ export class SherpaVoices implements VoicePort {
     const tts = await this.voice(lang)
     if (signal.aborted) return null
     // The progress callback is asked, as sound is made, whether to go on: 0 stops the synthesis in the library.
-    const audio = await tts.generateAsync({ text, sid: TTS_VOICES[lang].speakerId, speed: 1.0, onProgress: () => (signal.aborted ? 0 : 1) })
+    // The samples are copied into an ordinary buffer: Electron's V8 sandbox refuses the library's default, a buffer
+    // over its own memory ("External buffers are not allowed"), and every sentence then failed inside the
+    // application, silently (measured on the installed 0.9.1-development, 2026-10-14; under plain Node it works).
+    const audio = await tts.generateAsync({ text, sid: TTS_VOICES[lang].speakerId, speed: 1.0, enableExternalBuffer: false, onProgress: () => (signal.aborted ? 0 : 1) })
     return signal.aborted ? null : audio
   }
 

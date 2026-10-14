@@ -1,5 +1,9 @@
 import type { DirectorVoice } from './director-voice'
+import { MIN_PIN_LENGTH } from './pairing'
 import { SESSION_IDLE_MS, SESSION_MAX_MS, spokenDigits, type VoiceReply, type VoiceSession } from './voice-session'
+
+/** How long after the last key a PIN keyed without the pound key is taken. */
+export const KEYPAD_PAUSE_MS = 3000
 
 /**
  * 0.9.1: one live call, between what was heard and what is said. It knows nothing of audio or of the service
@@ -61,6 +65,7 @@ export class CallConversation {
   private interruptible = false
   private warmed = false
   private over = false
+  private keypadTimer: ReturnType<typeof setTimeout> | null = null
   private readonly lines: CallLine[] = []
   private watch: NodeJS.Timeout | undefined
   private limit: NodeJS.Timeout | undefined
@@ -191,9 +196,19 @@ export class CallConversation {
   digit(digit: string): Promise<void> {
     if (this.over) return Promise.resolve()
     this.rearm()
+    if (this.keypadTimer) clearTimeout(this.keypadTimer)
+    this.keypadTimer = null
     return this.enqueue(async () => {
       const reply = await this.o.session.onDigit(digit)
       if (reply !== null) await this.deliver('', reply, false)
+      // A PIN keyed without the pound key is taken once the keys stop: at least the shortest PIN there can be,
+      // then KEYPAD_PAUSE_MS without a key (people do not always press pound, and the prompt may not have been heard).
+      if (/^\d$/.test(digit) && !this.o.session.isAuthenticated && this.o.session.keyedCount >= MIN_PIN_LENGTH) {
+        this.keypadTimer = setTimeout(() => {
+          this.keypadTimer = null
+          if (!this.over && !this.o.session.isAuthenticated && this.o.session.keyedCount >= MIN_PIN_LENGTH) void this.digit('#')
+        }, KEYPAD_PAUSE_MS)
+      }
     })
   }
 
@@ -239,6 +254,7 @@ export class CallConversation {
     this.over = true
     clearTimeout(this.watch)
     clearTimeout(this.limit)
+    if (this.keypadTimer) clearTimeout(this.keypadTimer)
     await this.o.voice?.close()
   }
 }

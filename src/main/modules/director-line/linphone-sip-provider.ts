@@ -692,7 +692,14 @@ export class LinphoneSipProvider implements DirectorVoiceProvider {
       case 'dtmf': {
         const call = this.callFor(event)
         const digit = str(event, 'digit')
-        if (call && digit && /^[0-9*#A-D]$/.test(digit)) call.onDigitEvent(digit)
+        if (call && digit && /^[0-9*#A-D]$/.test(digit)) {
+          // That a key arrived, never which: whether the telephone's keypad reaches NEXUS at all is worth knowing.
+          if (!this.keyLogged.has(call.helperId)) {
+            this.keyLogged.add(call.helperId)
+            this.o.log?.('director-line: the caller pressed a key (keypad tones reach NEXUS)')
+          }
+          call.onDigitEvent(digit)
+        }
         return
       }
       case 'played': {
@@ -825,6 +832,8 @@ export class LinphoneSipProvider implements DirectorVoiceProvider {
   }
 
   private lastTarget: string | null = null
+  /** Calls for which a key was already logged (one line per call). */
+  private readonly keyLogged = new Set<string>()
 
   private outboundIdentity(): string {
     return this.lastTarget ?? 'sip:unknown@invalid.example'
