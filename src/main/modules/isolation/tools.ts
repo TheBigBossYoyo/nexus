@@ -105,6 +105,19 @@ function installRoot(real: string): string {
   return dir
 }
 
+/** What changes when an installation does: its executable, and the folders that gain an entry when a tool is added to it. */
+export function installFingerprint(root: string, real: string): string {
+  const stamp = (path: string): string => {
+    try {
+      const s = statSync(path)
+      return `${s.size}:${Math.round(s.mtimeMs)}`
+    } catch {
+      return '-'
+    }
+  }
+  return [real, root, join(root, 'bin'), join(root, 'node_modules'), join(root, 'bin', 'node_modules')].map(stamp).join('|')
+}
+
 function measure(dir: string): { bytes: number; files: number } {
   let bytes = 0
   let files = 0
@@ -170,7 +183,11 @@ export function mirrorTools(input: { sandboxRoot: string; userProfile: string; p
     }
     let target = mirroredRoots.get(lower(root))
     if (target === undefined) {
-      target = join(toolsDir, createHash('sha256').update(lower(root)).digest('hex').slice(0, 16))
+      // 0.9.1: the copy is of the installation as it is now. It used to be made once per installation directory and
+      // kept: a tool added later (pnpm, installed globally into Node's own folder) never reached the sandbox, and an
+      // enrolled project's checks found no pnpm. The fingerprint changes when the executable or the folders global
+      // tools land in change; a new copy is made beside the old one, which a contained process may still be using.
+      target = join(toolsDir, createHash('sha256').update(`${lower(root)}|${installFingerprint(root, real)}`).digest('hex').slice(0, 16))
       const marker = join(target, '.nexus-mirror.json')
       if (!existsSync(marker)) {
         const size = measure(root)
