@@ -28,6 +28,7 @@ import type { PauseCause } from '@shared/events'
 import type { RecoverableRun } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage, NexusError } from '@shared/result'
+import { profileProject } from '../profile/project-profiler'
 import { buildRunConfig } from '@shared/settings'
 import type { ConcreteStrategy, PolicyDecision, RunStrategyInfo, Strategy, TaskProfile } from '@shared/v3'
 import {
@@ -207,6 +208,23 @@ export class Orchestrator implements PipelineHost {
         : await git.headCommit(project.rootPath).catch(() => null)
     if (!readOnly && !baseCommit) {
       throw new NexusError('invalid_state', 'The repository has no commits yet. Create an initial commit first.')
+    }
+    // 0.9.1: the profile is the project as it was when it was last read (its branch, its check commands). One
+    // taken at another commit is read again before the run uses it: a project added at 0.2.1 kept saying so, and
+    // told the agents so, ten days and a hundred commits later.
+    if (isRepo && baseCommit && project.profile !== null && project.profile.headCommit !== baseCommit) {
+      try {
+        const profile = await profileProject(project.rootPath, {
+          isRepository: (p) => git.isRepository(p),
+          repoRoot: (p) => git.repoRoot(p).catch(() => null),
+          currentBranch: (p) => git.currentBranch(p).catch(() => null),
+          headCommit: (p) => git.headCommit(p).catch(() => null),
+          status: async (p) => ({ dirty: !(await git.status(p)).clean }),
+        })
+        Object.assign(project, repos.projects.update(project.id, { profile }))
+      } catch (e) {
+        this.core.log(`the profile of ${project.name} could not be read again: ${errorMessage(e)}`)
+      }
     }
 
     const checks = project.profile?.commands ?? { build: null, test: null, lint: null, typecheck: null }
