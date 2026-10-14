@@ -61,7 +61,20 @@ describe('selectFactsForTask', () => {
     const out = selectFactsForTask(facts, task('x', ['src/billing/new-file.ts']), 3)
     expect(out).toHaveLength(3)
     expect(out[0]?.reason).toContain("contains the task's suggested file")
-    expect(out.find((o) => o.fact.subject === 'src/billing/ledger.ts')?.reason).toContain('module src/billing')
+    expect(out.find((o) => o.fact.subject === 'src/billing/ledger.ts')?.reason).toContain('the folder of suggested file')
+  })
+
+  // 0.9.1: a real worker's pack held "module: src/main" and import relations of whole folders for one file deep below.
+  it('does not take a wide folder, or a file elsewhere in it, as being about a deep file', () => {
+    const wide = [
+      fact('module', 'src/main', 'src/main: 400 source files', []),
+      fact('import_relation', 'scripts -> src/main', 'scripts import src/main', []),
+      fact('hot_file', 'src/main/modules/git/git-service.ts', 'changed often', ['src/main/modules/git/git-service.ts']),
+      fact('hot_file', 'src/main/modules/progress/estimator.ts', 'changed often', ['src/main/modules/progress/estimator.ts']),
+      fact('module', 'src/main/modules/progress', 'progress: 4 files', []),
+    ]
+    const out = selectFactsForTask(wide, task('zzz', ['src/main/modules/progress/service.ts']), 10).map((o) => o.fact.subject)
+    expect(out).toEqual(['src/main/modules/progress', 'src/main/modules/progress/estimator.ts'])
   })
 
   it('is deterministic regardless of input order', () => {
