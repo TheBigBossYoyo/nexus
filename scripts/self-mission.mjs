@@ -147,6 +147,7 @@ try {
   let last = ''
   let detail
   const seenPending = new Set()
+  let plannedKeys = null
   for (;;) {
     if (Date.now() - started > timeoutMs) {
       report.result = 'TIMEOUT'
@@ -174,8 +175,11 @@ try {
       report.interventions.push({ at: new Date().toISOString(), kind: `boundary:${b.capability}`, detail: String(b.action ?? b.summary ?? '').slice(0, 300) })
       log('BOUNDARY', b.capability, String(b.action ?? '').slice(0, 120))
     }
+    // The tasks of the plan as it first appeared: a repair-mode mission plans its own diagnosis and fix, which are
+    // its work, not repairs. A repair is a task added afterwards (a fix of a failure).
+    if (plannedKeys === null && detail.tasks.length > 0) plannedKeys = new Set(detail.tasks.map((x) => x.key))
     for (const x of detail.tasks) {
-      if ((x.kind === 'repair' || x.parentTaskId !== null || /^mission-fix/.test(x.key)) && !report.repairs.some((r) => r.key === x.key)) {
+      if (!plannedKeys?.has(x.key) && (x.kind === 'repair' || x.parentTaskId !== null || /^mission-fix/.test(x.key)) && !report.repairs.some((r) => r.key === x.key)) {
         report.repairs.push({ key: x.key, title: x.title, at: new Date().toISOString() })
         log('REPAIR', x.key, x.title)
       }
