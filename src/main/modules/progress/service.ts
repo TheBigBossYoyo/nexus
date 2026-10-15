@@ -30,8 +30,11 @@ export interface ProgressServiceDeps {
   record?: (entry: { runId: string; at: number; lowSeconds: number; highSeconds: number; percent: number; confidence: string; wait: ProgressWait }) => void
   recordAccuracy?: (entry: { runId: string; finishedAt: number; samples: number; coverage: number; bias: number; meanWidthRatio: number }) => void
   /** 0.9.1: how long the final verification of earlier missions of this project took, in seconds, most recent first. */
-  /** How long the final checks of this project's earlier missions took (never those of the run asked about). */
-  finaleSeconds?: (projectId: string, exceptRunId: string) => number[]
+  /**
+   * How long the final checks of this project's missions took: earlier missions, and this run's own final checks
+   * from before `before` (a repeat after a repair); never the ones in progress or just finished.
+   */
+  finaleSeconds?: (projectId: string, runId: string, before: string | null) => number[]
   /**
    * 0.9.1: how long this run's check commands took when its tasks ran them whole (each as configured), summed;
    * null unless every configured check was measured so. On a project's first mission it is the best measure of its
@@ -158,21 +161,21 @@ export class ProgressService {
   private readonly finales = new Map<string, { at: number; stats: ReturnType<typeof statsOf> }>()
 
   /** How long this project's final verification takes: its history blended with a wide prior, read every ten minutes. */
-  private finaleStats(projectId: string, runId: string): ReturnType<typeof statsOf> {
+  private finaleStats(projectId: string, runId: string, startedAt: number | null): ReturnType<typeof statsOf> {
     const now = this.deps.now()
     // 0.9.1: the run's own final checks are not its history: once they had run, a first mission's estimate went back
     // to the wide prior for its last minute.
-    const history = (this.deps.finaleSeconds?.(projectId, runId) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
+    const history = (this.deps.finaleSeconds?.(projectId, runId, startedAt === null ? null : new Date(startedAt).toISOString()) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
     const measured = history.length === 0 ? (this.deps.fullChecksSeconds?.(runId) ?? null) : null
     // No earlier mission of this project, but its checks were run whole by this one's tasks: the final checks are
     // those commands again, then the final verifier (half a minute to a few minutes).
     if (measured !== null && Number.isFinite(measured)) return { n: 0, p25: measured + 20, median: measured * 1.2 + 45, p75: measured * 1.6 + 90, p90: measured * 2.5 + 180 }
-    const known = this.finales.get(`${projectId}|${runId}`)
+    const known = this.finales.get(`${projectId}|${runId}|${startedAt ?? ''}`)
     if (known !== undefined && now - known.at < 10 * 60_000) return known.stats
     // Few missions of one project: three of them are already its best measure, so the history is trusted sooner than for tasks.
     const past = history.length > 0 ? statsOf(history) : undefined
     const stats = past !== undefined && past.n >= 3 ? past : blend(past !== undefined ? { ...past, n: past.n * 3 } : undefined, FINALE_PRIOR)
-    this.finales.set(`${projectId}|${runId}`, { at: now, stats })
+    this.finales.set(`${projectId}|${runId}|${startedAt ?? ''}`, { at: now, stats })
     return stats
   }
 
@@ -215,7 +218,7 @@ export class ProgressService {
       previous: before?.snapshot ?? null,
       milestones: milestones.slice(-40),
       refreshSeconds: this.refreshMs() / 1000,
-      finale: { stats: this.finaleStats(run.projectId, run.id), startedAt: finaleStartedAt },
+      finale: { stats: this.finaleStats(run.projectId, run.id, finaleStartedAt), startedAt: finaleStartedAt },
     })
     const latest = [...checking.entries()].at(-1)
     const hint = /\((usually about [^)]*|its first time[^)]*)\)$/.exec(estimated.stage)?.[0] ?? null
