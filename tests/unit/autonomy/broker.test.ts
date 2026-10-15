@@ -370,6 +370,25 @@ describe('the capability broker', () => {
     expect(h.requests.map((r) => r.state)).toEqual(['EXPIRED', 'PENDING'])
   })
 
+  // 0.9.1: a worker refused a server it started itself checked the application with the app tools and completed; its
+  // request was shown as waiting for the owner until the end of the mission.
+  it('expires the pending requests of a task that completed, and only those', () => {
+    const h = harness()
+    h.broker.decide(req('GIT_PUSH', { resource: { kind: 'GIT_REMOTE', value: 'origin' } }), false)
+    h.broker.decide(req('GIT_PUSH', { taskId: 'task-2', resource: { kind: 'GIT_REMOTE', value: 'upstream' } }), false)
+    expect(h.broker.expireForRun('run-1', 'task-1')).toBe(1)
+    expect(h.requests.map((r) => r.state)).toEqual(['EXPIRED', 'PENDING'])
+  })
+
+  it('tells the owner which local port a fetch reaches', () => {
+    const h = harness()
+    const d = h.broker.decide(req('EXTERNAL_HOST_NETWORK', { reason: 'network operation (curl) to the local port 5051' }), false)
+    expect(d.outcome).toBe('BOUNDARY_GRANT_REQUIRED')
+    expect(h.requests[0]!.reason).toContain('It reaches this computer at port 5051, which is not an application NEXUS launched for the mission.')
+    h.broker.decide(req('EXTERNAL_HOST_NETWORK', { action: 'Bash: curl https://example.com', reason: 'network operation (curl)' }), false)
+    expect(h.requests[1]!.reason).not.toContain('port')
+  })
+
   it('still decides when the audit log cannot be written', () => {
     const h = harness()
     const broker = new CapabilityBroker({

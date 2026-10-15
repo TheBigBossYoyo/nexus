@@ -47,12 +47,18 @@ const ACTOR_OF_ROLE: Record<AgentRole, ActorKind> = {
 }
 
 /** What an agent is told when its call met a boundary. It names the request and says what to do meanwhile. */
-export function boundaryMessage(decisions: Extract<BrokerDecision, { outcome: 'BOUNDARY_GRANT_REQUIRED' }>[]): string {
+export function boundaryMessage(decisions: Extract<BrokerDecision, { outcome: 'BOUNDARY_GRANT_REQUIRED' }>[], needs: CapabilityNeed[] = []): string {
   const list = decisions.map((d) => `${AUTONOMY_CAPABILITIES[d.capability].label} (boundary request ${d.requestId})`).join('; ')
   // The boundary stays; the hint only points at what answers the usual reason for the read without the secret.
-  const hint = decisions.some((d) => d.capability === 'READ_PROJECT_SECRETS')
+  const secretHint = decisions.some((d) => d.capability === 'READ_PROJECT_SECRETS')
     ? 'If the aim is to diagnose package-manager or dependency behaviour, mcp__nexus__package_config_inspect gives the non-secret settings (registries, ignore-scripts, build-script allowlists, mirrors) without the raw file. '
     : ''
+  // 0.9.1: a server started in the shell and fetched with curl. The app tools are the project's way to the same
+  // check, not a way around this question.
+  const appHint = needs.some((n) => n.capability === 'EXTERNAL_HOST_NETWORK' && /to the local ports? [\d, ]+$/.test(n.why))
+    ? "If the aim is to run and check the project's application, use the app tools (mcp__nexus__app_launch, then app_act, app_snapshot, app_stop) when they are offered: they start it inside the containment and its port is then the project's own. "
+    : ''
+  const hint = secretHint + appHint
   return (
     `Not done: this is outside what the project allows without the user's decision. NEXUS has put the question to the user: ${list}. ` +
     hint +
@@ -94,7 +100,7 @@ export function createAutonomyGate(ctx: AutonomyGateContext): AutonomyGate {
         if (decision.outcome === 'DENIED') return { behavior: 'deny', reason: `Denied: ${decision.reason} This cannot be approved; choose a different approach.` }
       }
       const waiting = decisions.filter((d): d is Extract<BrokerDecision, { outcome: 'BOUNDARY_GRANT_REQUIRED' }> => d.outcome === 'BOUNDARY_GRANT_REQUIRED')
-      if (waiting.length > 0) return { behavior: 'deny', reason: boundaryMessage(waiting), boundaryRequests: waiting.map((d) => d.requestId) }
+      if (waiting.length > 0) return { behavior: 'deny', reason: boundaryMessage(waiting, needs), boundaryRequests: waiting.map((d) => d.requestId) }
       return { behavior: 'allow' }
     },
   }

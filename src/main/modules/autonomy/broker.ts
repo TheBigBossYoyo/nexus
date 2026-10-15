@@ -205,7 +205,11 @@ export class CapabilityBroker {
         return deny(`${MAX_BOUNDARY_REQUESTS_PER_CAPABILITY} different boundary requests for "${AUTONOMY_CAPABILITIES[capability].label}" have been put to the user in this mission; the limit was reached and no further question is asked. Finish what does not depend on it.`)
       }
       // GRANTED with nothing usable left (a ONCE grant that was used, a revoked one) or EXPIRED: a new question.
-      const reason = `${AUTONOMY_CAPABILITIES[capability].label} is not part of the ${PROFILE_LABEL[enrollment.profile]} profile of this project, so it needs your decision.`
+      // 0.9.1: a fetch from loopback was put as "a named external host" with nothing more; the owner is told what it reaches.
+      const local = /to the local ports? ([\d, ]+)$/.exec(request.reason)
+      const reason =
+        `${AUTONOMY_CAPABILITIES[capability].label} is not part of the ${PROFILE_LABEL[enrollment.profile]} profile of this project, so it needs your decision.` +
+        (local !== null ? ` It reaches this computer at port ${local[1]}, which is not an application NEXUS launched for the mission.` : '')
       const created: BoundaryRequest = {
         id: newId(),
         projectId: request.projectId,
@@ -299,12 +303,16 @@ export class CapabilityBroker {
     return this.deps.grants.revoke(grantId, this.iso())
   }
 
-  /** Pending requests of a mission that ended: nobody is waiting for them any more. */
-  expireForRun(runId: string): number {
+  /**
+   * Pending requests of a mission that ended, or (with a task) of a task that completed: nobody is waiting for them
+   * any more. 0.9.1: a worker refused a server it started itself, checked the application with the app tools instead
+   * and completed; its request was shown as waiting for the owner until the end of the mission.
+   */
+  expireForRun(runId: string, taskId?: string): number {
     let n = 0
     const at = this.iso()
     for (const request of this.deps.requests.listPending()) {
-      if (request.runId !== runId) continue
+      if (request.runId !== runId || (taskId !== undefined && request.taskId !== taskId)) continue
       if (this.deps.requests.decide(request.id, 'EXPIRED', at, null, null)) {
         n += 1
         this.notify({ ...request, state: 'EXPIRED', decidedAt: at }, 'decided')

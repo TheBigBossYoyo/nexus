@@ -161,10 +161,14 @@ export class AutonomyService {
     this.broker.expireForRun(runId)
   }
 
-  /** Follows the missions: one that completed, failed or was cancelled takes its unanswered questions with it. */
-  watch(bus: { subscribe(listener: (event: { type: string; runId: string }) => void): unknown }): void {
+  /**
+   * Follows the missions: one that completed, failed or was cancelled takes its unanswered questions with it, and
+   * so does a task that completed (its work no longer depends on them).
+   */
+  watch(bus: { subscribe(listener: (event: { type: string; runId: string; taskId?: string | null }) => void): unknown }): void {
     bus.subscribe((event) => {
       if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') this.runEnded(event.runId)
+      else if (event.type === 'task.completed' && typeof event.taskId === 'string') this.broker.expireForRun(event.runId, event.taskId)
     })
   }
 
