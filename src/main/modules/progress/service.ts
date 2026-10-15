@@ -71,6 +71,10 @@ export function milestoneOf(event: RunEvent, titleOf: (taskId: string | null) =>
       return p['kind'] === 'repair' ? { at, text: `Repair task created: ${String(p['title'] ?? title).slice(0, 70)}` } : null
     case 'checks.completed':
       return { at, text: p['passed'] === true ? 'Checks passed' : `Checks failed (${Array.isArray(p['failed']) ? p['failed'].length : 0})` }
+    case 'checks.flaky': {
+      const names = (Array.isArray(p['files']) ? p['files'] : []).map((f) => String(f).split(/[/\\]/).pop() ?? '')
+      return { at, text: `Passed when run again: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}` }
+    }
     case 'review.completed':
       return { at, text: p['verdict'] === 'approved' ? `Review approved: ${title}` : `Review asked for changes: ${title} (${String(p['findings'])} findings)` }
     case 'verification.passed':

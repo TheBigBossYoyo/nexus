@@ -59,6 +59,13 @@ describe('milestones', () => {
     for (const quiet of ['agent.tool.started', 'agent.tool.completed', 'agent.usage', 'agent.message', 'task.state_changed', 'run.state_changed']) expect(milestoneOf(ev(quiet), titleOf), quiet).toBeNull()
     expect(milestoneLine({ at: '2026-10-13T19:04:00', text: 'Unit suite passed' })).toBe('19:04 Unit suite passed')
   })
+
+  it('shows the test files that passed only when run again, by name and at most three', () => {
+    const titleOf = (): string => 'x'
+    const ev = (files: string[]): RunEvent => ({ seq: 1, runId: 'r', taskId: 't', agentId: null, type: 'checks.flaky', payload: { files }, createdAt: '2026-10-13T19:04:00' }) as unknown as RunEvent
+    expect(milestoneOf(ev(['tests/unit/progress/service.test.ts']), titleOf)?.text).toBe('Passed when run again: service.test.ts')
+    expect(milestoneOf(ev(['tests/a.test.ts', 'src/x/b.test.ts', 'tests\\win\\c.test.ts', 'd/d.test.ts', 'e.test.ts']), titleOf)?.text).toBe('Passed when run again: a.test.ts, b.test.ts, c.test.ts and 2 more')
+  })
 })
 
 describe('the progress service', () => {
