@@ -537,7 +537,11 @@ static class Program
             case 9: return "code 9: the session could not be verified";
             case 10: return "code 10: the staging folder could not be made safely (it existed, is a link, or belongs to someone else)";
             case 11: return "code 11: the broker is in a folder that non-administrators can modify; install NEXUS for all users";
-            case 12: return "code 12: unexpected files or settings that .NET would load next to or into the broker";
+            case 12: return "code 12: a file .NET would load (a .dll, .config, .manifest or .local) is next to the broker";
+            case 13: return "code 13: the elevated environment has a COR_ variable (a .NET profiler) set";
+            case 14: return "code 14: the elevated environment has a COMPlus_ variable (.NET runtime settings) set";
+            case 15: return "code 15: the elevated environment has DOTNET_STARTUP_HOOKS set";
+            case 16: return "code 16: the elevated environment has __COMPAT_LAYER (a Windows compatibility layer) set";
             default: return "code " + code;
         }
     }
@@ -838,14 +842,33 @@ static class Install
                 || string.Equals(name, Path.GetFileNameWithoutExtension(exe) + ".config", StringComparison.OrdinalIgnoreCase))
                 return "The privilege broker refuses to serve: " + name + " is next to it and .NET would load it";
         }
+        // One exit code per cause (13 to 16): the relay is told only the elevated broker's exit code.
         foreach (System.Collections.DictionaryEntry v in Environment.GetEnvironmentVariables())
         {
             string k = ((string)v.Key).ToUpperInvariant();
-            if (k.StartsWith("COR_", StringComparison.Ordinal) || k.StartsWith("COMPLUS_", StringComparison.Ordinal) || k == "DOTNET_STARTUP_HOOKS" || k == "__COMPAT_LAYER")
-                return "The privilege broker refuses to serve: the environment variable " + v.Key + " would change what .NET loads";
+            // __COMPAT_LAYER names built-in Windows compatibility layers, and Windows sets it itself on the elevated broker
+            // (measured on the owner's machine: refused as code 16 on every session). Layers of elevation and display are
+            // accepted; any other value is still refused. What loads code into .NET (COR_, COMPlus_, startup hooks) is never.
+            int cause = k.StartsWith("COR_", StringComparison.Ordinal) ? 13 : k.StartsWith("COMPLUS_", StringComparison.Ordinal) ? 14 : k == "DOTNET_STARTUP_HOOKS" ? 15 : k == "__COMPAT_LAYER" && !BenignLayers(v.Value as string) ? 16 : 0;
+            if (cause == 0) continue;
+            code = cause;
+            return "The privilege broker refuses to serve: the environment variable " + v.Key + " would change what .NET loads";
         }
         code = 0;
         return null;
+    }
+
+    static readonly HashSet<string> Layers = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+        "~", "RunAsAdmin", "RunAsHighest", "RunAsInvoker", "ElevateCreateProcess", "Installer",
+        "HighDpiAware", "DpiUnaware", "GdiDpiScaling", "PerProcessSystemDpiForceOff", "PerProcessSystemDpiForceOn" };
+
+    /// <summary>A compatibility layer value made only of layers of elevation and display (none of them loads code).</summary>
+    public static bool BenignLayers(string value)
+    {
+        if (value == null) return true;
+        foreach (string layer in value.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+            if (!Layers.Contains(layer)) return false;
+        return true;
     }
 
     static string Weak(string path, bool directory, SecurityIdentifier me, int mask, bool owner)
