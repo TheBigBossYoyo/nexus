@@ -23,12 +23,19 @@ import { waitForRuntime, stopNexus } from './acceptance-common.mjs'
 const root = resolve(import.meta.dirname, '..')
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? 'true' : all[i + 1]]] : acc), []))
 // --chatgpt-signin: opens NEXUS on the screen with the tests' own data folder, for the owner to connect ChatGPT
-// once (Settings); it ends when that window is closed. Nothing else is done.
+// once (Providers > Connect an account); it ends when that window is closed. Nothing else is done.
 if (args['chatgpt-signin'] === 'true') {
   const home = join(root, 'test-results', 'self-missions', '.chatgpt')
   mkdirSync(home, { recursive: true })
   const signin = await electron.launch({ args: ['.'], cwd: root, env: { ...process.env, NEXUS_DATA_DIR: home } })
-  await new Promise((done) => signin.on('close', done))
+  await new Promise((done) => signin.firstWindow().then((page) => page.on('close', done)))
+  // Closing the window leaves the runtime in the tray (measured 2026-10-15: the owner had to quit it there). It is
+  // stopped from an off-screen window of its own, as a mission's is.
+  const closer = await electron.launch({ args: ['.'], cwd: root, env: { ...process.env, NEXUS_DATA_DIR: home, NEXUS_WINDOW_OFFSCREEN: '1' } })
+  const page = await closer.firstWindow()
+  await page.waitForSelector('[data-testid="app-shell"]', { timeout: 60_000 })
+  await waitForRuntime(page)
+  await stopNexus(closer, home)
   console.log(existsSync(join(home, 'chatgpt-credentials.protected')) ? 'The tests have their ChatGPT connection.' : 'No ChatGPT connection was saved.')
   process.exit(0)
 }
