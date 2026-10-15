@@ -39,6 +39,8 @@ const activeKey = (runId: string): string => `run-active:${runId}`
 
 const CHECK_ORDER = ['typecheck', 'lint', 'build', 'test'] as const
 const CHECK_OUTPUT_BYTES = 48 * 1024
+/** The lines of a test run that say a file or a test failed (vitest, jest, node --test, pytest, cargo, go). */
+const FAILURE_LINE = /^\s*(?:FAIL\b|×|✗|not ok\b|FAILED\b|--- FAIL)|\(\d+ tests? \| \d+ failed\)|^\s*❯ \S+\.(?:test|spec)\./
 
 /** Dependency install command for a fresh worktree, by lockfile-derived package manager. */
 function setupCommand(project: Project): string | null {
@@ -343,14 +345,19 @@ export class Core {
     const minutes = this.deps.repos.settings.get().execution.checkTimeoutMinutes
     const timeoutMs = (taskId === null ? Math.min(120, Math.max(minutes * 3, 45)) : minutes) * 60_000
     const started = Date.now()
+    // 0.9.1: the end of a long output is what is kept; a test run's failed files are printed as they fail, so they
+    // are kept apart and put first when the output was cut (a contained full suite with 25 failed files kept 8 of them).
+    const keepLines = name === 'test' ? FAILURE_LINE : undefined
+    const withFailures = (r: { output: string; truncated: boolean; keptLines?: string[] }): string =>
+      r.truncated && (r.keptLines?.length ?? 0) > 0 ? `[The output is longer than what is kept; the failures it reported:]\n${(r.keptLines ?? []).join('\n')}\n[...]\n${r.output}` : r.output
     try {
       // 0.8: in an enrolled project these commands run inside its containment. They are project code: an install
       // hook, a test. A containment that cannot be made is a failed command, never an uncontained run.
-      const contained = await this.deps.execution?.runProjectCommand({ projectId: run.projectId, sessionKey: `${run.id}:${taskId ?? 'run'}`, worktree: cwd, commandLine: command }, { timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES })
-      if (contained) return { name, command, cwd, exitCode: contained.exitCode, timedOut: contained.timedOut, durationMs: contained.durationMs, output: contained.output }
+      const contained = await this.deps.execution?.runProjectCommand({ projectId: run.projectId, sessionKey: `${run.id}:${taskId ?? 'run'}`, worktree: cwd, commandLine: command }, { timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, ...(keepLines ? { keepLines } : {}) })
+      if (contained) return { name, command, cwd, exitCode: contained.exitCode, timedOut: contained.timedOut, durationMs: contained.durationMs, output: withFailures(contained) }
       // Setup and check commands run code the agents wrote: they get no Claude credentials.
-      const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, env: projectCommandEnv() })
-      return { name, command, cwd, exitCode: r.exitCode, timedOut: r.timedOut, durationMs: r.durationMs, output: r.output }
+      const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, env: projectCommandEnv(), ...(keepLines ? { keepLines } : {}) })
+      return { name, command, cwd, exitCode: r.exitCode, timedOut: r.timedOut, durationMs: r.durationMs, output: withFailures(r) }
     } catch (e) {
       // Unresolvable executable or a command line NEXUS refuses to interpret: recorded as a failed check.
       return { name, command, cwd, exitCode: null, timedOut: false, durationMs: Date.now() - started, output: errorMessage(e) }

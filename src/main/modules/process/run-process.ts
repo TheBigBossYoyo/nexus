@@ -14,7 +14,14 @@ export interface RunProcessOptions {
   input?: string
   /** Pass arguments to the child verbatim (Windows only; needed for cmd.exe /c). */
   windowsVerbatimArguments?: boolean
+  /**
+   * 0.9.1: lines of the whole output (colour codes removed) that match, kept apart from the capped output, at most
+   * KEPT_LINES of them: what a long run said early (a test runner's failed files) survives a cap that keeps its end.
+   */
+  keepLines?: RegExp
 }
+
+const KEPT_LINES = 400
 
 export interface ProcessResult {
   exitCode: number | null
@@ -26,6 +33,8 @@ export interface ProcessResult {
   aborted: boolean
   /** True when any captured stream exceeded maxOutputBytes and was cut. */
   truncated: boolean
+  /** The lines `keepLines` matched, in order (absent without it). */
+  keptLines?: string[]
   durationMs: number
 }
 
@@ -172,6 +181,19 @@ export function runProcess(file: string, args: readonly string[], opts: RunProce
     const out = new CappedBuffer(max, keep)
     const err = new CappedBuffer(max, keep)
     const combined = new CappedBuffer(max, keep)
+    const kept: string[] = []
+    const partial = { out: '', err: '' }
+    const watch = (stream: 'out' | 'err', chunk: Buffer | null): void => {
+      if (opts.keepLines === undefined) return
+      const text = partial[stream] + (chunk === null ? '\n' : chunk.toString('utf8'))
+      const lines = text.split(/\r?\n/)
+      partial[stream] = lines.pop() ?? ''
+      for (const line of lines) {
+        // eslint-disable-next-line no-control-regex
+        const plain = line.replace(/\u001b\[[0-9;]*m/g, '')
+        if (kept.length < KEPT_LINES && opts.keepLines.test(plain)) kept.push(plain.slice(0, 400))
+      }
+    }
     let timedOut = false
     let aborted = false
     let settled = false
@@ -184,7 +206,10 @@ export function runProcess(file: string, args: readonly string[], opts: RunProce
       if (timer) clearTimeout(timer)
       if (graceTimer) clearTimeout(graceTimer)
       opts.signal?.removeEventListener('abort', onAbort)
+      watch('out', null)
+      watch('err', null)
       resolve({
+        ...(opts.keepLines !== undefined ? { keptLines: kept } : {}),
         exitCode,
         stdout: out.toString(),
         stderr: err.toString(),
@@ -214,10 +239,12 @@ export function runProcess(file: string, args: readonly string[], opts: RunProce
     child.stdout.on('data', (c: Buffer) => {
       out.push(c)
       combined.push(c)
+      watch('out', c)
     })
     child.stderr.on('data', (c: Buffer) => {
       err.push(c)
       combined.push(c)
+      watch('err', c)
     })
     child.stdin.on('error', () => {
       // child exited before reading stdin
