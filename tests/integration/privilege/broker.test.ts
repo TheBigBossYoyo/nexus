@@ -45,15 +45,16 @@ const until = async (cond: () => boolean, ms = 10_000): Promise<boolean> => {
 }
 
 async function start(name: string, opts: { runtimePid?: number; seconds?: number; capabilities?: string[] } = {}) {
+  // The broker makes the staging folder itself and refuses one that exists: only its parent is made here.
   const staging = join(root, `${name}-${Date.now()}`, 'staging')
-  mkdirSync(staging, { recursive: true })
+  mkdirSync(join(staging, '..'), { recursive: true })
   const ended: string[] = []
   const started = await ElevatedBrokerClient.start({
     helperPath: helper,
     runtimePid: opts.runtimePid ?? process.pid,
     session: `test-${name}`,
     expiresAt: new Date(Date.now() + (opts.seconds ?? 120) * 1000),
-    capabilities: (opts.capabilities ?? ['NEXUS_ACCEPTANCE_FIXTURE', 'SIGNED_DRIVER_QUERY']) as never,
+    capabilities: (opts.capabilities ?? ['NEXUS_ACCEPTANCE_FIXTURE', 'SIGNED_DRIVER_QUERY', 'PROJECT_TOOLCHAIN_INSTALL', 'PROJECT_SERVICE_CONTROL']) as never,
     cwd: root,
     unelevatedTest: { stagingDir: staging },
     consentTimeoutMs: 20_000,
@@ -65,19 +66,21 @@ async function start(name: string, opts: { runtimePid?: number; seconds?: number
 }
 
 const whoami = 'C:\\Windows\\System32\\whoami.exe'
+const driverquery = 'C:\\Windows\\System32\\driverquery.exe'
+const sys = (n: string): string => `C:\\Windows\\System32\\${n}`
 
 describe.skipIf(!available)('privilege broker (real helper, unelevated test mode)', () => {
   it('runs a signed request of the session, refuses the rest, and ends what it started', async () => {
     const { client, staging } = await start('basic')
     expect(client.elevated).toBe(false)
     expect(client.brokerPid).toBeGreaterThan(0)
-    const ran = await client.exec({ opId: 'op-1', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: whoami, args: [], env: {}, timeoutMs: 20_000, inputs: [] })
+    const ran = await client.exec({ opId: 'op-1', capability: 'SIGNED_DRIVER_QUERY', executable: driverquery, args: ['/fo', 'csv', '/nh'], env: {}, timeoutMs: 60_000, inputs: [] })
     expect(ran).toMatchObject({ kind: 'result', exitCode: 0, timedOut: false })
     expect(ran.kind === 'result' && ran.stdout.trim().length).toBeGreaterThan(0)
     expect(await client.exec({ opId: 'op-2', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: 'C:\\Windows\\System32\\cmd.exe', args: ['/c', 'echo x'], env: {}, timeoutMs: 20_000, inputs: [] })).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/never run/) })
     expect(await client.exec({ opId: 'op-3', capability: 'APP_INSTALL_TEST', executable: whoami, args: [], env: {}, timeoutMs: 20_000, inputs: [] })).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/not part of this session/) })
     expect(await client.exec({ opId: 'op-4', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: 'C:\\Windows\\System32\\reg.exe', args: ['add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'EnableLUA', '/d', '0'], env: {}, timeoutMs: 20_000, inputs: [] })).toMatchObject({ kind: 'refused' })
-    expect(await client.exec({ opId: 'op-5', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: whoami, args: [], env: { PATH: 'C:\\evil' }, timeoutMs: 20_000, inputs: [] })).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/PATH may not be set/) })
+    expect(await client.exec({ opId: 'op-5', capability: 'SIGNED_DRIVER_QUERY', executable: driverquery, args: [], env: { PATH: 'C:\\evil' }, timeoutMs: 20_000, inputs: [] })).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/PATH may not be set/) })
     // Still alive after refusals: they are answers, not faults.
     expect(await client.ping()).toBe(true)
     const pid = client.brokerPid as number
@@ -93,11 +96,61 @@ describe.skipIf(!available)('privilege broker (real helper, unelevated test mode
     const copy = join(dir, 'probe-tool.exe')
     copyFileSync(whoami, copy)
     const hash = createHash('sha256').update(readFileSync(copy)).digest('hex')
-    expect(await client.exec({ opId: 'op-1', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: copy, args: [], env: {}, timeoutMs: 20_000, inputs: [] })).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/sha-?256/i) })
-    expect(await client.exec({ opId: 'op-2', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: copy, args: [], env: {}, timeoutMs: 20_000, inputs: [], sha256: 'f'.repeat(64) })).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/not the one that was reviewed/) })
-    const ok = await client.exec({ opId: 'op-3', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: copy, args: [], env: {}, timeoutMs: 20_000, inputs: [], sha256: hash })
-    expect(ok).toMatchObject({ kind: 'result', exitCode: 0, stagedSha256: hash })
+    // A hashed installer program, run silently (whoami does not know /S: its exit code is not the point, the copy is).
+    const base = { capability: 'PROJECT_TOOLCHAIN_INSTALL', executable: copy, args: ['/S'], env: {}, timeoutMs: 20_000, inputs: [] }
+    expect(await client.exec({ opId: 'op-1', ...base } as never)).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/sha-?256/i) })
+    expect(await client.exec({ opId: 'op-2', ...base, sha256: 'f'.repeat(64) } as never)).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/not the one that was reviewed/) })
+    const ok = await client.exec({ opId: 'op-3', ...base, sha256: hash } as never)
+    expect(ok).toMatchObject({ kind: 'result', stagedSha256: hash })
     expect(ok.kind === 'result' && ok.executable).not.toBe(copy)
+    // Not silent, or not an installer shape: the broker's own template refuses it, whatever the runtime said.
+    expect(await client.exec({ opId: 'op-4', ...base, args: [], sha256: hash } as never)).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/silent/) })
+  })
+
+  it('enforces the capability templates itself (F4): programs, verbs, switches, the fixture key', async () => {
+    const { client } = await start('templates', { capabilities: ['NEXUS_ACCEPTANCE_FIXTURE', 'SIGNED_DRIVER_QUERY', 'PROJECT_SERVICE_CONTROL', 'APP_INSTALL_TEST', 'NEXUS_FIREWALL_RECONCILIATION'] })
+    const ask = (opId: string, capability: string, executable: string, args: string[]) => client.exec({ opId, capability, executable, args, env: {}, timeoutMs: 20_000, inputs: [] } as never)
+    const refused = (reason: RegExp) => expect.objectContaining({ kind: 'refused', reason: expect.stringMatching(reason) })
+    // A program that is not the capability's.
+    expect(await ask('t-1', 'SIGNED_DRIVER_QUERY', whoami, [])).toEqual(refused(/driverquery/))
+    expect(await ask('t-2', 'NEXUS_ACCEPTANCE_FIXTURE', whoami, [])).toEqual(refused(/PowerShell/))
+    // sc.exe: query verbs only, one plain service name, never a protected service.
+    expect(await ask('t-3', 'PROJECT_SERVICE_CONTROL', sys('sc.exe'), ['create', 'evil', 'binPath=C:\\x.exe'])).toEqual(refused(/query, queryex, qc, start or stop/))
+    expect(await ask('t-4', 'PROJECT_SERVICE_CONTROL', sys('sc.exe'), ['stop', 'Spooler', 'extra'])).toEqual(refused(/nothing else/))
+    expect(await ask('t-5', 'PROJECT_SERVICE_CONTROL', sys('sc.exe'), ['stop', 'EventLog'])).toEqual(refused(/never controlled/))
+    expect(await ask('t-6', 'PROJECT_SERVICE_CONTROL', sys('sc.exe'), ['query', 'a b'])).toEqual(refused(/nothing else|not valid/))
+    // reg.exe: the acceptance fixture's key only (the old name is no key either).
+    expect(await ask('t-7', 'NEXUS_ACCEPTANCE_FIXTURE', sys('reg.exe'), ['add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'x', '/d', 'y'])).toEqual(refused(/NexusAcceptanceFixture/))
+    expect(await ask('t-8', 'NEXUS_ACCEPTANCE_FIXTURE', sys('reg.exe'), ['add', 'HKLM\\SOFTWARE\\NexusPrivilegeFixture'])).toEqual(refused(/touches/))
+    expect(await ask('t-9', 'NEXUS_ACCEPTANCE_FIXTURE', sys('reg.exe'), ['add', 'HKLM\\SOFTWARE\\NexusAcceptanceFixture', '/reg:64'])).toEqual(refused(/not allowed here/))
+    // msiexec: a package must be a .msi given with its hash, silently, with no property or transform switches.
+    expect(await ask('t-10', 'APP_INSTALL_TEST', sys('msiexec.exe'), ['/i', 'C:\\x\\a.msi', '/qn'])).toEqual(refused(/\.msi file given with its SHA-256/))
+    expect(await ask('t-11', 'APP_INSTALL_TEST', sys('msiexec.exe'), ['/x', '{00000000-0000-0000-0000-000000000000}', '/qn'])).toEqual(refused(/only with \/i/))
+    expect(await ask('t-12', 'APP_INSTALL_TEST', sys('msiexec.exe'), ['/i', '{00000000-0000-0000-0000-000000000000}', '/qn'])).toEqual(refused(/product code/))
+    // netsh: only NEXUS's own blocking rules.
+    expect(await ask('t-13', 'NEXUS_FIREWALL_RECONCILIATION', sys('netsh.exe'), ['advfirewall', 'firewall', 'add', 'rule', 'name=NexusSandboxX', 'action=allow'])).toEqual(refused(/block/))
+    expect(await ask('t-14', 'NEXUS_FIREWALL_RECONCILIATION', sys('netsh.exe'), ['advfirewall', 'set', 'allprofiles', 'state', 'off'])).toEqual(refused(/touches|advfirewall firewall/))
+    // The fixture key, read-only: the template lets it through (the key does not exist: reg.exe's own answer).
+    expect(await ask('t-15', 'NEXUS_ACCEPTANCE_FIXTURE', sys('reg.exe'), ['query', 'HKLM\\SOFTWARE\\NexusAcceptanceFixture'])).toMatchObject({ kind: 'result' })
+    expect(await client.ping()).toBe(true)
+  })
+
+  it('makes its staging folder itself (F2): one that exists is refused and left alone', async () => {
+    const staging = join(root, `existing-${Date.now()}`, 'staging')
+    mkdirSync(staging, { recursive: true }) // a pre-existing folder, as a user process could make it
+    const started = await ElevatedBrokerClient.start({
+      helperPath: helper,
+      runtimePid: process.pid,
+      session: 'test-existing',
+      expiresAt: new Date(Date.now() + 60_000),
+      capabilities: ['SIGNED_DRIVER_QUERY'] as never,
+      cwd: root,
+      unelevatedTest: { stagingDir: staging },
+      consentTimeoutMs: 20_000,
+    })
+    expect(started.ok).toBe(false)
+    expect(existsSync(staging)).toBe(true) // never deleted or used by the broker
+    expect(readdirSync(staging)).toEqual([])
   })
 
   it('no other process can use the pipe: it is taken by the relay, and one instance only', async () => {
@@ -133,7 +186,7 @@ describe.skipIf(!available)('privilege broker (real helper, unelevated test mode
 describe.skipIf(!available)('privilege broker protocol (raw lines)', () => {
   function raw(session: string) {
     const staging = join(root, `raw-${Date.now()}`, 'staging')
-    mkdirSync(staging, { recursive: true })
+    mkdirSync(join(staging, '..'), { recursive: true })
     const p = spawn(helper, ['session', '--runtime-pid', String(process.pid), '--session', session, '--expires-unix', String(Math.floor(Date.now() / 1000) + 120), '--capabilities', 'SIGNED_DRIVER_QUERY', '--unelevated-test', '--staging', staging], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true })
     children.push(p)
     const lines: string[] = []
