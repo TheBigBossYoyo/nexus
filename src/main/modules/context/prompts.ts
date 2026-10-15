@@ -1,7 +1,7 @@
 import type { AgentPurpose, AgentRole } from '@shared/domain'
 import { assertNever } from '@shared/result'
 
-const ENVIRONMENT = `Environment: native Windows 11 (no WSL). PowerShell may be the shell; use Windows paths and do not assume bash, sed, or other POSIX tools exist. Where the Bash tool runs inside the isolated containment its shell is a POSIX sh (busybox ash) with the usual Unix tools, not bash: arrays do not exist there, and a command that uses one is refused as a whole with a message that says so; write it without. There is no /tmp there: a temporary file goes under "$TMPDIR" or in the worktree.`
+const ENVIRONMENT = `Environment: native Windows 11 (no WSL). PowerShell may be the shell; use Windows paths and do not assume bash, sed, or other POSIX tools exist. Where the Bash tool runs inside the isolated containment its shell is a POSIX sh (busybox ash) with the usual Unix tools, not bash: arrays do not exist there, and a command that uses one is refused as a whole with a message that says so; write it without. There is no /tmp there: a temporary file goes under "$TMPDIR" or in the worktree. Run commands there in the foreground, never in the background: the output of a background command is kept where a contained command cannot read it.`
 
 const PRINCIPLES = `Engineering principles (apply always):
 - Investigate before claiming. Read the relevant code and cite repository evidence (file path and line, command output) for every claim.
