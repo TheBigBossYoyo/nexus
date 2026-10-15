@@ -12,6 +12,7 @@ import {
 } from '../../../src/renderer/src/views/run/eventText'
 import { annotateFile, normalizePath, ownersByPath, parsePatch, sortFindings } from '../../../src/renderer/src/views/run/diffModel'
 import { validateAddTask } from '../../../src/renderer/src/views/run/addTaskForm'
+import { reportOf } from '../../../src/renderer/src/views/run/reportModel'
 
 function task(id: string, over: Partial<Task> = {}): Task {
   return {
@@ -205,5 +206,19 @@ describe('add task validation', () => {
     const base = { title: '', description: '', role: 'worker' as const, dependsOn: [] as string[], suggestedFiles: '', criteria: '', complexity: 'small' as const, } satisfies Record<string, unknown>
     expect(Object.keys(validateAddTask(base)).sort()).toEqual(['description', 'title'])
     expect(validateAddTask({ ...base, title: 'x', description: 'y' })).toEqual({})
+  })
+})
+
+// 0.9.1: a finished audit shows its report on the overview (the owner's first one ended on merge instructions).
+describe('reportOf', () => {
+  const done = (id: string, at: string, over: Partial<Task> = {}): Task => task(id, { state: 'completed', resultSummary: `report ${id}`, finishedAt: at, kind: 'audit', ...over })
+  it('takes the synthesis, and lists the reports it was made from', () => {
+    const r = reportOf([done('a', '2026-01-01T00:01:00Z'), done('final', '2026-01-01T00:02:00Z', { kind: 'synthesis' }), done('b', '2026-01-01T00:03:00Z')])
+    expect(r?.task.id).toBe('final')
+    expect(r?.others.map((t) => t.id)).toEqual(['a', 'b'])
+  })
+  it('without a synthesis, takes the task that finished last; without any report, nothing', () => {
+    expect(reportOf([done('a', '2026-01-01T00:02:00Z'), done('b', '2026-01-01T00:01:00Z')])?.task.id).toBe('a')
+    expect(reportOf([task('a', { state: 'completed' }), task('b', { state: 'failed', resultSummary: 'x' })])).toBeNull()
   })
 })
