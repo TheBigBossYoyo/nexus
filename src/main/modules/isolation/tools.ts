@@ -149,6 +149,48 @@ function measure(dir: string): { bytes: number; files: number } {
 }
 
 /**
+ * 0.9.1: a copy of an npm-style launcher (`name`, `name.cmd`, `name.ps1`, as npm writes them for a global tool) and of
+ * the one package its .cmd starts (`%dp0%\node_modules\<package>\...`), in the same layout, for an installation too
+ * large to copy whole. Returns the folder to put on the PATH, or null when the launcher is not of that form or the
+ * package is too large too. Made once per launcher and package version, and reused.
+ */
+export function slimCopy(real: string, toolsDir: string): string | null {
+  const binDir = dirname(real)
+  let text: string
+  try {
+    text = readFileSync(real, 'utf8')
+  } catch {
+    return null
+  }
+  const m = /%dp0%\\node_modules\\((?:@[^\\"]+\\)?[^\\"]+)\\/i.exec(text)
+  if (m === null) return null
+  const pkg = m[1] as string
+  const pkgDir = join(binDir, 'node_modules', pkg)
+  if (!existsSync(pkgDir)) return null
+  const size = measure(pkgDir)
+  if (size.files > MAX_MIRROR_FILES || size.bytes > MAX_MIRROR_BYTES) return null
+  const stamp = (path: string): string => {
+    try {
+      const s = statSync(path)
+      return `${s.size}:${Math.round(s.mtimeMs)}`
+    } catch {
+      return '-'
+    }
+  }
+  const base = (real.split('\\').pop() as string).replace(/\.[^.\\]+$/, '')
+  const target = join(toolsDir, `slim-${createHash('sha256').update(`${lower(binDir)}|${pkg}|${stamp(real)}|${stamp(join(pkgDir, 'package.json'))}`).digest('hex').slice(0, 16)}`)
+  const marker = join(target, '.nexus-mirror.json')
+  if (!existsSync(marker)) {
+    rmSync(target, { recursive: true, force: true })
+    mkdirSync(target, { recursive: true })
+    for (const file of [base, `${base}.cmd`, `${base}.ps1`]) if (existsSync(join(binDir, file))) cpSync(join(binDir, file), join(target, file))
+    cpSync(pkgDir, join(target, 'node_modules', pkg), { recursive: true, dereference: false, errorOnExist: false, force: true, verbatimSymlinks: true })
+    writeFileSync(marker, JSON.stringify({ source: binDir, package: pkg, copiedAt: new Date().toISOString(), files: size.files, bytes: size.bytes }))
+  }
+  return target
+}
+
+/**
  * Finds the listed tools on the user's PATH and, for each that lives inside the user's profile, makes sure a
  * copy of its installation exists under `<sandboxRoot>\tools`. A copy is made once per installation directory
  * and version (its real path), and reused. Nothing in the user's profile is changed.
@@ -192,6 +234,15 @@ export function mirrorTools(input: { sandboxRoot: string; userProfile: string; p
       if (!existsSync(marker)) {
         const size = measure(root)
         if (size.files > MAX_MIRROR_FILES || size.bytes > MAX_MIRROR_BYTES) {
+          // 0.9.1: a launcher in a folder of global tools (Scoop keeps npm's global tools and its 6 GB cache in one
+          // "persist" folder) is copied with the one package it starts: pnpm never reached the sandbox otherwise, and
+          // an enrolled pnpm project could neither install nor run a check.
+          const slim = slimCopy(real, toolsDir)
+          if (slim !== null) {
+            if (!mirrorDirs.some((d) => lower(d) === lower(slim))) mirrorDirs.push(slim)
+            tools.push({ name, source: real, mirror: join(slim, real.split('\\').pop() as string), note: 'its launcher and the package it starts, without the rest of its folder' })
+            continue
+          }
           tools.push({ name, source: real, mirror: null, note: 'its installation is too large to copy' })
           continue
         }
