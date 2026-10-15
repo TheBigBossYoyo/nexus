@@ -11,7 +11,8 @@ const text = (v: unknown): string | null => (v === null || v === undefined ? nul
  * is never evicted, so a task asking again and again cannot push the record of an operation out.
  */
 const MAX_RECEIPTS = 20_000
-const EVICTABLE = "('REJECTED_BY_POLICY', 'REJECTED_BY_DIRECTOR', 'DECLINED_BY_OWNER')"
+// 0.9.1 (second review, L10): a request that met the deny list is never evicted either.
+const EVICTABLE ="('REJECTED_BY_POLICY', 'REJECTED_BY_DIRECTOR', 'DECLINED_BY_OWNER')"
 
 export interface PrivilegeSessionRow {
   id: string
@@ -112,7 +113,7 @@ export class SqlitePrivilegeStore implements PrivilegeStore {
     )
     if (++this.inserts % 100 === 0) {
       const total = (prepare(this.db, 'SELECT COUNT(*) AS n FROM privileged_operations').get() as { n: number }).n
-      if (total > MAX_RECEIPTS) prepare(this.db, `DELETE FROM privileged_operations WHERE seq IN (SELECT seq FROM privileged_operations WHERE outcome IN ${EVICTABLE} ORDER BY seq LIMIT ?)`).run(total - MAX_RECEIPTS)
+      if (total > MAX_RECEIPTS) prepare(this.db, `DELETE FROM privileged_operations WHERE seq IN (SELECT seq FROM privileged_operations WHERE outcome IN ${EVICTABLE} AND json_extract(receipt_json, '$.precheck.forbidden') IS NULL ORDER BY seq LIMIT ?)`).run(total - MAX_RECEIPTS)
     }
   }
 

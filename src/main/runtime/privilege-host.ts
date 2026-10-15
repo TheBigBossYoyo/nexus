@@ -39,6 +39,8 @@ export interface PrivilegeHostDeps {
   onChange: (status: PrivilegeSessionStatus | null) => void
   /** 0.9.1 (review F3): the owner's own confirmation of one operation, natively. */
   confirmOwner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>
+  /** 0.9.1 (second review, H1): why no session may be prepared now (an uncontained mission runs), or null. */
+  blockedBy?: (runId: string | null) => string | null
   log: (line: string) => void
 }
 
@@ -145,6 +147,7 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
     securityEvent: d.securityEvent,
     onChange: d.onChange,
     ...(d.confirmOwner ? { confirmOwner: d.confirmOwner } : {}),
+    ...(d.blockedBy ? { blockedBy: d.blockedBy } : {}),
     log: d.log,
   })
   service.recover()

@@ -58,12 +58,57 @@ function sessionLines(sessions: readonly PrivilegeSessionStatus[]): string[] {
   )
 }
 
+/**
+ * 0.9.1 (second review, L11): what an agent or a program wrote, as one line of plain text in the report: its line
+ * breaks and Markdown removed, so that it cannot make lines of its own (a fake "DECLINED BY YOU").
+ */
+export function inline(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ').replace(/([\\`*_#>|<[\]~])/g, '\\$1')
+}
+
+/** A receipt with every field an agent, a reviewer or a program wrote made inline text. */
+function shown(r: PrivilegedOperationReceipt): PrivilegedOperationReceipt {
+  const t = (s: string | null): string | null => (s === null ? null : inline(s))
+  return {
+    ...r,
+    goal: inline(r.goal),
+    whyRequired: inline(r.whyRequired),
+    whyElevation: inline(r.whyElevation),
+    whyNoUnelevatedAlternative: inline(r.whyNoUnelevatedAlternative),
+    rollback: inline(r.rollback),
+    missionTitle: t(r.missionTitle),
+    taskTitle: t(r.taskTitle),
+    outcomeReason: inline(r.outcomeReason),
+    observed: r.observed.map(inline),
+    expected: { ...r.expected, files: r.expected.files.map(inline), registry: r.expected.registry.map(inline), services: r.expected.services.map(inline), network: inline(r.expected.network) },
+    reviews: r.reviews.map((v) => ({ ...v, reason: inline(v.reason), restrictions: v.restrictions.map(inline) })),
+    precheck: { ...r.precheck, reason: inline(r.precheck.reason) },
+    finalPolicy: r.finalPolicy ? { ...r.finalPolicy, reason: inline(r.finalPolicy.reason) } : null,
+  }
+}
+
+/** Inline code no text inside can close, on one line. */
+function codeSpan(text: string): string {
+  const flat = text.replace(/[\r\n]+/g, ' ')
+  const longest = Math.max(0, ...[...flat.matchAll(/`+/g)].map((m) => m[0].length))
+  const tick = '`'.repeat(longest + 1)
+  return `${tick} ${flat} ${tick}`
+}
+
+/** A code block no text inside can close: its fence is longer than any run of backticks in it. */
+function fenced(text: string): string[] {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length))
+  const fence = '`'.repeat(Math.max(3, longest + 1))
+  return [fence, text, fence]
+}
+
 /** The full report: every attempt with every field (the Activity screen, the report file). */
 export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[]): string {
   const out = ['## Privileged activity', '']
   if (sessions.length === 0 && receipts.length === 0) return [...out, 'No privilege session was prepared and no administrator operation was asked for.', ''].join('\n')
   out.push(headline(receipts), '', ...sessionLines(sessions), '')
-  for (const r of receipts) {
+  for (const raw of receipts) {
+    const r = shown(raw)
     out.push(`### ${time(r.requestedAt)} — ${r.capability} — ${OUTCOME_TEXT[r.outcome]}`, '')
     out.push(`- Mission: ${r.missionTitle ?? r.runId ?? '—'}`, `- Task: ${r.taskTitle ?? r.taskId ?? '—'}`, `- Requested by: ${r.role}${r.agentId ? ` (${r.agentId.slice(0, 8)})` : ''}; provenance: ${r.provenance}`)
     if (r.followsOperationId) out.push(`- Follows operation: ${r.followsOperationId}`)
@@ -72,13 +117,13 @@ export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOpera
     for (const v of r.reviews) out.push(`  - ${v.reviewer === 'DIRECTOR_COUNCIL' ? 'Council' : 'Technical'}: ${v.reason}${v.restrictions.length ? ` Restrictions: ${v.restrictions.join('; ')}.` : ''}`)
     out.push(`- Deterministic policy: precheck ${r.precheck.verdict} (${r.precheck.reason})${r.finalPolicy ? `; final ${r.finalPolicy.verdict} (${r.finalPolicy.reason})` : ''}`)
     if (r.precheck.councilWhy.length) out.push(`- Council asked because: ${r.precheck.councilWhy.join('; ')}`)
-    out.push(`- Command: \`${shownCommand(r)}\``, `- Working directory: ${r.cwd ?? '(the broker\'s own staging folder)'}`, `- Environment set: ${r.envNames.length ? r.envNames.join(', ') : 'none beyond the machine\'s own'}`)
+    out.push(`- Command: ${codeSpan(shownCommand(r))}`, `- Working directory: ${r.cwd ?? '(the broker\'s own staging folder)'}`, `- Environment set: ${r.envNames.length ? r.envNames.join(', ') : 'none beyond the machine\'s own'}`)
     out.push(`- Expected: files ${r.expected.files.join(', ') || 'none'}; registry ${r.expected.registry.join(', ') || 'none'}; services/tasks ${r.expected.services.join(', ') || 'none'}; network ${r.expected.network}`)
     out.push(`- Observed: ${r.observed.length ? r.observed.join(' ') : 'nothing recorded'}`)
     out.push(`- Result: ${OUTCOME_TEXT[r.outcome]} — ${r.outcomeReason}${r.exitCode !== null ? ` Exit code ${r.exitCode}.` : ''}${r.durationMs !== null ? ` Duration ${(r.durationMs / 1000).toFixed(1)} s.` : ''}`)
     if (r.rollback) out.push(`- Rollback: ${r.rollback}`)
     out.push(`- Evidence: receipt ${r.id}${r.stagedSha256 ? `; program SHA-256 ${r.stagedSha256}` : ''}`)
-    if (r.stderr.trim()) out.push('', '```', r.stderr.trim().slice(0, 1500), '```')
+    if (r.stderr.trim()) out.push('', ...fenced(r.stderr.trim().slice(0, 1500)))
     out.push('')
   }
   return out.join('\n')
@@ -90,11 +135,12 @@ export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOper
   if (sessions.length === 0 && receipts.length === 0) return [...out, 'No administrator access was prepared for this run.', ''].join('\n')
   const uac = sessions.reduce((n, s) => n + s.uacPrompts, 0)
   out.push(`${headline(receipts)} UAC prompts: ${uac}.${sessions.some((s) => s.state === 'ACTIVE') ? ' A broker is still active.' : ' No broker is left running.'}`, '')
-  for (const r of receipts) {
+  for (const raw of receipts) {
+    const r = shown(raw)
     out.push(`**${time(r.requestedAt)} — ${r.goal}** (${r.capability})`)
     out.push(`Why admin: ${r.whyElevation}`)
     out.push(`Security review: ${reviewLine(r.reviews, r.precheck.councilRequired)} Deterministic policy: ${r.finalPolicy?.verdict ?? r.precheck.verdict}.`)
-    out.push(`Command: \`${shownCommand(r)}\``)
+    out.push(`Command: ${codeSpan(shownCommand(r))}`)
     out.push(`Result: ${OUTCOME_TEXT[r.outcome]}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''} — ${r.outcomeReason}${r.observed.length ? ` Changed/seen: ${r.observed.join(' ')}` : ''}`, '')
   }
   return out.join('\n')

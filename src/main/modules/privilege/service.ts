@@ -37,6 +37,8 @@ export interface BrokerHandle {
   readonly elevated: boolean
   exec(req: BrokerExecRequest): Promise<BrokerExecResult>
   end(): Promise<void>
+  /** Why it ended, as it said: with what it could not end ("may still be running: ..."). */
+  readonly endReason?: string | null
 }
 
 export interface PrivilegeServiceDeps {
@@ -62,6 +64,11 @@ export interface PrivilegeServiceDeps {
    * answer). Without anyone to ask the answer is no. Absent: an operation that needs it does not run.
    */
   confirmOwner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>
+  /**
+   * 0.9.1 (second review, H1): why no session may be prepared now, or null. A mission whose commands run as the owner
+   * outside any containment could reach the broker's relay as the owner: no session while one runs.
+   */
+  blockedBy?: (runId: string | null) => string | null
 }
 
 /** Who asks, as NEXUS knows it: never what the agent says of itself. */
@@ -148,6 +155,8 @@ export class PrivilegeService {
       return { ok: false, reason: 'Another privilege session is active; end it first.', status: this.statusOf(current.row) }
     }
     if ((input.scope === 'MISSION' || input.scope === 'OVERNIGHT') && input.runId === null) return { ok: false, reason: 'A mission or Overnight session belongs to one run.', status: null }
+    const blocked = this.d.blockedBy?.(input.runId) ?? null
+    if (blocked !== null) return { ok: false, reason: blocked, status: null }
     this.preparing = this.doPrepare(input).finally(() => {
       this.preparing = null
     })
@@ -189,6 +198,11 @@ export class PrivilegeService {
       // Revoked while the prompt was open.
       await started.client.end().catch(() => undefined)
       return { ok: false, reason: 'The session was revoked before it started.', status: this.statusOf(row) }
+    }
+    // 0.9.1 (second review, L1): a broker that ended as it said hello is not a session.
+    if (!started.client.alive) {
+      this.finish(row, 'FAILED', 'the broker ended as it started')
+      return { ok: false, reason: 'The broker ended as it started.', status: this.statusOf(row) }
     }
     row.state = 'ACTIVE'
     row.activeAt = this.now().toISOString()
@@ -247,12 +261,27 @@ export class PrivilegeService {
     const broker = current.broker
     this.finish(current.row, 'ENDED', reason)
     await broker?.end().catch(() => undefined)
+    // 0.9.1 (second review, M8): what the broker could not end (an installation, a service) is said when NEXUS ends
+    // the session too, not only when the broker ends by itself.
+    const left = /may still be running: (.*)\)$/.exec(broker?.endReason ?? '')?.[1]
+    if (left !== undefined) {
+      this.d.store.saveSession({ ...current.row, endReason: `${current.row.endReason ?? reason}; may still be running: ${left}`.slice(0, 400) })
+      this.d.securityEvent?.({ severity: 'NORMAL_AUTONOMOUS_ACTION', runId: current.row.runId, projectId: current.row.projectId, taskId: null, agentId: null, action: 'privilege session ended with work still running', reason: left.slice(0, 300) })
+    }
   }
 
   /** The scope of a mission or Overnight session ended with its run. */
   async endForRun(runId: string, reason: string): Promise<void> {
     const current = this.active
     if (current !== null && current.row.runId === runId && (current.row.scope === 'MISSION' || current.row.scope === 'OVERNIGHT')) await this.end(reason)
+  }
+
+  /** 0.9.1 (second review, H1): something now keeps sessions out (an uncontained mission started): the one in progress ends. */
+  async recheck(): Promise<void> {
+    const current = this.active
+    if (current === null || current.row.state !== 'ACTIVE') return
+    const blocked = this.d.blockedBy?.(current.row.runId) ?? null
+    if (blocked !== null) await this.end(blocked)
   }
 
   /** NEXUS has no work in progress: an UNTIL_IDLE session ends. */
@@ -275,6 +304,11 @@ export class PrivilegeService {
     const current = this.active
     const session = current?.row.state === 'ACTIVE' ? current.row : null
     const req: PrivilegedOperationRequest = { ...proposal, ...who, id: this.newId(), sessionId: session?.id ?? null, requestedAt: this.now().toISOString() }
+    // 0.9.1 (review F12, second review M5): what the request gave as secret (its secret arguments, its environment's
+    // values) is removed by value, before the patterns, from everything kept: the output, and the reasons of a refusal.
+    const secrets = [...req.secretArgs.map((i) => req.args[i] ?? ''), ...Object.values(req.env)].filter((v) => v.length >= 6).sort((a, b) => b.length - a.length)
+    const scrub = (text: string): string => redactText(secrets.reduce((t, secret) => t.split(secret).join('[secret]'), text))
+    const scrubbed = (d: PrivilegedPolicyDecision | null | undefined): PrivilegedPolicyDecision | null => (d ? { ...d, reason: scrub(d.reason) } : null)
     const receipt = (outcome: PrivilegedOutcome, outcomeReason: string, extra: Partial<PrivilegedOperationReceipt> & { precheck: PrivilegedPolicyDecision }): PrivilegedOperationReceipt => {
       const r: PrivilegedOperationReceipt = {
         id: req.id,
@@ -302,7 +336,6 @@ export class PrivilegeService {
         provenance: req.provenance,
         followsOperationId: req.followsOperationId ?? null,
         reviews: [],
-        finalPolicy: null,
         outcome,
         outcomeReason,
         exitCode: null,
@@ -312,7 +345,10 @@ export class PrivilegeService {
         stderr: '',
         stagedSha256: null,
         ...extra,
+        precheck: scrubbed(extra.precheck) as PrivilegedPolicyDecision,
+        finalPolicy: scrubbed(extra.finalPolicy),
       }
+      r.outcomeReason = scrub(r.outcomeReason)
       this.d.store.record(r)
       if (outcome === 'REJECTED_BY_POLICY' || outcome === 'REJECTED_BY_DIRECTOR') {
         const key = `${req.sessionId ?? 'none'}|${req.taskId ?? req.agentId ?? 'nexus'}`
@@ -324,7 +360,8 @@ export class PrivilegeService {
 
     // A session bound to a run serves that run only.
     let precheck: PrivilegedPolicyDecision
-    if (session !== null && (session.scope === 'MISSION' || session.scope === 'OVERNIGHT') && req.runId !== session.runId) {
+    // 0.9.1 (second review, L6): any session prepared for a run, whatever its scope.
+    if (session !== null && session.runId !== null && req.runId !== session.runId) {
       precheck = { verdict: 'DENIED', reason: 'The privilege session in progress belongs to another run.', forbidden: null, councilRequired: false, councilWhy: [] }
     } else if ((this.refusals.get(`${req.sessionId ?? 'none'}|${req.taskId ?? req.agentId ?? 'nexus'}`) ?? 0) >= REFUSALS_BEFORE_BLOCK) {
       precheck = { verdict: 'DENIED', reason: 'This task was refused too many privileged requests; it gets no more reviews in this session.', forbidden: null, councilRequired: false, councilWhy: [] }
@@ -366,31 +403,38 @@ export class PrivilegeService {
     })
     if (result.kind === 'refused') return receipt('REJECTED_BY_POLICY', `Refused by the broker: ${result.reason}`, { precheck, reviews, finalPolicy: final })
     if (result.kind === 'lost') return receipt('ABORTED', `The broker went away: ${result.reason}`, { precheck, reviews, finalPolicy: final })
+    const outcome: PrivilegedOutcome = result.timedOut ? 'TIMEOUT' : result.exitCode === 0 ? 'EXECUTED' : 'FAILED'
+    const cut = (s: string, truncated: boolean): string => {
+      const clean = scrub(s)
+      return clean.length > OUTPUT_KEPT || truncated ? `${clean.slice(0, OUTPUT_KEPT)}\n[cut]` : clean
+    }
+    const ran = (observed: string[]): PrivilegedOperationReceipt =>
+      receipt(outcome, outcome === 'EXECUTED' ? 'The program ran and exited with 0.' : outcome === 'TIMEOUT' ? `The program did not finish within ${Math.round(req.timeoutMs / 1000)} s and was ended.` : `The program exited with ${result.exitCode}.`, {
+        precheck,
+        reviews,
+        finalPolicy: final,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        observed: [
+          ...observed,
+          ...(result.leftoverEnded > 0 ? [`${result.leftoverEnded} process(es) it left running were ended.`] : []),
+          ...(result.leftover ? [`Not ended by NEXUS, may still be running: ${result.leftover}`] : []),
+          // 0.9.1 (second review, M1): what the program wrote in the result or log file the broker gave it (in its staging).
+          ...(result.files ?? []).map((f) => `${f.name}: ${cut(f.text, false).slice(0, 1500)}`),
+        ],
+        stdout: cut(result.stdout, result.stdoutTruncated),
+        stderr: cut(result.stderr, result.stderrTruncated),
+        stagedSha256: result.stagedSha256,
+      })
+    // 0.9.1 (second review, L12): the outcome is on record before the verification, which may itself fail.
+    ran([])
     let observed: string[]
     try {
       observed = (await this.d.verify?.(req)) ?? []
     } catch {
       observed = ['The verification after the operation could not be completed.']
     }
-    const outcome: PrivilegedOutcome = result.timedOut ? 'TIMEOUT' : result.exitCode === 0 ? 'EXECUTED' : 'FAILED'
-    // 0.9.1 (review F12): what the request gave as secret (its secret arguments, its environment's values) is removed
-    // from the output by value, before the patterns: an installer may print a key it was given, with no label.
-    const secrets = [...req.secretArgs.map((i) => req.args[i] ?? ''), ...Object.values(req.env)].filter((v) => v.length >= 6).sort((a, b) => b.length - a.length)
-    const cut = (s: string, truncated: boolean): string => {
-      const clean = redactText(secrets.reduce((text, secret) => text.split(secret).join('[secret]'), s))
-      return clean.length > OUTPUT_KEPT || truncated ? `${clean.slice(0, OUTPUT_KEPT)}\n[cut]` : clean
-    }
-    const r = receipt(outcome, outcome === 'EXECUTED' ? 'The program ran and exited with 0.' : outcome === 'TIMEOUT' ? `The program did not finish within ${Math.round(req.timeoutMs / 1000)} s and was ended.` : `The program exited with ${result.exitCode}.`, {
-      precheck,
-      reviews,
-      finalPolicy: final,
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      observed: [...observed, ...(result.leftoverEnded > 0 ? [`${result.leftoverEnded} process(es) it left running were ended.`] : []), ...(result.leftover ? [`Not ended by NEXUS, may still be running: ${result.leftover}`] : [])],
-      stdout: cut(result.stdout, result.stdoutTruncated),
-      stderr: cut(result.stderr, result.stderrTruncated),
-      stagedSha256: result.stagedSha256,
-    })
+    const r = ran(observed)
     if (session.scope === 'SINGLE_OPERATION') await this.end('its single operation ran', session.id)
     return r
   }

@@ -26,7 +26,7 @@ export interface BrokerExecRequest {
 }
 
 export type BrokerExecResult =
-  | { kind: 'result'; exitCode: number; durationMs: number; timedOut: boolean; executable: string; stagedSha256: string | null; leftoverEnded: number; leftover: string | null; stdout: string; stderr: string; stdoutTruncated: boolean; stderrTruncated: boolean }
+  | { kind: 'result'; exitCode: number; durationMs: number; timedOut: boolean; executable: string; stagedSha256: string | null; leftoverEnded: number; leftover: string | null; files?: { arg: number; name: string; text: string }[]; stdout: string; stderr: string; stdoutTruncated: boolean; stderrTruncated: boolean }
   | { kind: 'refused'; reason: string }
   | { kind: 'lost'; reason: string }
 
@@ -94,7 +94,8 @@ export class ElevatedBrokerClient {
         // Nothing of NEXUS's environment: the relay needs Windows' own folders and nothing else.
         env: { SystemRoot: systemRoot, windir: systemRoot, PATH: `${systemRoot}\\System32` },
         keepStdinOpen: true,
-        maxLines: 20,
+        // The hello carries the session key: no line of this process is kept (second review, informational).
+        maxLines: 0,
         lineLimit: 4 * 1024 * 1024,
         onLine: (line, stream) => (stream === 'stdout' ? client.onLine(line) : o.log?.(`privilege broker: ${line.slice(0, 200)}`)),
       })
@@ -141,6 +142,8 @@ export class ElevatedBrokerClient {
       return this.lost('a line from the broker could not be read')
     }
     if (seq === 's') {
+      // The relay's own lines are unsigned: they mean something only before the broker's hello (second review).
+      if (this.key !== null) return
       // The relay's own words: who the broker is, or why there is none.
       if (body.e === 'relay' && typeof body.brokerPid === 'number') {
         this.brokerPid = body.brokerPid
@@ -229,6 +232,13 @@ export class ElevatedBrokerClient {
         leftoverEnded: typeof answer.leftoverEnded === 'number' ? answer.leftoverEnded : 0,
         // 0.9.1 (review F9): what the program handed to Windows (an installation, a service) and may still be running.
         leftover: typeof answer.leftover === 'string' && answer.leftover.trim() !== '' ? answer.leftover.slice(0, 400) : null,
+        // 0.9.1 (second review, M1): the result and log files, written in the broker's staging and returned as text.
+        files: Array.isArray(answer.files)
+          ? (answer.files as unknown[]).flatMap((f) => {
+              const o = f as { arg?: unknown; name?: unknown; text?: unknown }
+              return typeof o === 'object' && o !== null && typeof o.name === 'string' && typeof o.text === 'string' ? [{ arg: typeof o.arg === 'number' ? o.arg : -1, name: o.name.slice(0, 120), text: o.text.slice(0, 65_536) }] : []
+            })
+          : [],
         stdout: str('stdout'),
         stderr: str('stderr'),
         stdoutTruncated: answer.stdoutTruncated === true,

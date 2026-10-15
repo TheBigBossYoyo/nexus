@@ -78,6 +78,8 @@ const SILENT_FLAGS = new Set(['/s', '/q', '/qn', '/quiet', '/passive', '/silent'
 const SILENT_REQUIRED = new Set(['/s', '/q', '/qn', '/quiet', '/passive', '/silent', '/verysilent', '--silent', '--quiet', '-s', '-q'])
 
 const lower = (s: string): string => s.toLowerCase()
+/** An argument that may be marked secret: NAME=value (or /NAME=value), the name saying it is a secret. */
+const SECRET_ARG = /^[/-]{0,2}[A-Za-z0-9_.]*(pass|pwd|key|token|secret|serial|licen[cs]e)[A-Za-z0-9_.]*[=:]./i
 const samePath = (a: string, b: string): boolean => win32.normalize(a).toLowerCase() === win32.normalize(b).toLowerCase()
 const under = (path: string, root: string): boolean => {
   const p = win32.normalize(path).toLowerCase()
@@ -153,6 +155,11 @@ export class PrivilegedPolicyEngine {
     if (!this.protectedProgram(req.executable)) why.push(`it runs ${win32.basename(req.executable)}, a program outside the Windows and Program Files folders`)
     if (POWERSHELLS.has(lower(win32.basename(req.executable))) && shipped === null) why.push(`it runs the script ${win32.basename(req.args[PS_HEAD.length] ?? '')}, which NEXUS does not ship`)
     if (samePath(req.executable, this.system(c, 'msiexec.exe')) && /\.msi$/i.test(req.args[1] ?? '')) why.push(`it installs the package ${win32.basename(req.args[1] ?? '')}`)
+    // 0.9.1 (second review, H2): removing or stopping software names it by a code or a service name the deny list
+    // cannot read (an antivirus by its product code): the owner decides, not one model.
+    if (samePath(req.executable, this.system(c, 'msiexec.exe')) && /^\{[0-9a-f-]{36}\}$/i.test(req.args[1] ?? '')) why.push(`it ${lower(req.args[0] ?? '') === '/x' ? 'removes' : 'changes'} the installed product ${req.args[1]}`)
+    if (req.capability === 'APP_UNINSTALL_TEST' && !samePath(req.executable, this.system(c, 'msiexec.exe'))) why.push(`it runs the uninstaller ${win32.basename(req.executable)}`)
+    if (samePath(req.executable, this.system(c, 'sc.exe')) && lower(req.args[0] ?? '') === 'stop') why.push(`it stops the service ${req.args[1] ?? ''}`)
     return why
   }
 
@@ -170,7 +177,12 @@ export class PrivilegedPolicyEngine {
     if (!win32.isAbsolute(req.executable) || !/^[a-z]:\\/i.test(req.executable)) return deny('The executable must be an absolute path on a local drive.')
     if (req.cwd !== undefined && (!win32.isAbsolute(req.cwd) || !/^[a-z]:\\/i.test(req.cwd))) return deny('The working directory must be an absolute path on a local drive.')
     if (req.secretArgs.some((i) => i >= req.args.length)) return deny('A secret argument index names no argument.')
-    if (!this.protectedProgram(req.executable) && req.sha256 === undefined) return deny('A program outside the protected program folders must be given with its SHA-256.')
+    // 0.9.1 (second review, M4): what is hidden from the reviewers and the owner is only a value that says it is a
+    // secret (an installer property such as LICENSEKEY=... or a password): never a path, a service or a parameter.
+    if (req.secretArgs.some((i) => !SECRET_ARG.test(req.args[i] ?? ''))) return deny('Only an argument of the form NAME=value whose name says it is a secret (a password, key or token) may be marked secret.')
+    // 0.9.1 (second review, M10): Program Files is not Windows' own: an application's folder there may be writable.
+    // Anything outside System32 and SysWOW64 is staged and run as the bytes with the hash given (the broker too).
+    if (!this.systemProgram(req.executable) && req.sha256 === undefined) return deny('A program outside the Windows system folders must be given with its SHA-256.')
     const t = this.template(req, ctx)
     if (!t.ok) return deny(t.reason)
     // Every allowed operation fits a template that was reviewed once: the Council is asked for what the template
@@ -205,6 +217,11 @@ export class PrivilegedPolicyEngine {
     return { ...again, reason: `${again.reason} Approved by review${again.councilRequired ? ' and the Council' : ''}.` }
   }
 
+  systemProgram(path: string): boolean {
+    const c = this.ctx(null)
+    return [join(c.systemRoot, 'System32'), join(c.systemRoot, 'SysWOW64')].some((root) => under(path, root))
+  }
+
   protectedProgram(path: string): boolean {
     const c = this.ctx(null)
     return [join(c.systemRoot, 'System32'), join(c.systemRoot, 'SysWOW64'), c.programFiles, c.programFilesX86].some((root) => under(path, root))
@@ -232,7 +249,7 @@ export class PrivilegedPolicyEngine {
     for (let i = 6; i < req.args.length; i++) {
       const name = (req.args[i] as string).replace(/^-/, '')
       const kind = Object.entries(params).find(([p]) => p.toLowerCase() === name.toLowerCase())?.[1]
-      if (!(req.args[i] as string).startsWith('-') || kind === undefined) return fail(`The parameter ${req.args[i]} is not one this script takes here.`)
+      if (!(req.args[i] as string).startsWith('-') || kind === undefined) return fail(`Argument ${i + 1} is not a parameter this script takes here.`)
       if (kind === 'value') {
         i++
         if (i >= req.args.length) return fail('A parameter has no value.')
@@ -253,8 +270,9 @@ export class PrivilegedPolicyEngine {
     const rest = args.slice(from)
     if (!rest.some((a) => SILENT_REQUIRED.has(lower(a)))) return 'An installer runs only silently (/S, /quiet, /qn, /silent or the like).'
     // 0.9.1 (review F8): a log file is written by Windows Installer with its rights: only in NEXUS's results folder.
-    const odd = rest.find((a) => !SILENT_FLAGS.has(lower(a)) && !/^\/l\*?v?$/i.test(a) && !this.inResults(a, c, '.log'))
-    return odd !== undefined ? `The installer argument ${odd} is not one of the silent-installation flags (a log file goes in NEXUS's own results folder).` : null
+    // 0.9.1 (second review, M5): named by position, never by value (it may be a secret).
+    const odd = rest.findIndex((a) => !SILENT_FLAGS.has(lower(a)) && !/^\/l\*?v?$/i.test(a) && !this.inResults(a, c, '.log'))
+    return odd >= 0 ? `Argument ${from + odd + 1} of the installer is not one of the silent-installation flags (a log file goes in NEXUS's own results folder).` : null
   }
 
   private inProject(path: string, c: PrivilegedPolicyContext): boolean {
@@ -294,6 +312,8 @@ export class PrivilegedPolicyEngine {
         return r.ok ? pass(r.reason, ["modifies NEXUS's own privileged security configuration (account, firewall)"]) : r
       }
       case 'NEXUS_CANONICALIZATION_REPAIR': {
+        // 0.9.1 (second review, L8): an agent may check; only NEXUS itself repairs its own security configuration.
+        if (req.role !== 'NEXUS' && !req.args.some((a) => lower(a) === '-check')) return fail("Repairing NEXUS's own security configuration is done by NEXUS itself; an agent may only run it with -Check.")
         const r = this.shippedScript(req, c, c.nexusScriptsDir, ['restore-canonicalization.ps1'], { ResultFile: 'value', Check: 'switch' })
         return r.ok ? pass(r.reason, req.args.some((a) => lower(a) === '-check') ? [] : ["modifies NEXUS's own privileged security configuration (an access entry of the Mount Manager)"]) : r
       }
@@ -317,6 +337,9 @@ export class PrivilegedPolicyEngine {
       case 'APP_UNINSTALL_TEST': {
         if (samePath(req.executable, this.system(c, 'msiexec.exe'))) return this.installer(req, c, { fromProject: false, verbs: ['/x'] })
         if (!(under(req.executable, c.programFiles) || under(req.executable, c.programFilesX86)) || !/^(uninst|uninstall)[^\\]*\.exe$/i.test(basename(req.executable))) return fail("An uninstall runs the application's own uninstaller under Program Files, or msiexec /x.")
+        // 0.9.1 (second review, M10): it runs elevated from a folder its own installer may have left writable; it is
+        // staged and run as the bytes with the hash given, as any program outside Windows' own folders.
+        if (req.sha256 === undefined) return fail('An uninstaller must be given with its SHA-256.')
         const bad = this.installerArgs(req.args, 0, c)
         return bad === null ? pass("The application's own uninstaller, run silently.") : fail(bad)
       }
@@ -332,6 +355,9 @@ export class PrivilegedPolicyEngine {
         if (!samePath(req.executable, this.system(c, 'netsh.exe'))) return fail('Firewall rules are reconciled with the system netsh.exe only.')
         const a = req.args.map(lower)
         if (a[0] !== 'advfirewall' || a[1] !== 'firewall' || !['add', 'delete', 'show'].includes(a[2] ?? '') || a[3] !== 'rule') return fail('netsh is allowed with advfirewall firewall add|delete|show rule only.')
+        // 0.9.1 (second review, L8): an agent may look at NEXUS's rules; only NEXUS itself changes them. One name, one action.
+        if (a[2] !== 'show' && req.role !== 'NEXUS') return fail("NEXUS's firewall rules are changed by NEXUS itself; an agent may only show them.")
+        if (a.filter((x) => x.startsWith('name=')).length > 1 || a.filter((x) => x.startsWith('action=')).length > 1) return fail('A rule is named once and has one action.')
         const nameArg = req.args.find((x) => /^name=/i.test(x))
         if (nameArg === undefined || !/^name=NexusSandbox[A-Za-z0-9 _.-]{0,80}$/i.test(nameArg)) return fail("Only NEXUS's own rules (named NexusSandbox…) are reconciled.")
         if (a[2] === 'add' && !a.includes('action=block')) return fail("NEXUS's rules block; a rule that allows is never added by a privilege session.")
@@ -351,7 +377,7 @@ export class PrivilegedPolicyEngine {
           const flags = new Set(['/v', '/t', '/d', '/f', '/ve', '/s'])
           for (let i = 0; i < rest.length; i++) {
             const f = lower(rest[i] as string)
-            if (!flags.has(f)) return fail(`The reg.exe argument ${rest[i]} is not allowed here.`)
+            if (!flags.has(f)) return fail(`Argument ${i + 3} of reg.exe is not allowed here.`)
             if (f === '/v' || f === '/t' || f === '/d') {
               const value = rest[++i] ?? ''
               if (!/^[A-Za-z0-9_. :-]{0,200}$/.test(value)) return fail('A fixture value has characters the fixture never uses.')
@@ -377,11 +403,38 @@ export function redactArgs(args: readonly string[], secretArgs: readonly number[
 
 /** Values that look like credentials (password=…, token=…, long base64/hex runs) are replaced. */
 export function redactText(text: string): string {
+  // 0.9.1 (second review, M6): names with a prefix (DB_PASSWORD=, NPM_TOKEN=), a flag then its value (--password x,
+  // -Password x), credentials in a URL, more token shapes, JWTs and hex keys.
   return text
-    .replace(/\b(password|passwd|pwd|secret|token|apikey|api_key|key|credential)s?\s*[=:]\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=[secret]')
+    .replace(/(?<![A-Za-z0-9])([A-Za-z0-9_.-]*?(?:password|passwd|pwd|secret|token|apikey|api_key|key|credential)s?)\s*[=:]\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=[secret]')
+    .replace(/(^|\s)(--?|\/)(password|passwd|pwd|token|secret|apikey|api-key|key|credential)\s+("[^"]*"|'[^']*'|[^\s-]\S*)/gi, '$1$2$3 [secret]')
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s:@/]+:[^\s@/]+@/gi, '$1[secret]@')
     .replace(/\b(bearer)\s+[A-Za-z0-9._~+/-]{8,}=*/gi, '$1 [secret]')
-    .replace(/\b(sk|pk|ghp|gho|github_pat|xox[abpr])[-_][A-Za-z0-9_-]{12,}\b/g, '[secret]')
+    .replace(/\b(sk|pk|ghp|gho|ghs|ghu|github_pat|xox[abpr]|npm|glpat)[-_][A-Za-z0-9_-]{12,}\b/g, '[secret]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b|\bAIza[0-9A-Za-z_-]{35}\b/g, '[secret]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[secret]')
+    .replace(/\b[0-9a-f]{32,}\b/gi, '[secret]')
     .replace(/\b[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])/g, '[secret]')
+}
+
+/**
+ * 0.9.1 (second review, H3): a privileged request as it may be kept in the tool history: secret arguments replaced,
+ * the environment's values withheld (they are often a licence key or a password), free text redacted. The history
+ * kept the whole request in clear, readable by any client of the runtime.
+ */
+export function redactPrivilegedInput(o: Record<string, unknown>): Record<string, unknown> {
+  // Through the extension tool the request arrives as { name, args: <request> }.
+  if (typeof o['args'] === 'object' && o['args'] !== null && !Array.isArray(o['args'])) return { ...o, args: redactPrivilegedInput(o['args'] as Record<string, unknown>) }
+  const secret = Array.isArray(o['secretArgs']) ? (o['secretArgs'] as unknown[]).filter((i): i is number => typeof i === 'number') : []
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'args' && Array.isArray(v)) out[k] = redactArgs(v.map(String), secret)
+    else if (k === 'env' && typeof v === 'object' && v !== null) out[k] = Object.fromEntries(Object.keys(v).map((name) => [name, '[withheld]']))
+    else if (typeof v === 'string') out[k] = redactText(v)
+    else if (k === 'args' || k === 'env') out[k] = '[withheld]'
+    else out[k] = v
+  }
+  return out
 }
 
 /** Whether a path is a drive path NEXUS may hand to the broker (for callers that build requests). */

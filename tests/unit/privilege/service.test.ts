@@ -46,7 +46,7 @@ function reviewer(verdict: 'APPROVE' | 'REJECT' = 'APPROVE', calls: { n: number 
   }
 }
 
-function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore } = {}) {
+function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore; blocked?: (runId: string | null) => string | null } = {}) {
   const store = opts.store ?? new MemoryPrivilegeStore()
   const broker = opts.broker ?? new FakeBroker((req, n) => (req.args[5]?.endsWith('fixture-install.ps1') && n === 1 ? ok('', 3) : ok()))
   let uac = 0
@@ -70,6 +70,7 @@ function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strate
     },
     verify: async (req) => req.expected.files.map((f) => `${f}: present.`),
     ...(opts.owner ? { confirmOwner: opts.owner } : {}),
+    ...(opts.blocked ? { blockedBy: opts.blocked } : {}),
   })
   return { service, store, broker, uac: () => uac }
 }
@@ -264,7 +265,11 @@ describe('privilege sessions', () => {
     })
     const { service } = setup({ broker, store })
     await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
-    const r = await service.submit(fixture('fixture-repair.ps1', [], { env: { LICENCE_KEY: 'K7Q2-PLM9-ZZ41' }, args: [...HEAD, join(fixtureDir, 'fixture-repair.ps1'), '-Version', 'hunter2go'], secretArgs: [7] }), who())
+    // 0.9.1 (second review, M4): only a value that says it is a secret may be hidden from the reviewers and the owner.
+    const hidden = await service.submit(fixture('fixture-repair.ps1', [], { args: [...HEAD, join(fixtureDir, 'fixture-repair.ps1'), '-Version', 'hunter2go'], secretArgs: [7] }), who())
+    expect(hidden).toMatchObject({ outcome: 'REJECTED_BY_POLICY', outcomeReason: expect.stringMatching(/NAME=value/) })
+    store.receiptRows.length = 0
+    const r = await service.submit(fixture('fixture-repair.ps1', [], { env: { LICENCE_KEY: 'K7Q2-PLM9-ZZ41', OWNER_NAME: 'hunter2go' } }), who())
     expect(during).toEqual(['EXECUTING'])
     expect(r.outcome).toBe('EXECUTED')
     expect(store.receiptRows).toHaveLength(1)
@@ -273,6 +278,30 @@ describe('privilege sessions', () => {
     store.record({ ...r, id: 'op-crashed', outcome: 'EXECUTING' })
     setup({ store }).service.recover()
     expect(store.receiptRows.find((x) => x.id === 'op-crashed')).toMatchObject({ outcome: 'ABORTED', outcomeReason: expect.stringMatching(/not known/) })
+  })
+
+  // 0.9.1 (second review, H1, L6, L1).
+  it('prepares no session while an uncontained mission runs, ends one when such a mission starts, and serves only its run', async () => {
+    let uncontained: string | null = 'A mission of a project whose commands are not contained is in progress.'
+    const h = setup({ blocked: () => uncontained })
+    expect(await h.service.prepare({ scope: 'UNTIL_IDLE', runId: 'run-1', projectId: 'p1' })).toMatchObject({ ok: false, reason: expect.stringMatching(/not contained/) })
+    expect(h.uac()).toBe(0)
+    uncontained = null
+    expect((await h.service.prepare({ scope: 'UNTIL_IDLE', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })).ok).toBe(true)
+    // Bound to its run whatever its scope.
+    expect((await h.service.submit(fixture('fixture-repair.ps1'), who({ runId: 'run-2' }))).outcomeReason).toMatch(/another run/)
+    uncontained = 'A mission of a project whose commands are not contained is in progress.'
+    await h.service.recheck()
+    expect(h.service.status()).toBeNull()
+    expect(h.broker.ended).toBe(true)
+  })
+
+  it('does not keep a session whose broker ended as it started', async () => {
+    const dead = new FakeBroker(() => ok())
+    dead.alive = false
+    const h = setup({ broker: dead })
+    expect(await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1' })).toMatchObject({ ok: false, reason: expect.stringMatching(/ended as it started/) })
+    expect(h.service.status()).toBeNull()
   })
 
   it('writes the privileged activity report with every field the owner asked for (B12, B13)', async () => {

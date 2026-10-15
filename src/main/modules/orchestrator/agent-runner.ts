@@ -50,6 +50,7 @@ import { canTransition } from '@main/modules/state'
 import type { ApprovalService } from './approvals'
 import type { GraphService } from './graph-service'
 import type { TokenIntelligenceEngine } from '@main/modules/token'
+import { redactPrivilegedInput as privilegedInputForLog } from '@main/modules/privilege/policy'
 import type { OrchestratorDeps } from './deps'
 import type { MemoryService } from './memory'
 import type { MessageService } from './messaging'
@@ -679,7 +680,9 @@ export class AgentRunner {
             break
           case 'tool.started': {
             toolNames.set(event.toolUseId, event.toolName)
-            const summary = summarizeToolInput(event.toolName, event.input)
+            // 0.9.1 (privilege review H3): a privileged request is kept without its secrets.
+            const input = /privileged_request$/.test(event.toolName) ? privilegedInputForLog(event.input) : event.input
+            const summary = summarizeToolInput(event.toolName, input)
             bus.transaction(() => {
               repos.toolEvents.insert({
                 id: newId(),
@@ -688,13 +691,13 @@ export class AgentRunner {
                 agentId,
                 toolUseId: event.toolUseId,
                 toolName: event.toolName,
-                input: event.input,
+                input,
                 status: 'started',
                 outputPreview: null,
                 startedAt: nowIso(),
                 completedAt: null,
               })
-              this.bumpMetrics(agentId, event.toolName, event.input, files, summary)
+              this.bumpMetrics(agentId, event.toolName, input, files, summary)
               bus.emit({
                 ...ids,
                 type: 'agent.tool.started',

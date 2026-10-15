@@ -39,7 +39,7 @@ export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): Privilege
       const asked = service.status() === null && ctx.confirm !== undefined
         ? await ctx.confirm(
             'Prepare an administrator session for NEXUS?',
-            [`Scope: ${input.scope.toLowerCase().replace(/_/g, ' ')}${runId ? ` (mission ${runId})` : ''}${input.hours !== undefined ? `, at most ${input.hours} h` : ''}.`, `What it may be used for: ${capabilities.join(', ')}.`, 'Windows will then ask for administrator rights once (UAC). Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again. If you did not ask for this, choose Cancel.'].join('\n\n'),
+            [`Scope: ${input.scope.toLowerCase().replace(/_/g, ' ')}${runId ? ` (mission ${runId})` : ''}${input.hours !== undefined ? `, at most ${input.hours} h` : ''}.`, `What it may be used for: ${capabilities.join(', ')}.`, 'Windows will then ask for administrator rights once (UAC). Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again.', 'While it lasts, other programs you run yourself (outside NEXUS) are not kept away from it: prepare it only while nothing untrusted runs on this computer. If you did not ask for this, choose Cancel.'].join('\n\n'),
           ).catch(() => false)
         : service.status() !== null
       if (!asked) return { ok: false, reason: ctx.confirm === undefined ? 'NEXUS cannot ask for your confirmation here, so no administrator session is prepared.' : 'Not confirmed: no administrator session was prepared.', status: service.status() }

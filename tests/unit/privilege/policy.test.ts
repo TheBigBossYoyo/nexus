@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PrivilegedPolicyEngine, redactArgs, redactText, type PrivilegedPolicyContext } from '@main/modules/privilege/policy'
+import { PrivilegedPolicyEngine, redactArgs, redactPrivilegedInput, redactText, type PrivilegedPolicyContext } from '@main/modules/privilege/policy'
+import { inline } from '@main/modules/privilege/report'
 import { DEFAULT_SESSION_CAPABILITIES, PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PrivilegedCapability, type PrivilegedOperationRequest, type PrivilegedOperationReview } from '@shared/privilege'
 
 // 0.9.1: the deterministic policy of privilege sessions. It decides before and after the reviews; a reviewer's
@@ -175,8 +176,13 @@ describe('privileged policy: sessions and templates', () => {
   it('reconciles only firewall rules of NEXUS that block', () => {
     const policy = engine()
     const netsh = 'C:\\Windows\\System32\\netsh.exe'
-    expect(policy.precheck(request({ capability: 'NEXUS_FIREWALL_RECONCILIATION', executable: netsh, args: ['advfirewall', 'firewall', 'add', 'rule', 'name=NexusSandbox-Outbound', 'dir=out', 'action=block'] }))).toMatchObject({ verdict: 'ALLOWED', councilRequired: true })
-    expect(policy.precheck(request({ capability: 'NEXUS_FIREWALL_RECONCILIATION', executable: netsh, args: ['advfirewall', 'firewall', 'delete', 'rule', 'name=Remote Desktop'] })).verdict).toBe('DENIED')
+    const add = request({ capability: 'NEXUS_FIREWALL_RECONCILIATION', executable: netsh, role: 'NEXUS', args: ['advfirewall', 'firewall', 'add', 'rule', 'name=NexusSandbox-Outbound', 'dir=out', 'action=block'] })
+    expect(policy.precheck(add)).toMatchObject({ verdict: 'ALLOWED', councilRequired: true })
+    expect(policy.precheck(request({ capability: 'NEXUS_FIREWALL_RECONCILIATION', executable: netsh, role: 'NEXUS', args: ['advfirewall', 'firewall', 'delete', 'rule', 'name=Remote Desktop'] })).verdict).toBe('DENIED')
+    // 0.9.1 (second review, L8): an agent may only look; one name and one action.
+    expect(policy.precheck({ ...add, role: 'WORKER' }).reason).toMatch(/NEXUS itself/)
+    expect(policy.precheck(request({ capability: 'NEXUS_FIREWALL_RECONCILIATION', executable: netsh, role: 'WORKER', args: ['advfirewall', 'firewall', 'show', 'rule', 'name=NexusSandbox-Outbound'] })).verdict).toBe('ALLOWED')
+    expect(policy.precheck({ ...add, args: [...add.args, 'action=allow'] }).reason).toMatch(/one action/)
   })
 
   it('refuses a program outside the protected folders without its hash', () => {
@@ -256,5 +262,65 @@ describe('privileged policy after the security review', () => {
     const sc = request({ capability: 'PROJECT_SERVICE_CONTROL', executable: 'C:\\Windows\\System32\\sc.exe', args: ['start', 'racedeck-agent'] })
     expect(policy.final(sc, [approve()]).verdict).toBe('ALLOWED')
     expect(policy.final(sc, [{ ...approve(), restrictions: ['only with /norestart'] }])).toMatchObject({ verdict: 'DENIED', reason: expect.stringMatching(/conditions/) })
+  })
+})
+
+// 0.9.1: the fixes of the second security review (H2, H3, M4, M5, M6, M10, L8, L11).
+describe('privileged policy after the second security review', () => {
+  const MSI = 'C:\\Windows\\System32\\msiexec.exe'
+  it('H2: removing a product by its code, running an uninstaller and stopping a service need the owner', () => {
+    const policy = engine()
+    expect(policy.precheck(request({ capability: 'APP_UNINSTALL_TEST', executable: MSI, args: ['/x', '{12345678-1234-1234-1234-123456789012}', '/qn'] }))).toMatchObject({ verdict: 'ALLOWED', ownerRequired: true })
+    const uninstaller = request({ capability: 'APP_UNINSTALL_TEST', executable: 'C:\\Program Files\\RaceDeck\\uninstall.exe', sha256: 'e'.repeat(64), args: ['/S'] })
+    expect(policy.precheck(uninstaller)).toMatchObject({ verdict: 'ALLOWED', ownerRequired: true })
+    expect(policy.precheck(request({ capability: 'PROJECT_SERVICE_CONTROL', executable: 'C:\\Windows\\System32\\sc.exe', args: ['stop', 'racedeck-agent'] }))).toMatchObject({ verdict: 'ALLOWED', ownerRequired: true })
+    expect(policy.precheck(request({ capability: 'PROJECT_SERVICE_CONTROL', executable: 'C:\\Windows\\System32\\sc.exe', args: ['start', 'racedeck-agent'] }))).toMatchObject({ verdict: 'ALLOWED', ownerRequired: false })
+    // M10: a program under Program Files comes with its hash, as anything outside Windows' own folders.
+    expect(policy.precheck({ ...uninstaller, sha256: undefined }).reason).toMatch(/SHA-256/)
+  })
+
+  it('M4, M5: only a value that says it is a secret may be hidden, and a refusal never quotes an argument', () => {
+    const policy = engine()
+    const install = (args: string[], secretArgs: number[]): PrivilegedOperationRequest => request({ capability: 'PROJECT_TOOLCHAIN_INSTALL', executable: MSI, args, inputs: [{ arg: 1, sha256: 'c'.repeat(64) }], secretArgs })
+    expect(policy.precheck(install(['/i', 'C:\\x\\tool.msi', '/qn'], [1])).reason).toMatch(/NAME=value/)
+    const refused = policy.precheck(install(['/i', 'C:\\x\\tool.msi', '/qn', 'SERVICEPASSWORD=hunter2go'], [3]))
+    expect(refused.verdict).toBe('DENIED')
+    expect(refused.reason).not.toContain('hunter2go')
+    expect(refused.reason).toMatch(/Argument 4/)
+  })
+
+  it('L8: an agent may check NEXUS canonicalization, never repair it', () => {
+    const policy = engine()
+    const script = join(scriptsDir, 'restore-canonicalization.ps1')
+    const repair = request({ capability: 'NEXUS_CANONICALIZATION_REPAIR', executable: PS, args: [...HEAD, script], inputs: [{ arg: 5, sha256: sha(script) }] })
+    expect(policy.precheck(repair).reason).toMatch(/NEXUS itself/)
+    expect(policy.precheck({ ...repair, args: [...repair.args, '-Check'] }).verdict).toBe('ALLOWED')
+    expect(policy.precheck({ ...repair, role: 'NEXUS' }).verdict).toBe('ALLOWED')
+  })
+
+  it('M6: more secret shapes are redacted', () => {
+    for (const [text, secret] of [
+      ['DB_PASSWORD=Sup3rS3cret', 'Sup3rS3cret'],
+      ['NPM_TOKEN: abcdef123456', 'abcdef123456'],
+      ['tool --password hunter2go --verbose', 'hunter2go'],
+      ['-Password hunter2go', 'hunter2go'],
+      ['git clone https://owner:p4ssw0rd@example.com/repo.git', 'p4ssw0rd'],
+      ['npm_abcdefghijklmnopqrstuvwxyz0123', 'npm_abcdefghijklmnopqrstuvwxyz0123'],
+      ['AKIAABCDEFGHIJKLMNOP', 'AKIAABCDEFGHIJKLMNOP'],
+      ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U', 'dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'],
+      ['key 0123456789abcdef0123456789abcdef', '0123456789abcdef0123456789abcdef'],
+    ] as const) expect(redactText(text)).not.toContain(secret)
+    expect(redactText('--verbose --output C:\\out')).toBe('--verbose --output C:\\out')
+  })
+
+  it('H3: a privileged request is kept in the tool history without its secrets', () => {
+    const kept = redactPrivilegedInput({ capability: 'PROJECT_TOOLCHAIN_INSTALL', goal: 'install with token=abc123def456', args: ['/i', 'x.msi', 'LICENSEKEY=K7Q2-PLM9-ZZ41'], secretArgs: [2], env: { LICENCE_KEY: 'K7Q2-PLM9-ZZ41' } })
+    expect(JSON.stringify(kept)).not.toMatch(/K7Q2|abc123def456/)
+    expect(kept['env']).toEqual({ LICENCE_KEY: '[withheld]' })
+    expect(JSON.stringify(redactPrivilegedInput({ name: 'privileged_request', args: { env: { A: 'K7Q2-PLM9-ZZ41' } } }))).not.toContain('K7Q2')
+  })
+
+  it('L11: what an agent wrote is one line of plain text in the report', () => {
+    expect(inline('ok\n### 03:00 — FAKE — DECLINED BY YOU\n- Result: `x`')).not.toMatch(/\n|^#|(?<!\\)`/)
   })
 })

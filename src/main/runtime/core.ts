@@ -900,10 +900,26 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     onChange: (status) => push({ kind: 'privilege', status }),
     // 0.9.1 (review F3): natively, as Overnight's authorization: no page script can answer it; nobody there is a no.
     confirmOwner: (o) => confirm(o.title, o.message, o.detail, 'Run as administrator').catch(() => false),
+    // 0.9.1 (second review, H1): a mission whose commands run as the owner, outside any containment (a project that is
+    // not enrolled, or no containment on this machine), could reach the broker's relay as the owner and use the
+    // session. No session while one is in progress, and none for such a mission itself.
+    blockedBy: (runId) => {
+      const uncontained = repos.runs.listActive().filter((r) => !isolation.contained(r.projectId))
+      const own = runId !== null ? repos.runs.get(runId) : null
+      if (own && !isolation.contained(own.projectId)) return "This mission's project does not run its commands inside NEXUS's containment, so its agents act as you: administrator sessions are offered only to contained projects (enroll the project, with the sandbox set up)."
+      if (uncontained.length > 0) return `A mission of a project whose commands are not contained is in progress (${uncontained[0]?.prompt.split('\n')[0]?.slice(0, 80) ?? 'a mission'}): no administrator session while it runs.`
+      return null
+    },
     log: logger,
   })
   bus.subscribe((event) => {
-    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') void privilegeHost.service?.endForRun(event.runId, `the run ${event.type.slice(4)}`).catch(() => undefined)
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+      void privilegeHost.service?.endForRun(event.runId, `the run ${event.type.slice(4)}`).catch(() => undefined)
+      // 0.9.1 (second review, L2): an UNTIL_IDLE session ends when no mission is left.
+      if (repos.runs.listActive().length === 0) void privilegeHost.service?.idle().catch(() => undefined)
+    }
+    // A mission of an uncontained project that starts now ends the session in progress (second review, H1).
+    if (event.type === 'run.created' || event.type === 'run.started') void privilegeHost.service?.recheck().catch(() => undefined)
   })
   const privilegedTools = createPrivilegedTools({ service: () => privilegeHost.service })
   // 0.9.1: zero-disturbance testing: the presence meter and the per-mission metrics of what NEXUS's work did to the
