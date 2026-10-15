@@ -1,4 +1,4 @@
-import { scopeFinalChecks, scopeTaskChecks } from './check-scope'
+import { failedTestFiles, rerunTestsCommand, scopeFinalChecks, scopeTaskChecks } from './check-scope'
 import {
   TERMINAL_RUN_STATES,
   type CommandResult,
@@ -230,12 +230,33 @@ export class Core {
     bus.emit({ runId: run.id, taskId, type: 'checks.started', payload: { commands: commands.filter((c) => !c.skip).map((c) => c.command) } })
 
     const results: CommandResult[] = []
+    const flaky: string[] = []
     for (const check of commands) {
       if (check.skip) {
         results.push({ name: check.name, command: check.command, cwd, exitCode: 0, timedOut: false, durationMs: 0, output: check.note ?? 'Not run for this task.' })
         continue
       }
-      const result = await this.runOne(check.name, check.command, cwd, run, taskId)
+      let result = await this.runOne(check.name, check.command, cwd, run, taskId)
+      // 0.9.1: a test run whose failures are a few named files runs those files once more. Passing then, the check
+      // passes and says so (a test that fails once in a full run is told apart in seconds from a defect, where a
+      // repair and the whole suite again took half an hour); failing again, it fails as before.
+      if (check.name === 'test' && result.exitCode !== 0 && !result.timedOut) {
+        const files = failedTestFiles(result.output)
+        const rerun = files === null ? null : rerunTestsCommand(cwd, check.command, files)
+        if (files !== null && rerun !== null) {
+          const again = await this.runOne('test', rerun, cwd, run, taskId)
+          if (again.exitCode === 0 && !again.timedOut) {
+            result = {
+              ...result,
+              exitCode: 0,
+              durationMs: result.durationMs + again.durationMs,
+              output: `[Failed in this run, then passed when run again alone: ${files.join(', ')}. Possibly flaky: a test that fails only sometimes.]\n${again.output}\n--- the first run ---\n${result.output.slice(-6000)}`,
+            }
+            flaky.push(...files)
+            this.deps.bus.emit({ runId: run.id, taskId, type: 'checks.flaky', payload: { files } })
+          }
+        }
+      }
       results.push(check.note !== null ? { ...result, output: `[${check.note}]\n${result.output}` } : result)
     }
     const failed = results.filter((r) => r.exitCode !== 0 || r.timedOut)
@@ -245,7 +266,7 @@ export class Core {
       commands.length === 0
         ? 'No check commands are configured for this project; nothing was run.'
         : passed
-          ? `${results.length} check command(s) passed${partial ? ' (tests: only those affected by the mission, as the owner set it; the whole suite was not run)' : ''}.`
+          ? `${results.length} check command(s) passed${partial ? ' (tests: only those affected by the mission, as the owner set it; the whole suite was not run)' : ''}${flaky.length > 0 ? `; failed once and passed when run again alone: ${flaky.join(', ')}` : ''}.`
           : `Failed: ${failed.map((r) => r.name).join(', ')}`
 
     return bus.transaction(() => {

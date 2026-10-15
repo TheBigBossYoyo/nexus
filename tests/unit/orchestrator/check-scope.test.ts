@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { scopeFinalChecks, scopeTaskChecks, scriptOf } from '@main/modules/orchestrator/check-scope'
+import { failedTestFiles, rerunTestsCommand, scopeFinalChecks, scopeTaskChecks, scriptOf } from '@main/modules/orchestrator/check-scope'
 
 // 0.9.1: a task's checks are about its own changes. Found when a mission on NEXUS itself ran the whole 15-minute
 // suite after a task, timed out, and sent a repair agent to fix code that had nothing wrong with it.
@@ -84,5 +84,37 @@ describe('scopeFinalChecks', () => {
     expect(out[3]?.note).toBe('Affected tests only (Settings > Execution > Final tests): The 1 test file(s) that name the files the mission changed. The whole suite was not run.')
     const none = scopeFinalChecks({ checks, order: ORDER, cwd: dir, changedFiles: ['README.md'] })
     expect(none[3]).toMatchObject({ skip: true, note: 'Affected tests only (Settings > Execution > Final tests): no test names a file the mission changed. The whole suite was not run.' })
+  })
+})
+
+// 0.9.1: a full run of NEXUS's suite failed on one test that raced git; the mission repaired it and ran 22 minutes again.
+describe('failedTestFiles and rerunTestsCommand', () => {
+  const vitestOutput = [
+    ' FAIL  |integration| tests/scenarios/read-snapshot.test.ts > scenario: a read-only run > reads the base commit',
+    "Error: git branch --list failed: warning: unable to access '.git/config': Permission denied",
+    ' Test Files  1 failed | 289 passed | 7 skipped (297)',
+    '      Tests  1 failed | 5465 passed | 77 skipped (5543)',
+  ].join('\n')
+
+  it('reads the failed files when the output accounts for every failure', () => {
+    expect(failedTestFiles(vitestOutput)).toEqual(['tests/scenarios/read-snapshot.test.ts'])
+    expect(failedTestFiles('FAIL tests/a.test.js\nFAIL tests/b.test.js\nTest Suites: 2 failed, 10 passed, 12 total')).toEqual(['tests/a.test.js', 'tests/b.test.js'])
+  })
+
+  it('says nothing when the output does not account for the failure exactly', () => {
+    expect(failedTestFiles(`${vitestOutput}\nVitest caught 1 unhandled error\nUnhandled Error`)).toBeNull()
+    expect(failedTestFiles(vitestOutput.replace('1 failed | 289', '2 failed | 288'))).toBeNull()
+    expect(failedTestFiles('Error: Projects "a" and "b" have different maxWorkers\n Test Files  no tests')).toBeNull()
+    const many = Array.from({ length: 6 }, (_, i) => ` FAIL  tests/t${i}.test.ts > x`).join('\n')
+    expect(failedTestFiles(`${many}\n Test Files  6 failed | 1 passed`)).toBeNull()
+  })
+
+  it('runs only those files again, with the project test runner', () => {
+    project({ test: 'vitest run' }, [])
+    expect(rerunTestsCommand(dir, 'pnpm test', ['tests/a b.test.ts', 'tests/c.test.ts'])).toBe('pnpm exec vitest run "tests/a b.test.ts" tests/c.test.ts')
+    project({ test: 'jest' }, [])
+    expect(rerunTestsCommand(dir, 'npm test', ['t/a.test.js'])).toBe('npm exec jest t/a.test.js')
+    project({ test: 'node --test' }, [])
+    expect(rerunTestsCommand(dir, 'npm test', ['t/a.test.js'])).toBeNull()
   })
 })

@@ -112,6 +112,8 @@ export interface EventPayloads {
 
   'checks.started': { commands: string[] }
   'checks.completed': { passed: boolean; failed: string[] }
+  /** 0.9.1: test files that failed in a check and passed when run again alone (possibly flaky). */
+  'checks.flaky': { files: string[] }
 
   'review.started': { attempt: number }
   'review.finding': { severity: Severity; title: string; file: string | null }

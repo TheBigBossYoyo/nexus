@@ -207,3 +207,31 @@ export function scopeTaskChecks(input: { checks: Partial<Record<CheckName, strin
   }
   return out
 }
+
+const FAILED_VITEST = /^\s*FAIL\s+(?:\|[^|\n]+\|\s+)?(\S+?\.(?:test|spec)\.[cm]?[jt]sx?)(?=\s|$)/gm
+const FAILED_JEST = /^\s*FAIL\s+(\S+?\.(?:test|spec)\.[cm]?[jt]sx?)\s*$/gm
+const MAX_RETRIED_FILES = 5
+
+/**
+ * 0.9.1: the test files a vitest or jest run reported as failed, read from its output; null when the output does
+ * not account for the failure exactly (an unhandled error, a crash, a count that does not match, too many files).
+ * A whole suite of NEXUS failed on one test that raced git on Windows: the mission sent a repair agent and ran
+ * the 22-minute suite again, where running the one failed file again would have said in seconds that it passes.
+ */
+export function failedTestFiles(output: string): string[] | null {
+  if (/Unhandled (?:Error|Rejection)|ERR_|Segmentation fault|out of memory/i.test(output)) return null
+  const files = new Set([...output.matchAll(FAILED_VITEST), ...output.matchAll(FAILED_JEST)].map((m) => (m[1] as string).split('\\').join('/')))
+  const counted = /Test (?:Files|Suites):?\s+(\d+) failed/.exec(output)
+  if (files.size === 0 || files.size > MAX_RETRIED_FILES || counted === null || Number(counted[1]) !== files.size) return null
+  return [...files].sort()
+}
+
+/** The command that runs only `files` again, for a test command NEXUS can read exactly (vitest or jest); null otherwise. */
+export function rerunTestsCommand(cwd: string, testCommand: string, files: readonly string[]): string | null {
+  const called = scriptOf(testCommand)
+  const direct = /^(?:npx\s+|pnpm\s+exec\s+)?(vitest|jest)\b/.exec(testCommand.trim())
+  const tool = direct?.[1] ?? (called === null ? null : plainInvocation(readScripts(cwd)[called.script], 'vitest') !== null ? 'vitest' : plainInvocation(readScripts(cwd)[called.script], 'jest') !== null ? 'jest' : null)
+  if (tool === null) return null
+  const exec = called !== null ? `${called.pm} exec` : 'npx'
+  return tool === 'vitest' ? `${exec} vitest run ${files.map(quote).join(' ')}` : `${exec} jest ${files.map(quote).join(' ')}`
+}

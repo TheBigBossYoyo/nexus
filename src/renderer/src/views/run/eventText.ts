@@ -92,6 +92,7 @@ const RENDER: Renderers = {
 
   'checks.started': (p) => `Checks started: ${p.commands.join(', ')}`,
   'checks.completed': (p) => (p.passed ? 'Checks passed' : `Checks failed: ${p.failed.join(', ')}`),
+  'checks.flaky': (p) => `Failed once, passed when run again: ${p.files.join(', ')}`,
 
   'review.started': (p) => `Review started (attempt ${p.attempt})`,
   'review.finding': (p) => `Finding [${p.severity}] ${trunc(p.title)}${p.file ? ` in ${p.file}` : ''}`,
