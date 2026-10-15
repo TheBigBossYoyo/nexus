@@ -35,7 +35,7 @@ class FakeBroker implements BrokerHandle {
   }
 }
 
-const ok = (stdout = 'done', exitCode = 0): BrokerExecResult => ({ kind: 'result', exitCode, durationMs: 120, timedOut: false, executable: PS, stagedSha256: null, leftoverEnded: 0, stdout, stderr: exitCode === 0 ? '' : 'the folder is missing', stdoutTruncated: false, stderrTruncated: false })
+const ok = (stdout = 'done', exitCode = 0): BrokerExecResult => ({ kind: 'result', exitCode, durationMs: 120, timedOut: false, executable: PS, stagedSha256: null, leftoverEnded: 0, leftover: null, stdout, stderr: exitCode === 0 ? '' : 'the folder is missing', stdoutTruncated: false, stderrTruncated: false })
 
 function reviewer(verdict: 'APPROVE' | 'REJECT' = 'APPROVE', calls: { n: number } = { n: 0 }): AdvisoryProvider {
   return {

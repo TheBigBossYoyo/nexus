@@ -26,7 +26,7 @@ export interface BrokerExecRequest {
 }
 
 export type BrokerExecResult =
-  | { kind: 'result'; exitCode: number; durationMs: number; timedOut: boolean; executable: string; stagedSha256: string | null; leftoverEnded: number; stdout: string; stderr: string; stdoutTruncated: boolean; stderrTruncated: boolean }
+  | { kind: 'result'; exitCode: number; durationMs: number; timedOut: boolean; executable: string; stagedSha256: string | null; leftoverEnded: number; leftover: string | null; stdout: string; stderr: string; stdoutTruncated: boolean; stderrTruncated: boolean }
   | { kind: 'refused'; reason: string }
   | { kind: 'lost'; reason: string }
 
@@ -147,7 +147,7 @@ export class ElevatedBrokerClient {
         this.pipeName = typeof body.pipe === 'string' ? body.pipe : null
       }
       else if (body.e === 'declined') this.helloWaiter?.({ failure: 'DECLINED', reason: 'The administrator prompt was declined.' })
-      else if (body.e === 'failed') this.helloWaiter?.({ failure: 'FAILED', reason: typeof body.reason === 'string' ? body.reason.slice(0, 200) : 'The broker could not be started.' })
+      else if (body.e === 'failed') this.helloWaiter?.({ failure: 'FAILED', reason: typeof body.reason === 'string' ? body.reason.slice(0, 400) : 'The broker could not be started.' })
       return
     }
     if (seq === '0') {
@@ -167,7 +167,8 @@ export class ElevatedBrokerClient {
     if (seq !== String(this.received + 1) || !sameHex(mac, sign(this.key, this.o.session, 'r', seq, text))) return this.lost('an answer that is not the next signed one')
     this.received++
     if (body.e === 'ended') {
-      this.lost(typeof body.reason === 'string' ? `ended: ${body.reason}` : 'ended')
+      const leftover = typeof body.leftover === 'string' && body.leftover.trim() !== '' ? ` (may still be running: ${body.leftover.slice(0, 300)})` : ''
+      this.lost(typeof body.reason === 'string' ? `ended: ${body.reason}${leftover}` : `ended${leftover}`)
       return
     }
     const waiter = this.pending.shift()
@@ -226,6 +227,8 @@ export class ElevatedBrokerClient {
         executable: str('executable'),
         stagedSha256: typeof answer.stagedSha256 === 'string' ? answer.stagedSha256 : null,
         leftoverEnded: typeof answer.leftoverEnded === 'number' ? answer.leftoverEnded : 0,
+        // 0.9.1 (review F9): what the program handed to Windows (an installation, a service) and may still be running.
+        leftover: typeof answer.leftover === 'string' && answer.leftover.trim() !== '' ? answer.leftover.slice(0, 400) : null,
         stdout: str('stdout'),
         stderr: str('stderr'),
         stdoutTruncated: answer.stdoutTruncated === true,

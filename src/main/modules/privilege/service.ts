@@ -386,7 +386,7 @@ export class PrivilegeService {
       finalPolicy: final,
       exitCode: result.exitCode,
       durationMs: result.durationMs,
-      observed: result.leftoverEnded > 0 ? [...observed, `${result.leftoverEnded} process(es) it left running were ended.`] : observed,
+      observed: [...observed, ...(result.leftoverEnded > 0 ? [`${result.leftoverEnded} process(es) it left running were ended.`] : []), ...(result.leftover ? [`Not ended by NEXUS, may still be running: ${result.leftover}`] : [])],
       stdout: cut(result.stdout, result.stdoutTruncated),
       stderr: cut(result.stderr, result.stderrTruncated),
       stagedSha256: result.stagedSha256,

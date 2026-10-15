@@ -76,7 +76,12 @@ win:
       arch: [x64]
 nsis:
   oneClick: false
-  perMachine: false
+  # 0.9.1 (security review F1, the owner's decision): installed for all users, under Program Files, which only
+  # administrators can change. The privilege broker is the one program NEXUS starts with administrator rights; in a
+  # per-user folder any program running as the user could replace it before the UAC prompt. One administrator prompt
+  # at install. A folder chosen elsewhere works, but privilege sessions then refuse to start (the runtime and the
+  # broker both check where the broker is).
+  perMachine: true
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
   artifactName: NEXUS-Setup-${version}.${ext}
