@@ -498,6 +498,14 @@ export class ApplicationUnderTestManager {
     app.proxy = null
     await session?.close().catch(() => undefined)
     await app.process?.stop().catch(() => undefined)
+    // 0.9.1: the application runs in the launcher's job, which Windows ends after the launcher: for a moment its port
+    // still answered once stop() had returned (a full run of the suite, under load), and an application started again
+    // at once could have found its own port taken. Stopped means the port answers nobody, within a few seconds.
+    const port = app.endpoint?.port
+    if (port !== undefined) {
+      const until = Date.now() + 3000
+      while (Date.now() < until && (await portListening(port, app.endpoint?.host ?? '127.0.0.1', 200))) await delay(100)
+    }
     await proxy?.close().catch(() => undefined)
     if (app.specPath !== null) this.deps.broker.releaseSpec(app.specPath)
     app.specPath = null
