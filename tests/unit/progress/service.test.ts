@@ -8,7 +8,7 @@ import { ProgressService, checkLabel, milestoneLine, milestoneOf, type ProgressC
 const T0 = Date.parse('2026-10-13T19:00:00Z')
 const iso = (minutes: number): string => new Date(T0 + minutes * 60_000).toISOString()
 
-function world() {
+function world(opts: { fullChecksSeconds?: number | null } = {}) {
   let now = T0
   let seq = 0
   const run = { id: 'run-1', projectId: 'p', state: 'executing', pauseReason: null, startedAt: iso(0), createdAt: iso(0), finishedAt: null, config: { maxParallelAgents: 2 } } as unknown as Run
@@ -41,6 +41,7 @@ function world() {
     onChange: (snapshot, why) => changes.push({ why, snapshot }),
     record: (entry) => recorded.push(entry),
     recordAccuracy: (entry) => accuracy.push(entry),
+    fullChecksSeconds: () => opts.fullChecksSeconds ?? null,
   })
   return { run, task, emit, service, changes, recorded, accuracy, advance: (minutes: number) => (now += minutes * 60_000), setWait: (w: typeof wait) => (wait = w), now: () => now }
 }
@@ -134,6 +135,18 @@ describe('the progress service', () => {
     expect(w.service.refresh('run-1')?.stage).toBe('Final checks: pnpm run build, pnpm test (its first time on this project, so its length is not known yet)')
     w.setWait({ kind: 'WAITING_FOR_NETWORK', detail: 'Wi-Fi disconnected' })
     expect(w.service.refresh('run-1')?.stage).not.toContain('Final checks')
+  })
+
+  // 0.9.1: a first mission of a small project (checks of one second) was shown at least 7 minutes, then at least 3 for its last minute.
+  it('estimates a first mission final checks from the check durations its tasks measured, else from the wide prior', () => {
+    const finish = (w: ReturnType<typeof world>) => {
+      w.task('a', 'completed', { startedAt: iso(0), finishedAt: iso(3) })
+      w.run.state = 'verifying'
+      w.emit('checks.started', { commands: ['npm test'] }, null)
+      return w.service.refresh('run-1')?.eta.highSeconds ?? 0
+    }
+    expect(finish(world({ fullChecksSeconds: 2 }))).toBeLessThan(300)
+    expect(finish(world())).toBeGreaterThan(1000)
   })
 
   it('names a check by what it runs, not by the files a scoped command lists', () => {

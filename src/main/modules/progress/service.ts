@@ -31,6 +31,12 @@ export interface ProgressServiceDeps {
   recordAccuracy?: (entry: { runId: string; finishedAt: number; samples: number; coverage: number; bias: number; meanWidthRatio: number }) => void
   /** 0.9.1: how long the final verification of earlier missions of this project took, in seconds, most recent first. */
   finaleSeconds?: (projectId: string) => number[]
+  /**
+   * 0.9.1: how long this run's check commands took when its tasks ran them whole (each as configured), summed;
+   * null unless every configured check was measured so. On a project's first mission it is the best measure of its
+   * final checks: a mission of six minutes was shown "at least 7 minutes" from the wide prior alone.
+   */
+  fullChecksSeconds?: (runId: string) => number | null
 }
 
 export type ProgressChange = 'STAGE' | 'BLOCKER' | 'WAIT' | 'RECOVERY' | 'SCOPE' | 'COMPLETION' | 'REFRESH'
@@ -151,8 +157,12 @@ export class ProgressService {
   private readonly finales = new Map<string, { at: number; stats: ReturnType<typeof statsOf> }>()
 
   /** How long this project's final verification takes: its history blended with a wide prior, read every ten minutes. */
-  private finaleStats(projectId: string): ReturnType<typeof statsOf> {
+  private finaleStats(projectId: string, runId: string): ReturnType<typeof statsOf> {
     const now = this.deps.now()
+    const measured = this.deps.finaleSeconds === undefined || (this.deps.finaleSeconds(projectId) ?? []).length === 0 ? (this.deps.fullChecksSeconds?.(runId) ?? null) : null
+    // No earlier mission of this project, but its checks were run whole by this one's tasks: the final checks are
+    // those commands again, then the final verifier (half a minute to a few minutes).
+    if (measured !== null && Number.isFinite(measured)) return { n: 0, p25: measured + 20, median: measured * 1.2 + 45, p75: measured * 1.6 + 90, p90: measured * 2.5 + 180 }
     const known = this.finales.get(projectId)
     if (known !== undefined && now - known.at < 10 * 60_000) return known.stats
     const seconds = (this.deps.finaleSeconds?.(projectId) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
@@ -202,7 +212,7 @@ export class ProgressService {
       previous: before?.snapshot ?? null,
       milestones: milestones.slice(-40),
       refreshSeconds: this.refreshMs() / 1000,
-      finale: { stats: this.finaleStats(run.projectId), startedAt: finaleStartedAt },
+      finale: { stats: this.finaleStats(run.projectId, run.id), startedAt: finaleStartedAt },
     })
     const latest = [...checking.entries()].at(-1)
     const hint = /\((usually about [^)]*|its first time[^)]*)\)$/.exec(estimated.stage)?.[0] ?? null

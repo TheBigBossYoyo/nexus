@@ -444,6 +444,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const finishedTaskRows = db.prepare("SELECT kind, complexity, started_at AS s, finished_at AS f FROM tasks WHERE state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?")
   const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
   const progressListeners: ((snapshot: ProgressSnapshot, why: string) => void)[] = []
+  const taskCheckRows = db.prepare("SELECT commands FROM verification_results WHERE run_id = ? AND task_id IS NOT NULL AND kind = 'checks' ORDER BY created_at DESC LIMIT 50")
   const finaleRows = db.prepare("SELECT v.commands FROM verification_results v JOIN runs r ON r.id = v.run_id WHERE r.project_id = ? AND v.task_id IS NULL AND v.kind = 'checks' ORDER BY v.created_at DESC LIMIT 20")
   const progress = new ProgressService({
     now: () => Date.now(),
@@ -469,6 +470,25 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
           return []
         }
       }),
+    // 0.9.1: the run's check commands as its tasks ran them whole (not scoped, not skipped), the latest of each.
+    fullChecksSeconds: (runId) => {
+      const run = repos.runs.get(runId)
+      if (run === null) return null
+      const configured = Object.entries(run.config.checks).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== '')
+      if (configured.length === 0) return null
+      const latest = new Map<string, number>()
+      for (const row of taskCheckRows.all(runId) as { commands: string }[]) {
+        try {
+          for (const c of JSON.parse(row.commands) as { name?: string; command?: string; durationMs?: number; output?: string }[]) {
+            const whole = configured.some(([n, cmd]) => n === c.name && cmd === c.command) && (c.durationMs ?? 0) > 0 && !(c.output ?? '').startsWith('[')
+            if (whole && c.name !== undefined && !latest.has(c.name)) latest.set(c.name, (c.durationMs ?? 0) / 1000)
+          }
+        } catch {
+          // A row that cannot be read measures nothing.
+        }
+      }
+      return configured.every(([n]) => latest.has(n)) ? [...latest.values()].reduce((a, b) => a + b, 0) : null
+    },
     onChange: (snapshot, why) => {
       push({ kind: 'progress', snapshot })
       for (const listener of progressListeners) listener(snapshot, why)
