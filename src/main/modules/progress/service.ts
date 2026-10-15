@@ -30,7 +30,8 @@ export interface ProgressServiceDeps {
   record?: (entry: { runId: string; at: number; lowSeconds: number; highSeconds: number; percent: number; confidence: string; wait: ProgressWait }) => void
   recordAccuracy?: (entry: { runId: string; finishedAt: number; samples: number; coverage: number; bias: number; meanWidthRatio: number }) => void
   /** 0.9.1: how long the final verification of earlier missions of this project took, in seconds, most recent first. */
-  finaleSeconds?: (projectId: string) => number[]
+  /** How long the final checks of this project's earlier missions took (never those of the run asked about). */
+  finaleSeconds?: (projectId: string, exceptRunId: string) => number[]
   /**
    * 0.9.1: how long this run's check commands took when its tasks ran them whole (each as configured), summed;
    * null unless every configured check was measured so. On a project's first mission it is the best measure of its
@@ -159,17 +160,19 @@ export class ProgressService {
   /** How long this project's final verification takes: its history blended with a wide prior, read every ten minutes. */
   private finaleStats(projectId: string, runId: string): ReturnType<typeof statsOf> {
     const now = this.deps.now()
-    const measured = this.deps.finaleSeconds === undefined || (this.deps.finaleSeconds(projectId) ?? []).length === 0 ? (this.deps.fullChecksSeconds?.(runId) ?? null) : null
+    // 0.9.1: the run's own final checks are not its history: once they had run, a first mission's estimate went back
+    // to the wide prior for its last minute.
+    const history = (this.deps.finaleSeconds?.(projectId, runId) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
+    const measured = history.length === 0 ? (this.deps.fullChecksSeconds?.(runId) ?? null) : null
     // No earlier mission of this project, but its checks were run whole by this one's tasks: the final checks are
     // those commands again, then the final verifier (half a minute to a few minutes).
     if (measured !== null && Number.isFinite(measured)) return { n: 0, p25: measured + 20, median: measured * 1.2 + 45, p75: measured * 1.6 + 90, p90: measured * 2.5 + 180 }
-    const known = this.finales.get(projectId)
+    const known = this.finales.get(`${projectId}|${runId}`)
     if (known !== undefined && now - known.at < 10 * 60_000) return known.stats
-    const seconds = (this.deps.finaleSeconds?.(projectId) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
     // Few missions of one project: three of them are already its best measure, so the history is trusted sooner than for tasks.
-    const history = seconds.length > 0 ? statsOf(seconds) : undefined
-    const stats = history !== undefined && history.n >= 3 ? history : blend(history !== undefined ? { ...history, n: history.n * 3 } : undefined, FINALE_PRIOR)
-    this.finales.set(projectId, { at: now, stats })
+    const past = history.length > 0 ? statsOf(history) : undefined
+    const stats = past !== undefined && past.n >= 3 ? past : blend(past !== undefined ? { ...past, n: past.n * 3 } : undefined, FINALE_PRIOR)
+    this.finales.set(`${projectId}|${runId}`, { at: now, stats })
     return stats
   }
 

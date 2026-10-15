@@ -445,7 +445,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
   const progressListeners: ((snapshot: ProgressSnapshot, why: string) => void)[] = []
   const taskCheckRows = db.prepare("SELECT commands FROM verification_results WHERE run_id = ? AND task_id IS NOT NULL AND kind = 'checks' ORDER BY created_at DESC LIMIT 50")
-  const finaleRows = db.prepare("SELECT v.commands FROM verification_results v JOIN runs r ON r.id = v.run_id WHERE r.project_id = ? AND v.task_id IS NULL AND v.kind = 'checks' ORDER BY v.created_at DESC LIMIT 20")
+  const finaleRows = db.prepare("SELECT v.commands FROM verification_results v JOIN runs r ON r.id = v.run_id WHERE r.project_id = ? AND v.run_id != ? AND v.task_id IS NULL AND v.kind = 'checks' ORDER BY v.created_at DESC LIMIT 20")
   const progress = new ProgressService({
     now: () => Date.now(),
     run: (runId) => repos.runs.get(runId) ?? null,
@@ -461,8 +461,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     refreshSeconds: () => repos.settings.get().execution.progressRefreshSeconds ?? DEFAULT_PROGRESS_REFRESH_SECONDS,
     waitOf: (run) => progressWaitOf(run),
     // 0.9.1: how long the final checks of this project's earlier missions took (the integration's checks).
-    finaleSeconds: (projectId) =>
-      (finaleRows.all(projectId) as { commands: string }[]).flatMap((r) => {
+    finaleSeconds: (projectId, exceptRunId) =>
+      (finaleRows.all(projectId, exceptRunId) as { commands: string }[]).flatMap((r) => {
         try {
           const total = (JSON.parse(r.commands) as { durationMs?: number }[]).reduce((n, c) => n + (c.durationMs ?? 0), 0) / 1000
           return total > 0 ? [total] : []
