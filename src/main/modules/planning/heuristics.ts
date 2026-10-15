@@ -1,4 +1,4 @@
-import type { ProjectProfile } from '@shared/domain'
+import type { ProjectProfile, RunMode } from '@shared/domain'
 
 export interface PlanningRecommendation {
   mode: 'single' | 'consensus'
@@ -115,7 +115,15 @@ export function countDeliverables(prompt: string): number {
 export function recommendPlanningMode(
   prompt: string,
   profile: ProjectProfile | null,
+  runMode?: RunMode,
 ): PlanningRecommendation {
+  // 0.9.1: a read-only mission (an audit, a question) is planned as the areas to read, which one planner lays out.
+  // Measured on the owner's first audit (a five-property security review): consensus planning, three planners, a
+  // critic and a synthesis, took 4.5 of its 16.5 minutes and five sessions of the strongest model, for a plan of
+  // five parallel reviews and a report.
+  if (runMode === 'audit' || runMode === 'ask') {
+    return { mode: 'single', reasons: ['A read-only mission: its tasks are the areas to read and a report, which one planner lays out.'] }
+  }
   const reasons: string[] = []
   let score = 0
   // What to build, without the constraints: the length and the scope keywords are its.

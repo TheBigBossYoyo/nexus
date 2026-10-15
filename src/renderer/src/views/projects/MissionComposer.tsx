@@ -128,7 +128,7 @@ export function MissionComposer({ project }: { project: Project }) {
   const debouncedPrompt = useDebounced(prompt.trim(), 600)
   const debouncedStrategyPrompt = useDebounced(prompt.trim(), 500)
   const preview = usePolicyPreview(project.id, showStrategy && strategy === 'ADAPTIVE' ? debouncedStrategyPrompt : '')
-  const recommendation = usePlanningRecommendation(project.id, mode === 'ask' ? '' : debouncedPrompt)
+  const recommendation = usePlanningRecommendation(project.id, mode === 'ask' ? '' : debouncedPrompt, mode)
 
   const preset = presetChoice ?? settings?.execution.defaultPreset ?? 'balanced'
   const presetAgents = settings ? presetMaxAgents(preset, settings) : null

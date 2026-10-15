@@ -562,7 +562,7 @@ export const ipcInputs = {
   'graph.revisions': z.object({ runId: Id }).strict(),
   'graph.proposals': z.object({ runId: Id }).strict(),
   'planning.candidates': z.object({ runId: Id }).strict(),
-  'planning.recommend': z.object({ projectId: Id, prompt: z.string().max(20_000) }).strict(),
+  'planning.recommend': z.object({ projectId: Id, prompt: z.string().max(20_000), mode: RunModeSchema.optional() }).strict(),
   'routing.list': z.object({ runId: Id }).strict(),
   'performance.summary': z.object({ projectId: Id.optional() }).strict(),
   'intelligence.list': z

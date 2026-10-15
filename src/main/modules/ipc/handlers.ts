@@ -582,8 +582,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       candidates: repos.planningCandidates.listByRun(runId),
       critiques: repos.planningCritiques.listByRun(runId),
     }),
-    'planning.recommend': ({ projectId, prompt }) =>
-      recommendPlanningMode(prompt, repos.projects.require(projectId).profile),
+    'planning.recommend': ({ projectId, prompt, mode }) =>
+      recommendPlanningMode(prompt, repos.projects.require(projectId).profile, mode),
     'routing.list': ({ runId }) => repos.routingDecisions.listByRun(runId),
     'performance.summary': ({ projectId }) => {
       const outcomes = projectId

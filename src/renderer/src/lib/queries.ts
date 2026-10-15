@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
-import type { MemoryScope } from '@shared/domain'
+import type { MemoryScope, RunMode } from '@shared/domain'
 import { api, type IpcError } from './bridge'
 
 /** Stable query keys. push.ts invalidates by these prefixes, so keep the first segments meaningful. */
@@ -40,7 +40,7 @@ export const qk = {
   graphRevisions: (runId: string) => ['graph', 'revisions', runId] as const,
   graphProposals: (runId: string) => ['graph', 'proposals', runId] as const,
   planningCandidates: (runId: string) => ['planning', 'candidates', runId] as const,
-  planningRecommend: (projectId: string, prompt: string) => ['planning', 'recommend', projectId, prompt] as const,
+  planningRecommend: (projectId: string, prompt: string, mode = '') => ['planning', 'recommend', projectId, prompt, mode] as const,
   routing: (runId: string) => ['routing', runId] as const,
   performanceRoot: () => ['performance'] as const,
   performance: (projectId: string | null) => ['performance', projectId ?? 'all'] as const,
@@ -162,11 +162,11 @@ export const useGraphProposals = (runId: string | null) =>
   useRead(qk.graphProposals(runId ?? ''), 'graph.proposals', { runId: runId ?? '' }, runId !== null)
 export const usePlanningCandidates = (runId: string | null) =>
   useRead(qk.planningCandidates(runId ?? ''), 'planning.candidates', { runId: runId ?? '' }, runId !== null)
-export const usePlanningRecommendation = (projectId: string | null, prompt: string) =>
+export const usePlanningRecommendation = (projectId: string | null, prompt: string, mode?: RunMode) =>
   useRead(
-    qk.planningRecommend(projectId ?? '', prompt),
+    qk.planningRecommend(projectId ?? '', prompt, mode),
     'planning.recommend',
-    { projectId: projectId ?? '', prompt },
+    { projectId: projectId ?? '', prompt, ...(mode ? { mode } : {}) },
     projectId !== null && prompt.trim().length > 0,
   )
 export const useRoutingDecisions = (runId: string | null) =>
