@@ -132,6 +132,32 @@ describe('progress of a mission', () => {
     expect(snap([task('b', 'waiting')], { run: run('paused', { pauseReason: 'user' }) }).wait).toBe('WAITING_FOR_USER')
   })
 
+  it('a boundary request that waits while a task runs says what is worked on, and gives the estimate', () => {
+    const wait = { kind: 'WAITING_FOR_USER_BOUNDARY' as const, detail: 'git push origin' }
+    const s = snap([task('a', 'completed', { startedAt: at(0), finishedAt: at(20) }), task('b', 'running', { startedAt: at(20) })], { wait })
+    expect(s.stage).toBe('Working on: Task b (a boundary request waits for your decision)')
+    expect(s.summary).toMatch(/of active work remain\.$/)
+    expect(s.summary).not.toContain('when that ends is not known')
+    expect(s.eta.lowSeconds).not.toBeNull()
+    expect(s.wait).toBe('WAITING_FOR_USER_BOUNDARY')
+    expect(s.blocker).toContain('git push origin')
+  })
+
+  it('a boundary request with nothing else running says it waits, and withholds the clock', () => {
+    const wait = { kind: 'WAITING_FOR_USER_BOUNDARY' as const, detail: 'git push origin' }
+    const s = snap([task('a', 'completed', { startedAt: at(0), finishedAt: at(20) }), task('b', 'waiting'), task('c', 'ready')], { wait })
+    expect(s.stage).toBe('Waiting for your decision on a boundary request')
+    expect(s.summary).toContain('Waiting for your decision on a boundary request; when that ends is not known')
+    expect(s.wait).toBe('WAITING_FOR_USER_BOUNDARY')
+    expect(s.blocker).toContain('git push origin')
+  })
+
+  it('a wait for the network stops the running tasks too', () => {
+    const s = snap([task('b', 'running', { startedAt: at(20) })], { wait: { kind: 'WAITING_FOR_NETWORK', detail: 'Wi-Fi disconnected' } })
+    expect(s.stage).toBe('Waiting for the Internet')
+    expect(s.summary).toContain('when that ends is not known')
+  })
+
   it('before there is a plan it gives no number at all', () => {
     const s = snap([], { run: run('planning') })
     expect(s.percent).toBe(0)

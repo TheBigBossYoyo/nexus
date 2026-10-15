@@ -186,6 +186,9 @@ const WAIT_TEXT: Record<Exclude<ProgressWait, 'ACTIVE' | 'FINISHED'>, string> = 
   WAITING_FOR_EXTERNAL_PROCESS: 'Waiting for an external process',
 }
 
+/** Said after the stage when a boundary request waits but other tasks keep working. */
+export const BOUNDARY_SUFFIX = ' (a boundary request waits for your decision)'
+
 function stageOf(input: ProgressInput, counts: ProgressSnapshot['tasks']): string {
   const { run, tasks } = input
   if (run.state === 'completed') return 'Completed'
@@ -295,7 +298,10 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
   const blocker = input.wait != null ? `${WAIT_TEXT[input.wait.kind]}: ${input.wait.detail}`.slice(0, 300) : blocked ? `${blocked.title.slice(0, 60)}: ${(blocked.blockedReason ?? '').slice(0, 200)}` : null
 
   const active = eta.lowSeconds === null ? 'How much work remains is not known yet.' : nothingLeft ? (finished ? 'Finished.' : 'Finishing.') : `${eta.text} of active work remain.`
-  const waiting = wait === 'ACTIVE' || wait === 'FINISHED' ? '' : ` ${WAIT_TEXT[wait]}; when that ends is not known, so neither is the time on the clock.`
+  // A boundary request stops only the task that asked: while others run, the mission goes on and the clock holds.
+  const proceeds = input.wait?.kind === 'WAITING_FOR_USER_BOUNDARY' && counts.running > 0
+  const waiting = wait === 'ACTIVE' || wait === 'FINISHED' || proceeds ? '' : ` ${WAIT_TEXT[wait]}; when that ends is not known, so neither is the time on the clock.`
+  const working = finale !== null && input.finale?.startedAt != null && open.length === 0 ? finaleStage(input.finale.stats) : stageOf(input, counts)
   const milestones = [...(input.milestones ?? [])].slice(-12)
   const elapsedFrom = Date.parse(run.startedAt ?? run.createdAt)
   const elapsedTo = finished && run.finishedAt !== null ? Date.parse(run.finishedAt) : now
@@ -303,7 +309,7 @@ export function estimateProgress(input: ProgressInput): ProgressSnapshot {
     subject: { kind: 'run', id: run.id },
     at: new Date(now).toISOString(),
     percent,
-    stage: wait !== 'ACTIVE' && wait !== 'FINISHED' ? WAIT_TEXT[wait] : finale !== null && input.finale?.startedAt != null && open.length === 0 ? finaleStage(input.finale.stats) : stageOf(input, counts),
+    stage: proceeds ? `${working}${BOUNDARY_SUFFIX}` : wait !== 'ACTIVE' && wait !== 'FINISHED' ? WAIT_TEXT[wait] : working,
     elapsedSeconds: Math.max(0, Math.round((elapsedTo - elapsedFrom) / 1000)),
     eta,
     wait,

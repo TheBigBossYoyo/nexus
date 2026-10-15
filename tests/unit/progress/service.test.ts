@@ -17,7 +17,7 @@ function world(opts: { fullChecksSeconds?: number | null } = {}) {
   const changes: { why: ProgressChange; snapshot: ProgressSnapshot }[] = []
   const recorded: { lowSeconds: number; highSeconds: number }[] = []
   const accuracy: { coverage: number; samples: number }[] = []
-  let wait: { kind: 'WAITING_FOR_NETWORK'; detail: string } | null = null
+  let wait: { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_USER_BOUNDARY'; detail: string } | null = null
   const task = (key: string, state: Task['state'], over: Partial<Task> = {}): Task => {
     const t = { id: key, runId: run.id, key, title: `Task ${key}`, kind: 'implement', complexity: 'medium', state, startedAt: null, finishedAt: null, parentTaskId: null, blockedReason: null, repairCycles: 0, ...over } as unknown as Task
     const at = tasks.findIndex((x) => x.id === key)
@@ -131,6 +131,16 @@ describe('the progress service', () => {
     w.emit('checks.completed', { passed: true, failed: [] }, 'a')
     w.service.refresh('run-1')
     expect(w.service.snapshot('run-1')?.stage).toBe('Working on: Task a')
+  })
+
+  it('names the checks of a running task during a boundary wait, with the boundary said after them', () => {
+    const w = world()
+    w.task('a', 'running', { startedAt: iso(0) })
+    w.setWait({ kind: 'WAITING_FOR_USER_BOUNDARY', detail: 'git push' })
+    w.emit('checks.started', { commands: ['pnpm run typecheck', 'pnpm test'] }, 'a')
+    const s = w.service.refresh('run-1')
+    expect(s?.stage).toBe('Running checks of Task a: pnpm run typecheck, pnpm test (a boundary request waits for your decision)')
+    expect(s?.wait).toBe('WAITING_FOR_USER_BOUNDARY')
   })
 
   it('names the final checks of the mission while they run, but leaves a wait as it is', () => {

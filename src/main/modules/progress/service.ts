@@ -1,7 +1,7 @@
 import type { Run, Task, TaskDependency } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
 import { DEFAULT_PROGRESS_REFRESH_SECONDS, MAX_PROGRESS_REFRESH_SECONDS, MIN_PROGRESS_REFRESH_SECONDS, type ProgressMilestone, type ProgressSnapshot, type ProgressWait } from '@shared/progress'
-import { blend, DurationModel, estimateProgress, etaAccuracy, FINALE_PRIOR, statsOf, type FinishedTask } from './estimator'
+import { blend, BOUNDARY_SUFFIX, DurationModel, estimateProgress, etaAccuracy, FINALE_PRIOR, statsOf, type FinishedTask } from './estimator'
 
 /**
  * 0.9: the progress of the missions that are going on, kept current. It reads what the runtime already has
@@ -225,8 +225,10 @@ export class ProgressService {
       finale: { stats: this.finaleStats(run.projectId, run.id, finaleStartedAt), startedAt: finaleStartedAt },
     })
     const latest = [...checking.entries()].at(-1)
-    const hint = /\((usually about [^)]*|its first time[^)]*)\)$/.exec(estimated.stage)?.[0] ?? null
-    const snapshot = estimated.wait === 'ACTIVE' && latest !== undefined ? { ...estimated, stage: checksStage(latest[0] === null ? null : (titles.get(latest[0]) ?? 'a task'), latest[1], hint) } : estimated
+    // A boundary request that waits while work goes on (the estimator says so in the stage) shows the checks too.
+    const boundary = estimated.wait === 'WAITING_FOR_USER_BOUNDARY'
+    const hint = /\((usually about [^)]*|its first time[^)]*)\)$/.exec(boundary ? estimated.stage.replace(BOUNDARY_SUFFIX, '') : estimated.stage)?.[0] ?? null
+    const snapshot = (estimated.wait === 'ACTIVE' || (boundary && estimated.stage.endsWith(BOUNDARY_SUFFIX))) && latest !== undefined ? { ...estimated, stage: `${checksStage(latest[0] === null ? null : (titles.get(latest[0]) ?? 'a task'), latest[1], hint)}${boundary ? BOUNDARY_SUFFIX : ''}` } : estimated
     const kept: Kept = { snapshot, seq, finaleStartedAt, checking, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
     this.kept.set(runId, kept)
     return kept
