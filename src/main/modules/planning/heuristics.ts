@@ -82,19 +82,20 @@ export function buildPart(prompt: string): string {
 
 /** Items in a numbered or bulleted list, or the longest short-phrase "a, b and c" list on one line. */
 export function countDeliverables(prompt: string): number {
-  let markers = 0
   let longestList = 0
   // 0.9.1: what a prompt forbids or asks to run is not something to build. A precise prompt lists its constraints
   // as bullets too, and those made a detailed request look like a broad one (and pick the costly planning).
   let constraints = false
+  // The indentation of each bullet that says what to build: the details of one item (its sub-bullets) are not more items.
+  const indents: number[] = []
   for (const line of prompt.split(/\r?\n/)) {
-    const bullet = /^\s*(?:\d+[.)]|[-*•])\s+(\S.*)$/.exec(line)
+    const bullet = /^(\s*)(?:\d+[.)]|[-*•])\s+(\S.*)$/.exec(line)
     if (bullet === null && /:\s*$/.test(line.trim())) {
       constraints = CONSTRAINT_HEADING.test(line.trim())
       continue
     }
     if (bullet !== null) {
-      if (!constraints && !INSTRUCTION_BULLET.test(bullet[1] ?? '')) markers++
+      if (!constraints && !INSTRUCTION_BULLET.test(bullet[2] ?? '')) indents.push((bullet[1] ?? '').replace(/\t/g, '    ').length)
       continue
     }
     const parts = line
@@ -105,6 +106,8 @@ export function countDeliverables(prompt: string): number {
       longestList = Math.max(longestList, parts.length)
     }
   }
+  const outer = indents.length > 0 ? Math.min(...indents) : 0
+  const markers = indents.filter((i) => i === outer).length
   return Math.max(markers, longestList)
 }
 
@@ -141,7 +144,8 @@ export function recommendPlanningMode(
   }
 
   const lower = build.toLowerCase()
-  const hits = BREADTH_KEYWORDS.filter((k) => lower.includes(k))
+  // Whole words only: `security_reviewer`, an identifier the prompt names, is not a security task (0.9.1).
+  const hits = BREADTH_KEYWORDS.filter((k) => new RegExp(`(?<![\\w])${k}(?![\\w])`).test(lower))
   if (hits.length >= 2) {
     score += 2
     reasons.push(`Broad scope keywords: ${hits.join(', ')}.`)

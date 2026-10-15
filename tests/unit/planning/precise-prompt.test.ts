@@ -25,3 +25,19 @@ describe('a precise prompt is not a broad one', () => {
     expect(recommendPlanningMode(broad, { fileCount: 2500 } as never).mode).toBe('consensus')
   })
 })
+
+// 0.9.1: a one-task request about agent roles got consensus planning (2 min 40 s for a plan of one task): the role
+// identifier `security_reviewer` counted as the scope keyword "security", and one item's sub-bullets as more items.
+describe('identifiers and sub-bullets do not make a request broad', () => {
+  it('matches scope keywords as whole words only', () => {
+    const named = recommendPlanningMode('Give the security_reviewer role only two tools.', null)
+    expect(named.reasons.join(' ')).not.toContain('security')
+    const real = recommendPlanningMode('Review the security of the login flow.', null)
+    expect(real.reasons.join(' ')).toContain('Broad scope keyword: security')
+  })
+
+  it('counts the outer bullets of a list, not the details of one of them', () => {
+    const prompt = ['What to do:', '- Split the text so that:', '  - workers get every tool;', '  - reviewers get two;', '- The wording stays the same.', '- Add unit tests.'].join('\n')
+    expect(countDeliverables(prompt)).toBe(3)
+  })
+})
