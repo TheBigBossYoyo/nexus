@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { failedTestFiles, rerunTestsCommand, scopeFinalChecks, scopeTaskChecks, scriptOf } from '@main/modules/orchestrator/check-scope'
+import { failedTestFiles, rerunTestsCommand, scopeFinalChecks, scopeTaskChecks, scriptOf, testsNaming } from '@main/modules/orchestrator/check-scope'
 
 // 0.9.1: a task's checks are about its own changes. Found when a mission on NEXUS itself ran the whole 15-minute
 // suite after a task, timed out, and sent a repair agent to fix code that had nothing wrong with it.
@@ -116,5 +116,22 @@ describe('failedTestFiles and rerunTestsCommand', () => {
     expect(rerunTestsCommand(dir, 'npm test', ['t/a.test.js'])).toBe('npm exec jest t/a.test.js')
     project({ test: 'node --test' }, [])
     expect(rerunTestsCommand(dir, 'npm test', ['t/a.test.js'])).toBeNull()
+  })
+})
+
+// 0.9.1: one change to progress/service.ts chose the 19 test files importing any module called "service".
+describe('testsNaming', () => {
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('names a module with its folder, and a test beside its source by ./name', () => {
+    project({}, [])
+    for (const d of ['src/progress', 'src/billing', 'tests']) mkdirSync(join(dir, d), { recursive: true })
+    writeFileSync(join(dir, 'src/progress/service.ts'), 'export {}\n')
+    writeFileSync(join(dir, 'src/billing/service.ts'), 'export {}\n')
+    writeFileSync(join(dir, 'tests/progress.test.ts'), "import { x } from '../src/progress/service'\n")
+    writeFileSync(join(dir, 'tests/billing.test.ts'), "import { y } from '../src/billing/service'\n")
+    writeFileSync(join(dir, 'src/progress/service.test.ts'), "import { x } from './service'\n")
+    writeFileSync(join(dir, 'src/billing/other.test.ts'), "import { y } from './service'\n")
+    expect(testsNaming(dir, ['src/progress/service.ts'])).toEqual(['src/progress/service.test.ts', 'tests/progress.test.ts'])
   })
 })

@@ -100,24 +100,32 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export function testsNaming(cwd: string, sources: readonly string[]): string[] | null {
   const all = testFiles(cwd)
   const chosen = new Set(sources.map((s) => s.replace(/\\/g, '/')).filter((s) => TEST_FILE.test(s)))
-  const stems = [
-    ...new Set(
-      sources
-        .filter((s) => !TEST_FILE.test(s))
-        .map((s) => {
-          const parts = s.replace(/\\/g, '/').split('/')
-          const stem = (parts.at(-1) ?? '').replace(/\.[^.]+$/, '')
-          return stem === 'index' ? (parts.at(-2) ?? stem) : stem
-        })
-        .filter((s) => s.length >= 3),
-    ),
-  ]
-  if (stems.length > 0) {
-    const pattern = new RegExp(`[/'"](?:${stems.map(escapeRe).join('|')})(?:\\.[cm]?[jt]sx?)?['"]`)
+  // 0.9.1: a module is named with its folder (`progress/service`): by its file name alone, one change to
+  // progress/service.ts chose the 19 test files that import any module called "service". A test beside the source
+  // may name it as `./service`.
+  const named = sources
+    .filter((s) => !TEST_FILE.test(s))
+    .map((s) => {
+      const parts = s.replace(/\\/g, '/').split('/')
+      const file = (parts.at(-1) ?? '').replace(/\.[^.]+$/, '')
+      const stem = file === 'index' ? (parts.at(-2) ?? file) : file
+      const folder = file === 'index' ? parts.at(-3) : parts.at(-2)
+      const dir = parts.slice(0, -1).join('/')
+      return { stem, folder, dir }
+    })
+    .filter((n) => n.stem.length >= 3)
+  if (named.length > 0) {
+    const ext = '(?:\\.[cm]?[jt]sx?)?'
+    const pattern = new RegExp(`[/'"](?:${[...new Set(named.map((n) => (n.folder ? `${escapeRe(n.folder)}/${escapeRe(n.stem)}` : escapeRe(n.stem))))].join('|')})${ext}['"]`)
+    const beside = (test: string): RegExp | null => {
+      const here = named.filter((n) => n.dir === test.split('/').slice(0, -1).join('/'))
+      return here.length === 0 ? null : new RegExp(`['"]\\./(?:${here.map((n) => escapeRe(n.stem)).join('|')})${ext}['"]`)
+    }
     for (const test of all) {
       if (chosen.has(test)) continue
       try {
-        if (pattern.test(readFileSync(join(cwd, test), 'utf8'))) chosen.add(test)
+        const text = readFileSync(join(cwd, test), 'utf8')
+        if (pattern.test(text) || beside(test)?.test(text) === true) chosen.add(test)
       } catch {
         // An unreadable test is left to the integration.
       }
