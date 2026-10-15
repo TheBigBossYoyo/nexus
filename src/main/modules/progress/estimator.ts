@@ -20,10 +20,14 @@ export interface DurationStats {
   p90: number
 }
 
-/** What a task of each size takes when nothing is known yet (seconds). Deliberately wide. */
+/**
+ * What a task of each size takes when nothing is known yet (seconds). Deliberately wide. 0.9.1: the short ends were
+ * measured too high: small tasks of real missions took 35 to 273 s and a medium one 114 s, and a six-minute mission
+ * was shown "at least 7 minutes" by a fresh installation.
+ */
 const PRIOR: Record<Complexity, DurationStats> = {
-  small: { n: 0, p25: 90, median: 240, p75: 480, p90: 900 },
-  medium: { n: 0, p25: 240, median: 600, p75: 1200, p90: 2400 },
+  small: { n: 0, p25: 50, median: 180, p75: 420, p90: 900 },
+  medium: { n: 0, p25: 110, median: 480, p75: 1200, p90: 2400 },
   large: { n: 0, p25: 600, median: 1500, p75: 3000, p90: 5400 },
 }
 /** Below this many finished tasks of a kind, the history is mixed with the prior instead of believed. */

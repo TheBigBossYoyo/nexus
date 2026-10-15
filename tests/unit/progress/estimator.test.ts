@@ -43,9 +43,9 @@ describe('the duration model', () => {
   it('does not believe three samples: few are mixed with general figures, none means general figures', () => {
     const empty = new DurationModel([])
     const few = new DurationModel(history('implement', 'medium', [1, 1, 1]))
-    expect(empty.of('implement', 'medium').median).toBe(600)
+    expect(empty.of('implement', 'medium').median).toBe(480)
     expect(few.of('implement', 'medium').median).toBeGreaterThan(60)
-    expect(few.of('implement', 'medium').median).toBeLessThan(600)
+    expect(few.of('implement', 'medium').median).toBeLessThan(480)
     // A kind never seen falls back to what tasks of that size took, whatever their kind.
     expect(learned.of('research', 'medium').median / 60).toBeGreaterThan(15)
   })
