@@ -98,6 +98,9 @@ describe('failedTestFiles and rerunTestsCommand', () => {
 
   it('reads the failed files when the output accounts for every failure', () => {
     expect(failedTestFiles(vitestOutput)).toEqual(['tests/scenarios/read-snapshot.test.ts'])
+    // In colour, as a contained run printed it.
+    const coloured = vitestOutput.replace(' FAIL ', ' \u001b[31mFAIL\u001b[39m ').replace('Test Files  1 failed', 'Test Files \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m')
+    expect(failedTestFiles(coloured)).toEqual(['tests/scenarios/read-snapshot.test.ts'])
     expect(failedTestFiles('FAIL tests/a.test.js\nFAIL tests/b.test.js\nTest Suites: 2 failed, 10 passed, 12 total')).toEqual(['tests/a.test.js', 'tests/b.test.js'])
   })
 

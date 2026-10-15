@@ -226,7 +226,10 @@ const MAX_RETRIED_FILES = 5
  * A whole suite of NEXUS failed on one test that raced git on Windows: the mission sent a repair agent and ran
  * the 22-minute suite again, where running the one failed file again would have said in seconds that it passes.
  */
-export function failedTestFiles(output: string): string[] | null {
+export function failedTestFiles(raw: string): string[] | null {
+  // Colours are off in NEXUS's own runs, but a contained run's output came with them: read the text, not the codes.
+  // eslint-disable-next-line no-control-regex
+  const output = raw.replace(/\u001b\[[0-9;]*m/g, '')
   if (/Unhandled (?:Error|Rejection)|ERR_|Segmentation fault|out of memory/i.test(output)) return null
   const files = new Set([...output.matchAll(FAILED_VITEST), ...output.matchAll(FAILED_JEST)].map((m) => (m[1] as string).split('\\').join('/')))
   const counted = /Test (?:Files|Suites):?\s+(\d+) failed/.exec(output)

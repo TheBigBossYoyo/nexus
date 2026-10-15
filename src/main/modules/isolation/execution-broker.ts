@@ -891,7 +891,10 @@ export class ExecutionBroker {
     // The same validation as an uncontained run: a configured command is a program and its arguments.
     tokenizeCommandLine(input.commandLine)
     const roots = await this.roots(input)
-    const { env } = this.environment(input, roots)
+    const { env: contained } = this.environment(input, roots)
+    // 0.9.1: a check's output is read by agents and kept in records: contained runs printed it in colour (vitest's
+    // codes in every line of a 40 KB output), which an uncontained run never did.
+    const env = { ...contained, NO_COLOR: '1', FORCE_COLOR: '0' }
     const comspec = this.deps.baseEnv()['ComSpec'] ?? this.deps.baseEnv()['COMSPEC'] ?? 'C:\\Windows\\System32\\cmd.exe'
     const specPath = this.deps.launcher.writeSpec(this.spec(input, roots, `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`, env, options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs + 5000 } : {}))
     try {
