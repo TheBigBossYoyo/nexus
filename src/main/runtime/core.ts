@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process'
 import { constants as osConstants, setPriority } from 'node:os'
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
@@ -99,7 +98,7 @@ import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
 import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
 import { FakePowerController, WindowsPowerController, type PowerController } from '../modules/power'
-import { killProcessTree } from '../modules/process'
+import { killProcessTree, runProcess } from '../modules/process'
 import { BackgroundEngineering, ProgramEngine } from '../modules/program'
 import {
   ClaudeAgentRuntimeProvider,
@@ -211,8 +210,7 @@ function testNumber(host: RuntimeHost, name: string): number | undefined {
 function markNotIndexed(dir: string): void {
   try {
     mkdirSync(dir, { recursive: true })
-    const child = execFile('attrib', ['+I', dir], { windowsHide: true, timeout: 15_000 }, () => undefined)
-    child.on('error', () => undefined)
+    void runProcess('attrib', ['+I', dir], { cwd: dir, timeoutMs: 15_000 }).catch(() => undefined)
   } catch {
     // Indexed as before.
   }
