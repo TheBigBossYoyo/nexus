@@ -318,6 +318,16 @@ describe('buildContextPack', () => {
     expect(pack.prompt).toMatch(/\[\.\.\. \d+ more dependency outputs omitted \.\.\.\]/)
   })
 
+  // 0.9.1: the owner's first audit gave its report task five reviews cut to 2,500 characters each.
+  it('gives a synthesis task its dependencies whole', () => {
+    const reviews = Array.from({ length: 5 }, (_, i) => ({ key: `review-${i}`, title: `Review ${i}`, summary: `${'z'.repeat(17_000)}END-${i}` }))
+    const synthesis = buildContextPack(baseInput({ task: makeTask({ kind: 'synthesis' }), dependencyOutputs: reviews }))
+    for (let i = 0; i < 5; i++) expect(synthesis.prompt).toContain(`END-${i}`)
+    expect(synthesis.prompt).not.toMatch(/truncated|omitted/)
+    const worker = buildContextPack(baseInput({ dependencyOutputs: reviews }))
+    expect(worker.prompt).not.toContain('END-0')
+  })
+
   it('reports section sizes matching rendered bodies', () => {
     const pack = buildContextPack(baseInput({ decisions: [decision] }))
     for (const s of pack.sections) expect(s.chars).toBeGreaterThan(0)

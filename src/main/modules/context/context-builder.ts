@@ -89,12 +89,13 @@ export function buildContextPack(input: ContextPackInput): {
 } {
   const { task, repo, extra } = input
 
+  const synthesis = task.kind === 'synthesis'
   const dependencies = input.dependencyOutputs.length
     ? boundedList(
         input.dependencyOutputs.map(
-          (d) => `### ${d.key}: ${d.title}\n${truncate(d.summary, SECTION_LIMITS.dependencyItem)}`,
+          (d) => `### ${d.key}: ${d.title}\n${truncate(d.summary, synthesis ? SECTION_LIMITS.synthesisDependencyItem : SECTION_LIMITS.dependencyItem)}`,
         ),
-        SECTION_LIMITS.dependencies,
+        synthesis ? SECTION_LIMITS.synthesisDependencies : SECTION_LIMITS.dependencies,
         'dependency outputs',
       )
     : null
