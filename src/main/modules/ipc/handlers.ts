@@ -12,7 +12,7 @@ import {
 } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { MIN_ROUTING_SAMPLES } from '@shared/v2'
-import { sensitiveSettingsChanges } from '@shared/settings'
+import { sensitiveSettingsChanges, type Settings } from '@shared/settings'
 import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
@@ -82,6 +82,8 @@ export interface IpcContext {
    * before 0.7 (tests of the handlers).
    */
   confirmSettings?: (changes: string[]) => Promise<boolean>
+  /** 0.9.1: told of the settings once saved (the priority of missions' work follows them at once). */
+  onSettingsSaved?: (settings: Settings) => void
   /** Native folder picker; resolves null when cancelled. Lives in main, never in the renderer. */
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
@@ -203,6 +205,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           'The change was not confirmed, so the settings are as they were.',
         )
       const saved = repos.settings.set(settings)
+      ctx.onSettingsSaved?.(saved)
       if (before.claude.subscriptionMode !== saved.claude.subscriptionMode) {
         authCache = null
         ctx.push({ kind: 'auth.changed' })

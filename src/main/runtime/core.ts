@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process'
+import { constants as osConstants, setPriority } from 'node:os'
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
@@ -17,6 +19,7 @@ import type { PushMessage } from '@shared/events'
 import type { AppInfo } from '@shared/ipc'
 import { newId } from '@shared/ids'
 import { errorMessage } from '@shared/result'
+import type { Settings } from '@shared/settings'
 import {
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeIdentity,
@@ -201,6 +204,20 @@ function testNumber(host: RuntimeHost, name: string): number | undefined {
  * asked, that it was not done, and that it waits for the user. A reviewer or a verifier reads the task's
  * artifacts; without this the only evidence of a refused action is the word of the session that tried it.
  */
+/**
+ * 0.9.1: a folder of NEXUS's own made "not content indexed": Windows Search leaves alone what is created in it from
+ * now on. The folder's own setting only; the owner's indexing options are not touched.
+ */
+function markNotIndexed(dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true })
+    const child = execFile('attrib', ['+I', dir], { windowsHide: true, timeout: 15_000 }, () => undefined)
+    child.on('error', () => undefined)
+  } catch {
+    // Indexed as before.
+  }
+}
+
 export function recordBoundaryEvidence(repos: ReturnType<typeof createRepositories>, request: { id: string; runId: string | null; taskId: string | null; capability: string; action: string; occurrences: number }): void {
   if (request.runId === null) return
   const task = request.taskId !== null ? repos.tasks.get(request.taskId) : null
@@ -383,6 +400,23 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   }
   executionBroker.sweep()
   const bus = new EventBus(repos.events, repos.transaction)
+  // 0.9.1: the owner's PC suffered during missions (measured on NEXUS itself: 23 % CPU on average and peaks at 73 %
+  // while its suite ran, two thousand pages a second at times). Missions' work runs below normal priority: Windows
+  // gives it to every process started from here (workers, Claude Code, shells, checks, git), so the owner's own
+  // programs come first and, with nobody else asking, the work gets the whole machine as before. The window and
+  // the call helper set their own priority back to normal.
+  const applyWorkPriority = (s: Settings): void => {
+    if (process.platform !== 'win32') return
+    try {
+      setPriority(process.pid, s.execution.backgroundPriority === false ? osConstants.priority.PRIORITY_NORMAL : osConstants.priority.PRIORITY_BELOW_NORMAL)
+    } catch (e) {
+      logger(`work priority: ${errorMessage(e)}`)
+    }
+  }
+  applyWorkPriority(repos.settings.get())
+  // The worktrees and the sandbox's state are written and rewritten by every check: Windows Search indexing them
+  // (measured: 2 % of the machine during a suite) is work for nothing. New files there are made unindexed.
+  if (process.platform === 'win32') for (const dir of [worktreesDir, join(dataDir, 'sandbox')]) markNotIndexed(dir)
   const git = new GitService()
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
   // Git directory comes from the repository NEXUS's own record names for the worktree.
@@ -1814,6 +1848,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       },
       apps: () => apps.sessions(),
     },
+    onSettingsSaved: (s) => applyWorkPriority(s),
     confirmSettings: (changes) =>
       confirm(
         'NEXUS Settings',

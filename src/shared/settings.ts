@@ -81,6 +81,12 @@ export const SettingsSchema = z.object({
      * it can miss (a test that reaches a changed module through another one) is said in the record of the checks.
      */
     finalTests: z.enum(['FULL', 'AFFECTED']).optional(),
+    /**
+     * 0.9.1: missions' work (agents, their commands, checks, git) runs at Windows' below-normal priority, so that the
+     * owner's own programs get the processor first; with nobody else asking, the work gets all of it as before.
+     * Nothing is limited: no agent, no worker, no check fewer. Absent (older settings): on.
+     */
+    backgroundPriority: z.boolean().optional(),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */

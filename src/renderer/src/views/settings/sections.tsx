@@ -190,6 +190,12 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
         label="Require plan approval by default"
       />
       <Toggle
+        checked={e.backgroundPriority !== false}
+        onChange={(v) => set('execution', { backgroundPriority: v })}
+        label="Keep the computer responsive during missions (missions' work runs below normal priority: your programs come first; nothing is limited when you are not using the computer)"
+        data-testid="exec-backgroundPriority"
+      />
+      <Toggle
         checked={isQuietCommandsOn(e)}
         onChange={(v) => set('execution', quietCommandsPatch(v))}
         label="Run commands quietly (on a hidden desktop)"

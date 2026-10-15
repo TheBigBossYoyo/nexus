@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { constants, setPriority } from 'node:os'
 import { dirname } from 'node:path'
 import { spawnLong, type LongProcess } from '../process/spawn-process'
 import {
@@ -117,6 +118,14 @@ export const spawnSipHelper: SpawnHelper = (file, args, handlers) => {
     maxLines: 200,
     onLine: (line, stream) => (stream === 'stdout' ? handlers.stdout(line) : handlers.stderr(line)),
   })
+  // 0.9.1: a call's audio is real time: the helper keeps normal priority when the runtime's work runs below it.
+  if (child.pid !== null) {
+    try {
+      setPriority(child.pid, constants.priority.PRIORITY_NORMAL)
+    } catch {
+      // Not raised: the call still works, with less headroom under load.
+    }
+  }
   // The runner has to hand over the child's standard input for this to work: see the note in the report of 0.9.1.
   const io = child as LongProcess & { writeInput?: (text: string) => boolean; endInput?: () => void }
   if (typeof io.writeInput !== 'function' || typeof io.endInput !== 'function') {
