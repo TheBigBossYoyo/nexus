@@ -474,7 +474,12 @@ export class Orchestrator implements PipelineHost {
     // plans, waits or is paused: the plan then described one state of the repository and the workers, in
     // worktrees made from the base commit, executed another. A run with no base commit (a folder that is not a
     // repository, a read-only question) has only the checkout to read.
-    const planningRoot = run.baseCommit && run.mode !== 'ask' && run.mode !== 'audit' ? (await this.ensureIntegration(run)).path : project.rootPath
+    // 0.9.1: a read-only mission of a contained project reads a snapshot too. Its commands run as the sandbox
+    // account, which cannot reach the user's checkout: the owner's first audit of an enrolled project had every
+    // shell command of every session refused ("The worktree is not inside the sandbox root").
+    const readOnly = run.mode === 'ask' || run.mode === 'audit'
+    const snapshot = run.baseCommit !== null && (!readOnly || this.deps.execution?.contained?.(run.projectId) === true)
+    const planningRoot = snapshot ? (await this.ensureIntegration(run)).path : project.rootPath
     if (this.closing || repos.runs.require(runId).state !== 'planning') return
 
     if ((run.config.planningMode ?? 'single') === 'consensus') {
@@ -1072,7 +1077,8 @@ export class Orchestrator implements PipelineHost {
     const integration = repos.worktrees.listByRun(runId).find((w) => w.taskId === null && w.state === 'active')
     const criteria = repos.criteria.listByRun(runId).filter((c) => c.taskId === null)
 
-    if (integration && run.baseCommit && existsSync(integration.path)) {
+    // A read-only mission's worktree is a snapshot to read (0.9.1, a contained project): nothing was merged into it to check.
+    if (integration && run.baseCommit && existsSync(integration.path) && run.mode !== 'ask' && run.mode !== 'audit') {
       const control = this.runControl(runId)
       const cycle = tasks.filter((t) => t.key.startsWith('mission-fix-')).length + 1
       // Under the merge lock: a task merging into the integration worktree must not race the checks
@@ -1653,7 +1659,7 @@ export class Orchestrator implements PipelineHost {
   private async removeReadSnapshot(runId: string): Promise<void> {
     const { repos, git } = this.deps
     const run = repos.runs.get(runId)
-    if (!run || run.mode !== 'ask' || !TERMINAL_RUN_STATES.includes(run.state)) return
+    if (!run || (run.mode !== 'ask' && run.mode !== 'audit') || !TERMINAL_RUN_STATES.includes(run.state)) return
     const snapshots = repos.worktrees.listByRun(runId).filter((w) => w.taskId === null && w.state !== 'removed')
     if (snapshots.length === 0) return
     await this.idle(runId)

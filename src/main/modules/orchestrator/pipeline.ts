@@ -1158,7 +1158,11 @@ export class TaskPipeline {
     const integration = repos.worktrees
       .listByRun(run.id)
       .find((w) => w.taskId === null && w.state === 'active' && existsSync(w.path))
-    return integration?.path ?? this.core.project(run).rootPath
+    if (integration) return integration.path
+    // 0.9.1: a contained session cannot reach the user's checkout; it reads a snapshot at the run's base commit
+    // (what is not committed there is not in it).
+    if (run.baseCommit && this.core.deps.execution?.contained?.(run.projectId) === true) return (await this.host.ensureIntegration(run)).path
+    return this.core.project(run).rootPath
   }
 
   private async ensureWorktree(run: Run, task: Task): Promise<Worktree> {

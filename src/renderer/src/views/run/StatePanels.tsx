@@ -216,7 +216,7 @@ export function MissionComplete() {
           </section>
         ) : null}
 
-        {readOnly && !run.integrationBranch ? null : (
+        {readOnly ? null : (
         <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4" data-testid="merge-instructions">
           <h3 className="m-0 text-heading font-semibold">Bring the result into your branch</h3>
           {run.integrationBranch ? (

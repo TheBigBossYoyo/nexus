@@ -57,6 +57,8 @@ export interface OrchestratorDeps {
   execution?: {
     shellFor(session: { projectId: string; sessionKey: string; worktree: string; cwd: string }): ShellContainment | undefined
     runProjectCommand(input: { projectId: string; sessionKey: string; worktree: string; commandLine: string }, options: Omit<RunProcessOptions, 'cwd' | 'env'>): Promise<ProcessResult | null>
+    /** 0.9.1: whether this project's sessions run their commands inside a verified containment. */
+    contained?(projectId: string): boolean
   }
   /**
    * 0.8: the extension tools of a session (web research; the application and browser tools): which groups it
