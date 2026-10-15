@@ -141,7 +141,7 @@ try {
   }
   const recommendation = await call('planning.recommend', { projectId: project.id, prompt })
   report.planning = recommendation
-  const run = await call('runs.create', { projectId: project.id, mode: 'build', preset: 'balanced', prompt, compilationMode: compileMode, compiledTaskSpecId: spec.id, requirePlanApproval: false, planningMode: recommendation.mode })
+  const run = await call('runs.create', { projectId: project.id, mode: args['run-mode'] ?? 'build', preset: 'balanced', prompt, compilationMode: compileMode, compiledTaskSpecId: spec.id, requirePlanApproval: false, planningMode: recommendation.mode })
   log(`mission ${run.id} started (planning ${recommendation.mode})`)
   const started = Date.now()
   let last = ''
