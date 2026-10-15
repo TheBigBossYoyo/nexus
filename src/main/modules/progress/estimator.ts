@@ -95,7 +95,7 @@ const RUNNING = new Set(['running', 'assigned', 'review', 'verification'])
 
 export interface ProgressInput {
   now: number
-  run: Pick<Run, 'id' | 'state' | 'pauseReason' | 'startedAt' | 'createdAt' | 'finishedAt'>
+  run: Pick<Run, 'id' | 'state' | 'pauseReason' | 'startedAt' | 'createdAt' | 'finishedAt'> & Partial<Pick<Run, 'mode'>>
   tasks: readonly Pick<Task, 'id' | 'key' | 'title' | 'kind' | 'complexity' | 'state' | 'startedAt' | 'finishedAt' | 'parentTaskId' | 'blockedReason' | 'repairCycles'>[]
   dependencies: readonly TaskDependency[]
   model: DurationModel
@@ -194,7 +194,9 @@ function stageOf(input: ProgressInput, counts: ProgressSnapshot['tasks']): strin
   if (run.state === 'planning') return 'Planning'
   if (run.state === 'awaiting_approval') return 'Waiting for the plan to be approved'
   const running = tasks.filter((t) => RUNNING.has(t.state))
-  const repairs = running.filter((t) => t.kind === 'repair' || t.parentTaskId !== null)
+  // A repair fixes a failure: a task added for one (it has a parent, or is a fix of the mission's final checks). A
+  // repair-mode mission's own diagnosis and fix are its work, said as such (0.9.1: "Repairing" while it diagnosed).
+  const repairs = running.filter((t) => t.parentTaskId !== null || t.key.startsWith('mission-fix-') || (t.kind === 'repair' && run.mode !== 'repair'))
   const verifying = running.filter((t) => t.state === 'verification' || t.state === 'review')
   if (repairs.length > 0) return `Repairing (${repairs.length} ${repairs.length === 1 ? 'repair' : 'repairs'} in work)`
   if (verifying.length > 0 && verifying.length === running.length) return `Verifying ${verifying.length === 1 ? (verifying[0]?.title ?? 'a task').slice(0, 60) : `${verifying.length} tasks`}`

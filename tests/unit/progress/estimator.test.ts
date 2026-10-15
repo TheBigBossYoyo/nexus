@@ -51,6 +51,17 @@ describe('the duration model', () => {
   })
 })
 
+// 0.9.1: a repair-mode mission was shown "Repairing (1 repair in work)" while it diagnosed, as if a failure were fixed.
+describe('the stage of repairs', () => {
+  it('names a repair only for a task added to fix a failure', () => {
+    const diagnose = task('diagnose', 'running', { kind: 'repair', startedAt: at(28) })
+    expect(snap([diagnose], { run: run('executing', { mode: 'repair' }) }).stage).toBe('Working on: Task diagnose')
+    expect(snap([task('fix', 'running', { kind: 'repair', parentTaskId: 'a', startedAt: at(28) })], { run: run('executing', { mode: 'repair' }) }).stage).toBe('Repairing (1 repair in work)')
+    expect(snap([task('mission-fix-1', 'running', { startedAt: at(28) })]).stage).toBe('Repairing (1 repair in work)')
+    expect(snap([diagnose], { run: run('executing', { mode: 'build' }) }).stage).toBe('Repairing (1 repair in work)')
+  })
+})
+
 describe('progress of a mission', () => {
   it('weighs tasks by their work: four lint tasks done and one implementation left is not 80%', () => {
     const tasks = [1, 2, 3, 4].map((i) => task(`lint-${i}`, 'completed', { complexity: 'small', startedAt: at(i), finishedAt: at(i + 2) })).concat([task('feature', 'ready')])
