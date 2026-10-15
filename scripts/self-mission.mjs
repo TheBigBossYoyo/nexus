@@ -16,7 +16,7 @@
 // It uses the real Claude (the owner's subscription) and needs `pnpm build` first.
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { waitForRuntime, stopNexus } from './acceptance-common.mjs'
 
@@ -43,7 +43,17 @@ const dir = join(root, 'test-results', 'self-missions', `${name}-${mode}-${stamp
 const repo = join(dir, 'repo')
 const dataDir = join(dir, 'data')
 mkdirSync(dataDir, { recursive: true })
-const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
+// Every line also goes to the run's own folder: a run's log is never another's (two runs once shared one redirect).
+const log = (...a) => {
+  const line = [new Date().toISOString().slice(11, 19), ...a].join(' ')
+  console.log(line)
+  try {
+    appendFileSync(join(dir, 'log.txt'), `${line}
+`)
+  } catch {
+    // The console has it.
+  }
+}
 // --repo <path>: a mission on another project (a git repository); by default NEXUS on itself.
 const source = args.repo ? resolve(args.repo) : root
 const branch = execFileSync('git', ['-C', source, 'branch', '--show-current'], { encoding: 'utf8' }).trim()
