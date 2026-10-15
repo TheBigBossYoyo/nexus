@@ -252,6 +252,23 @@ const isWithin = (parent: string, child: string): boolean => {
 }
 
 /** A worktree NEXUS created, and the Git directory NEXUS itself found for it in the repository. */
+/** Every directory above the paths of a NUL-separated listing of files. */
+function directoriesOf(listing: string): string[] {
+  const directories = new Set<string>()
+  for (const path of listing.split('\0')) {
+    const parts = path.split('/')
+    for (let depth = 1; depth < parts.length; depth += 1) directories.add(parts.slice(0, depth).join('/'))
+  }
+  return [...directories]
+}
+
+/** Keeps a value in a map of at most `max` entries; the oldest goes first. */
+function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.delete(key)
+  map.set(key, value)
+  if (map.size > max) map.delete(map.keys().next().value as K)
+}
+
 interface TrustedWorktree {
   root: string
   gitDir: string
@@ -405,6 +422,19 @@ export class GitService {
   private trustedIndexDir: string | null = null
   /** The commit each private index was last made to match, by index file. */
   private readonly indexBase = new Map<string, string>()
+  /**
+   * 0.9.1: answers of git that cannot change, kept so that git is not started again to give them (a fake mission of
+   * three tasks started 312 git processes, about 60 ms each on the owner's machine). An object id names the same
+   * object for good (replacement objects are never used), so the commit an id peels to, and the files of a commit,
+   * are kept by repository and id. Nothing an agent can write is taken as such an answer: a branch's id is still
+   * read from its ref file each time, and only the step from that id to its files is remembered.
+   */
+  private readonly peeled = new Map<string, string>()
+  private readonly treeDirectories = new Map<string, readonly string[]>()
+  /** The directories of the files in each private index (a file only NEXUS writes), with the index's file identity then. */
+  private readonly indexDirectories = new Map<string, { stamp: string; directories: readonly string[] }>()
+  /** Whether a name is a valid branch name: git's rule, the same for every repository. */
+  private readonly branchNames = new Map<string, boolean>()
   private commitEvidenceSink: ((evidence: CommitEvidence) => void) | null = null
   private worktreeCreatedHook: ((gitDir: string) => Promise<void>) | null = null
   private repositoryOf: ((worktreePath: string) => WorktreeOrigin | string | null | Promise<WorktreeOrigin | string | null>) | null = null
@@ -459,10 +489,37 @@ export class GitService {
 
   /** The commit the worktree's branch names, read from the repository: never from what the worktree says of itself. */
   private async tipOf(own: TrustedWorktree): Promise<string | null> {
+    // The branch's loose ref file, read as git reads it (a loose ref outranks a packed one); the commit its id
+    // peels to is asked of git once. Anything else (a packed ref, a symbolic one, another ref store) is asked as before.
+    if (own.branch !== null) {
+      const id = await this.looseBranchId(own, own.branch)
+      if (id !== null) return this.peel(own, id)
+    }
     const ref = own.branch !== null ? `refs/heads/${own.branch}` : 'HEAD'
     const r = await this.exec(own, ['rev-parse', '--verify', '-q', `${ref}^{commit}`], {}, this.privateIndexOf(own))
     const sha = r.stdout.trim()
     return r.exitCode === 0 && /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+  }
+
+  /** The object id in the loose ref file of a branch of the worktree's repository; null when there is no such plain file holding one. */
+  private async looseBranchId(own: TrustedWorktree, branch: string): Promise<string | null> {
+    const file = join(dirname(dirname(own.gitDir)), 'refs', 'heads', ...branch.split('/'))
+    const info = await lstat(file).catch(() => null)
+    if (info === null || info.isSymbolicLink() || !info.isFile() || info.size > 200) return null
+    const text = (await readFile(file, 'utf8').catch(() => '')).trim()
+    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(text) ? text : null
+  }
+
+  /** The commit an object id of the worktree's repository peels to; null when it names none (not kept: it may yet arrive). */
+  private async peel(own: TrustedWorktree, id: string): Promise<string | null> {
+    const key = `${pathKeyOf(dirname(dirname(own.gitDir)))}\0${id}`
+    const known = this.peeled.get(key)
+    if (known !== undefined) return known
+    const r = await this.exec(own, ['rev-parse', '--verify', '-q', `${id}^{commit}`], {}, this.privateIndexOf(own))
+    const sha = r.stdout.trim()
+    if (r.exitCode !== 0 || !/^[0-9a-f]{40,64}$/.test(sha)) return null
+    remember(this.peeled, key, sha, 4096)
+    return sha
   }
 
   /** Makes NEXUS's index of a worktree match the branch's commit, unless it already does. The files are then compared against it. */
@@ -603,6 +660,17 @@ export class GitService {
     if (commondir === null || !samePath(resolve(own.gitDir, commondir), common)) refuse(`its commondir names ${commondir === null ? 'nothing readable' : JSON.stringify(commondir.slice(0, 200))} instead of the repository at ${common}`)
     const back = await read('gitdir')
     if (back === null || !samePath(resolve(own.gitDir, back), dotGit)) refuse(`its gitdir names ${back === null ? 'nothing readable' : JSON.stringify(back.slice(0, 200))} instead of ${dotGit}`)
+  }
+
+  /** The checks before every command in a worktree NEXUS created. */
+  private async assertOwnIntact(own: TrustedWorktree): Promise<void> {
+    await this.assertEntryIntact(own)
+    // A worktree NEXUS created has no configuration of its own. In a repository that reads per-worktree
+    // configuration (`extensions.worktreeConfig`, the user's setting), a `config.worktree` in the worktree's
+    // entry would name filters, drivers and hooks for NEXUS's own git. The runtime makes that file empty and
+    // unwritable for project code when the worktree is created; a file with something in it is not read past.
+    const planted = await stat(join(own.gitDir, 'config.worktree')).then((info) => info.size > 0, () => false)
+    if (planted) throw new NexusError('invalid_state', `The working tree at ${own.root} has a configuration of its own (config.worktree in its Git directory), which NEXUS did not write. NEXUS will not run git there.`, { cwd: own.root })
   }
 
   /**
@@ -854,13 +922,7 @@ export class GitService {
       await this.assertOwnGitDir(cwd)
       await this.assertPlainCloneConfig(cwd)
     } else {
-      await this.assertEntryIntact(own)
-      // A worktree NEXUS created has no configuration of its own. In a repository that reads per-worktree
-      // configuration (`extensions.worktreeConfig`, the user's setting), a `config.worktree` in the worktree's
-      // entry would name filters, drivers and hooks for NEXUS's own git. The runtime makes that file empty and
-      // unwritable for project code when the worktree is created; a file with something in it is not read past.
-      const planted = await stat(join(own.gitDir, 'config.worktree')).then((info) => info.size > 0, () => false)
-      if (planted) throw new NexusError('invalid_state', `The working tree at ${own.root} has a configuration of its own (config.worktree in its Git directory), which NEXUS did not write. NEXUS will not run git there.`, { cwd: own.root })
+      await this.assertOwnIntact(own)
       if (WRITES_BRANCH.has(sub)) await this.assertOnOwnBranch(own)
     }
     // The index: NEXUS's own, made to match the branch before it is used. A caller that names an index of its
@@ -899,25 +961,20 @@ export class GitService {
    */
   private async unlinkTrackedDirectories(own: TrustedWorktree, args: readonly string[], index: string | null): Promise<number> {
     const directories = new Set<string>()
-    const take = (listing: string): void => {
-      for (const path of listing.split('\0')) {
-        const parts = path.split('/')
-        for (let depth = 1; depth < parts.length; depth += 1) directories.add(parts.slice(0, depth).join('/'))
-      }
+    const take = (found: readonly string[]): void => {
+      for (const directory of found) directories.add(directory)
     }
-    const listed = await this.exec(own, ['ls-files', '-z', '--full-name'], { maxOutputBytes: 256 * 1024 * 1024 }, index)
-    if (listed.exitCode === 0) take(listed.stdout)
+    take(await this.indexedDirectories(own, index))
     const sub = subcommandOf(args)
     const revisions = new Set<string>(['HEAD'])
     for (const arg of args.slice(args.indexOf(sub) + 1)) if (!arg.startsWith('-') && arg !== '.' && arg.length <= 300) revisions.add(arg)
     let looked = 0
     for (const revision of revisions) {
       if (looked >= 12) break
-      const commit = await this.exec(own, ['rev-parse', '--verify', '-q', `${revision}^{commit}`], {}, index)
-      if (commit.exitCode !== 0) continue
+      const commit = await this.commitOf(own, revision, index)
+      if (commit === null) continue
       looked += 1
-      const tree = await this.exec(own, ['ls-tree', '-r', '-z', '--name-only', '--full-tree', commit.stdout.trim()], { maxOutputBytes: 256 * 1024 * 1024 }, index)
-      if (tree.exitCode === 0) take(tree.stdout)
+      take(await this.commitDirectories(own, commit, index))
     }
     let removed = 0
     // Shallowest first: below a link that was removed there is nothing left to look at.
@@ -931,6 +988,47 @@ export class GitService {
       removed += 1
     }
     return removed
+  }
+
+  /** The directories of the files in an index. NEXUS's private index is listed again only when the file changed. */
+  private async indexedDirectories(own: TrustedWorktree, index: string | null): Promise<readonly string[]> {
+    const info = index !== null ? await lstat(index).catch(() => null) : null
+    const stamp = info !== null ? `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}` : null
+    const known = index !== null ? this.indexDirectories.get(index) : undefined
+    if (known !== undefined && stamp !== null && known.stamp === stamp) return known.directories
+    const listed = await this.exec(own, ['ls-files', '-z', '--full-name'], { maxOutputBytes: 256 * 1024 * 1024 }, index)
+    if (listed.exitCode !== 0) return []
+    const directories = directoriesOf(listed.stdout)
+    if (index !== null && stamp !== null && !listed.truncated) remember(this.indexDirectories, index, { stamp, directories }, 256)
+    return directories
+  }
+
+  /**
+   * The commit a revision names in a worktree NEXUS created. Its HEAD on its own branch is the branch's commit and an
+   * object id is the commit it peels to, both as tipOf and peel find them; anything else is asked of git.
+   */
+  private async commitOf(own: TrustedWorktree, revision: string, index: string | null): Promise<string | null> {
+    if (revision === 'HEAD' && own.branch !== null) {
+      const head = await readFile(join(own.gitDir, 'HEAD'), 'utf8').then((text) => text.trim()).catch(() => '')
+      if (head === `ref: refs/heads/${own.branch}`) return this.tipOf(own)
+    }
+    if (/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(revision)) return this.peel(own, revision)
+    const r = await this.exec(own, ['rev-parse', '--verify', '-q', `${revision}^{commit}`], {}, index)
+    const sha = r.stdout.trim()
+    return r.exitCode === 0 && /^[0-9a-f]{40,64}$/.test(sha) ? sha : null
+  }
+
+  /** The directories of the files of a commit, which never change. */
+  private async commitDirectories(own: TrustedWorktree, commit: string, index: string | null): Promise<readonly string[]> {
+    const key = `${pathKeyOf(dirname(dirname(own.gitDir)))}\0${commit}`
+    const known = this.treeDirectories.get(key)
+    if (known !== undefined) return known
+    const tree = await this.exec(own, ['ls-tree', '-r', '-z', '--name-only', '--full-tree', commit], { maxOutputBytes: 256 * 1024 * 1024 }, index)
+    if (tree.exitCode !== 0) return []
+    const directories = directoriesOf(tree.stdout)
+    // A cut listing is not the commit's whole list; it is used once and not kept.
+    if (!tree.truncated) remember(this.treeDirectories, key, directories, 64)
+    return directories
   }
 
   /** The arguments of an `add` with every nested repository the index names excluded. `add -A` with no path means the whole tree, and still does. */
@@ -957,6 +1055,15 @@ export class GitService {
   /** Resolves any revision to a full commit sha. Throws git_failed when it does not exist. */
   async resolveCommit(repo: string, rev: string): Promise<string> {
     this.assertRevision(rev, 'revision')
+    // In a worktree NEXUS created, an object id is peeled as tipOf peels the branch's (once per repository and id),
+    // after the same checks of its git entry as any command there.
+    const own = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(rev) ? await this.trustedFor(repo) : null
+    if (own) {
+      await this.assertOwnIntact(own)
+      const peeled = await this.peel(own, rev)
+      if (peeled === null) throw new NexusError('git_failed', `Unknown revision: ${rev}`, { rev })
+      return peeled
+    }
     const r = await this.run(repo, ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`], { okCodes: [0, 1] })
     const sha = r.stdout.trim()
     if (r.exitCode !== 0 || sha === '') throw new NexusError('git_failed', `Unknown revision: ${rev}`, { rev })
@@ -1035,8 +1142,13 @@ export class GitService {
 
   async isValidBranchName(repo: string, name: string): Promise<boolean> {
     if (name.length === 0 || name.startsWith('-') || name.startsWith('@') || /[\0\r\n]/.test(name)) return false
+    // git's rule for a name, not anything of the repository: `@{-N}`, the one form a repository resolves, is refused above.
+    const known = this.branchNames.get(name)
+    if (known !== undefined) return known
     const r = await this.run(repo, ['check-ref-format', '--branch', name], { okCodes: [0, 1, 128] })
-    return r.exitCode === 0 && r.stdout.trim() === name
+    const valid = r.exitCode === 0 && r.stdout.trim() === name
+    remember(this.branchNames, name, valid, 2048)
+    return valid
   }
 
   async assertValidBranchName(repo: string, name: string): Promise<void> {
