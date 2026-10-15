@@ -852,6 +852,7 @@ static class Install
             int cause = k.StartsWith("COR_", StringComparison.Ordinal) ? 13 : k.StartsWith("COMPLUS_", StringComparison.Ordinal) ? 14 : k == "DOTNET_STARTUP_HOOKS" ? 15 : k == "__COMPAT_LAYER" && !BenignLayers(v.Value as string) ? 16 : 0;
             if (cause == 0) continue;
             code = cause;
+            if (cause == 16) Note("compat-layer.txt", v.Value as string);
             return "The privilege broker refuses to serve: the environment variable " + v.Key + " would change what .NET loads";
         }
         code = 0;
@@ -860,7 +861,36 @@ static class Install
 
     static readonly HashSet<string> Layers = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
         "~", "RunAsAdmin", "RunAsHighest", "RunAsInvoker", "ElevateCreateProcess", "Installer",
+        // Windows 11's own detectors on an elevated program (measured on the owner's machine: "DetectorsAppHealth
+        // DetectorsAdminProtection Installer"); they observe, they load nothing.
+        "DetectorsAppHealth", "DetectorsAdminProtection",
         "HighDpiAware", "DpiUnaware", "GdiDpiScaling", "PerProcessSystemDpiForceOff", "PerProcessSystemDpiForceOn" };
+
+    /// <summary>
+    /// What a refusal saw, for the owner to read (nobody sees an elevated program's output): one line, in
+    /// %ProgramData%\NexusPrivilege\diagnostic, a folder only administrators can write (made so here when it is new),
+    /// readable by users. Elevated only; never in a folder a user can write; nothing is executed from there.
+    /// </summary>
+    static void Note(string file, string value)
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "NexusPrivilege", "diagnostic");
+            // The parent as the staging code makes it (administrators only); this folder readable by users too.
+            string[] sddl = { "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FR;;;BU)" };
+            string[] dirs = { Path.GetDirectoryName(dir), dir };
+            for (int i = 0; i < 2; i++)
+            {
+                DirectorySecurity ds = new DirectorySecurity();
+                ds.SetSecurityDescriptorSddlForm(sddl[i]);
+                if (!Directory.Exists(dirs[i])) Directory.CreateDirectory(dirs[i], ds);
+                if ((File.GetAttributes(dirs[i]) & FileAttributes.ReparsePoint) != 0) return;
+            }
+            string text = (value ?? "").Length > 300 ? value.Substring(0, 300) : (value ?? "");
+            File.WriteAllText(Path.Combine(dir, file), text.Replace('\r', ' ').Replace('\n', ' ') + Environment.NewLine);
+        }
+        catch (Exception) { }
+    }
 
     /// <summary>A compatibility layer value made only of layers of elevation and display (none of them loads code).</summary>
     public static bool BenignLayers(string value)
