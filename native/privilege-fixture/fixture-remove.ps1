@@ -3,8 +3,8 @@ param(
   [string]$ResultFile = ''
 )
 $ErrorActionPreference = 'Stop'
-$root = Join-Path $env:ProgramFiles 'NexusPrivilegeFixture'
+$root = Join-Path $env:ProgramFiles 'NexusAcceptanceFixture'
 if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
-if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\NexusPrivilegeFixture') { Remove-Item -LiteralPath 'HKLM:\SOFTWARE\NexusPrivilegeFixture' -Recurse -Force }
+if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\NexusAcceptanceFixture') { Remove-Item -LiteralPath 'HKLM:\SOFTWARE\NexusAcceptanceFixture' -Recurse -Force }
 Write-Output 'removed'
 exit 0

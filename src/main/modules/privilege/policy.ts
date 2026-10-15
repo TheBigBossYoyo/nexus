@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { basename, isAbsolute, join, win32 } from 'node:path'
 import type { ForbiddenPrivilegedAction, PrivilegedCapability, PrivilegedOperationRequest, PrivilegedOperationReview, PrivilegedPolicyDecision } from '@shared/privilege'
 
@@ -29,6 +30,16 @@ export interface PrivilegedPolicyContext {
   projectRoots: readonly string[]
   /** The capabilities the active session was given, or null when no session is active. */
   sessionCapabilities: readonly PrivilegedCapability[] | null
+  /**
+   * 0.9.1 (review F3): the bytes of a script a request names, to match against the deny list; null when it cannot
+   * be read (the request is then refused). Absent: no script can be checked, and none is run.
+   */
+  readFile?: (path: string) => Buffer | null
+  /**
+   * 0.9.1 (review F8): the folder NEXUS gives elevated programs for their result and log files. An agent names no
+   * other place for an elevated program to write. Null or absent: no result or log file may be named.
+   */
+  resultsDir?: string | null
 }
 
 /** An entry of the deny list: what it stands for and how it is recognized. Patterns are case-insensitive. */
@@ -46,7 +57,9 @@ const FORBIDDEN: ReadonlyArray<{ action: ForbiddenPrivilegedAction; pattern: Reg
   { action: 'READ_CREDENTIAL_STORE_ARBITRARILY', pattern: /cmdkey|vaultcmd|credentialmanager|credential\s*manager|\\credentials\\|\\protect\\|lsass|sekurlsa|mimikatz|\\sam\b|\breg(\.exe)?\s+save\b|\bdpapi\b|storedcredential|\bvault\b|\bntds\b|\bhashdump\b|\bsecrets?\s*dump/i },
   { action: 'EXPORT_USER_SECRETS', pattern: /[\\/]\.ssh[\\/]|id_rsa|id_ed25519|[\\/]\.aws[\\/]|[\\/]\.azure[\\/]|[\\/]\.config[\\/]gh|\.npmrc|\.netrc|\.git-credentials|[\\/]\.claude[\\/]|[\\/]\.codex[\\/]|[\\/]\.gnupg[\\/]|[\\/]\.docker[\\/]|overnight\.key|secrets\.bin|\.protected\b|chatgpt-credentials|\bexfiltrat|\bupload\b[^.]{0,40}\b(credential|secret|token|key|password)s?|\b(credential|secret|token|password)s?\b[^.]{0,40}\bupload/i },
   { action: 'DELETE_UNRELATED_USER_FILES', pattern: /remove-item[^\n]*-recurse|\brd\s+\/s|\brmdir\s+\/s|\bdel\s+\/[sq]|\bformat(\.com)?\s+[a-z]:|cipher(\.exe)?\s+\/w|\b(delete|wipe|erase|remove|clean)\b[^.\n]{0,60}\\users\\[^\\]+\\(documents|desktop|downloads|pictures|videos|music|onedrive)\b|\b(delete|wipe|erase)\b[^.]{0,30}\b(user|personal|home)\b[^.]{0,20}\b(files|folders|data)/i },
-  { action: 'ALTER_NEXUS_PRIVILEGED_POLICY', pattern: /nexusprivilege|nexus-elevate|privilege[\s_-]*(polic|session|broker)|privileged[\s_-]*(polic|capabilit)|\\appdata\\roaming\\nexus\\|\\programs\\nexus\\|\bnexus\b[^.]{0,30}\b(security\s*polic|deny\s*list|policy\s*engine)/i },
+  // NEXUS's installed folders, per user and (0.9.1, the install for all users) under Program Files. The scripts NEXUS
+  // ships are there: a request for one of them, by its path and with its real hash, is matched without that path.
+  { action: 'ALTER_NEXUS_PRIVILEGED_POLICY', pattern: /nexusprivilege|nexus-elevate|privilege[\s_-]*(polic|session|broker)|privileged[\s_-]*(polic|capabilit)|\\appdata\\roaming\\nexus\\|\\programs\\nexus\\|\\program files( \(x86\))?\\nexus\\|\bnexus\b[^.]{0,30}\b(security\s*polic|deny\s*list|policy\s*engine)/i },
   { action: 'GRANT_THEMSELVES_NEW_PRIVILEGED_CAPABILITIES', pattern: /\bgrant\b[^.]{0,40}\b(capabilit|privilege|admin|elevat)|sedebugprivilege|setcbprivilege|seimpersonate|setokeninformation|ntrights|\bsecpol\b|\buser\s*rights?\s*assignment|\b(add|extend|widen)\b[^.]{0,30}\b(capabilit|scope)/i },
 ]
 
@@ -85,8 +98,11 @@ export class PrivilegedPolicyEngine {
   /** The context is read for each decision, for the request at hand (its run's worktrees), or for none. */
   constructor(private readonly ctx: (req: PrivilegedOperationRequest | null) => PrivilegedPolicyContext) {}
 
-  /** The deny list, matched against everything the request says. */
-  forbiddenIn(req: Pick<PrivilegedOperationRequest, 'executable' | 'args' | 'env' | 'goal' | 'whyRequired' | 'whyElevation' | 'cwd'>): ForbiddenPrivilegedAction | null {
+  /**
+   * The deny list, matched against everything the request says. `shipped`: the argument that is a script NEXUS ships
+   * (its own path, with its real hash), matched without its path: NEXUS's install folder is itself on the list.
+   */
+  forbiddenIn(req: Pick<PrivilegedOperationRequest, 'executable' | 'args' | 'env' | 'goal' | 'whyRequired' | 'whyElevation' | 'cwd'>, shipped?: number): ForbiddenPrivilegedAction | null {
     const name = lower(win32.basename(req.executable))
     if (SHELLS.has(name)) return 'ARBITRARY_SHELL'
     if (POWERSHELLS.has(name)) {
@@ -94,17 +110,61 @@ export class PrivilegedPolicyEngine {
       // Everything after -File <script> goes to the script, not to PowerShell: the fixed head is the whole check.
       if (head.join(' ') !== PS_HEAD.map(lower).join(' ') || req.args.length < PS_HEAD.length + 1) return 'ARBITRARY_SHELL'
     }
+    const args = req.args.map((a, i) => (i === shipped ? win32.basename(a) : a))
     // The command as one line (a pattern may span arguments: `net user x /add` arrives as four), then each other field.
-    const text = [[req.executable, ...req.args].join(' '), ...Object.entries(req.env).map(([k, v]) => `${k}=${v}`), req.cwd ?? '', req.goal, req.whyRequired, req.whyElevation].join('\n')
+    const text = [[req.executable, ...args].join(' '), ...Object.entries(req.env).map(([k, v]) => `${k}=${v}`), req.cwd ?? '', req.goal, req.whyRequired, req.whyElevation].join('\n')
     for (const f of FORBIDDEN) if (f.pattern.test(text)) return f.action
     return null
   }
 
+  /** The index of the argument that is a script NEXUS ships, at its own path and with the hash of the file there; null when none is. */
+  private shippedArg(req: PrivilegedOperationRequest, c: PrivilegedPolicyContext): number | null {
+    if (!POWERSHELLS.has(lower(win32.basename(req.executable)))) return null
+    const script = req.args[PS_HEAD.length]
+    if (script === undefined) return null
+    const home = [c.nexusScriptsDir, c.fixtureDir].find((dir) => dir !== null && samePath(win32.dirname(script), dir))
+    if (home === undefined) return null
+    const hash = c.trustedHash(script)
+    const input = req.inputs.find((i) => i.arg === PS_HEAD.length)
+    return hash !== null && input !== undefined && input.sha256 === hash ? PS_HEAD.length : null
+  }
+
+  /**
+   * 0.9.1 (review F3): the scripts a request stages, other than the ones NEXUS ships, matched against the deny list
+   * by what they contain, as the bytes with the hash the request gives (the broker stages those bytes and no others).
+   * A tripwire, not the boundary: a script can hide what it does; the owner's own confirmation is the boundary.
+   */
+  private scriptContentCheck(req: PrivilegedOperationRequest, c: PrivilegedPolicyContext, shipped: number | null): { forbidden: ForbiddenPrivilegedAction | null; reason: string | null } {
+    for (const input of req.inputs) {
+      const path = req.args[input.arg] ?? ''
+      if (input.arg === shipped || !/\.(ps1|psm1|psd1)$/i.test(path)) continue
+      const bytes = c.readFile?.(path) ?? null
+      if (bytes === null) return { forbidden: null, reason: `The script ${win32.basename(path)} could not be read to be checked.` }
+      if (createHash('sha256').update(bytes).digest('hex') !== input.sha256) return { forbidden: null, reason: `The script ${win32.basename(path)} is not the file with the hash given for it.` }
+      const content = bytes.toString('utf8')
+      for (const f of FORBIDDEN) if (f.pattern.test(content)) return { forbidden: f.action, reason: `The script ${win32.basename(path)} contains what the deny list forbids (${f.action}).` }
+    }
+    return { forbidden: null, reason: null }
+  }
+
+  /** Why the owner must confirm this operation: it runs a file that is not a Windows program or a script NEXUS ships. */
+  private ownerWhy(req: PrivilegedOperationRequest, c: PrivilegedPolicyContext, shipped: number | null): string[] {
+    const why: string[] = []
+    if (!this.protectedProgram(req.executable)) why.push(`it runs ${win32.basename(req.executable)}, a program outside the Windows and Program Files folders`)
+    if (POWERSHELLS.has(lower(win32.basename(req.executable))) && shipped === null) why.push(`it runs the script ${win32.basename(req.args[PS_HEAD.length] ?? '')}, which NEXUS does not ship`)
+    if (samePath(req.executable, this.system(c, 'msiexec.exe')) && /\.msi$/i.test(req.args[1] ?? '')) why.push(`it installs the package ${win32.basename(req.args[1] ?? '')}`)
+    return why
+  }
+
   /** Before any reviewer: may this request be put to review at all, and does it need the full Council? */
   precheck(req: PrivilegedOperationRequest): PrivilegedPolicyDecision {
-    const forbidden = this.forbiddenIn(req)
-    if (forbidden !== null) return { verdict: 'DENIED', reason: `Forbidden under any privilege session (${forbidden}).`, forbidden, councilRequired: false, councilWhy: [] }
     const ctx = this.ctx(req)
+    const shipped = this.shippedArg(req, ctx)
+    const forbidden = this.forbiddenIn(req, shipped ?? undefined)
+    if (forbidden !== null) return { verdict: 'DENIED', reason: `Forbidden under any privilege session (${forbidden}).`, forbidden, councilRequired: false, councilWhy: [] }
+    const content = this.scriptContentCheck(req, ctx, shipped)
+    if (content.forbidden !== null) return { verdict: 'DENIED', reason: content.reason ?? 'Forbidden.', forbidden: content.forbidden, councilRequired: false, councilWhy: [] }
+    if (content.reason !== null) return deny(content.reason)
     if (ctx.sessionCapabilities === null) return deny('No privilege session is active: the owner has not authorized administrator work for this.')
     if (!ctx.sessionCapabilities.includes(req.capability)) return deny(`The active privilege session was not given ${req.capability}.`)
     if (!win32.isAbsolute(req.executable) || !/^[a-z]:\\/i.test(req.executable)) return deny('The executable must be an absolute path on a local drive.')
@@ -115,8 +175,11 @@ export class PrivilegedPolicyEngine {
     if (!t.ok) return deny(t.reason)
     // Every allowed operation fits a template that was reviewed once: the Council is asked for what the template
     // itself flags (machine-wide installs, NEXUS's own security configuration, the firewall, a script), not for each
-    // first use of a known program.
-    return { verdict: 'ALLOWED', reason: t.reason, forbidden: null, councilRequired: t.council.length > 0, councilWhy: [...t.council] }
+    // first use of a known program. 0.9.1 (review F3): a file an agent may have written or fetched also needs the
+    // Council, and the owner's own confirmation of this very operation: no model is the last word on it.
+    const ownerWhy = this.ownerWhy(req, ctx, shipped)
+    const council = ownerWhy.length > 0 && t.council.length === 0 ? ['runs a file that is not a Windows program or a script NEXUS ships'] : [...t.council]
+    return { verdict: 'ALLOWED', reason: t.reason, forbidden: null, councilRequired: council.length > 0, councilWhy: council, ownerRequired: ownerWhy.length > 0, ownerWhy }
   }
 
   /**
@@ -130,11 +193,14 @@ export class PrivilegedPolicyEngine {
     if (technical === undefined || technical.failed) return { ...again, verdict: 'DENIED', reason: 'The Technical Director gave no valid review; nothing runs without one.' }
     if (technical.verdict !== 'APPROVE') return { ...again, verdict: 'DENIED', reason: `The Technical Director did not approve (${technical.verdict}).` }
     if (technical.risk === 'CRITICAL') return { ...again, verdict: 'DENIED', reason: 'Rated CRITICAL risk: not run under a privilege session.' }
+    // 0.9.1 (review F11): an approval with conditions is not an approval. Nothing here could hold the program to them.
+    if (technical.restrictions.length > 0) return { ...again, verdict: 'DENIED', reason: `The Technical Director approved only with conditions (${technical.restrictions.join('; ').slice(0, 300)}), which nothing can enforce on the program: not run.` }
     if (again.councilRequired) {
       const council = reviews.find((r) => r.reviewer === 'DIRECTOR_COUNCIL')
       if (council === undefined || council.failed) return { ...again, verdict: 'DENIED', reason: 'This operation needs the Director Council, which gave no valid review.' }
       if (council.verdict !== 'APPROVE') return { ...again, verdict: 'DENIED', reason: `The Director Council did not approve (${council.verdict}).` }
       if (council.risk === 'CRITICAL') return { ...again, verdict: 'DENIED', reason: 'Rated CRITICAL risk by the Council: not run under a privilege session.' }
+      if (council.restrictions.length > 0) return { ...again, verdict: 'DENIED', reason: `The Director Council approved only with conditions (${council.restrictions.join('; ').slice(0, 300)}), which nothing can enforce on the program: not run.` }
     }
     return { ...again, reason: `${again.reason} Approved by review${again.councilRequired ? ' and the Council' : ''}.` }
   }
@@ -170,16 +236,25 @@ export class PrivilegedPolicyEngine {
       if (kind === 'value') {
         i++
         if (i >= req.args.length) return fail('A parameter has no value.')
+        // 0.9.1 (review F8): the script writes its result there with administrator rights: only where NEXUS says.
+        if (name.toLowerCase() === 'resultfile' && !this.inResults(req.args[i] as string, c, '.json')) return fail("A result file is written only in NEXUS's own results folder, as a .json file.")
       }
     }
     return pass('A script NEXUS ships, with its own hash.')
   }
 
-  private installerArgs(args: readonly string[], from: number): string | null {
-    const rest = args.slice(from).map(lower)
-    if (!rest.some((a) => SILENT_REQUIRED.has(a))) return 'An installer runs only silently (/S, /quiet, /qn, /silent or the like).'
-    const odd = rest.find((a) => !SILENT_FLAGS.has(a) && !/^\/l\*?v?$/.test(a) && !/^[a-z]:\\[^"*?<>|]+\.log$/i.test(a))
-    return odd !== undefined ? `The installer argument ${odd} is not one of the silent-installation flags.` : null
+  /** Whether an elevated program may write this file: a plain file of NEXUS's results folder, of this kind. */
+  private inResults(path: string, c: PrivilegedPolicyContext, extension: string): boolean {
+    const dir = c.resultsDir ?? null
+    return dir !== null && win32.isAbsolute(path) && !/[\\/]\.\.?([\\/]|$)/.test(path) && samePath(win32.dirname(path), dir) && path.toLowerCase().endsWith(extension) && /^[A-Za-z0-9_.-]{1,80}$/.test(win32.basename(path))
+  }
+
+  private installerArgs(args: readonly string[], from: number, c: PrivilegedPolicyContext): string | null {
+    const rest = args.slice(from)
+    if (!rest.some((a) => SILENT_REQUIRED.has(lower(a)))) return 'An installer runs only silently (/S, /quiet, /qn, /silent or the like).'
+    // 0.9.1 (review F8): a log file is written by Windows Installer with its rights: only in NEXUS's results folder.
+    const odd = rest.find((a) => !SILENT_FLAGS.has(lower(a)) && !/^\/l\*?v?$/i.test(a) && !this.inResults(a, c, '.log'))
+    return odd !== undefined ? `The installer argument ${odd} is not one of the silent-installation flags (a log file goes in NEXUS's own results folder).` : null
   }
 
   private inProject(path: string, c: PrivilegedPolicyContext): boolean {
@@ -197,14 +272,14 @@ export class PrivilegedPolicyEngine {
         if (!/\.msi$/i.test(pkg) || req.inputs.find((i) => i.arg === 1) === undefined) return fail('The package must be a .msi file given with its SHA-256.')
         if (opts.fromProject && !this.inProject(pkg, c)) return fail("The package must come from the run's own worktree.")
       } else if (verb === '/i') return fail('An installation names its package file, not a product code.')
-      const bad = this.installerArgs(req.args, 2)
+      const bad = this.installerArgs(req.args, 2, c)
       return bad === null ? pass('A silent Windows Installer operation on a hashed package.') : fail(bad)
     }
     if (this.protectedProgram(req.executable)) return fail('An installer here is msiexec or a hashed installer program.')
     if (req.sha256 === undefined) return fail('The installer must be given with its SHA-256.')
     if (opts.fromProject && !this.inProject(req.executable, c)) return fail("The installer must come from the run's own worktree.")
     if (!/\.exe$/i.test(req.executable)) return fail('The installer must be an .exe or a .msi.')
-    const bad = this.installerArgs(req.args, 0)
+    const bad = this.installerArgs(req.args, 0, c)
     return bad === null ? pass('A hashed installer, run silently.') : fail(bad)
   }
 
@@ -242,7 +317,7 @@ export class PrivilegedPolicyEngine {
       case 'APP_UNINSTALL_TEST': {
         if (samePath(req.executable, this.system(c, 'msiexec.exe'))) return this.installer(req, c, { fromProject: false, verbs: ['/x'] })
         if (!(under(req.executable, c.programFiles) || under(req.executable, c.programFilesX86)) || !/^(uninst|uninstall)[^\\]*\.exe$/i.test(basename(req.executable))) return fail("An uninstall runs the application's own uninstaller under Program Files, or msiexec /x.")
-        const bad = this.installerArgs(req.args, 0)
+        const bad = this.installerArgs(req.args, 0, c)
         return bad === null ? pass("The application's own uninstaller, run silently.") : fail(bad)
       }
       case 'PROJECT_SERVICE_CONTROL': {
@@ -272,7 +347,7 @@ export class PrivilegedPolicyEngine {
         if (samePath(req.executable, this.system(c, 'reg.exe'))) {
           const [verb, key, ...rest] = req.args
           if (!['add', 'delete', 'query'].includes(lower(verb ?? ''))) return fail('reg.exe is allowed with add, delete or query here.')
-          if (!/^HKLM\\SOFTWARE\\NexusPrivilegeFixture(\\[A-Za-z0-9_.-]{1,60}){0,3}$/i.test(key ?? '')) return fail('The fixture touches HKLM\\SOFTWARE\\NexusPrivilegeFixture only.')
+          if (!/^HKLM\\SOFTWARE\\NexusAcceptanceFixture(\\[A-Za-z0-9_.-]{1,60}){0,3}$/i.test(key ?? '')) return fail('The fixture touches HKLM\\SOFTWARE\\NexusAcceptanceFixture only.')
           const flags = new Set(['/v', '/t', '/d', '/f', '/ve', '/s'])
           for (let i = 0; i < rest.length; i++) {
             const f = lower(rest[i] as string)

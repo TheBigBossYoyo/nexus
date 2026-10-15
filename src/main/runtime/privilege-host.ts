@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve, win32 } from 'node:path'
 import type { SecurityEventSeverity } from '@shared/autonomy'
 import type { PrivilegeSessionStatus, PrivilegedOperationRequest } from '@shared/privilege'
@@ -37,6 +37,8 @@ export interface PrivilegeHostDeps {
   reviewers: (projectId: string | null, operationId: string) => Promise<{ technical?: AdvisoryProvider; strategic?: AdvisoryProvider }>
   securityEvent: (e: { severity: SecurityEventSeverity; runId: string | null; projectId: string | null; taskId: string | null; agentId: string | null; action: string; reason: string }) => void
   onChange: (status: PrivilegeSessionStatus | null) => void
+  /** 0.9.1 (review F3): the owner's own confirmation of one operation, natively. */
+  confirmOwner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>
   log: (line: string) => void
 }
 
@@ -48,6 +50,18 @@ export interface PrivilegeHost {
   section(runId: string, full?: boolean): string
   /** The UAC prompts the privilege sessions of a run caused. */
   uacPrompts(runId: string): number
+}
+
+const underFolder = (path: string, root: string): boolean => win32.normalize(path).toLowerCase().startsWith(`${win32.normalize(root).toLowerCase().replace(/\\+$/, '')}\\`)
+
+/** A script a request names, to be checked against the deny list (review F3); larger than any script NEXUS runs, refused. */
+const readScript = (path: string): Buffer | null => {
+  try {
+    if (statSync(path).size > 2 * 1024 * 1024) return null
+    return readFileSync(path)
+  } catch {
+    return null
+  }
 }
 
 const sha256 = (path: string): string | null => {
@@ -70,6 +84,10 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   let unavailableReason: string | null = null
   if (process.platform !== 'win32') unavailableReason = 'Privilege sessions are a Windows feature.'
   else if (helper === null || !existsSync(helper)) unavailableReason = 'The privilege broker is not part of this build.'
+  // 0.9.1 (review F1): the broker is the one program started with administrator rights. In a folder the user can write
+  // (an install for this user only), any program running as the user could replace it before the UAC prompt. It is
+  // started only from under Program Files, which only administrators can change; the broker checks its folder too.
+  else if (d.isPackaged && !underFolder(helper, d.env['ProgramFiles'] ?? 'C:\\Program Files')) unavailableReason = 'NEXUS is installed for this user only, in a folder any program you run can change; privilege sessions need NEXUS installed for all users (under Program Files).'
   const uacPrompts = (runId: string): number => store.sessions({ runId, limit: 50 }).reduce((n, s) => n + s.uacPrompts, 0)
   if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf, uacPrompts }
   const helperPath: string = helper
@@ -81,6 +99,9 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   // Packaged: resources/privilege-fixture. From the source tree: native/privilege-fixture (the helpers are in out/native).
   const fixtureDir = d.resourcesPath !== undefined ? join(d.resourcesPath, 'privilege-fixture') : d.launcherPath !== undefined ? resolve(dirname(d.launcherPath), '..', '..', 'native', 'privilege-fixture') : null
   const scriptsDir = d.sandboxSetupDir ?? null
+  // 0.9.1 (review F8): where an elevated script writes its result and Windows Installer its log; nowhere else.
+  const resultsDir = join(d.dataDir, 'privilege', 'results')
+  mkdirSync(resultsDir, { recursive: true })
 
   const service: PrivilegeService = new PrivilegeService({
     store,
@@ -93,6 +114,8 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
       trustedHash: sha256,
       projectRoots: req === null ? [] : d.projectRoots(req.runId),
       sessionCapabilities: service.sessionCapabilities(),
+      readFile: readScript,
+      resultsDir,
     })),
     review: new PrivilegedReviewPipeline({ providers: (req) => d.reviewers(req.projectId, `privileged:${req.id}`) }),
     startBroker: async (o) => {
@@ -121,6 +144,7 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
     },
     securityEvent: d.securityEvent,
     onChange: d.onChange,
+    ...(d.confirmOwner ? { confirmOwner: d.confirmOwner } : {}),
     log: d.log,
   })
   service.recover()

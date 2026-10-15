@@ -13,8 +13,9 @@ const scriptsDir = resolve(__dirname, '..', '..', '..', 'native', 'sandbox-setup
 const sha = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex')
 const PS = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
 const HEAD = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File']
+const RESULTS = 'C:\\Users\\owner\\AppData\\Roaming\\NEXUS-data\\privilege\\results'
 
-function engine(caps: readonly PrivilegedCapability[] | null = [...PRIVILEGED_CAPABILITIES], roots: string[] = ['C:\\work\\racedeck']): PrivilegedPolicyEngine {
+function engine(caps: readonly PrivilegedCapability[] | null = [...PRIVILEGED_CAPABILITIES], roots: string[] = ['C:\\work\\racedeck'], over: Partial<PrivilegedPolicyContext> = {}): PrivilegedPolicyEngine {
   const ctx: PrivilegedPolicyContext = {
     systemRoot: 'C:\\Windows',
     programFiles: 'C:\\Program Files',
@@ -30,6 +31,15 @@ function engine(caps: readonly PrivilegedCapability[] | null = [...PRIVILEGED_CA
     },
     projectRoots: roots,
     sessionCapabilities: caps,
+    readFile: (p) => {
+      try {
+        return readFileSync(p)
+      } catch {
+        return null
+      }
+    },
+    resultsDir: RESULTS,
+    ...over,
   }
   return new PrivilegedPolicyEngine(() => ctx)
 }
@@ -65,7 +75,7 @@ describe('privileged policy: the absolute deny list', () => {
     ['a new administrator account', { capability: 'PROJECT_SERVICE_CONTROL', executable: 'C:\\Windows\\System32\\sc.exe', goal: 'Create an admin user for the CI', args: ['query', 'x'] }, 'CREATE_ADMIN_USER'],
     ['test signing for a driver', { capability: 'SIGNED_DRIVER_QUERY', executable: 'C:\\Windows\\System32\\driverquery.exe', goal: 'enable testsigning', args: ['/si'] }, 'CHANGE_BOOT_CONFIGURATION'],
     ['Bitdefender exclusions', { capability: 'PROJECT_TOOLCHAIN_REPAIR', executable: 'C:\\Windows\\System32\\msiexec.exe', goal: 'Stop Bitdefender scanning node_modules', args: ['/fa', '{00000000-0000-0000-0000-000000000000}', '/qn'] }, 'DISABLE_BITDEFENDER'],
-    ["NEXUS's own privileged policy", { capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: 'C:\\Windows\\System32\\reg.exe', goal: 'widen the privilege policy of NEXUS', args: ['query', 'HKLM\\SOFTWARE\\NexusPrivilegeFixture'] }, 'ALTER_NEXUS_PRIVILEGED_POLICY'],
+    ["NEXUS's own privileged policy", { capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: 'C:\\Windows\\System32\\reg.exe', goal: 'widen the privilege policy of NEXUS', args: ['query', 'HKLM\\SOFTWARE\\NexusAcceptanceFixture'] }, 'ALTER_NEXUS_PRIVILEGED_POLICY'],
     ['a credential store dump', { capability: 'SIGNED_DRIVER_QUERY', executable: 'C:\\Windows\\System32\\driverquery.exe', goal: 'dump lsass to check a crash', args: ['/si'] }, 'READ_CREDENTIAL_STORE_ARBITRARILY'],
     ['a kernel driver', { capability: 'KNOWN_DEPENDENCY_MACHINE_INSTALL', executable: 'C:\\Windows\\System32\\msiexec.exe', goal: 'install the capture kernel driver', args: ['/i', 'C:\\tmp\\drv.msi', '/qn'] }, 'INSTALL_ARBITRARY_KERNEL_DRIVER'],
     ['the control plane on the network', { capability: 'NEXUS_FIREWALL_RECONCILIATION', executable: 'C:\\Windows\\System32\\netsh.exe', args: ['advfirewall', 'firewall', 'add', 'rule', 'name=NexusSandbox open', 'dir=in', 'action=allow', 'localport=7000'] }, 'OPEN_NEXUS_CONTROL_PLANE_TO_INTERNET'],
@@ -154,9 +164,12 @@ describe('privileged policy: sessions and templates', () => {
   it("repairs NEXUS's own sandbox only for NEXUS itself, with the Council", () => {
     const policy = engine()
     const script = join(scriptsDir, 'setup-sandbox.ps1')
-    const req = request({ capability: 'NEXUS_SANDBOX_REPAIR', executable: PS, args: [...HEAD, script, '-MainUserSid', 'S-1-5-21-1', '-PasswordFile', 'C:\\x\\p', '-ResultFile', 'C:\\x\\r.json'], inputs: [{ arg: 5, sha256: sha(script) }] })
+    const req = request({ capability: 'NEXUS_SANDBOX_REPAIR', executable: PS, args: [...HEAD, script, '-MainUserSid', 'S-1-5-21-1', '-PasswordFile', 'C:\\x\\p', '-ResultFile', `${RESULTS}\\r.json`], inputs: [{ arg: 5, sha256: sha(script) }] })
     expect(policy.precheck(req).reason).toMatch(/NEXUS itself/)
-    expect(policy.precheck({ ...req, role: 'NEXUS' })).toMatchObject({ verdict: 'ALLOWED', councilRequired: true })
+    expect(policy.precheck({ ...req, role: 'NEXUS' })).toMatchObject({ verdict: 'ALLOWED', councilRequired: true, ownerRequired: false })
+    // 0.9.1 (review F8): the result is written with administrator rights, so only in NEXUS's results folder.
+    const elsewhere = { ...req, role: 'NEXUS' as const, args: req.args.map((a) => (a.endsWith('r.json') ? 'C:\\Windows\\System32\\drivers\\etc\\hosts.json' : a)) }
+    expect(policy.precheck(elsewhere).reason).toMatch(/results folder/)
   })
 
   it('reconciles only firewall rules of NEXUS that block', () => {
@@ -177,5 +190,71 @@ describe('privileged policy: redaction', () => {
     expect(redactArgs(['/v', 'x', 'hunter2'], [2])).toEqual(['/v', 'x', '[secret]'])
     expect(redactText('--token=ghp_abcdefghijklmnopqrstuvwxyz password: s3cr3t')).not.toMatch(/ghp_|s3cr3t/)
     expect(redactText('Authorization: Bearer abcdefghijklmnop')).toBe('Authorization: Bearer [secret]')
+  })
+})
+
+// 0.9.1: the fixes of the security review of privilege sessions (F3, F8, F10, F11).
+describe('privileged policy after the security review', () => {
+  const sha256 = (b: Buffer): string => createHash('sha256').update(b).digest('hex')
+  const WORK = 'C:\\work\\racedeck'
+  const scripts: Record<string, Buffer> = {
+    [`${WORK}\\fix-path.ps1`]: Buffer.from('$p = [Environment]::GetEnvironmentVariable("Path", "Machine")\n[Environment]::SetEnvironmentVariable("Path", "$p;C:\\tools", "Machine")\n'),
+    [`${WORK}\\sneaky.ps1`]: Buffer.from('Write-Output "repairing"\nSet-MpPreference -DisableRealtimeMonitoring $true\n'),
+  }
+  const withScripts = (): PrivilegedPolicyEngine => engine(undefined, undefined, { readFile: (p) => scripts[p] ?? null })
+  const repairScript = (name: string, hash?: string): PrivilegedOperationRequest => {
+    const path = `${WORK}\\${name}`
+    return request({ capability: 'PROJECT_TOOLCHAIN_REPAIR', executable: PS, args: [...HEAD, path], inputs: [{ arg: 5, sha256: hash ?? sha256(scripts[path] as Buffer) }] })
+  }
+
+  it('F3: a script the run wrote needs the Council and the owner; the deny list reads what it contains', () => {
+    const policy = withScripts()
+    expect(policy.precheck(repairScript('fix-path.ps1'))).toMatchObject({ verdict: 'ALLOWED', councilRequired: true, ownerRequired: true })
+    expect(policy.precheck(repairScript('sneaky.ps1'))).toMatchObject({ verdict: 'DENIED', forbidden: 'DISABLE_DEFENDER' })
+    expect(policy.precheck(repairScript('fix-path.ps1', 'a'.repeat(64))).reason).toMatch(/not the file with the hash/)
+    expect(engine().precheck(repairScript('fix-path.ps1')).reason).toMatch(/could not be read/)
+  })
+
+  it("F3: an installer the run built or fetched needs the Council and the owner; Windows' own programs and NEXUS's scripts do not ask the owner", () => {
+    const policy = engine()
+    const built = request({ capability: 'APP_INSTALL_TEST', executable: `${WORK}\\dist\\setup.exe`, sha256: 'b'.repeat(64), args: ['/S'] })
+    expect(policy.precheck(built)).toMatchObject({ verdict: 'ALLOWED', councilRequired: true, ownerRequired: true })
+    const msi = request({ capability: 'PROJECT_TOOLCHAIN_INSTALL', executable: 'C:\\Windows\\System32\\msiexec.exe', args: ['/i', 'C:\\Users\\owner\\Downloads\\tool.msi', '/qn'], inputs: [{ arg: 1, sha256: 'c'.repeat(64) }] })
+    expect(policy.precheck(msi)).toMatchObject({ verdict: 'ALLOWED', ownerRequired: true })
+    const sc = request({ capability: 'PROJECT_SERVICE_CONTROL', executable: 'C:\\Windows\\System32\\sc.exe', args: ['query', 'racedeck-agent'] })
+    expect(policy.precheck(sc)).toMatchObject({ verdict: 'ALLOWED', ownerRequired: false })
+    expect(policy.precheck(fixtureScript('fixture-install.ps1', ['-Version', '1.0.0']))).toMatchObject({ verdict: 'ALLOWED', ownerRequired: false })
+  })
+
+  it("F8: a Windows Installer log goes only in NEXUS's results folder", () => {
+    const policy = engine()
+    const msi = (log: string): PrivilegedOperationRequest => request({ capability: 'PROJECT_TOOLCHAIN_INSTALL', executable: 'C:\\Windows\\System32\\msiexec.exe', args: ['/i', 'C:\\Users\\owner\\Downloads\\tool.msi', '/qn', '/l*v', log], inputs: [{ arg: 1, sha256: 'c'.repeat(64) }] })
+    expect(policy.precheck(msi(`${RESULTS}\\install.log`)).verdict).toBe('ALLOWED')
+    expect(policy.precheck(msi('C:\\Windows\\System32\\config\\x.log')).verdict).toBe('DENIED')
+    expect(policy.precheck(msi(`${RESULTS}\\..\\x.log`)).verdict).toBe('DENIED')
+  })
+
+  it("F10: NEXUS's own scripts run from an installed NEXUS, by their path and real hash; anything else naming that folder is still forbidden", () => {
+    const installed = 'C:\\Program Files\\NEXUS\\resources\\sandbox-setup'
+    const real = sha(join(scriptsDir, 'restore-canonicalization.ps1'))
+    const policy = engine(undefined, undefined, { nexusScriptsDir: installed, trustedHash: (p) => (p.toLowerCase() === `${installed}\\restore-canonicalization.ps1`.toLowerCase() ? real : null) })
+    const script = `${installed}\\restore-canonicalization.ps1`
+    const check = request({ capability: 'NEXUS_CANONICALIZATION_REPAIR', executable: PS, args: [...HEAD, script, '-Check'], inputs: [{ arg: 5, sha256: real }] })
+    expect(policy.precheck(check)).toMatchObject({ verdict: 'ALLOWED', ownerRequired: false })
+    expect(policy.precheck({ ...check, inputs: [{ arg: 5, sha256: 'd'.repeat(64) }] })).toMatchObject({ verdict: 'DENIED', forbidden: 'ALTER_NEXUS_PRIVILEGED_POLICY' })
+    const perUserDir = 'C:\\Users\\owner\\AppData\\Local\\Programs\\NEXUS\\resources\\sandbox-setup'
+    const perUser = engine(undefined, undefined, { nexusScriptsDir: perUserDir, trustedHash: () => real })
+    expect(perUser.precheck({ ...check, args: [...HEAD, `${perUserDir}\\restore-canonicalization.ps1`, '-Check'] }).verdict).toBe('ALLOWED')
+    const replace = request({ capability: 'APP_INSTALL_TEST', executable: `${WORK}\\dist\\setup.exe`, sha256: 'b'.repeat(64), args: ['/S', 'C:\\Program Files\\NEXUS\\resources\\bin\\x.exe'] })
+    expect(policy.precheck(replace)).toMatchObject({ verdict: 'DENIED', forbidden: 'ALTER_NEXUS_PRIVILEGED_POLICY' })
+    // The fixture's registry key no longer collides with the deny list.
+    expect(engine().precheck(request({ capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: 'C:\\Windows\\System32\\reg.exe', args: ['query', 'HKLM\\SOFTWARE\\NexusAcceptanceFixture'] })).verdict).toBe('ALLOWED')
+  })
+
+  it('F11: an approval with conditions is not an approval', () => {
+    const policy = engine()
+    const sc = request({ capability: 'PROJECT_SERVICE_CONTROL', executable: 'C:\\Windows\\System32\\sc.exe', args: ['start', 'racedeck-agent'] })
+    expect(policy.final(sc, [approve()]).verdict).toBe('ALLOWED')
+    expect(policy.final(sc, [{ ...approve(), restrictions: ['only with /norestart'] }])).toMatchObject({ verdict: 'DENIED', reason: expect.stringMatching(/conditions/) })
   })
 })

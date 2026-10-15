@@ -14,6 +14,8 @@ const OUTCOME_TEXT: Record<PrivilegedOutcome, string> = {
   ABORTED: 'ABORTED',
   REJECTED_BY_POLICY: 'REJECTED BY POLICY',
   REJECTED_BY_DIRECTOR: 'REJECTED BY REVIEW',
+  DECLINED_BY_OWNER: 'DECLINED BY YOU',
+  EXECUTING: 'RUNNING (OR STOPPED WITH NEXUS)',
 }
 
 const time = (iso: string): string => {
@@ -36,7 +38,7 @@ function reviewLine(reviews: readonly PrivilegedOperationReview[], councilRequir
 }
 
 export function countsOf(receipts: readonly PrivilegedOperationReceipt[]): Record<PrivilegedOutcome, number> {
-  const out: Record<PrivilegedOutcome, number> = { EXECUTED: 0, FAILED: 0, TIMEOUT: 0, ABORTED: 0, REJECTED_BY_POLICY: 0, REJECTED_BY_DIRECTOR: 0 }
+  const out: Record<PrivilegedOutcome, number> = { EXECUTED: 0, FAILED: 0, TIMEOUT: 0, ABORTED: 0, REJECTED_BY_POLICY: 0, REJECTED_BY_DIRECTOR: 0, DECLINED_BY_OWNER: 0, EXECUTING: 0 }
   for (const r of receipts) out[r.outcome]++
   return out
 }
@@ -44,7 +46,7 @@ export function countsOf(receipts: readonly PrivilegedOperationReceipt[]): Recor
 function headline(receipts: readonly PrivilegedOperationReceipt[]): string {
   const c = countsOf(receipts)
   const ran = c.EXECUTED + c.FAILED + c.TIMEOUT
-  const refused = c.REJECTED_BY_POLICY + c.REJECTED_BY_DIRECTOR
+  const refused = c.REJECTED_BY_POLICY + c.REJECTED_BY_DIRECTOR + c.DECLINED_BY_OWNER
   const parts = [`${ran} run`, ...(c.FAILED + c.TIMEOUT > 0 ? [`${c.FAILED + c.TIMEOUT} of them failed`] : []), ...(refused > 0 ? [`${refused} refused`] : []), ...(c.ABORTED > 0 ? [`${c.ABORTED} aborted`] : [])]
   return `${receipts.length} privileged attempt${receipts.length === 1 ? '' : 's'}: ${parts.join(', ')}.`
 }

@@ -6,8 +6,12 @@ import { guard, prepare, type Row } from '../persistence/table'
 /** 0.9.1: the sessions and the receipts of every privileged attempt (migration 023). */
 
 const text = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
-/** Receipts kept in all; the oldest go first. A worker that asks again and again stays visible in the newest. */
+/**
+ * Receipts kept in all; the oldest refusals go first. 0.9.1 (review F7): only refusals: what ran (or may have run)
+ * is never evicted, so a task asking again and again cannot push the record of an operation out.
+ */
 const MAX_RECEIPTS = 20_000
+const EVICTABLE = "('REJECTED_BY_POLICY', 'REJECTED_BY_DIRECTOR', 'DECLINED_BY_OWNER')"
 
 export interface PrivilegeSessionRow {
   id: string
@@ -31,7 +35,10 @@ export interface PrivilegeStore {
   sessions(opts?: { runId?: string; limit?: number }): PrivilegeSessionRow[]
   /** Sessions a previous run of NEXUS left marked as preparing or active: their broker ended with that runtime. */
   unfinished(): PrivilegeSessionRow[]
+  /** Writes a receipt, or replaces the one with its id (an operation recorded as EXECUTING before it ran). */
   record(r: PrivilegedOperationReceipt): void
+  /** Operations recorded as EXECUTING: after a restart, the ones a stopped NEXUS left running. */
+  executing(): PrivilegedOperationReceipt[]
   receipts(opts: { runId?: string; sessionId?: string; since?: string; limit?: number }): PrivilegedOperationReceipt[]
   counts(sessionId: string): Record<PrivilegedOutcome, number>
 }
@@ -99,13 +106,24 @@ export class SqlitePrivilegeStore implements PrivilegeStore {
       prepare(
         this.db,
         `INSERT INTO privileged_operations (id, session_id, run_id, project_id, task_id, requested_at, finished_at, capability, outcome, receipt_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET finished_at = excluded.finished_at, outcome = excluded.outcome, receipt_json = excluded.receipt_json`,
       ).run(r.id, r.sessionId, r.runId, r.projectId, r.taskId, r.requestedAt, r.finishedAt, r.capability, r.outcome, JSON.stringify(r)),
     )
     if (++this.inserts % 100 === 0) {
       const total = (prepare(this.db, 'SELECT COUNT(*) AS n FROM privileged_operations').get() as { n: number }).n
-      if (total > MAX_RECEIPTS) prepare(this.db, 'DELETE FROM privileged_operations WHERE seq IN (SELECT seq FROM privileged_operations ORDER BY seq LIMIT ?)').run(total - MAX_RECEIPTS)
+      if (total > MAX_RECEIPTS) prepare(this.db, `DELETE FROM privileged_operations WHERE seq IN (SELECT seq FROM privileged_operations WHERE outcome IN ${EVICTABLE} ORDER BY seq LIMIT ?)`).run(total - MAX_RECEIPTS)
     }
+  }
+
+  executing(): PrivilegedOperationReceipt[] {
+    return (prepare(this.db, "SELECT receipt_json FROM privileged_operations WHERE outcome = 'EXECUTING' ORDER BY seq").all() as Row[]).flatMap((row) => {
+      try {
+        return [JSON.parse(String(row['receipt_json'])) as PrivilegedOperationReceipt]
+      } catch {
+        return []
+      }
+    })
   }
 
   receipts(opts: { runId?: string; sessionId?: string; since?: string; limit?: number }): PrivilegedOperationReceipt[] {
@@ -162,7 +180,12 @@ export class MemoryPrivilegeStore implements PrivilegeStore {
     return [...this.sessionRows.values()].filter((s) => s.state === 'PREPARING' || s.state === 'ACTIVE')
   }
   record(r: PrivilegedOperationReceipt): void {
-    this.receiptRows.push(structuredClone(r))
+    const at = this.receiptRows.findIndex((x) => x.id === r.id)
+    if (at >= 0) this.receiptRows[at] = structuredClone(r)
+    else this.receiptRows.push(structuredClone(r))
+  }
+  executing(): PrivilegedOperationReceipt[] {
+    return this.receiptRows.filter((r) => r.outcome === 'EXECUTING').map((r) => structuredClone(r))
   }
   receipts(opts: { runId?: string; sessionId?: string; since?: string }): PrivilegedOperationReceipt[] {
     return this.receiptRows.filter((r) => (opts.runId === undefined || r.runId === opts.runId) && (opts.sessionId === undefined || r.sessionId === opts.sessionId) && (opts.since === undefined || r.requestedAt >= opts.since))

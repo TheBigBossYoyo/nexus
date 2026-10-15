@@ -1,3 +1,4 @@
+import { win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   DEFAULT_SESSION_CAPABILITIES,
@@ -56,6 +57,11 @@ export interface PrivilegeServiceDeps {
   log?: (line: string) => void
   /** Minutes without a privileged operation after which an UNTIL_IDLE session ends. Default 30. */
   idleMinutes?: number
+  /**
+   * 0.9.1 (review F3): the owner's own confirmation of one operation, asked natively (a dialog no page script can
+   * answer). Without anyone to ask the answer is no. Absent: an operation that needs it does not run.
+   */
+  confirmOwner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>
 }
 
 /** Who asks, as NEXUS knows it: never what the agent says of itself. */
@@ -74,6 +80,8 @@ const DEFAULT_HOURS: Record<PrivilegeSessionScope, number> = { SINGLE_OPERATION:
 /** Refused attempts of one task after which its further requests are refused without review (and still recorded). */
 const REFUSALS_BEFORE_BLOCK = 8
 const OUTPUT_KEPT = 4000
+/** How long the owner's confirmation of one operation is waited for. */
+const OWNER_ANSWER_MS = 10 * 60_000
 
 export type PrepareResult = { ok: true; status: PrivilegeSessionStatus } | { ok: false; reason: string; status: PrivilegeSessionStatus | null }
 
@@ -92,10 +100,16 @@ export class PrivilegeService {
     this.newId = d.newId ?? randomUUID
   }
 
-  /** At start: a session a previous runtime left open is over; its broker ended with that runtime. */
+  /**
+   * At start: a session a previous runtime left open is over; its broker ended with that runtime. An operation that
+   * was running then (review F6) is closed as ABORTED: what it changed before it was stopped is not known.
+   */
   recover(): void {
     for (const row of this.d.store.unfinished()) {
       this.d.store.saveSession({ ...row, state: 'ENDED', endedAt: this.now().toISOString(), endReason: 'NEXUS stopped; the broker ended with it' })
+    }
+    for (const r of this.d.store.executing()) {
+      this.d.store.record({ ...r, outcome: 'ABORTED', finishedAt: this.now().toISOString(), outcomeReason: 'NEXUS stopped while this operation was running: the broker ended it, and what it had changed by then is not known.' })
     }
   }
 
@@ -328,9 +342,16 @@ export class PrivilegeService {
       const byPolicy = this.d.policy.precheck(req).verdict === 'DENIED'
       return receipt(byPolicy ? 'REJECTED_BY_POLICY' : 'REJECTED_BY_DIRECTOR', final.reason, { precheck, reviews, finalPolicy: final })
     }
+    // 0.9.1 (review F3): a file an agent may have written or fetched runs only once the owner confirmed this very operation.
+    if (final.ownerRequired === true) {
+      const confirmed = await this.askOwner(req, final, reviews)
+      if (!confirmed) return receipt('DECLINED_BY_OWNER', this.d.confirmOwner ? 'You did not confirm this operation (or nobody was there to confirm it): it did not run.' : 'This operation needs your own confirmation and there is no way to ask for it here: it did not run.', { precheck, reviews, finalPolicy: final })
+    }
     const broker = this.active?.row.id === session?.id ? this.active?.broker : null
     if (session === null || broker == null || !broker.alive) return receipt('ABORTED', 'The privilege session ended before the operation could run.', { precheck, reviews, finalPolicy: final })
     this.touchIdle(session)
+    // 0.9.1 (review F6): on record before it starts, so that a NEXUS stopped while it runs still leaves its trace.
+    receipt('EXECUTING', 'Started with administrator rights.', { precheck, reviews, finalPolicy: final })
     const result = await broker.exec({
       opId: req.id,
       capability: req.capability,
@@ -352,8 +373,11 @@ export class PrivilegeService {
       observed = ['The verification after the operation could not be completed.']
     }
     const outcome: PrivilegedOutcome = result.timedOut ? 'TIMEOUT' : result.exitCode === 0 ? 'EXECUTED' : 'FAILED'
+    // 0.9.1 (review F12): what the request gave as secret (its secret arguments, its environment's values) is removed
+    // from the output by value, before the patterns: an installer may print a key it was given, with no label.
+    const secrets = [...req.secretArgs.map((i) => req.args[i] ?? ''), ...Object.values(req.env)].filter((v) => v.length >= 6).sort((a, b) => b.length - a.length)
     const cut = (s: string, truncated: boolean): string => {
-      const clean = redactText(s)
+      const clean = redactText(secrets.reduce((text, secret) => text.split(secret).join('[secret]'), s))
       return clean.length > OUTPUT_KEPT || truncated ? `${clean.slice(0, OUTPUT_KEPT)}\n[cut]` : clean
     }
     const r = receipt(outcome, outcome === 'EXECUTED' ? 'The program ran and exited with 0.' : outcome === 'TIMEOUT' ? `The program did not finish within ${Math.round(req.timeoutMs / 1000)} s and was ended.` : `The program exited with ${result.exitCode}.`, {
@@ -369,6 +393,33 @@ export class PrivilegeService {
     })
     if (session.scope === 'SINGLE_OPERATION') await this.end('its single operation ran', session.id)
     return r
+  }
+
+  /** The owner's confirmation of one operation: what runs, why, what the reviews said. No model's words decide it. */
+  private async askOwner(req: PrivilegedOperationRequest, final: PrivilegedPolicyDecision, reviews: readonly PrivilegedOperationReview[]): Promise<boolean> {
+    if (this.d.confirmOwner === undefined) return false
+    const detail = [
+      `Command: ${[req.executable, ...redactArgs(req.args, req.secretArgs)].join(' ')}`,
+      `Why your confirmation is asked: ${(final.ownerWhy ?? []).join('; ')}.`,
+      `Requested by: ${req.role.toLowerCase()}${req.taskTitle ? `, task "${req.taskTitle}"` : ''}${req.missionTitle ? `, mission "${req.missionTitle}"` : ''}.`,
+      `Its stated goal (the agent's words): ${redactText(req.goal)}`,
+      `Why administrator rights (the agent's words): ${redactText(req.whyElevation)}`,
+      ...reviews.map((r) => `${r.reviewer === 'DIRECTOR_COUNCIL' ? 'Council' : 'Technical Director'}: ${r.failed ? 'no valid review' : `${r.verdict} (risk ${r.risk})`}. ${r.reason}`),
+      'It runs with administrator rights. If you did not expect it, choose Do not run.',
+    ].join('\n\n')
+    // Not answered in time (an Overnight run, the owner away) is a no: the operations behind it wait in the same queue.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<boolean>((done) => {
+      timer = setTimeout(() => done(false), OWNER_ANSWER_MS)
+      timer.unref?.()
+    })
+    try {
+      return await Promise.race([this.d.confirmOwner({ title: 'NEXUS: run as administrator?', message: `An agent asks to run ${win32.basename(req.executable)} with administrator rights.`, detail: detail.slice(0, 6000) }), late])
+    } catch {
+      return false
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   private changed(): void {

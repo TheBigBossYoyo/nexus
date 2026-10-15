@@ -898,6 +898,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     reviewers: (projectId, operationId) => advisoryRouting.service.providers(projectId ?? 'nexus', operationId, 'DIRECTOR'),
     securityEvent: (e) => autonomy.record({ projectId: e.projectId, runId: e.runId, taskId: e.taskId, agentId: e.agentId, severity: e.severity, action: e.action, resource: 'privilege session', reason: e.reason.slice(0, 600) }),
     onChange: (status) => push({ kind: 'privilege', status }),
+    // 0.9.1 (review F3): natively, as Overnight's authorization: no page script can answer it; nobody there is a no.
+    confirmOwner: (o) => confirm(o.title, o.message, o.detail, 'Run as administrator').catch(() => false),
     log: logger,
   })
   bus.subscribe((event) => {
@@ -1764,7 +1766,13 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     autonomy,
     confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
     presentation: { metrics: (runId) => presentationHost.service.metrics(runId) },
-    privilege: { service: () => privilegeHost.service, unavailableReason: privilegeHost.unavailableReason, projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null },
+    privilege: {
+      service: () => privilegeHost.service,
+      unavailableReason: privilegeHost.unavailableReason,
+      projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null,
+      // 0.9.1 (review F5): as Overnight's authorization, natively; nobody there is a no.
+      confirm: (message, detail) => confirm('NEXUS administrator session', message, detail, 'Prepare').catch(() => false),
+    },
     isolation: {
       status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
       setup: async () => {

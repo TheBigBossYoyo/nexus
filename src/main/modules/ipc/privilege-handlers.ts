@@ -1,13 +1,15 @@
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { NexusError } from '@shared/result'
+import { DEFAULT_SESSION_CAPABILITIES } from '@shared/privilege'
 import type { PrivilegeService } from '../privilege/service'
 import { buildPrivilegedActivityReport } from '../privilege/report'
 
 /**
- * 0.9.1: privilege sessions from the window. Only the window reaches these channels: no agent session, no message
- * of the Director Line and no call can prepare a session (a remote command never creates administrator authority).
- * Preparing one needs no NEXUS dialog of its own: the UAC prompt it raises is Windows' own consent, on the secure
- * desktop, which nothing in NEXUS can answer.
+ * 0.9.1: privilege sessions from the window. No agent tool, no message of the Director Line and no call can prepare a
+ * session without the owner (a remote command never creates administrator authority). Review F5: any client holding
+ * the runtime's token reaches these channels, and a UAC prompt at a moment someone else chose is easy to accept: a
+ * session is prepared only after NEXUS's own confirmation (natively, as Overnight's authorization), then the UAC
+ * prompt. An Overnight run that prepares its session was confirmed by its own authorization.
  */
 
 export interface PrivilegeHandlerContext {
@@ -15,6 +17,8 @@ export interface PrivilegeHandlerContext {
   unavailableReason: string | null
   /** The project a run belongs to, or null. */
   projectOfRun: (runId: string) => string | null
+  /** The owner's confirmation, natively; no answer is a no. Absent: no session is prepared. */
+  confirm?: (message: string, detail: string) => Promise<boolean>
 }
 
 type PrivilegeHandlers = { [C in Extract<IpcChannel, `privilege.${string}`>]: (input: IpcInput<C>) => IpcOutputs[C] | Promise<IpcOutputs[C]> }
@@ -31,6 +35,14 @@ export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): Privilege
       const runId = input.runId ?? null
       const projectId = runId !== null ? ctx.projectOfRun(runId) : null
       if (runId !== null && projectId === null) throw new NexusError('not_found', 'No such run.')
+      const capabilities = input.capabilities ?? DEFAULT_SESSION_CAPABILITIES
+      const asked = service.status() === null && ctx.confirm !== undefined
+        ? await ctx.confirm(
+            'Prepare an administrator session for NEXUS?',
+            [`Scope: ${input.scope.toLowerCase().replace(/_/g, ' ')}${runId ? ` (mission ${runId})` : ''}${input.hours !== undefined ? `, at most ${input.hours} h` : ''}.`, `What it may be used for: ${capabilities.join(', ')}.`, 'Windows will then ask for administrator rights once (UAC). Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again. If you did not ask for this, choose Cancel.'].join('\n\n'),
+          ).catch(() => false)
+        : service.status() !== null
+      if (!asked) return { ok: false, reason: ctx.confirm === undefined ? 'NEXUS cannot ask for your confirmation here, so no administrator session is prepared.' : 'Not confirmed: no administrator session was prepared.', status: service.status() }
       const result = await service.prepare({ scope: input.scope, runId, projectId, ...(input.capabilities ? { capabilities: input.capabilities } : {}), ...(input.hours !== undefined ? { hours: input.hours } : {}) })
       return { ok: result.ok, reason: result.ok ? null : result.reason, status: result.status }
     },

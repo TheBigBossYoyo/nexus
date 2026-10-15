@@ -46,8 +46,8 @@ function reviewer(verdict: 'APPROVE' | 'REJECT' = 'APPROVE', calls: { n: number 
   }
 }
 
-function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean } = {}) {
-  const store = new MemoryPrivilegeStore()
+function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore } = {}) {
+  const store = opts.store ?? new MemoryPrivilegeStore()
   const broker = opts.broker ?? new FakeBroker((req, n) => (req.args[5]?.endsWith('fixture-install.ps1') && n === 1 ? ok('', 3) : ok()))
   let uac = 0
   const service: PrivilegeService = new PrivilegeService({
@@ -69,6 +69,7 @@ function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strate
       return { ok: true, client: broker }
     },
     verify: async (req) => req.expected.files.map((f) => `${f}: present.`),
+    ...(opts.owner ? { confirmOwner: opts.owner } : {}),
   })
   return { service, store, broker, uac: () => uac }
 }
@@ -85,7 +86,7 @@ const fixture = (name: string, extra: string[] = [], over: Partial<PrivilegedOpe
     executable: PS,
     args: [...HEAD, join(fixtureDir, name), ...extra],
     inputs: [{ arg: 5, sha256: sha(join(fixtureDir, name)) }],
-    expected: { files: ['C:\\Program Files\\NexusPrivilegeFixture\\bin\\version.txt'], registry: [], services: [], network: 'none' },
+    expected: { files: ['C:\\Program Files\\NexusAcceptanceFixture\\bin\\version.txt'], registry: [], services: [], network: 'none' },
     rollback: 'fixture-remove.ps1',
     ...over,
   })
@@ -109,7 +110,7 @@ describe('privilege sessions', () => {
     expect(broker.ran).toHaveLength(3)
     expect(store.receiptRows.map((r) => r.outcome)).toEqual(['FAILED', 'EXECUTED', 'EXECUTED'])
     expect(retry.followsOperationId).toBe(repair.id)
-    expect(retry.observed).toEqual(['C:\\Program Files\\NexusPrivilegeFixture\\bin\\version.txt: present.'])
+    expect(retry.observed).toEqual(['C:\\Program Files\\NexusAcceptanceFixture\\bin\\version.txt: present.'])
     expect(service.status()).toMatchObject({ state: 'ACTIVE', uacPrompts: 1, counts: { EXECUTED: 2, FAILED: 1 } })
 
     // Asking again for the same scope gives the same session, with no prompt.
@@ -218,7 +219,7 @@ describe('privilege sessions', () => {
 
   it('asks the Council only when the template says so, and not for a rejected operation', async () => {
     const strategicCalls = { n: 0 }
-    const { service, broker } = setup({ broker: new FakeBroker(() => ok()), strategic: reviewer('APPROVE', strategicCalls) })
+    const { service, broker } = setup({ broker: new FakeBroker(() => ok()), strategic: reviewer('APPROVE', strategicCalls), owner: async () => true })
     await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
     await service.submit(fixture('fixture-repair.ps1'), who())
     expect(strategicCalls.n).toBe(0)
@@ -229,6 +230,49 @@ describe('privilege sessions', () => {
     expect(strategicCalls.n).toBe(1)
     expect(install.reviews.map((r) => r.reviewer)).toEqual(['CLAUDE_TECHNICAL_DIRECTOR', 'DIRECTOR_COUNCIL'])
     expect(broker.ran).toHaveLength(2)
+  })
+
+  // 0.9.1 (review F3): a package the run may have fetched runs only once the owner confirmed it, whatever the reviews.
+  it('runs a file NEXUS does not ship only when the owner confirms this very operation', async () => {
+    const msi = PrivilegedOperationProposalSchema.parse({ capability: 'KNOWN_DEPENDENCY_MACHINE_INSTALL', goal: 'Install the Visual C++ runtime', whyRequired: 'The native module loads it.', whyElevation: 'Machine-wide runtime.', whyNoUnelevatedAlternative: 'There is no per-user package.', executable: 'C:\\Windows\\System32\\msiexec.exe', args: ['/i', 'C:\\work\\racedeck\\vc.msi', '/qn'], inputs: [{ arg: 1, sha256: 'c'.repeat(64) }] })
+    const asked: string[] = []
+    const no = setup({ broker: new FakeBroker(() => ok()), strategic: reviewer('APPROVE'), owner: async (o) => (asked.push(o.detail), false) })
+    await no.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const declined = await no.service.submit(msi, who())
+    expect(declined.outcome).toBe('DECLINED_BY_OWNER')
+    expect(no.broker.ran).toHaveLength(0)
+    expect(asked[0]).toContain('msiexec.exe /i C:\\work\\racedeck\\vc.msi /qn')
+    expect(asked[0]).toContain('it installs the package vc.msi')
+    // With no way to ask, nothing runs.
+    const none = setup({ broker: new FakeBroker(() => ok()), strategic: reviewer('APPROVE') })
+    await none.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    expect((await none.service.submit(msi, who())).outcome).toBe('DECLINED_BY_OWNER')
+    expect(none.broker.ran).toHaveLength(0)
+    // A script NEXUS ships does not ask.
+    await no.service.submit(fixture('fixture-repair.ps1'), who())
+    expect(asked).toHaveLength(1)
+    expect(no.broker.ran).toHaveLength(1)
+  })
+
+  // 0.9.1 (review F6, F12): on record before it starts; secrets given to it removed from what it printed.
+  it('records an operation before it runs, closes one a stopped NEXUS left running, and removes the secrets it was given from its output', async () => {
+    const store = new MemoryPrivilegeStore()
+    let during: string[] = []
+    const broker = new FakeBroker(() => {
+      during = store.receiptRows.map((r) => r.outcome)
+      return ok('licence accepted: K7Q2-PLM9-ZZ41 for user hunter2go')
+    })
+    const { service } = setup({ broker, store })
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const r = await service.submit(fixture('fixture-repair.ps1', [], { env: { LICENCE_KEY: 'K7Q2-PLM9-ZZ41' }, args: [...HEAD, join(fixtureDir, 'fixture-repair.ps1'), '-Version', 'hunter2go'], secretArgs: [7] }), who())
+    expect(during).toEqual(['EXECUTING'])
+    expect(r.outcome).toBe('EXECUTED')
+    expect(store.receiptRows).toHaveLength(1)
+    expect(r.stdout).toBe('licence accepted: [secret] for user [secret]')
+    // A NEXUS that stopped while an operation ran: at the next start it is closed, not left as running.
+    store.record({ ...r, id: 'op-crashed', outcome: 'EXECUTING' })
+    setup({ store }).service.recover()
+    expect(store.receiptRows.find((x) => x.id === 'op-crashed')).toMatchObject({ outcome: 'ABORTED', outcomeReason: expect.stringMatching(/not known/) })
   })
 
   it('writes the privileged activity report with every field the owner asked for (B12, B13)', async () => {

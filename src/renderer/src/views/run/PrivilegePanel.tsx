@@ -18,6 +18,8 @@ const OUTCOME_TONE: Record<PrivilegedOutcome, 'success' | 'danger' | 'warning' |
   EXECUTED: 'success',
   FAILED: 'danger',
   TIMEOUT: 'danger',
+  DECLINED_BY_OWNER: 'neutral',
+  EXECUTING: 'warning',
   ABORTED: 'warning',
   REJECTED_BY_POLICY: 'warning',
   REJECTED_BY_DIRECTOR: 'warning',

@@ -152,10 +152,20 @@ export interface PrivilegedPolicyDecision {
   /** Whether the full Director Council must approve as well as the Technical Director. */
   councilRequired: boolean
   councilWhy: string[]
+  /**
+   * 0.9.1 (review F3): whether the owner must confirm this very operation, natively, after the reviews: it runs a
+   * file that is neither a Windows program nor a script NEXUS ships (an agent may have written or fetched it), and
+   * no model may be the last word on that. Absent on decisions recorded before.
+   */
+  ownerRequired?: boolean
+  ownerWhy?: string[]
 }
 
-/** What became of an attempt. Every attempt has one, refused ones included. */
-export const PRIVILEGED_OUTCOMES = ['EXECUTED', 'FAILED', 'REJECTED_BY_POLICY', 'REJECTED_BY_DIRECTOR', 'ABORTED', 'TIMEOUT'] as const
+/**
+ * What became of an attempt. Every attempt has one, refused ones included. EXECUTING is written before the program
+ * starts and replaced by the outcome (review F6); one left behind by a stopped NEXUS is closed as ABORTED.
+ */
+export const PRIVILEGED_OUTCOMES = ['EXECUTED', 'FAILED', 'REJECTED_BY_POLICY', 'REJECTED_BY_DIRECTOR', 'DECLINED_BY_OWNER', 'ABORTED', 'TIMEOUT', 'EXECUTING'] as const
 export type PrivilegedOutcome = (typeof PRIVILEGED_OUTCOMES)[number]
 
 /** The record of one privileged attempt: what the morning report and the Activity screen show (B12). */
