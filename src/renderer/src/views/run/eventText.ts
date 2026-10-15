@@ -212,6 +212,8 @@ export function eventTone(event: RunEvent): Tone {
       return 'waiting'
     case 'checks.completed':
       return (event.payload as EventPayloads['checks.completed']).passed ? 'success' : 'danger'
+    case 'checks.flaky':
+      return 'warning'
     case 'review.completed':
       return (event.payload as EventPayloads['review.completed']).verdict === 'approved' ? 'success' : 'warning'
     case 'agent.tool.completed':

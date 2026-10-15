@@ -5,6 +5,7 @@ import { buildGraphModel, layoutGraph, isEdgeSatisfied } from '../../../src/rend
 import {
   describeEvent,
   eventCategory,
+  eventTone,
   mergeEvents,
   pauseDetailFromEvents,
   toolActivityFromEvents,
@@ -110,6 +111,12 @@ describe('event rendering', () => {
     expect(eventCategory('message.sent')).toBe('agent')
     expect(eventCategory('plan.approved')).toBe('run')
     expect(eventCategory('git.merged')).toBe('git')
+  })
+
+  it('shows a flaky check with the warning tone', () => {
+    const e = event(1, 'checks.flaky', { files: ['a.test.ts', 'b.test.ts'] })
+    expect(describeEvent(e)).toBe('Failed once, passed when run again: a.test.ts, b.test.ts')
+    expect(eventTone(e)).toBe('warning')
   })
 
   it('pairs tool starts with completions and keeps denials', () => {
