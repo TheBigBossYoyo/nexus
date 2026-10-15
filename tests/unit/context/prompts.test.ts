@@ -43,6 +43,26 @@ describe('rolePrompt', () => {
     }
   })
 
+  it('describes every nexus tool to the roles that implement or design', () => {
+    for (const role of ['worker', 'debugger', 'architect'] as const) {
+      const p = rolePrompt(role, 'implement')
+      expect(p, role).toContain('mcp__nexus__package_config_inspect')
+      expect(p, role).toContain('mcp__nexus__privileged_request')
+    }
+  })
+
+  it('describes only send_message and report_blocker to the read-only roles', () => {
+    for (const role of ['verifier', 'reviewer', 'security_reviewer', 'researcher', 'planner'] as const) {
+      const p = rolePrompt(role, 'verify')
+      expect(p, role).toContain('mcp__nexus__report_blocker')
+      expect(p, role).toContain('mcp__nexus__send_message')
+      expect(p, role).not.toContain('mcp__nexus__record_decision')
+      expect(p, role).not.toContain('mcp__nexus__propose_memory')
+      expect(p, role).not.toContain('mcp__nexus__package_config_inspect')
+      expect(p, role).not.toContain('mcp__nexus__privileged_request')
+    }
+  })
+
   it('produces a distinct prompt for each role and works for every purpose', () => {
     const texts = new Set(AGENT_ROLES.map((r) => rolePrompt(r, 'implement')))
     expect(texts.size).toBe(AGENT_ROLES.length)

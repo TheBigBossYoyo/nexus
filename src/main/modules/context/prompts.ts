@@ -15,10 +15,11 @@ const PRINCIPLES = `Engineering principles (apply always):
 - When blocked, call mcp__nexus__report_blocker with the concrete blocker and evidence instead of pretending the work is complete.
 - Do not spawn subagents or delegate through the Task/Agent tool; NEXUS owns orchestration.`
 
-const NEXUS_TOOLS = `NEXUS tools (MCP server "nexus"):
+const NEXUS_TOOLS_BASIC = `NEXUS tools (MCP server "nexus"):
 - mcp__nexus__send_message: message another task or role (type: question, information, blocker, interface_change, handoff, decision_request, acknowledgement; subject at most 200 characters).
-- mcp__nexus__report_blocker: report a concrete blocker with evidence.
-- mcp__nexus__record_decision: record a notable design decision with rationale.
+- mcp__nexus__report_blocker: report a concrete blocker with evidence.`
+
+const NEXUS_TOOLS_EXTRA = `- mcp__nexus__record_decision: record a notable design decision with rationale.
 - mcp__nexus__propose_memory: propose a durable, evidence-backed project fact for project memory (user-approved before use).
 - mcp__nexus__propose_graph_change: propose a change to the task graph (only for the roles that have a "Changing the plan" section).
 - mcp__nexus__package_config_inspect: the package-manager configuration of the worktree as facts (ignore-scripts, registries, build-script allowlists, mirrors, lockfile, what applies to commands run in the task), with credentials left out. Use it first to diagnose dependency installs and install scripts. Do not cat, type or Get-Content .npmrc or other credential-bearing configuration: the raw file is a boundary that is put to the user.
@@ -117,6 +118,24 @@ function roleText(role: AgentRole): string {
   }
 }
 
+/** Read-only roles are described only the NEXUS tools they use. */
+function nexusToolsText(role: AgentRole): string {
+  switch (role) {
+    case 'worker':
+    case 'debugger':
+    case 'architect':
+      return `${NEXUS_TOOLS_BASIC}\n${NEXUS_TOOLS_EXTRA}`
+    case 'reviewer':
+    case 'verifier':
+    case 'security_reviewer':
+    case 'researcher':
+    case 'planner':
+      return NEXUS_TOOLS_BASIC
+    default:
+      return assertNever(role, 'agent role')
+  }
+}
+
 function purposeText(purpose: AgentPurpose): string | null {
   switch (purpose) {
     case 'synthesis':
@@ -151,7 +170,7 @@ export function canProposeGraphChange(role: AgentRole, purpose: AgentPurpose): b
 
 /** Role policy appended to the runtime's base system prompt. */
 export function rolePrompt(role: AgentRole, purpose: AgentPurpose): string {
-  return [roleText(role), purposeText(purpose), canProposeGraphChange(role, purpose) ? GRAPH_CHANGES : null, PRINCIPLES, NEXUS_TOOLS, ENVIRONMENT]
+  return [roleText(role), purposeText(purpose), canProposeGraphChange(role, purpose) ? GRAPH_CHANGES : null, PRINCIPLES, nexusToolsText(role), ENVIRONMENT]
     .filter((s): s is string => s !== null)
     .join('\n\n')
 }
