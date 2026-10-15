@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { canonicalizePath, isPathInside, isSecretPath, isTopLevelGit, pathNamesGit } from './paths'
 import { EXEC_API, hasPowerApiText, NEXUS_DATA_TEXT, POWER_COMMAND_NAMES, POWER_WORDS } from './power-patterns'
-import { neutralizeCommitHeredocs, neutralizeInertHeredocs, separateProgramHeredocs, tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, neutralizeInertHeredocs, neutralizePowerShellCommitHereStrings, separateProgramHeredocs, tokenize } from './shell-tokenizer'
 import type { Segment, Shell } from './shell-tokenizer'
 
 export type CommandLevel = 'safe' | 'write' | 'needs_approval' | 'forbidden'
@@ -170,7 +170,7 @@ const DOTNET_NETWORK = /net\.webclient|downloadstring|downloadfile|start-bitstra
 
 function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number): void {
   // A quoted heredoc used only as a git commit message is inert prose, not shell (bash only).
-  const text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(rawText)) : rawText
+  const text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(rawText)) : neutralizePowerShellCommitHereStrings(rawText)
   if (depth > MAX_NESTING) {
     a.ask('high', 'shell commands are nested too deeply to inspect')
     return

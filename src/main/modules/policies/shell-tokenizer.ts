@@ -471,3 +471,28 @@ export function separateProgramHeredocs(text: string): { text: string; programs:
   }
   return { text: out, programs }
 }
+
+const PS_COMMIT_HERESTRING = /(?:^|[\n;|])[ \t]*git(?:[ \t]+-C[ \t]+(?:"[^"\n$`]*"|'[^'\n]*'|[^\s"'$`;&|()<>]+))*[ \t]+commit(?:[ \t]+--?[A-Za-z][A-Za-z-]*)*[ \t]+(?:-[A-Za-z]*m|--message)[ \t]+@'[ \t]*\r?\n/g
+
+/**
+ * 0.9.1: PowerShell's form of the commit message heredoc. `git commit -m @'` ... `'@` passes a single-quoted
+ * here-string, which PowerShell never expands: its text is the message, not commands (an agent's message that
+ * quoted `git branch --list` and its own <noreply@...> address was put to the owner as a branch write and a
+ * redirection). Only the single-quoted form, as the message of git commit, with the terminator `'@` at the start
+ * of a line as PowerShell requires; the double-quoted form expands $(...) and stays as written.
+ */
+export function neutralizePowerShellCommitHereStrings(text: string): string {
+  if (!text.includes("@'")) return text
+  let out = text
+  for (let guard = 0; guard < 16; guard++) {
+    PS_COMMIT_HERESTRING.lastIndex = 0
+    const m = PS_COMMIT_HERESTRING.exec(out)
+    if (m === null) break
+    const bodyStart = m.index + m[0].length
+    const close = /^'@/m.exec(out.slice(bodyStart))
+    if (close === null) break
+    const opener = m[0].replace(/@'[ \t]*\r?\n$/, '')
+    out = `${out.slice(0, m.index)}${opener}MESSAGE${out.slice(bodyStart + close.index + 2)}`
+  }
+  return out
+}
