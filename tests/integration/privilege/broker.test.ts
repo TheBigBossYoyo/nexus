@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, createHmac } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { ElevatedBrokerClient } from '@main/modules/privilege/broker-client'
@@ -184,10 +184,10 @@ describe.skipIf(!available)('privilege broker (real helper, unelevated test mode
 })
 
 describe.skipIf(!available)('privilege broker protocol (raw lines)', () => {
-  function raw(session: string) {
-    const staging = join(root, `raw-${Date.now()}`, 'staging')
+  function raw(session: string, opts: { capabilities?: string; expiresInSeconds?: number } = {}) {
+    const staging = join(root, `raw-${session}-${Date.now()}`, 'staging')
     mkdirSync(join(staging, '..'), { recursive: true })
-    const p = spawn(helper, ['session', '--runtime-pid', String(process.pid), '--session', session, '--expires-unix', String(Math.floor(Date.now() / 1000) + 120), '--capabilities', 'SIGNED_DRIVER_QUERY', '--unelevated-test', '--staging', staging], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true })
+    const p = spawn(helper, ['session', '--runtime-pid', String(process.pid), '--session', session, '--expires-unix', String(Math.floor(Date.now() / 1000) + (opts.expiresInSeconds ?? 120)), '--capabilities', opts.capabilities ?? 'SIGNED_DRIVER_QUERY', '--unelevated-test', '--staging', staging], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true })
     children.push(p)
     const lines: string[] = []
     let buf = ''
@@ -211,8 +211,87 @@ describe.skipIf(!available)('privilege broker protocol (raw lines)', () => {
       await until(() => lines.filter((l) => /^[1-9]/.test(l)).length >= n)
       return JSON.parse((lines.filter((l) => /^[1-9]/.test(l))[n - 1] as string).split('\t')[2] as string) as Record<string, unknown>
     }
-    return { p, key, send, answer }
+    const hello = async (): Promise<Record<string, unknown>> => {
+      await until(() => lines.some((l) => l.startsWith('0\t')))
+      return JSON.parse((lines.find((l) => l.startsWith('0\t')) as string).split('\t')[2] as string) as Record<string, unknown>
+    }
+    return { p, key, send, answer, hello, staging }
   }
+
+  const ps = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  const psHead = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File']
+  /** A harmless script in a folder with NEXUS's folder name (the broker's test mode takes the folder name, an install takes the install folder). */
+  function fixtureScript(folder: string, name: string, body: string): { path: string; sha: string } {
+    const dir = join(root, `scripts-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, folder)
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, name)
+    writeFileSync(path, body, 'ascii')
+    return { path, sha: createHash('sha256').update(readFileSync(path)).digest('hex') }
+  }
+  const resultScript = "param([string]$Version = '1', [string]$ResultFile = '')\nSet-Content -LiteralPath $ResultFile -Value 'hello-result' -Encoding ASCII\nWrite-Output (Get-Location).Path\nWrite-Output $env:PSModulePath\nexit 0\n"
+
+  it('writes a result file inside its staging folder and returns the text; the requested path is never written; the working folder is ignored (M1, M2)', async () => {
+    const s = raw('raw-result', { capabilities: 'NEXUS_ACCEPTANCE_FIXTURE' })
+    const k = await s.key()
+    const script = fixtureScript('privilege-fixture', 'fixture-install.ps1', resultScript)
+    const asked = join(root, `asked-${Date.now()}`, 'result.json')
+    mkdirSync(join(asked, '..'), { recursive: true })
+    s.send(k, 1, { op: 'exec', opId: 'r-1', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: ps, args: [...psHead, script.path, '-ResultFile', asked], cwd: 'Z:\\does\\not\\exist', env: {}, timeoutMs: 60_000, inputs: [{ arg: 5, sha256: script.sha }] })
+    const r = await s.answer(1)
+    expect(r).toMatchObject({ e: 'result', exitCode: 0, timedOut: false })
+    expect(r.files).toEqual([{ arg: 7, name: 'result.json', text: 'hello-result\r\n' }])
+    expect(existsSync(asked)).toBe(false)
+    // The working folder is the operation's folder inside the staging folder, whatever the request said.
+    const stdout = String(r.stdout)
+    expect(stdout.toLowerCase()).toContain(join(s.staging, 'r-1').toLowerCase())
+    // The module path is the system's folders only.
+    expect(stdout).toMatch(/Windows\\system32\\WindowsPowerShell\\v1\.0\\Modules;.*WindowsPowerShell\\Modules/i)
+    expect(stdout.split(/\r?\n/).filter((l) => /Modules/.test(l))).toHaveLength(1)
+    // The staging folder goes with the session.
+    s.send(k, 2, { op: 'end' })
+    expect(await until(() => !existsSync(s.staging))).toBe(true)
+  })
+
+  it('refuses a NEXUS script that is not in NEXUS\'s own folder, even with its true hash (H1)', async () => {
+    const s = raw('raw-home', { capabilities: 'NEXUS_SANDBOX_REPAIR,NEXUS_ACCEPTANCE_FIXTURE' })
+    const k = await s.key()
+    const elsewhere = fixtureScript('somewhere-else', 'setup-sandbox.ps1', 'exit 0\n')
+    s.send(k, 1, { op: 'exec', opId: 'h-1', capability: 'NEXUS_SANDBOX_REPAIR', executable: ps, args: [...psHead, elsewhere.path, '-MainUserSid', 'S-1-5-21-1', '-PasswordFile', 'C:\\x\\p.txt', '-ResultFile', 'C:\\x\\r.json'], env: {}, timeoutMs: 20_000, inputs: [{ arg: 5, sha256: elsewhere.sha }] })
+    expect(await s.answer(1)).toMatchObject({ e: 'refused', reason: expect.stringMatching(/NEXUS's own/) })
+    const wrongFolder = fixtureScript('sandbox-setup', 'fixture-install.ps1', 'exit 0\n')
+    s.send(k, 2, { op: 'exec', opId: 'h-2', capability: 'NEXUS_ACCEPTANCE_FIXTURE', executable: ps, args: [...psHead, wrongFolder.path], env: {}, timeoutMs: 20_000, inputs: [{ arg: 5, sha256: wrongFolder.sha }] })
+    expect(await s.answer(2)).toMatchObject({ e: 'refused', reason: expect.stringMatching(/privilege-fixture/) })
+  })
+
+  it('never takes .NET loader variables or the module path from a request (M3)', async () => {
+    const { client } = await start('env')
+    const ask = (opId: string, env: Record<string, string>) => client.exec({ opId, capability: 'SIGNED_DRIVER_QUERY', executable: driverquery, args: ['/fo', 'csv', '/nh'], env, timeoutMs: 20_000, inputs: [] } as never)
+    let n = 0
+    for (const name of ['COR_PROFILER', 'cor_anything', 'COMPlus_ReadyToRun', 'complus_x', 'DOTNET_gcServer', 'dotnet_ROOT', 'CORECLR_ENABLE_PROFILING', 'coreclr_other', 'PSModulePath', 'psmodulepath'])
+      expect(await ask(`e-${n++}`, { [name]: '1' }), name).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/may not be set/) })
+    expect(await ask('e-ok', { MY_SETTING: '1' })).toMatchObject({ kind: 'result', exitCode: 0 })
+  })
+
+  it('the relay and the broker deny the user memory access, handle duplication, threads and a rewrite of their access list (H1)', async () => {
+    const s = raw('raw-dacl')
+    const hello = await s.hello()
+    const probe = (pid: number) => spawnSync(helper, ['probe-process', String(pid)], { encoding: 'utf8', windowsHide: true, timeout: 15_000 }).stdout.trim()
+    for (const pid of [s.p.pid as number, hello.pid as number]) {
+      expect(probe(pid)).toBe('terminate=yes create-thread=no vm-operation=no vm-read=no vm-write=no dup-handle=no write-dac=no query-limited=yes synchronize=yes')
+    }
+    // The relay still works for the runtime: it reads the key, sends requests and gets answers.
+    const k = await s.key()
+    s.send(k, 1, { op: 'ping' })
+    expect(await s.answer(1)).toMatchObject({ e: 'pong' })
+  })
+
+  it('caps the expiry at 14 hours (L4)', async () => {
+    const s = raw('raw-cap', { expiresInSeconds: 30 * 24 * 3600 })
+    const hello = await s.hello()
+    const limit = Math.floor(Date.now() / 1000) + 14 * 3600
+    expect(hello.expiresUnix as number).toBeLessThanOrEqual(limit + 5)
+    expect(hello.expiresUnix as number).toBeGreaterThan(limit - 120)
+  })
 
   it('refuses a replayed line, a line signed for another session, and ends after three such lines', async () => {
     const s = raw('raw-replay')

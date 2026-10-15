@@ -57,7 +57,16 @@
 //   - a staged file stays open (no write, no delete by others) from the hash check until its program has ended;
 //   - each capability is a template here as well (programs, verbs, switches), stricter than or equal to the runtime's;
 //   - elevated, outside the tests, it serves only from a folder that non-administrators cannot modify;
-//   - what installer or service work may outlive the job is reported in the result ("leftover"), never stopped here.
+//   - what installer or service work may outlive the job is reported in the result ("leftover"), never stopped here;
+//   - (second review) the NEXUS_* scripts are NEXUS's own files in <install>\resources\sandbox-setup or \privilege-fixture
+//     (the folders next to this program's own: <install>\resources\bin), hashed there; a result or log file the program
+//     is asked to write is a file in the operation's staging folder instead, and its text (64 KB at most) comes back in
+//     the result as "files":[{"arg":<index>,"name":"<the name asked for>","text":".."}]; the requested working folder
+//     is ignored (the operation's staging folder is the working folder); the child's PSModulePath is the system's
+//     module folders; COR_, COMPlus_, DOTNET_ and CORECLR_ variables and PSModulePath are never taken from a request;
+//     programs outside System32 and SysWOW64 (Program Files uninstallers too) are staged and hashed; the relay's own
+//     process denies its user memory access, handle duplication, threads and a rewrite of its access list; the expiry
+//     is at most 14 hours away and the runtime process must be the one (id and start time) the relay saw.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -122,6 +131,7 @@ static class N
     [DllImport(K, SetLastError = true)] public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr proc);
     [DllImport(K, SetLastError = true)] public static extern bool TerminateJobObject(IntPtr job, uint code);
     [DllImport(K)] public static extern IntPtr LocalFree(IntPtr p);
+    [DllImport(A, SetLastError = true)] public static extern bool SetKernelObjectSecurity(IntPtr h, uint info, IntPtr sd);
     [DllImport(A, SetLastError = true)] public static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr token);
     [DllImport(A, SetLastError = true)] public static extern bool GetTokenInformation(IntPtr t, int cls, IntPtr buf, int len, out int ret);
     [DllImport(A, SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr s);
@@ -138,6 +148,9 @@ static class N
 }
 
 class Refused : Exception { public Refused(string m) : base(m) { } }
+
+/// <summary>A piece of JSON the broker built itself (an array of objects), written as is by Json.Ev.</summary>
+sealed class RawJson { public readonly string Text; public RawJson(string text) { Text = text; } }
 
 static class Json
 {
@@ -291,6 +304,7 @@ static class Json
             object v = kv[i + 1];
             if (v == null) sb.Append("null");
             else if (v is bool) sb.Append((bool)v ? "true" : "false");
+            else if (v is RawJson) sb.Append(((RawJson)v).Text);
             else if (v is int || v is long || v is uint) sb.Append(Convert.ToInt64(v).ToString(CultureInfo.InvariantCulture));
             else if (v is string[])
             {
@@ -329,7 +343,47 @@ static class Program
     static readonly Regex EnvName = new Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$");
     static readonly Regex Hex64 = new Regex("^[0-9a-f]{64}$");
 
-    static string SelfPath() { return Assembly.GetExecutingAssembly().Location; }
+    public static string SelfPath() { return Assembly.GetExecutingAssembly().Location; }
+
+    const uint PROCESS_TERMINATE = 0x1, PROCESS_CREATE_THREAD = 0x2, PROCESS_VM_OPERATION = 0x8, PROCESS_VM_READ = 0x10, PROCESS_VM_WRITE = 0x20, PROCESS_DUP_HANDLE = 0x40, WRITE_DAC = 0x40000;
+
+    /// <summary>
+    /// The first thing the relay (and the broker) does: the access list of its own process object. The current user may
+    /// only wait for it, ask when it started and where it runs from, and end it: no reading or writing of its memory, no
+    /// duplicating of its handles (the pipe's), no thread inside it, no rewriting of this list or the owner. OWNER RIGHTS
+    /// has the same limited rights, so being the owner of the process object gives no more. SYSTEM and Administrators
+    /// keep full access. The handle of the process that started it (the runtime) is unaffected; it was made with full access.
+    /// </summary>
+    public static void RestrictOwnProcess()
+    {
+        string user = Broker.UserSid();
+        IntPtr sd; uint size;
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;0x1fffff;;;SY)(A;;0x1fffff;;;BA)(A;;0x101001;;;" + user + ")(A;;0x101001;;;OW)", 1, out sd, out size))
+            throw new FormatException("the process access list could not be made");
+        try
+        {
+            if (!N.SetKernelObjectSecurity(N.GetCurrentProcess(), 4, sd)) throw new FormatException("the process access list could not be set: " + Marshal.GetLastWin32Error());   // DACL_SECURITY_INFORMATION
+        }
+        finally { N.LocalFree(sd); }
+    }
+
+    /// <summary>Tests: which kinds of access to a process this user gets (it never uses what it opens).</summary>
+    static int ProbeProcess(string pidText)
+    {
+        uint pid;
+        if (!uint.TryParse(pidText, NumberStyles.None, CultureInfo.InvariantCulture, out pid)) { Console.Out.WriteLine("invalid"); return EXIT_USAGE; }
+        string[] names = { "terminate", "create-thread", "vm-operation", "vm-read", "vm-write", "dup-handle", "write-dac", "query-limited", "synchronize" };
+        uint[] rights = { PROCESS_TERMINATE, PROCESS_CREATE_THREAD, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE, PROCESS_DUP_HANDLE, WRITE_DAC, PROCESS_QUERY_LIMITED, SYNCHRONIZE };
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < names.Length; i++)
+        {
+            IntPtr h = N.OpenProcess(rights[i], false, pid);
+            sb.Append(names[i]).Append('=').Append(h != IntPtr.Zero ? "yes" : "no").Append(' ');
+            if (h != IntPtr.Zero) N.CloseHandle(h);
+        }
+        Console.Out.WriteLine(sb.ToString().Trim());
+        return 0;
+    }
 
     static int Main(string[] args)
     {
@@ -339,7 +393,14 @@ static class Program
         {
             if (args.Length == 1 && args[0] == "--version") { Console.Out.WriteLine("nexus-elevate 1"); return 0; }
             if (args.Length == 2 && args[0] == "probe") return Probe(args[1]);
-            if (args.Length >= 1 && args[0] == "session") return Relay(Options(args));
+            if (args.Length == 2 && args[0] == "probe-process") return ProbeProcess(args[1]);
+            if (args.Length >= 1 && args[0] == "session")
+            {
+                // Before anything else, so that no other process of this user can read the session out of the relay or take its handles.
+                try { RestrictOwnProcess(); }
+                catch (Exception e) { Say("failed", "reason", "the relay could not protect its own process: " + e.Message); return EXIT_UNREACHABLE; }
+                return Relay(Options(args));
+            }
             if (args.Length >= 1 && args[0] == "serve") return Broker.Serve(Options(args));
         }
         catch (FormatException e) { Err(e.Message); return EXIT_USAGE; }
@@ -417,8 +478,14 @@ static class Program
         using (RNGCryptoServiceProvider rng = new RNGCryptoServiceProvider()) rng.GetBytes(r);
         string pipe = "nexus-priv-" + BitConverter.ToString(r).Replace("-", "").ToLowerInvariant();
         IntPtr self = N.GetCurrentProcess();
+        // The runtime as it is now (id and start time): the broker checks that it is still this process, not a later one with the same id.
+        uint runtimeId = uint.Parse(runtimePid, CultureInfo.InvariantCulture);
+        IntPtr runtimeHandle = N.OpenProcess(PROCESS_QUERY_LIMITED, false, runtimeId);
+        long runtimeCreated = runtimeHandle == IntPtr.Zero ? -1 : Creation(runtimeHandle);
+        if (runtimeHandle != IntPtr.Zero) N.CloseHandle(runtimeHandle);
+        if (runtimeCreated <= 0) { Say("failed", "reason", "the runtime process could not be read"); return EXIT_UNVERIFIED; }
         string parameters = "serve --pipe " + pipe + " --client-pid " + N.GetProcessId(self) + " --client-created " + Creation(self)
-            + " --runtime-pid " + runtimePid + " --session " + session + " --expires-unix " + expires + " --capabilities " + capabilities
+            + " --runtime-pid " + runtimePid + " --runtime-created " + runtimeCreated + " --session " + session + " --expires-unix " + expires + " --capabilities " + capabilities
             + (test ? " --unelevated-test --staging " + QuoteArg(staging) : "");
 
         if (!test)
@@ -586,12 +653,18 @@ sealed class Watch
     public bool Msi;
     public string Service;
     public string Verb;
+    /// <summary>Indexes of the arguments that name a file the program is asked to write (a result, a log): the broker names a file of its own instead.</summary>
+    public readonly List<int> OutArgs = new List<int>();
 }
 
 /// <summary>
 /// The capability templates, hard-coded here: a minimal subset of src/main/modules/privilege/policy.ts (template()),
 /// equal or stricter. They know nothing of the run's worktrees or the role of the requester (the runtime decides those);
-/// they bound what a request can be if it reached the broker without passing the runtime's policy. A capability this does
+/// they bound what a request can be if it reached the broker WITHOUT passing the runtime's policy only in what they check:
+/// for the NEXUS_* capabilities that includes WHERE the script is (NEXUS's own install folders, see ScriptHome), so that a
+/// program holding the session's key cannot run a script of its own under a NEXUS script's name. For the other capabilities
+/// a script or installer is whatever the request names and hashes: the runtime's policy (a hash it pinned, the owner's
+/// confirmation) bounds those, not this file. A capability this does
 /// not know is refused. The same file names, verbs, switches and shapes as the runtime; stricter in: PowerShell is the
 /// system's only (never pwsh), a result or log file is a plain local path outside the Windows and Program Files folders,
 /// no extra spaces around a service name, a firewall or registry argument has a plain character set only.
@@ -624,10 +697,10 @@ static class Templates
         {
             case "NEXUS_SANDBOX_REPAIR":
             case "NEXUS_SCHEDULED_TASK_REPAIR":
-                Script(exe, args, inputs, new string[] { "setup-sandbox.ps1" }, new string[] { "MainUserSid", "PasswordFile", "ResultFile" }, new string[0], "ResultFile");
+                Script(exe, args, inputs, "sandbox-setup", new string[] { "setup-sandbox.ps1" }, new string[] { "MainUserSid", "PasswordFile", "ResultFile" }, new string[0], "ResultFile", w);
                 return w;
             case "NEXUS_CANONICALIZATION_REPAIR":
-                Script(exe, args, inputs, new string[] { "restore-canonicalization.ps1" }, new string[] { "ResultFile" }, new string[] { "Check" }, "ResultFile");
+                Script(exe, args, inputs, "sandbox-setup", new string[] { "restore-canonicalization.ps1" }, new string[] { "ResultFile" }, new string[] { "Check" }, "ResultFile", w);
                 return w;
             case "PROJECT_TOOLCHAIN_INSTALL":
             case "KNOWN_DEPENDENCY_MACHINE_INSTALL":
@@ -653,7 +726,7 @@ static class Templates
                 if (!(Broker.Under(exe, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)) || Broker.Under(exe, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)))
                     || !Regex.IsMatch(Path.GetFileName(exe), @"^(uninst|uninstall)[^\\]*\.exe$", RegexOptions.IgnoreCase))
                     throw No("An uninstall runs the application's own uninstaller under Program Files, or msiexec /x.");
-                InstallerArgs(args, 0);
+                InstallerArgs(args, 0, w);
                 return w;
             case "PROJECT_SERVICE_CONTROL":
                 {
@@ -685,7 +758,7 @@ static class Templates
                 }
             case "NEXUS_ACCEPTANCE_FIXTURE":
                 if (Is(exe, "reg.exe")) { Reg(args); return w; }
-                Script(exe, args, inputs, new string[] { "fixture-install.ps1", "fixture-repair.ps1", "fixture-remove.ps1" }, new string[] { "Version", "ResultFile" }, new string[0], "ResultFile");
+                Script(exe, args, inputs, "privilege-fixture", new string[] { "fixture-install.ps1", "fixture-repair.ps1", "fixture-remove.ps1" }, new string[] { "Version", "ResultFile" }, new string[0], "ResultFile", w);
                 return w;
             default:
                 throw No("The broker knows no template for the capability " + capability + ".");
@@ -698,13 +771,17 @@ static class Templates
         for (int i = 0; i < PsHead.Length; i++) if (!string.Equals(args[i], PsHead[i], StringComparison.OrdinalIgnoreCase)) throw No("PowerShell runs only as -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script>.");
     }
 
-    /// <summary>A script NEXUS ships: system PowerShell, the fixed head, a script of that name given as a staged input, its parameters.</summary>
-    static void Script(string exe, List<string> args, HashSet<int> inputs, string[] scripts, string[] valueParams, string[] switchParams, string resultParam)
+    /// <summary>
+    /// A script NEXUS ships: system PowerShell, the fixed head, a script of that name that is NEXUS's own file (in the install
+    /// folder next to this program's, see ScriptHome) given as a staged input, its parameters.
+    /// </summary>
+    static void Script(string exe, List<string> args, HashSet<int> inputs, string folder, string[] scripts, string[] valueParams, string[] switchParams, string resultParam, Watch w)
     {
         if (!Is(exe, "WindowsPowerShell\\v1.0\\powershell.exe")) throw No("This capability runs the system PowerShell only.");
         Head(args);
         string file = Path.GetFileName(args[5]);
         if (Array.FindIndex(scripts, delegate (string s) { return string.Equals(s, file, StringComparison.OrdinalIgnoreCase); }) < 0) throw No("Only " + string.Join(", ", scripts) + " may be run for this capability.");
+        ScriptHome(args[5], folder);
         if (!inputs.Contains(5)) throw No("The script must be staged with its SHA-256.");
         for (int i = 6; i < args.Count; i++)
         {
@@ -717,8 +794,31 @@ static class Templates
             if (v == null) continue;
             if (++i >= args.Count) throw No("A parameter has no value.");
             if (!PlainValue.IsMatch(args[i]) || args[i].Contains("..")) throw No("The value of " + a + " has characters this script never takes.");
-            if (string.Equals(v, resultParam, StringComparison.OrdinalIgnoreCase)) OutFile(args[i], null);
+            if (string.Equals(v, resultParam, StringComparison.OrdinalIgnoreCase)) { OutFile(args[i], null); w.OutArgs.Add(i); }
         }
+    }
+
+    /// <summary>
+    /// The script must be the file of that name in NEXUS's own install: <install>\resources\{folder}\{name}, where this
+    /// program is <install>\resources\bin\nexus-elevate.exe (the install folder is one Install.Check found
+    /// administrator-only). In the tests (--unelevated-test) the folder must be named {folder} (the repository's native\ folders).
+    /// A script anywhere else, even under the right name and with its true hash, is refused.
+    /// </summary>
+    static void ScriptHome(string script, string folder)
+    {
+        string name = Path.GetFileName(script);
+        if (Broker.TestMode)
+        {
+            string dir = Path.GetDirectoryName(script);
+            if (dir == null || !string.Equals(Path.GetFileName(dir), folder, StringComparison.OrdinalIgnoreCase)) throw No("The script must be NEXUS's own, in a folder named " + folder + ".");
+            return;
+        }
+        string bin = Path.GetDirectoryName(Program.SelfPath());
+        string resources = bin == null ? null : Path.GetDirectoryName(bin);
+        if (resources == null || !string.Equals(Path.GetFileName(bin), "bin", StringComparison.OrdinalIgnoreCase) || !string.Equals(Path.GetFileName(resources), "resources", StringComparison.OrdinalIgnoreCase))
+            throw No("The broker is not in an installed copy of NEXUS, so it knows no folder of NEXUS's own scripts.");
+        string expected = Path.Combine(resources, folder, name);
+        if (!string.Equals(script, expected, StringComparison.OrdinalIgnoreCase)) throw No("The script must be NEXUS's own file " + expected + ".");
     }
 
     /// <summary>A file the elevated program is asked to write (a result, a log): a plain local path, not under the Windows or Program Files folders.</summary>
@@ -731,7 +831,7 @@ static class Templates
             throw No("An elevated program does not write into the Windows or Program Files folders.");
     }
 
-    static void InstallerArgs(List<string> args, int from)
+    static void InstallerArgs(List<string> args, int from, Watch w)
     {
         bool silent = false;
         for (int i = from; i < args.Count; i++)
@@ -743,6 +843,7 @@ static class Templates
             {
                 if (++i >= args.Count) throw No("A log flag has no file.");
                 OutFile(args[i], ".log");
+                w.OutArgs.Add(i);
                 continue;
             }
             throw No("The installer argument " + a + " is not one of the silent-installation flags.");
@@ -763,13 +864,13 @@ static class Templates
                 if (!pkg.EndsWith(".msi", StringComparison.OrdinalIgnoreCase) || !inputs.Contains(1)) throw No("The package must be a .msi file given with its SHA-256.");
             }
             else if (verb == "/i") throw No("An installation names its package file, not a product code.");
-            InstallerArgs(args, 2);
+            InstallerArgs(args, 2, w);
             w.Msi = true;
             return;
         }
         if (Broker.ProtectedProgram(exe)) throw No("An installer here is msiexec or a hashed installer program.");
         if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw No("The installer must be an .exe or a .msi.");
-        InstallerArgs(args, 0);
+        InstallerArgs(args, 0, w);
     }
 
     static void Reg(List<string> args)
@@ -806,7 +907,7 @@ static class Templates
 static class Install
 {
     const int Writeish = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
-    const int AncestorWriteish = 0x40 | 0x40000 | 0x80000 | 0x10000000;
+    const int AncestorWriteish = 0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000;   // delete-child, DELETE (a folder that can be deleted can be renamed away), change-permissions, take-ownership, generic all
     static readonly SecurityIdentifier[] Owners = {
         new SecurityIdentifier("S-1-5-18"), new SecurityIdentifier("S-1-5-32-544"),
         new SecurityIdentifier("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464") };
@@ -827,7 +928,7 @@ static class Install
             if (!string.Equals(Broker.FinalPath(self, false), self, StringComparison.OrdinalIgnoreCase) || !string.Equals(Broker.FinalPath(dir, true), dir, StringComparison.OrdinalIgnoreCase))
                 return Folder + " (the path goes through a link or a short name)";
             string bad = Weak(self, false, me, Writeish, true) ?? Weak(dir, true, me, Writeish, true);
-            for (string up = Path.GetDirectoryName(dir); bad == null && up != null; up = Path.GetDirectoryName(up)) bad = Weak(up, true, me, AncestorWriteish, false);
+            for (string up = Path.GetDirectoryName(dir); bad == null && up != null; up = Path.GetDirectoryName(up)) bad = Weak(up, true, me, AncestorWriteish, true);
             if (bad != null) return Folder + " (" + bad + ")";
         }
         catch (Exception e) { return Folder + " (it could not be checked: " + e.GetType().Name + ")"; }
@@ -916,9 +1017,12 @@ static class Install
             if (r.AccessControlType != AccessControlType.Allow) continue;
             if (directory && (r.PropagationFlags & PropagationFlags.InheritOnly) != 0) continue;
             SecurityIdentifier who = (SecurityIdentifier)r.IdentityReference;
-            bool weak = who.Equals(me);
-            foreach (SecurityIdentifier s in Everyone) if (s.Equals(who)) weak = true;
-            if (weak && ((int)r.FileSystemRights & mask) != 0) return who.Value + " may write " + path;
+            // Anyone but SYSTEM, Administrators and TrustedInstaller who is allowed a writing right is weak: the current user,
+            // the well-known groups, and any group or account this list does not know. (CREATOR OWNER on a folder is
+            // inherit-only above and skipped; on a file it would be a real entry, and is weak.)
+            bool trusted = false;
+            foreach (SecurityIdentifier s in Owners) if (s.Equals(who)) trusted = true;
+            if (!trusted && ((int)r.FileSystemRights & mask) != 0) return who.Value + " may write " + path;
         }
         return null;
     }
@@ -940,6 +1044,8 @@ static class Broker
     static string desktop;
     static readonly List<IntPtr> jobs = new List<IntPtr>();
     static volatile bool ending;
+    /// <summary>--unelevated-test: the tests of the protocol; NEXUS's script folders are then the repository's.</summary>
+    public static bool TestMode;
 
     public static int Serve(Dictionary<string, string> o)
     {
@@ -947,14 +1053,19 @@ static class Broker
         uint clientPid = uint.Parse(Program.Need(o, "client-pid", new Regex("^[0-9]{1,10}$")), CultureInfo.InvariantCulture);
         long clientCreated = long.Parse(Program.Need(o, "client-created", new Regex("^[0-9]{1,20}$")), CultureInfo.InvariantCulture);
         uint runtimePid = uint.Parse(Program.Need(o, "runtime-pid", new Regex("^[0-9]{1,10}$")), CultureInfo.InvariantCulture);
+        long runtimeCreated = long.Parse(Program.Need(o, "runtime-created", new Regex("^[0-9]{1,20}$")), CultureInfo.InvariantCulture);
         session = Program.Need(o, "session", new Regex("^[A-Za-z0-9-]{1,64}$"));
         long expiresUnix = long.Parse(Program.Need(o, "expires-unix", new Regex("^[0-9]{1,12}$")), CultureInfo.InvariantCulture);
+        // No session lasts longer than 14 hours (the longest an Overnight session is given), whatever was asked.
+        long nowUnix = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+        if (expiresUnix > nowUnix + 14 * 3600) expiresUnix = nowUnix + 14 * 3600;
         foreach (string c in Program.Need(o, "capabilities", null).Split(','))
         {
             if (!new Regex("^[A-Z][A-Z_]{1,63}$").IsMatch(c)) throw new FormatException("a capability name is not valid");
             capabilities.Add(c);
         }
         bool test = o.ContainsKey("unelevated-test");
+        TestMode = test;
         bool elevated = IsElevated();
         if (!elevated && !test) return 7;
         if (elevated && !test)
@@ -967,8 +1078,10 @@ static class Broker
         // The relay: the process given, still the one that was started then, and this very program.
         IntPtr client = N.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED, false, clientPid);
         if (client == IntPtr.Zero || Program.Creation(client) != clientCreated || !SameFile(Program.ImageOf(client), Program.ImageOf(N.GetCurrentProcess()))) return 9;
-        IntPtr runtime = N.OpenProcess(SYNCHRONIZE, false, runtimePid);
-        if (runtime == IntPtr.Zero) return 9;
+        // The runtime: the process the relay saw (id and start time), not a later one that has the same id.
+        IntPtr runtime = N.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED, false, runtimePid);
+        if (runtime == IntPtr.Zero || Program.Creation(runtime) != runtimeCreated) return 9;
+        try { Program.RestrictOwnProcess(); } catch (Exception e) { Program.Err("the broker could not protect its own process: " + e.Message); return 9; }
 
         staging = test ? Path.GetFullPath(Program.Need(o, "staging", null)) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "NexusPrivilege", session);
         try { PrepareStaging(test); }
@@ -980,7 +1093,7 @@ static class Broker
         IntPtr sd; uint size;
         // The user's own SID, read and write, at medium integrity or above. No ACE for an AppContainer, a capability,
         // the sandbox account or anyone else: Windows refuses them.
-        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;0x12019f;;;" + user + ")S:(ML;;NW;;;ME)", 1, out sd, out size)) return 6;
+        if (!N.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;0x12019f;;;" + user + ")S:(ML;;NWNR;;;ME)", 1, out sd, out size)) return 6;
         SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES(); sa.nLength = Marshal.SizeOf(sa); sa.lpSecurityDescriptor = sd;
         IntPtr h = N.CreateNamedPipeW("\\\\.\\pipe\\" + pipeName, 3 | 0x00080000 | 0x40000000, 8, 1, 65536, 65536, 0, ref sa);
         N.LocalFree(sd);
@@ -1048,7 +1161,7 @@ static class Broker
         finally { Marshal.FreeHGlobal(b); N.CloseHandle(token); }
     }
 
-    static string UserSid()
+    public static string UserSid()
     {
         IntPtr token;
         if (!N.OpenProcessToken(N.GetCurrentProcess(), 0x8, out token)) throw new FormatException("the token could not be read");
@@ -1334,6 +1447,13 @@ static class Broker
             || Under(path, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)) || Under(path, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
     }
 
+    /// <summary>Windows' own programs: System32 and SysWOW64 only. A program anywhere else (Program Files too: a product may leave its folder writable) is staged and hashed.</summary>
+    public static bool SystemProgram(string path)
+    {
+        string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return Under(path, Path.Combine(win, "System32")) || Under(path, Path.Combine(win, "SysWOW64"));
+    }
+
     static string Sha256Of(string path)
     {
         using (SHA256 sha = SHA256.Create())
@@ -1344,7 +1464,7 @@ static class Broker
     /// <summary>Copies a file into the operation's staging folder and checks it there: what runs is what was reviewed.</summary>
     static string Stage(string source, string sha256, string opDir, List<FileStream> holds)
     {
-        if (sha256 == null || !new Regex("^[0-9a-f]{64}$").IsMatch(sha256)) throw new Refused("a program or file outside the protected program folders needs its SHA-256");
+        if (sha256 == null || !new Regex("^[0-9a-f]{64}$").IsMatch(sha256)) throw new Refused("a program or file outside the Windows system folders needs its SHA-256");
         Directory.CreateDirectory(opDir);
         string target = Path.Combine(opDir, Path.GetFileName(source));
         if (File.Exists(target)) throw new Refused("two staged files have the same name: " + Path.GetFileName(source));
@@ -1452,10 +1572,10 @@ static class Broker
             if (args.Count < 6) throw new Refused("PowerShell is run only as -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <reviewed script>");
             for (int i = 0; i < head.Length; i++) if (!string.Equals(args[i], head[i], StringComparison.OrdinalIgnoreCase)) throw new Refused("PowerShell is run only as -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <reviewed script>");
             for (int i = head.Length + 1; i < args.Count; i++) if (args[i].StartsWith("-Command", StringComparison.OrdinalIgnoreCase) || args[i].StartsWith("-Enc", StringComparison.OrdinalIgnoreCase)) throw new Refused("no command string after the script");
-            if (!ProtectedProgram(executable)) throw new Refused("PowerShell must be the system's own");
+            if (!SystemProgram(executable)) throw new Refused("PowerShell must be the system's own");
             if (!staged.Contains(5) || !args[5].EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) throw new Refused("the script must be a reviewed .ps1 file (an input)");
         }
-        if (!ProtectedProgram(executable))
+        if (!SystemProgram(executable))
         {
             stagedSha = Json.Str(body, "sha256", true);
             executable = Stage(executable, stagedSha, opDir, holds);
@@ -1474,8 +1594,19 @@ static class Broker
             }
         }
 
-        string cwd = Json.Str(body, "cwd", false);
-        cwd = cwd == null ? staging : Canonical(cwd, true, "the working directory");
+        // The working folder is the operation's own staging folder (only administrators can write it), whatever the request
+        // names: a folder the requester can still change would let a missing DLL or a relative file be planted after approval.
+        Directory.CreateDirectory(opDir);
+        string cwd = opDir;
+        // A file the program is asked to write (a result, a log) is a file in that folder instead; its text comes back in the result.
+        List<string[]> outFiles = new List<string[]>();   // { argument index, name asked for, path used }
+        foreach (int oi in watch.OutArgs)
+        {
+            string asked = Path.GetFileName(args[oi]);
+            string used = Path.Combine(opDir, "out" + oi.ToString(CultureInfo.InvariantCulture) + "-" + asked);
+            outFiles.Add(new string[] { oi.ToString(CultureInfo.InvariantCulture), asked, used });
+            args[oi] = used;
+        }
         int timeout = 300000;
         object t;
         if (body.TryGetValue("timeoutMs", out t) && t != null)
@@ -1483,9 +1614,29 @@ static class Broker
             if (!(t is double) || (double)t < 1000 || (double)t > 1800000) throw new Refused("timeoutMs is between 1000 and 1800000");
             timeout = (int)(double)t;
         }
-        IntPtr env = BuildEnvironment(body);
-        try { return Run(opId, executable, args, cwd, env, timeout, stagedSha, watch); }
+        IntPtr env = BuildEnvironment(body, shell);
+        try { return Run(opId, executable, args, cwd, env, timeout, stagedSha, watch, outFiles); }
         finally { Marshal.FreeHGlobal(env); }
+    }
+
+    /// <summary>What a program wrote to the file the broker named for it: its text, 64 KB at most. A link or a missing file gives nothing.</summary>
+    static string ReadOutFile(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) return null;
+            byte[] b = new byte[65537];
+            int n = 0;
+            using (FileStream f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                while (n < b.Length) { int r = f.Read(b, n, b.Length - n); if (r <= 0) break; n += r; }
+            if (n > 65536) n = 65536;
+            // PowerShell's Out-File writes UTF-16 with a byte order mark; Set-Content -Encoding UTF8 writes UTF-8 (with one).
+            if (n >= 2 && b[0] == 0xFF && b[1] == 0xFE) return new UnicodeEncoding(false, false, false).GetString(b, 2, (n - 2) & ~1);
+            if (n >= 2 && b[0] == 0xFE && b[1] == 0xFF) return new UnicodeEncoding(true, false, false).GetString(b, 2, (n - 2) & ~1);
+            int skip = n >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF ? 3 : 0;
+            return new UTF8Encoding(false, false).GetString(b, skip, n - skip);
+        }
+        catch (Exception) { return null; }
     }
 
     static readonly HashSet<string> ReservedVariables = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
@@ -1495,8 +1646,11 @@ static class Broker
         "PYTHONSTARTUP", "PERL5OPT", "RUBYOPT", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "ELECTRON_RUN_AS_NODE", "LD_PRELOAD"
     };
 
+    /// <summary>Whole families of variables that change how .NET loads code (profilers, startup hooks, runtime settings).</summary>
+    static readonly Regex ReservedPrefix = new Regex("^(COR_|COMPLUS_|DOTNET_|CORECLR_)", RegexOptions.IgnoreCase);
+
     /// <summary>The environment block: a fixed set of the machine's own variables and what the request names, nothing of the broker's.</summary>
-    static IntPtr BuildEnvironment(Dictionary<string, object> body)
+    static IntPtr BuildEnvironment(Dictionary<string, object> body, bool powershell)
     {
         string win = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Windows);
         SortedDictionary<string, string> vars = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1511,6 +1665,10 @@ static class Broker
         vars["ProgramFiles(x86)"] = System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFilesX86);
         vars["NUMBER_OF_PROCESSORS"] = System.Environment.ProcessorCount.ToString(CultureInfo.InvariantCulture);
         vars["PROCESSOR_ARCHITECTURE"] = "AMD64";
+        // Windows PowerShell builds its module path from the user's Documents folder when nothing is set: the system's folders only.
+        // (PSModuleAutoLoadingPreference=None is not set: the shipped scripts rely on the automatic loading of the system's
+        // NetSecurity, ScheduledTasks and LocalAccounts modules, which are in these folders.)
+        if (powershell) vars["PSModulePath"] = Path.Combine(sys, "WindowsPowerShell\\v1.0\\Modules") + ";" + Path.Combine(vars["ProgramFiles"], "WindowsPowerShell\\Modules");
         object e;
         if (body.TryGetValue("env", out e) && e != null)
         {
@@ -1519,7 +1677,7 @@ static class Broker
             foreach (KeyValuePair<string, object> kv in given)
             {
                 string v = kv.Value as string;
-                if (!new Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$").IsMatch(kv.Key) || ReservedVariables.Contains(kv.Key)) throw new Refused("the variable " + kv.Key + " may not be set");
+                if (!new Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$").IsMatch(kv.Key) || ReservedVariables.Contains(kv.Key) || ReservedPrefix.IsMatch(kv.Key)) throw new Refused("the variable " + kv.Key + " may not be set");
                 if (v == null || v.Length > 4096 || v.IndexOf('\0') >= 0) throw new Refused("the value of " + kv.Key + " is not valid");
                 vars[kv.Key] = v;
             }
@@ -1649,7 +1807,7 @@ static class Broker
         return notes.Count == 0 ? null : string.Join("; ", notes.ToArray());
     }
 
-    static string Run(string opId, string executable, List<string> args, string cwd, IntPtr env, int timeoutMs, string stagedSha, Watch watch)
+    static string Run(string opId, string executable, List<string> args, string cwd, IntPtr env, int timeoutMs, string stagedSha, Watch watch, List<string[]> outFiles)
     {
         StringBuilder cmd = new StringBuilder(Program.QuoteArg(executable));
         foreach (string a in args) cmd.Append(' ').Append(Program.QuoteArg(a));
@@ -1705,8 +1863,18 @@ static class Broker
         long ms = (long)(DateTime.UtcNow - started).TotalMilliseconds;
         // Installer and service work happens outside the job: say what may still be going on (never stopped here).
         string outliving = LeftoverOf(watch);
+        // The files the program was asked to write, read now that nothing of its job runs: [{"arg":..,"name":"..","text":".."}].
+        StringBuilder written = new StringBuilder("[");
+        foreach (string[] f in outFiles)
+        {
+            string text = ReadOutFile(f[2]);
+            if (text == null) continue;
+            if (written.Length > 1) written.Append(',');
+            written.Append("{\"arg\":").Append(f[0]).Append(",\"name\":").Append(Json.Quote(f[1])).Append(",\"text\":").Append(Json.Quote(text)).Append('}');
+        }
+        written.Append(']');
         return Json.Ev("result", "opId", opId, "exitCode", (long)(int)code, "durationMs", ms, "timedOut", timedOut, "executable", executable,
-            "stagedSha256", stagedSha, "leftoverEnded", (long)leftover, "leftover", outliving,"stdout", stdout.Text(), "stdoutTruncated", stdout.Truncated, "stderr", stderr.Text(), "stderrTruncated", stderr.Truncated, "desktop", desktop);
+            "stagedSha256", stagedSha, "leftoverEnded", (long)leftover, "leftover", outliving,"stdout", stdout.Text(), "stdoutTruncated", stdout.Truncated, "stderr", stderr.Text(), "stderrTruncated", stderr.Truncated, "desktop", desktop, "files", new RawJson(written.ToString()));
     }
 
     static uint ActiveIn(IntPtr job)
