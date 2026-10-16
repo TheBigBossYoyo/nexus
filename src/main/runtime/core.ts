@@ -1,4 +1,4 @@
-import { constants as osConstants, setPriority } from 'node:os'
+import { getPriority, constants as osConstants, setPriority } from 'node:os'
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
@@ -403,15 +403,34 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   // gives it to every process started from here (workers, Claude Code, shells, checks, git), so the owner's own
   // programs come first and, with nobody else asking, the work gets the whole machine as before. The window and
   // the call helper set their own priority back to normal.
+  // Measured on the installed build: set here, at the start, the runtime was found at normal priority a minute later
+  // (Chromium sets its own while it starts), and stayed lowered when set again afterwards. So it is set again a few
+  // seconds after the start and when a mission is created or starts, before it forks anything.
+  let workPriority: number | null = null
   const applyWorkPriority = (s: Settings): void => {
     if (process.platform !== 'win32') return
+    const wanted = s.execution.backgroundPriority === false ? osConstants.priority.PRIORITY_NORMAL : osConstants.priority.PRIORITY_BELOW_NORMAL
+    // Workers are kept and reused: one started before the priority was set keeps the one it was started with, and
+    // so would the sessions it runs.
+    for (const worker of repos.workers.listLive()) {
+      if (worker.pid === null) continue
+      try {
+        if (getPriority(worker.pid) !== wanted) setPriority(worker.pid, wanted)
+      } catch {
+        // Gone, or not ours to change: its next sessions keep its priority.
+      }
+    }
     try {
-      setPriority(process.pid, s.execution.backgroundPriority === false ? osConstants.priority.PRIORITY_NORMAL : osConstants.priority.PRIORITY_BELOW_NORMAL)
+      if (getPriority(process.pid) === wanted) return
+      setPriority(process.pid, wanted)
+      if (workPriority !== wanted) logger(`work priority: ${wanted === osConstants.priority.PRIORITY_NORMAL ? 'normal' : 'below normal'}`)
+      workPriority = wanted
     } catch (e) {
       logger(`work priority: ${errorMessage(e)}`)
     }
   }
   applyWorkPriority(repos.settings.get())
+  setTimeout(() => applyWorkPriority(repos.settings.get()), 10_000).unref?.()
   // The worktrees and the sandbox's state are written and rewritten by every check: Windows Search indexing them
   // (measured: 2 % of the machine during a suite) is work for nothing. New files there are made unindexed.
   if (process.platform === 'win32') for (const dir of [worktreesDir, join(dataDir, 'sandbox')]) markNotIndexed(dir)
@@ -951,7 +970,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       if (repos.runs.listActive().length === 0) void privilegeHost.service?.idle().catch(() => undefined)
     }
     // A mission of an uncontained project that starts now ends the session in progress (second review, H1).
-    if (event.type === 'run.created' || event.type === 'run.started') void privilegeHost.service?.recheck().catch(() => undefined)
+    if (event.type === 'run.created' || event.type === 'run.started') {
+      applyWorkPriority(repos.settings.get())
+      void privilegeHost.service?.recheck().catch(() => undefined)
+    }
   })
   const privilegedTools = createPrivilegedTools({ service: () => privilegeHost.service })
   // 0.9.1: zero-disturbance testing: the presence meter and the per-mission metrics of what NEXUS's work did to the
