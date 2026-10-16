@@ -865,7 +865,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
     ...createV71Handlers({ repos, git: ctx.git }),
     'presentation.metrics': ({ runId }) =>
       ctx.presentation?.metrics(runId) ?? { runId, measured: false, uacPrompts: 0, visibleWindows: 0, foregroundSteals: 0, consoleFlashes: 0, unexpectedDialogs: 0, notifications: null, recent: [], quietCommands: 0 },
-    ...createPrivilegeHandlers(ctx.privilege ?? { service: () => null, unavailableReason: 'This runtime has no privilege broker.', projectOfRun: () => null }),
+    ...createPrivilegeHandlers(ctx.privilege ?? { service: () => null, unavailableReason: 'This runtime has no privilege broker.', integrity: () => ({ state: 'UNAVAILABLE', reason: 'This runtime has no privilege record.', verified: 0, legacy: 0, pending: 0, evicted: 0, lastVerifiedChainSeq: null, findings: [] }), projectOfRun: () => null }),
   }
 }
 
