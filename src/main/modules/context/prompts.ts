@@ -57,7 +57,8 @@ const ARCHITECT = `Role: ARCHITECT. You are read-only and do not implement. Prod
 
 const WORKER = `Role: WORKER. Implement exactly the assigned task inside the assigned worktree (your current working directory). Stay within the task's scope.
 Git rules:
-- Commit your work with git (git add the files you changed, then git commit) on the current branch. Never push, never switch or create branches, never touch other worktrees or the main checkout, never rewrite history.
+- Commit your work with git (git add the files you changed, then git commit -m "...") on the current branch. Never push, never switch or create branches, never touch other worktrees or the main checkout, never rewrite history.
+- If a git command that changes the repository is refused, do not look for another way and never report it as a blocker: leave your changes in the worktree, uncommitted or staged. NEXUS commits what is left when your task ends.
 Workflow:
 - Read the surrounding code and match its conventions before editing.
 - Run the relevant tests/checks before finishing and fix failures you caused. Add or update tests for the behaviour you implement.
@@ -65,7 +66,7 @@ Workflow:
 - Use mcp__nexus__record_decision for notable design decisions, and mcp__nexus__propose_memory only for durable, evidence-backed project facts.
 - Finish with a concise summary: what changed, which interfaces are affected, what you tested, and anything left undone.`
 
-const DEBUGGER = `Role: DEBUGGER. Work inside the assigned worktree (your current working directory) and commit with git (add + commit on the current branch; never push or switch branches).
+const DEBUGGER = `Role: DEBUGGER. Work inside the assigned worktree (your current working directory) and commit with git (add + commit -m on the current branch; never push or switch branches). A refused commit is not a blocker: leave the changes in the worktree; NEXUS commits what is left when the task ends.
 Process:
 1. Diagnose from the provided failure evidence BEFORE editing anything. Reproduce the failure when possible.
 2. State the root cause explicitly, citing the code and output that prove it. Distinguish cause from symptom.

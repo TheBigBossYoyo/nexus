@@ -144,7 +144,7 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     expect(out['mixed'], all).not.toContain('agent commit')
     expect(out['mixed']).toContain('mixed-done')
     expect(out['with-node'], all).not.toMatch(/from-node:nexus\//)
-    expect(out['diff'], all).toContain('runs only as a command of its own')
+    expect(out['diff'], all).toContain('as a command of its own')
     expect(out['show'], all).toContain('agent commit')
     // A commit inside a larger command cannot be made as the sandbox account: it is stopped before git, and says what to do.
     expect(out['buried-commit']).toContain('rc=128')
@@ -155,7 +155,7 @@ d('scenario: git in a mission under the ISOLATED profile (0.8)', () => {
     // Reading the worktree's own `.git` file is reading a file of the worktree: it is no question for the user.
     expect(refused['pointer'], all).toBe(false)
     expect(out['pointer']).toContain('gitdir:')
-    expect(out['powershell-mixed'], all).toContain('runs only as a command of its own')
+    expect(out['powershell-mixed'], all).toContain('as a command of its own')
     // What is not the task's own is refused by Windows.
     for (const name of ['other-branch', 'config', 'hook']) expect(out[name], `${name}: ${all}`).toMatch(/REFUSED:(EPERM|EACCES)/)
     expect(await git(h.repoDir, 'rev-parse', 'main')).toBe(mainBefore)

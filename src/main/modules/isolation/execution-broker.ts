@@ -109,8 +109,10 @@ const DEFAULT_MAX_PROCESSES = 512
  */
 const UI_LIMIT_HANDLES = 0x1
 const WINDOW_UI_LIMITS = 0xff & ~UI_LIMIT_HANDLES
+// 0.9.1: a worker that met this with `git commit -F msg.txt` in PowerShell, then alone, then in bash, stopped its task
+// as blocked: the words did not say that only bash runs such a command, that -F is refused, or that it need not commit.
 const GIT_HINT =
-  'nexus: in the isolated profile this git command runs only as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine). Run it separately; nothing was changed.'
+  'nexus: nothing was changed. In the isolated profile a git command that changes the repository (add, commit, reset, ...) runs only in the Bash tool, as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine), and a commit message is given with -m, not -F. You can also leave your changes in the worktree: NEXUS commits what is left when your task ends, so a refused commit is not a blocker.'
 /** git subcommands that change a ref or the index: the AppContainer writes nothing in the user's repository, so they run as a command of their own. */
 const REF_CHANGING = ['add', 'rm', 'mv', 'update-index', 'read-tree', 'commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
 
