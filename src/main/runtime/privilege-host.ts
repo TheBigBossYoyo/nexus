@@ -10,6 +10,7 @@ import { receiptChainVault } from '../modules/privilege/chain-key'
 import type { PrivilegeRecords } from '../modules/ipc/privilege-handlers'
 import type { Database } from '../modules/persistence/database'
 import { ElevatedBrokerClient } from '../modules/privilege/broker-client'
+import { createPersistenceCollector } from '../modules/privilege/persistence-snapshot'
 import { PrivilegedPolicyEngine } from '../modules/privilege/policy'
 import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '../modules/privilege/report'
 import { PrivilegedReviewPipeline } from '../modules/privilege/review'
@@ -116,6 +117,7 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   const systemRoot = d.env['SystemRoot'] ?? 'C:\\Windows'
   const programFiles = d.env['ProgramFiles'] ?? 'C:\\Program Files'
   const programFilesX86 = d.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
+  const programData = process.env['ProgramData'] ?? 'C:\\ProgramData'
   // Packaged: resources/privilege-fixture. From the source tree: native/privilege-fixture (the helpers are in out/native).
   const fixtureDir = d.resourcesPath !== undefined ? join(d.resourcesPath, 'privilege-fixture') : d.launcherPath !== undefined ? resolve(dirname(d.launcherPath), '..', '..', 'native', 'privilege-fixture') : null
   const scriptsDir = d.sandboxSetupDir ?? null
@@ -155,6 +157,8 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
       })
     },
     verify: createPrivilegeVerifier({ systemRoot }),
+    // 0.9.1 (second review, L5): unelevated, read-only snapshots around an install, repair or uninstall.
+    persistence: createPersistenceCollector({ systemRoot, programData }),
     // setup-sandbox.ps1 reads its checks from the file beside it: staged beside it, with its own hash.
     companions: (req: PrivilegedOperationRequest) => {
       if (scriptsDir === null || !/setup-sandbox\.ps1$/i.test(req.args[5] ?? '')) return []

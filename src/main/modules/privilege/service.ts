@@ -2,6 +2,8 @@ import { win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   DEFAULT_SESSION_CAPABILITIES,
+  type PersistenceReport,
+  type PersistenceSnapshot,
   type PrivilegeSessionScope,
   type PrivilegeSessionStatus,
   type PrivilegedCapability,
@@ -16,6 +18,7 @@ import {
 import type { SecurityEventSeverity } from '@shared/autonomy'
 import type { BrokerExecRequest, BrokerExecResult, BrokerStart } from './broker-client'
 import type { ReceiptChainVerification } from './chain'
+import { PERSISTENCE_CAPABILITIES, diffPersistence, persistenceObservedLines } from './persistence'
 import { redactArgs, redactText, type PrivilegedPolicyEngine } from './policy'
 import type { PrivilegedReviewPipeline } from './review'
 import type { PrivilegeSessionRow, PrivilegeStore } from './store'
@@ -50,6 +53,11 @@ export interface PrivilegeServiceDeps {
   startBroker: (o: { session: string; expiresAt: Date; capabilities: readonly PrivilegedCapability[]; onEnded: (reason: string) => void }) => Promise<BrokerStart | { ok: true; client: BrokerHandle }>
   /** What can be observed after an operation (files, registry keys, services), unelevated. */
   verify?: (req: PrivilegedOperationRequest) => Promise<string[]>
+  /**
+   * 0.9.1 (second review, L5): an unelevated, read-only snapshot of the persistence surfaces (services, scheduled
+   * tasks, Run keys, the all-users StartUp folder), taken before and after an operation that installs, repairs or uninstalls.
+   */
+  persistence?: (signal?: AbortSignal) => Promise<PersistenceSnapshot>
   /** Companion files a request needs staged beside it (a shipped script's own helpers), with their hashes. */
   companions?: (req: PrivilegedOperationRequest) => { path: string; sha256: string }[]
   /** A security event worth the owner's attention (a forbidden request, a broker that could not be believed). */
@@ -395,6 +403,18 @@ export class PrivilegeService {
     this.touchIdle(session)
     // 0.9.1 (review F6): on record before it starts, so that a NEXUS stopped while it runs still leaves its trace.
     receipt('EXECUTING', 'Started with administrator rights.', { precheck, reviews, finalPolicy: final })
+    // 0.9.1 (second review, L5): what an install, repair or uninstall leaves behind, seen from two unelevated snapshots.
+    const collect = this.d.persistence !== undefined && PERSISTENCE_CAPABILITIES.has(req.capability) ? this.d.persistence : null
+    const before = collect ? await this.snapshot(collect) : null
+    const persisted = async (): Promise<{ report: PersistenceReport; lines: string[] } | null> => {
+      if (collect === null || before === null) return null
+      const report = diffPersistence(before, await this.snapshot(collect), req.expected)
+      if (report.unexpected > 0) {
+        const items = report.changes.filter((c) => !c.expected).map((c) => `${c.surface} ${c.id} ${c.change}`)
+        this.d.securityEvent?.({ severity: 'ISOLATION_FAILURE', runId: req.runId, projectId: req.projectId, taskId: req.taskId, agentId: req.agentId, action: 'privileged operation left unexpected persistence', reason: scrub(items.join('; ')).slice(0, 300) })
+      }
+      return { report, lines: persistenceObservedLines(report) }
+    }
     const result = await broker.exec({
       opId: req.id,
       capability: req.capability,
@@ -408,7 +428,12 @@ export class PrivilegeService {
       files: this.d.companions?.(req) ?? [],
     })
     if (result.kind === 'refused') return receipt('REJECTED_BY_POLICY', `Refused by the broker: ${result.reason}`, { precheck, reviews, finalPolicy: final })
-    if (result.kind === 'lost') return receipt('ABORTED', `The broker went away: ${result.reason}`, { precheck, reviews, finalPolicy: final })
+    if (result.kind === 'lost') {
+      const lostPersistence = await persisted()
+      return receipt('ABORTED', `The broker went away: ${result.reason}`, { precheck, reviews, finalPolicy: final, ...(lostPersistence ? { observed: lostPersistence.lines, persistence: lostPersistence.report } : {}) })
+    }
+    // Before the first final receipt: the store chains that one and keeps it unchanged after it (store.record).
+    const persistence = await persisted()
     const outcome: PrivilegedOutcome = result.timedOut ? 'TIMEOUT' : result.exitCode === 0 ? 'EXECUTED' : 'FAILED'
     const cut = (s: string, truncated: boolean): string => {
       const clean = scrub(s)
@@ -427,10 +452,12 @@ export class PrivilegeService {
           ...(result.leftover ? [`Not ended by NEXUS, may still be running: ${result.leftover}`] : []),
           // 0.9.1 (second review, M1): what the program wrote in the result or log file the broker gave it (in its staging).
           ...(result.files ?? []).map((f) => `${f.name}: ${cut(f.text, false).slice(0, 1500)}`),
+          ...(persistence?.lines ?? []),
         ],
         stdout: cut(result.stdout, result.stdoutTruncated),
         stderr: cut(result.stderr, result.stderrTruncated),
         stagedSha256: result.stagedSha256,
+        ...(persistence ? { persistence: persistence.report } : {}),
       })
     // 0.9.1 (second review, L12): the outcome is on record before the verification, which may itself fail.
     ran([])
@@ -443,6 +470,21 @@ export class PrivilegeService {
     const r = ran(observed)
     if (session.scope === 'SINGLE_OPERATION') await this.end('its single operation ran', session.id)
     return r
+  }
+
+  /**
+   * One persistence snapshot. One that could not be taken is a snapshot whose every surface FAILED: the diff then
+   * infers nothing there, the receipt says so, and the operation proceeds. Whether an incomplete snapshot BEFORE the
+   * operation should instead stop it is the open question left to the user.
+   */
+  private async snapshot(collect: (signal?: AbortSignal) => Promise<PersistenceSnapshot>): Promise<PersistenceSnapshot> {
+    try {
+      return await collect()
+    } catch (e) {
+      const note = `the snapshot could not be taken: ${e instanceof Error ? e.message.slice(0, 200) : 'unknown error'}`
+      const failed = { state: 'FAILED' as const, note }
+      return { takenAt: this.now().toISOString(), durationMs: 0, items: [], coverage: { SERVICE: failed, SCHEDULED_TASK: failed, RUN_KEY: failed, STARTUP_FOLDER: failed } }
+    }
   }
 
   /** The owner's confirmation of one operation: what runs, why, what the reviews said. No model's words decide it. */
