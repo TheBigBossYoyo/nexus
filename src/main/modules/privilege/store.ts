@@ -78,10 +78,10 @@ export type ReceiptChainVault = ReturnType<typeof receiptChainVault>
 function withFindings(result: ReceiptChainVerification, extra: ChainFinding[], anchorUnreadable: boolean, unavailableReason: string): ReceiptChainVerification {
   const kept = anchorUnreadable ? result.findings.filter((f) => !(f.kind === 'TAIL_MISSING' && f.chainSeq === null && f.receiptId === null)) : result.findings
   if (extra.length === 0 && kept.length === result.findings.length) return result
-  const findings = [...extra, ...kept].slice(0, 50)
+  const findings = [...extra, ...kept]
   const first = findings[0]
   if (first === undefined) return { ...result, state: 'UNAVAILABLE', reason: unavailableReason, findings: [] }
-  const total = extra.length + kept.length
+  const total = findings.length
   return { ...result, state: 'BROKEN', findings, reason: `${total} problem${total === 1 ? '' : 's'} found. ${first.detail}` }
 }
 

@@ -18,7 +18,6 @@ import type { PrivilegedOperationReceipt, PrivilegedOutcome } from '@shared/priv
 export const CHAIN_VERSION = 1
 export const GENESIS_HASH = '0'.repeat(64)
 
-const MAX_FINDINGS = 50
 // The same outcomes as EVICTABLE in store.ts: only refusals are ever evicted.
 const EVICTABLE_OUTCOMES: readonly PrivilegedOutcome[] = ['REJECTED_BY_POLICY', 'REJECTED_BY_DIRECTOR', 'DECLINED_BY_OWNER']
 
@@ -350,8 +349,9 @@ export function verifyReceiptChain(input: {
     if (!used.has(span)) walkFinding({ kind: 'BAD_SPAN', chainSeq: span.fromChainSeq, receiptId: null, detail: `The eviction record for ${positions(span.fromChainSeq, span.toChainSeq)} does not fit the chain.` })
   }
 
-  const findings = [...walkFindings, ...otherFindings].slice(0, MAX_FINDINGS)
-  const total = walkFindings.length + otherFindings.length
+  // Every finding is kept: the report must never hide part of a broken record.
+  const findings = [...walkFindings, ...otherFindings]
+  const total = findings.length
   const base = { verified, legacy, pending, evicted, lastVerifiedChainSeq, findings }
   const firstFinding = findings[0]
   if (firstFinding) return { ...base, state: 'BROKEN', reason: `${total} problem${total === 1 ? '' : 's'} found. ${firstFinding.detail}` }
