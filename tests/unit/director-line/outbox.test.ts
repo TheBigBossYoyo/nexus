@@ -9,7 +9,6 @@ type PolicyChange = (p: CommunicationPolicy) => void
 async function pairedRig(policy?: PolicyChange) {
   const r = makeRig()
   await r.pairOperator()
-  await r.pairing.pairPhoneFromSettings('TWILIO_VOICE', '+33612345678', 'me')
   if (policy) await r.setPolicy(policy)
   return r
 }
@@ -48,12 +47,12 @@ describe('calls and the one fallback', () => {
     const r = await pairedRig()
     await r.line.report(ev('PROGRAM_COMPLETE', 'p1', 'RaceDeck is finished'))
     expect(r.voice.calls).toHaveLength(1)
-    expect(r.voice.calls[0]!.to).toBe('+33612345678')
+    expect(r.voice.calls[0]!.report).toBe('RaceDeck is finished')
     expect(r.provider.sent).toHaveLength(0)
     expect(r.deliveries.all.map((d) => d.outcome)).toContain('ANSWERED')
   })
 
-  it.each(['NO_ANSWER', 'BUSY', 'FAILED'] as const)('%s -> exactly ONE fallback message and never a second call', async (state) => {
+  it.each(['NO_ANSWER', 'BUSY', 'DECLINED', 'FAILED', 'NOT_REGISTERED', 'SUPPRESSED'] as const)('%s -> the voice line sends the report by message: exactly ONE message, never a second call', async (state) => {
     const r = await pairedRig()
     r.voice.next = state
     await r.line.report(ev('CRITICAL_FAILURE', 'p1', 'the run failed'))
@@ -61,6 +60,36 @@ describe('calls and the one fallback', () => {
     await r.line.flush()
     expect(r.voice.calls).toHaveLength(1)
     expect(r.provider.sent).toHaveLength(1)
+    expect(r.provider.sent[0]!.text).toContain('the run failed')
+    expect(await r.outbox.list()).toHaveLength(0)
+  })
+
+  it('a call that did not take place and whose message did not go either leaves the normal message attempt to the outbox', async () => {
+    const r = await pairedRig()
+    r.voice.next = 'NO_ANSWER'
+    r.voice.sendsFallback = false
+    await r.line.report(ev('CRITICAL_FAILURE', 'p1', 'the run failed'))
+    expect(r.voice.calls).toHaveLength(1)
+    expect(r.provider.sent).toHaveLength(1)
+    expect(r.provider.sent[0]!.text).toBe('NEXUS: the run failed')
+  })
+
+  it.each(['LINE_BUSY', 'NOT_PAIRED'] as const)('%s -> nothing was sent by the voice line, so the report goes by message once', async (state) => {
+    const r = await pairedRig()
+    r.voice.next = state
+    await r.line.report(ev('PROGRAM_COMPLETE', 'p1', 'finished'))
+    expect(r.voice.calls).toHaveLength(1)
+    expect(r.provider.sent).toHaveLength(1)
+    expect(r.provider.sent[0]!.text).toBe('NEXUS: finished')
+  })
+
+  it('a report is still delivered once on the PC when the message channel is down and the voice line sent it there', async () => {
+    const r = await pairedRig()
+    r.provider.configured = false
+    r.voice.next = 'NO_ANSWER'
+    await r.line.report(ev('PROGRAM_COMPLETE', 'p1', 'finished'))
+    expect(r.spies.notify).toHaveBeenCalledTimes(1)
+    expect(await r.outbox.list()).toHaveLength(0)
   })
 
   it('an unconfigured voice provider falls back to the message without a call', async () => {
@@ -90,7 +119,7 @@ describe('calls and the one fallback', () => {
 
   it('the call is counted before it is placed (a crash during the call cannot lead to a second one)', async () => {
     const r = await pairedRig()
-    r.voice.placeCall = async () => { throw new Error('process died') }
+    r.voice.throws = true
     await expect(r.line.report(ev('PROGRAM_COMPLETE', 'p1', 'finished'))).rejects.toThrow()
     const [item] = await r.outbox.list()
     expect(item!.callAttempts).toBe(1)

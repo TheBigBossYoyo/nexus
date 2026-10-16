@@ -8,6 +8,10 @@ import { killProcessTree } from './run-process'
  */
 export interface LongProcess {
   readonly pid: number | null
+  /** With `keepStdinOpen`: writes to the process's standard input. False when it can no longer be written to. */
+  writeInput(text: string): boolean
+  /** With `keepStdinOpen`: closes the process's standard input. */
+  endInput(): void
   /** The last lines of stdout and stderr together, oldest first. */
   output(maxLines?: number): string[]
   /** Null while it runs. */
@@ -25,6 +29,8 @@ export interface SpawnLongOptions {
   maxLines?: number
   /** The child's standard input is a pipe that stays open and is never written: for a helper that runs until its input closes. */
   keepStdinOpen?: boolean
+  /** The longest line kept whole, in characters. Default 4000; a helper whose lines are signed needs them whole. */
+  lineLimit?: number
 }
 
 /** The most of an unfinished line that is kept while waiting for its newline. */
@@ -32,6 +38,8 @@ const PENDING_LINE_LIMIT = 8192
 
 export function spawnLong(file: string, args: readonly string[], options: SpawnLongOptions): LongProcess {
   const maxLines = options.maxLines ?? 2000
+  const lineLimit = options.lineLimit ?? 4000
+  const pendingLimit = Math.max(PENDING_LINE_LIMIT, lineLimit)
   const lines: string[] = []
   let code: number | null | undefined
   const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, windowsHide: true, shell: false, stdio: [options.keepStdinOpen === true ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
@@ -53,14 +61,14 @@ export function spawnLong(file: string, args: readonly string[], options: SpawnL
       text = rest + text
       const parts = text.split(/\r?\n/)
       rest = parts.pop() ?? ''
-      if (rest.length > PENDING_LINE_LIMIT) {
+      if (rest.length > pendingLimit) {
         // Emitted once as the (cut) line it is, then dropped until the next newline.
-        parts.push(rest.slice(0, PENDING_LINE_LIMIT))
+        parts.push(rest.slice(0, pendingLimit))
         rest = ''
         dropping = true
       }
       for (const part of parts) {
-        const line = part.slice(0, 4000)
+        const line = part.slice(0, lineLimit)
         lines.push(line)
         if (lines.length > maxLines) lines.splice(0, lines.length - maxLines)
         try {
@@ -85,6 +93,15 @@ export function spawnLong(file: string, args: readonly string[], options: SpawnL
   })
   return {
     pid: child.pid ?? null,
+    writeInput: (text) => {
+      const input = child.stdin
+      if (!input || input.destroyed || !input.writable) return false
+      input.write(text)
+      return true
+    },
+    endInput: () => {
+      child.stdin?.end()
+    },
     output: (n = 200) => lines.slice(-n),
     exitCode: () => code,
     exited,

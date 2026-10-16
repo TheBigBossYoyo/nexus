@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import BetterSqlite3 from 'better-sqlite3'
 import { NexusError } from '@shared/result'
-import { createRepositories, openDatabase, runMigrations, type Database } from '@main/modules/persistence'
+import { MIGRATIONS, createRepositories, openDatabase, runMigrations, type Database } from '@main/modules/persistence'
 import { makeProject, makeRun, makeTask, openMemory, seed } from './fixtures'
 
 const dirs: string[] = []
@@ -53,20 +54,25 @@ describe('openDatabase', () => {
       { version: 18, name: 'research' },
       { version: 19, name: 'boundary-action-hash' },
       { version: 20, name: 'operational-autonomy' },
+      { version: 21, name: 'voice-line' },
+      { version: 22, name: 'voice-line-verification' },
+      { version: 23, name: 'privilege-sessions' },
+      { version: 24, name: 'user-disturbance' },
+      { version: 25, name: 'privilege-receipt-chain' },
     ])
     first.close()
 
     const second = openDatabase(path)
     open.push(second)
-    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 20 })
+    expect(second.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()).toEqual({ n: 25 })
   })
 
   it('rolls the whole migration back when one fails', () => {
     const db = openDatabase(':memory:')
     open.push(db)
     const bad = [
-      { version: 21, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
-      { version: 22, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
+      { version: 26, name: 'ok', sql: 'CREATE TABLE extra_a (x INTEGER);' },
+      { version: 27, name: 'broken', sql: 'CREATE TABLE extra_b (x INTEGER); THIS IS NOT SQL;' },
     ]
     expect(() =>
       runMigrations(db, [
@@ -90,12 +96,40 @@ describe('openDatabase', () => {
         { version: 18, name: 'research', sql: '' },
         { version: 19, name: 'boundary-action-hash', sql: '' },
         { version: 20, name: 'operational-autonomy', sql: '' },
+        { version: 21, name: 'voice-line', sql: '' },
+        { version: 22, name: 'voice-line-verification', sql: '' },
+        { version: 23, name: 'privilege-sessions', sql: '' },
+        { version: 24, name: 'user-disturbance', sql: '' },
+        { version: 25, name: 'privilege-receipt-chain', sql: '' },
         ...bad,
       ]),
     ).toThrow()
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'extra_%'").all()
     expect(tables).toEqual([])
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 20 })
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()).toEqual({ v: 25 })
+  })
+
+  it('counts receipts that existed before migration 25 as the legacy boundary and leaves their chain columns NULL', () => {
+    const db = new BetterSqlite3(':memory:')
+    open.push(db)
+    runMigrations(db, MIGRATIONS.slice(0, 24))
+    const insert = db.prepare(
+      `INSERT INTO privileged_operations (id, requested_at, finished_at, capability, outcome, receipt_json)
+       VALUES (?, 'now', 'now', 'PROJECT_TOOLCHAIN_INSTALL', 'EXECUTED', '{}')`,
+    )
+    insert.run('op-1')
+    insert.run('op-2')
+    const maxSeq = (db.prepare('SELECT MAX(seq) AS m FROM privileged_operations').get() as { m: number }).m
+    runMigrations(db)
+    expect(db.prepare('SELECT legacy_max_seq, legacy_count FROM privilege_chain_meta').all()).toEqual([
+      { legacy_max_seq: maxSeq, legacy_count: 2 },
+    ])
+    expect(
+      db.prepare('SELECT chain_seq, chain_prev, chain_hash, chain_hmac FROM privileged_operations ORDER BY seq').all(),
+    ).toEqual([
+      { chain_seq: null, chain_prev: null, chain_hash: null, chain_hmac: null },
+      { chain_seq: null, chain_prev: null, chain_hash: null, chain_hmac: null },
+    ])
   })
 
   it('refuses a database written by a newer schema', () => {

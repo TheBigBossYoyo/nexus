@@ -109,8 +109,10 @@ const DEFAULT_MAX_PROCESSES = 512
  */
 const UI_LIMIT_HANDLES = 0x1
 const WINDOW_UI_LIMITS = 0xff & ~UI_LIMIT_HANDLES
+// 0.9.1: a worker that met this with `git commit -F msg.txt` in PowerShell, then alone, then in bash, stopped its task
+// as blocked: the words did not say that only bash runs such a command, that -F is refused, or that it need not commit.
 const GIT_HINT =
-  'nexus: in the isolated profile this git command runs only as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine). Run it separately; nothing was changed.'
+  'nexus: nothing was changed. In the isolated profile a git command that changes the repository (add, commit, reset, ...) runs only in the Bash tool, as a command of its own: git alone, with no pipe and no other program on the line (several git commands joined by && or ; are fine), and a commit message is given with -m, not -F. You can also leave your changes in the worktree: NEXUS commits what is left when your task ends, so a refused commit is not a blocker.'
 /** git subcommands that change a ref or the index: the AppContainer writes nothing in the user's repository, so they run as a command of their own. */
 const REF_CHANGING = ['add', 'rm', 'mv', 'update-index', 'read-tree', 'commit', 'merge', 'rebase', 'reset', 'checkout', 'switch', 'branch', 'tag', 'stash', 'cherry-pick', 'revert', 'pull', 'am', 'update-ref', 'symbolic-ref', 'worktree', 'fetch', 'push', 'gc', 'pack-refs', 'notes', 'replace', 'bisect']
 
@@ -255,6 +257,13 @@ export class ExecutionBroker {
   private sandboxRef: { root: string; ref: SandboxAccountRef } | null = null
   private sharedClosed = false
   private readonly counts = { shell: 0, commands: 0, programs: 0, refused: 0 }
+  /** 0.9.1: commands of projects that are not contained, started quietly (presentShell). */
+  private quietLaunches = 0
+
+  /** How many commands of projects that are not contained were started on a desktop of their own. */
+  quietCount(): number {
+    return this.quietLaunches
+  }
   /** Paths of repositories the sandbox account was given access to at this start, by path and kind of access. */
   private readonly granted = new Set<string>()
 
@@ -833,6 +842,44 @@ export class ExecutionBroker {
   }
 
   /**
+   * 0.9.1: how an agent's shell command of a project that is NOT contained runs without disturbing the user. Not a
+   * containment: the command is the user's, with the user's rights and the agent shell's own environment, exactly
+   * as it would have run. The launcher only starts it on a desktop of its own (whatever window it, a test or an
+   * application under test opens is on no screen and takes no focus), with no console window, in a job that ends
+   * it with the launcher. The text is written to a script, as for a contained command, never spliced into a line.
+   */
+  async presentShell(input: { sessionKey: string; worktree: string; cwd: string; shell: ShellKind; command: string }): Promise<{ ok: true; file: string; args: string[]; specPath: string } | { ok: false; reason: string }> {
+    try {
+      const shells = await this.findShells()
+      const dir = join(this.deps.sandboxDir, 'present', input.sessionKey.replace(/[^A-Za-z0-9-]/g, '_').slice(0, 80))
+      mkdirSync(dir, { recursive: true })
+      const id = randomBytes(8).toString('hex')
+      let commandLine: string
+      if (input.shell === 'bash') {
+        if (shells.gitRoot === null) return { ok: false, reason: 'Git Bash was not found.' }
+        const bash = [join(shells.gitRoot, 'usr', 'bin', 'bash.exe'), join(shells.gitRoot, 'bin', 'bash.exe')].find((p) => existsSync(p))
+        if (bash === undefined) return { ok: false, reason: 'Git Bash was not found.' }
+        const script = join(dir, `nx-${id}.sh`)
+        writeFileSync(script, `${input.command}\n`, { flag: 'wx' })
+        commandLine = `${quoteArg(bash)} --noprofile --norc ${quoteArg(script)}`
+      } else {
+        const script = join(dir, `nx-${id}.ps1`)
+        writeFileSync(script, `${String.fromCharCode(0xfeff)}${input.command}\nexit $LASTEXITCODE\n`, { flag: 'wx' })
+        commandLine = `${quoteArg(shells.powershell)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${quoteArg(script)}`
+      }
+      const cwd = existsSync(input.cwd) ? input.cwd : input.worktree
+      // No UI limits: they are no boundary for a command that runs as the user anyway, and a job that sets them
+      // cannot hold the job a browser engine makes for itself (the tests of an Electron project start one).
+      const specPath = this.deps.launcher.writeSpec({ profile: 'PRESENT', cwd, commandLine, env: {}, inheritEnv: true, uiLimits: 0, maxProcesses: 4096 })
+      const { file, args } = this.deps.launcher.invocation(specPath)
+      this.quietLaunches += 1
+      return { ok: true, file, args, specPath }
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message.slice(0, 200) : 'the quiet launch could not be prepared' }
+    }
+  }
+
+  /**
    * Runs a command line NEXUS itself runs in a project (the dependency setup, a check command) inside the
    * containment. The command line is one the project configured; it is refused if it uses shell operators, as
    * before 0.8. Throws when the containment cannot be made: the caller records a failed command, not a run.
@@ -846,7 +893,10 @@ export class ExecutionBroker {
     // The same validation as an uncontained run: a configured command is a program and its arguments.
     tokenizeCommandLine(input.commandLine)
     const roots = await this.roots(input)
-    const { env } = this.environment(input, roots)
+    const { env: contained } = this.environment(input, roots)
+    // 0.9.1: a check's output is read by agents and kept in records: contained runs printed it in colour (vitest's
+    // codes in every line of a 40 KB output), which an uncontained run never did.
+    const env = { ...contained, NO_COLOR: '1', FORCE_COLOR: '0' }
     const comspec = this.deps.baseEnv()['ComSpec'] ?? this.deps.baseEnv()['COMSPEC'] ?? 'C:\\Windows\\System32\\cmd.exe'
     const specPath = this.deps.launcher.writeSpec(this.spec(input, roots, `${quoteArg(comspec)} /d /s /c "${input.commandLine}"`, env, options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs + 5000 } : {}))
     try {

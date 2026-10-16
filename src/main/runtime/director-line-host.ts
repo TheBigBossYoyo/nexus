@@ -24,6 +24,8 @@ export interface DirectorLineHostDeps {
   pendingBoundaryRequests: () => number
   isOnline: () => boolean
   latestOvernightReport: () => string | null
+  /** 0.9.1: what ran with administrator rights in the last day, said plainly. */
+  privilegedActivity?: () => string
   pauseRun: (runId: string, detail: string) => Promise<unknown>
   resumeRun: (runId: string) => Promise<unknown>
   /** The same entry as the window's "new mission": admission, the Task Compiler and the capability broker follow from it. */
@@ -84,6 +86,9 @@ export function createDirectorLineHost(deps: DirectorLineHostDeps) {
       },
       async getOvernightReport() {
         return deps.latestOvernightReport()
+      },
+      async getPrivilegedActivity() {
+        return deps.privilegedActivity?.() ?? 'Nothing ran as administrator.'
       },
       async getLatestChecks() {
         let latest: RunEvent | null = null

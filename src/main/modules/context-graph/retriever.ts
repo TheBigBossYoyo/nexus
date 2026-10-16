@@ -32,15 +32,30 @@ const STOP: ReadonlySet<string> = new Set([
   'does', 'did', 'done', 'fix', 'bug', 'task', 'file', 'files', 'code', 'change', 'changes', 'update', 'implement', 'need', 'needs', 'via', 'per', 'out', 'who', 'how', 'why',
 ])
 
-/** The meaningful terms of a text: lowercase words of three letters or more that are not stop words. */
+/**
+ * 0.9.1: the words of a repository's layout. A task names its files, and every node's path holds these words too:
+ * `src`, `main`, `tests`, `unit` and `modules` matched every test and component of a mission's repository, and the
+ * worker's pack carried unrelated tests. The file's own name still counts (`service`, `progress`).
+ */
+const PATH_WORDS: ReadonlySet<string> = new Set(['src', 'main', 'lib', 'libs', 'tests', 'unit', 'modules', 'module', 'index', 'ts', 'tsx', 'js', 'jsx', 'mjs', 'renderer', 'components', 'views'])
+
+/** The meaningful terms of a text: lowercase words of three letters or more that are not stop words or layout words. */
 export function queryTerms(text: string): string[] {
   const out = new Set<string>()
-  for (const t of text.toLowerCase().split(/[^a-z0-9_]+/)) if (t.length >= 3 && !STOP.has(t)) out.add(t)
+  for (const t of text.toLowerCase().split(/[^a-z0-9_]+/)) if (t.length >= 3 && !STOP.has(t) && !PATH_WORDS.has(t)) out.add(t)
   return [...out]
 }
 
-/** A crude stem, so that "sessions" and "session", "caching" and "cache" compare equal. The index itself stems with Porter. */
-const stem = (t: string): string => (t.length > 4 ? t.replace(/(ing|ed|es|s)$/, '') : t)
+/**
+ * A crude stem, so that "sessions" and "session", "caching" and "cache" compare equal. The index itself stems with
+ * Porter. A stem shorter than four letters is no word (0.9.1: "comes" became "com" and matched "commands", "lines"
+ * became "lin" and matched "lint"): then the word is kept whole.
+ */
+const stem = (t: string): string => {
+  if (t.length <= 4) return t
+  const s = t.replace(/(ing|ed|es|s)$/, '')
+  return s.length >= 4 ? s : t
+}
 
 /** Categories and risks for which a narrow context is the wrong default. */
 const BROAD_CATEGORIES: ReadonlySet<string> = new Set(['architecture', 'security', 'refactor', 'migration', 'cross_cutting', 'workspace', 'unknown'])

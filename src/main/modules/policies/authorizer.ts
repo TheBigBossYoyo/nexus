@@ -1,5 +1,6 @@
 import { PUSH_FORM_HINT, grantedPushOf, renderUserGitScript, userGitOf, userGitOfPowerShell, type UserGitInvocation } from './git-pipeline'
 import { lookup as dnsLookup } from 'node:dns/promises'
+import { homedir } from 'node:os'
 import path from 'node:path'
 import type { AgentRole } from '@shared/domain'
 import { newId, nowIso } from '@shared/ids'
@@ -206,6 +207,11 @@ export function isPrivateHost(hostname: string): boolean {
   return LOCAL_SUFFIXES.includes(tld)
 }
 
+/** The folder name Claude Code gives the sessions of a working directory: every character not a letter or a digit becomes '-'. */
+export function claudeProjectSlug(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, '-')
+}
+
 /**
  * Builds the per-call policy check for one agent. Never throws: any internal failure is a deny.
  */
@@ -229,11 +235,22 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
   const shellRoots = writing ? [ctx.worktreeRoot] : restrictedProfile ? [ctx.worktreeRoot, ...(ctx.extraReadRoots ?? [])] : [ctx.worktreeRoot, ctx.projectRoot, ...(ctx.extraReadRoots ?? [])]
   const safePrefixes = ctx.safeCommandPrefixes.map((p) => p.trim().toLowerCase().split(/\s+/).filter(Boolean)).filter((p) => p.length > 0)
   const inReadRoots = (c: string): boolean => readRoots.some((r) => isPathInside(r, c))
+  // 0.9.1: Claude Code keeps a tool result too long for the conversation in a file of the session's own and the agent
+  // reads it back. In the owner's audit that read was put to them as "reads a file outside the enrolled project". Only
+  // the tool-results files of a session whose folder is this very worktree: never another project's sessions.
+  const ownToolResults = path.join(process.env['CLAUDE_CONFIG_DIR'] ?? path.join(homedir(), '.claude'), 'projects', claudeProjectSlug(ctx.worktreeRoot))
+  const isOwnToolResult = (c: string): boolean => {
+    const rel = path.relative(ownToolResults, c)
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false
+    const parts = rel.split(/[\\/]/)
+    return parts.length >= 2 && parts.length <= 3 && /^[0-9a-f-]{36}$/i.test(parts[0] ?? '') && parts[1] === 'tool-results' && (parts.length === 2 || /^[A-Za-z0-9_.-]{1,120}\.(txt|json)$/.test(parts[2] ?? ''))
+  }
 
   function authorizeRead(raw: string | null, field: string, base: string = worktree): Decided {
     if (raw === null) return deny(`${field} is required`)
     const target = canon(raw, base)
     if (NEXUS_DATA_TEXT.test(raw) || NEXUS_DATA_TEXT.test(target)) return needing(deny(NEXUS_DATA_DENY), 'ACCESS_NEXUS_CONTROL_PLANE', 'names NEXUS application data', target)
+    if (isOwnToolResult(target)) return ALLOW
     if (!inReadRoots(target)) {
       return needing(deny(`Read denied: ${raw} is outside the worktree, project and approved read locations. Use paths inside ${worktree}.`), 'READ_OUTSIDE_PROJECT', 'reads a file outside the enrolled project', target)
     }
@@ -343,7 +360,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       ]
       const needs = [
         baseNeed,
-        ...needsForFindings(findings, { contained, confined }),
+        ...needsForFindings(findings, { contained, confined, localPorts: ctx.autonomy?.localPorts() ?? [] }),
         ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons.map((r) => needForExecutionReason(r, verdict.trust, { contained, confined })) : []),
       ]
       const reasons = [...(base.behavior === 'ask' ? [base.reason] : []), ...(verdict.decision === 'REQUIRE_APPROVAL' ? verdict.reasons : [])]
@@ -603,7 +620,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
    */
   async function containShell(req: ToolRequest, outcome: Outcome): Promise<Outcome> {
     const containment = ctx.containment
-    if (containment === undefined || containment.profile === 'STANDARD' || outcome.tool.behavior !== 'allow' || outcome.shell === undefined) return outcome
+    if (containment === undefined || (containment.profile === 'STANDARD' && containment.quiet !== true) || outcome.tool.behavior !== 'allow' || outcome.shell === undefined) return outcome
     const refuse = (detail: string): Outcome => {
       const reason = `Not run: ${detail} Nothing is run outside the containment in this project.`
       return { tool: deny(reason), audit: { classification: 'SYSTEM_SENSITIVE', provenance: 'not_applicable', decision: 'DENY', reason } }

@@ -12,7 +12,7 @@ import {
 } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { MIN_ROUTING_SAMPLES } from '@shared/v2'
-import { sensitiveSettingsChanges } from '@shared/settings'
+import { sensitiveSettingsChanges, type Settings } from '@shared/settings'
 import { errorMessage, NexusError } from '@shared/result'
 import type { z } from 'zod'
 import type { AgentRuntime } from '@main/modules/agent-runtime/types'
@@ -50,6 +50,8 @@ import {
   type CompiledTaskSpec,
 } from '@shared/intelligence'
 import { withAdmittedIntent } from '@main/modules/intelligence/admission-prompt'
+import { createPrivilegeHandlers, type PrivilegeHandlerContext } from './privilege-handlers'
+import type { UserDisturbanceMetrics } from '@shared/presentation'
 
 export interface IpcContext {
   /** 0.9: progress and time remaining of missions. Absent: the channel answers null. */
@@ -80,6 +82,8 @@ export interface IpcContext {
    * before 0.7 (tests of the handlers).
    */
   confirmSettings?: (changes: string[]) => Promise<boolean>
+  /** 0.9.1: told of the settings once saved (the priority of missions' work follows them at once). */
+  onSettingsSaved?: (settings: Settings) => void
   /** Native folder picker; resolves null when cancelled. Lives in main, never in the renderer. */
   pickDirectory: () => Promise<string | null>
   openDataDir: () => Promise<void>
@@ -102,6 +106,10 @@ export interface IpcContext {
   directorLine?: DirectorLineHandlerContext['directorLine']
   /** 0.8: the containment as the runtime holds it. Absent (tests of other handlers): no containment exists and none can be set up. */
   isolation?: Omit<IsolationHandlerContext, 'confirm'>
+  /** 0.9.1: privilege sessions. Absent: none can be prepared. */
+  privilege?: PrivilegeHandlerContext
+  /** 0.9.1: the disturbance metrics. Absent: nothing was measured. */
+  presentation?: { metrics: (runId: string) => UserDisturbanceMetrics }
 }
 
 type Handlers = {
@@ -197,6 +205,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           'The change was not confirmed, so the settings are as they were.',
         )
       const saved = repos.settings.set(settings)
+      ctx.onSettingsSaved?.(saved)
       if (before.claude.subscriptionMode !== saved.claude.subscriptionMode) {
         authCache = null
         ctx.push({ kind: 'auth.changed' })
@@ -576,8 +585,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       candidates: repos.planningCandidates.listByRun(runId),
       critiques: repos.planningCritiques.listByRun(runId),
     }),
-    'planning.recommend': ({ projectId, prompt }) =>
-      recommendPlanningMode(prompt, repos.projects.require(projectId).profile),
+    'planning.recommend': ({ projectId, prompt, mode }) =>
+      recommendPlanningMode(prompt, repos.projects.require(projectId).profile, mode),
     'routing.list': ({ runId }) => repos.routingDecisions.listByRun(runId),
     'performance.summary': ({ projectId }) => {
       const outcomes = projectId
@@ -619,6 +628,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       confirmation,
       compilationMode,
       compiledTaskSpecId,
+      adminRecovery,
       ...input
     }) =>
       intelligenceOperations.run(async () => {
@@ -663,6 +673,7 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
             p.endAction !== 'NONE' && p.failsafeEnabled
               ? `Failsafe: Windows shuts this PC down after ${Math.floor(p.failsafeAfterMinutes / 60)} h ${p.failsafeAfterMinutes % 60} min even if NEXUS stops responding. A timed shutdown always closes applications without waiting.`
               : 'Failsafe: none',
+            ...(adminRecovery === true ? ['Administrator recovery: one Windows UAC prompt follows now, for a temporary broker that ends with this run.'] : []),
           ].join('\n')
           const ok = await ctx.confirmPower(
             p.endAction === 'NONE'
@@ -672,13 +683,21 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           )
           if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
         }
-        return supervisor.start({
+        const started = await supervisor.start({
           ...defined,
           confirmed,
           confirmation,
           compiledTaskSpec: spec,
           ...(snapshot && snapshot !== 'no-head' ? { expectedHead: snapshot } : {}),
         })
+        if (adminRecovery !== true) return started
+        // 0.9.1: the one UAC prompt of the night, now, while the owner is here (never at 03:00). Declined or
+        // unavailable, the night goes on without administrator recovery, and the report says so.
+        const service = ctx.privilege?.service() ?? null
+        const prepared = service
+          ? await service.prepare({ scope: 'OVERNIGHT', runId: started.run.id, projectId: input.projectId })
+          : { ok: false as const, reason: ctx.privilege?.unavailableReason ?? 'Privilege sessions are not available.' }
+        return { ...started, privilege: { ok: prepared.ok, reason: prepared.ok ? null : prepared.reason } }
       }),
     'overnight.startArena': async ({ campaign, policy: p, confirmed, confirmation }) => {
       const supervisor = overnight()
@@ -844,6 +863,9 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
       ...(ctx.confirmAutonomy ? { confirm: ctx.confirmAutonomy } : {}),
     }),
     ...createV71Handlers({ repos, git: ctx.git }),
+    'presentation.metrics': ({ runId }) =>
+      ctx.presentation?.metrics(runId) ?? { runId, measured: false, uacPrompts: 0, visibleWindows: 0, foregroundSteals: 0, consoleFlashes: 0, unexpectedDialogs: 0, notifications: null, recent: [], quietCommands: 0 },
+    ...createPrivilegeHandlers(ctx.privilege ?? { service: () => null, unavailableReason: 'This runtime has no privilege broker.', integrity: () => ({ state: 'UNAVAILABLE', reason: 'This runtime has no privilege record.', verified: 0, legacy: 0, pending: 0, evicted: 0, lastVerifiedChainSeq: null, findings: [] }), projectOfRun: () => null }),
   }
 }
 

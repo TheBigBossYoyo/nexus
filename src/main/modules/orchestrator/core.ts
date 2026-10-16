@@ -1,3 +1,4 @@
+import { failedTestFiles, rerunTestsCommand, scopeFinalChecks, scopeTaskChecks } from './check-scope'
 import {
   TERMINAL_RUN_STATES,
   type CommandResult,
@@ -38,6 +39,8 @@ const activeKey = (runId: string): string => `run-active:${runId}`
 
 const CHECK_ORDER = ['typecheck', 'lint', 'build', 'test'] as const
 const CHECK_OUTPUT_BYTES = 48 * 1024
+/** The lines of a test run that say a file or a test failed (vitest, jest, node --test, pytest, cargo, go). */
+const FAILURE_LINE = /^\s*(?:FAIL\b|×|✗|not ok\b|FAILED\b|--- FAIL)|\(\d+ tests? \| \d+ failed\)|^\s*❯ \S+\.(?:test|spec)\./
 
 /** Dependency install command for a fresh worktree, by lockfile-derived package manager. */
 function setupCommand(project: Project): string | null {
@@ -213,25 +216,59 @@ export class Core {
   }
 
   /** Run the configured check commands and store every command with its result. */
-  async runChecks(run: Run, taskId: string | null, cwd: string, attempt: number): Promise<Verification> {
+  async runChecks(run: Run, taskId: string | null, cwd: string, attempt: number, scope?: { changedFiles: readonly string[] }): Promise<Verification> {
     const { repos, bus } = this.deps
-    const commands = CHECK_ORDER.flatMap((name) => {
-      const command = run.config.checks[name]
-      return command ? [{ name, command }] : []
-    })
-    bus.emit({ runId: run.id, taskId, type: 'checks.started', payload: { commands: commands.map((c) => c.command) } })
+    // 0.9.1: a task's checks are about its own changes (check-scope.ts); the integration runs every command whole,
+    // unless the owner chose the affected tests only for it (a scope is then given for the integration too).
+    const commands =
+      scope !== undefined && taskId !== null
+        ? scopeTaskChecks({ checks: run.config.checks, order: CHECK_ORDER, cwd, changedFiles: scope.changedFiles })
+        : scope !== undefined
+          ? scopeFinalChecks({ checks: run.config.checks, order: CHECK_ORDER, cwd, changedFiles: scope.changedFiles })
+          : CHECK_ORDER.flatMap((name) => {
+            const command = run.config.checks[name]
+            return command ? [{ name, command, scope: 'FULL' as const, skip: false, note: null }] : []
+          })
+    bus.emit({ runId: run.id, taskId, type: 'checks.started', payload: { commands: commands.filter((c) => !c.skip).map((c) => c.command) } })
 
     const results: CommandResult[] = []
-    for (const { name, command } of commands) {
-      results.push(await this.runOne(name, command, cwd, run, taskId))
+    const flaky: string[] = []
+    for (const check of commands) {
+      if (check.skip) {
+        results.push({ name: check.name, command: check.command, cwd, exitCode: 0, timedOut: false, durationMs: 0, output: check.note ?? 'Not run for this task.' })
+        continue
+      }
+      let result = await this.runOne(check.name, check.command, cwd, run, taskId)
+      // 0.9.1: a test run whose failures are a few named files runs those files once more. Passing then, the check
+      // passes and says so (a test that fails once in a full run is told apart in seconds from a defect, where a
+      // repair and the whole suite again took half an hour); failing again, it fails as before.
+      if (check.name === 'test' && result.exitCode !== 0 && !result.timedOut) {
+        const files = failedTestFiles(result.output)
+        const rerun = files === null ? null : rerunTestsCommand(cwd, check.command, files)
+        if (files !== null && rerun !== null) {
+          const again = await this.runOne('test', rerun, cwd, run, taskId)
+          if (again.exitCode === 0 && !again.timedOut) {
+            result = {
+              ...result,
+              exitCode: 0,
+              durationMs: result.durationMs + again.durationMs,
+              output: `[Failed in this run, then passed when run again alone: ${files.join(', ')}. Possibly flaky: a test that fails only sometimes.]\n${again.output}\n--- the first run ---\n${result.output.slice(-6000)}`,
+            }
+            flaky.push(...files)
+            this.deps.bus.emit({ runId: run.id, taskId, type: 'checks.flaky', payload: { files } })
+          }
+        }
+      }
+      results.push(check.note !== null ? { ...result, output: `[${check.note}]\n${result.output}` } : result)
     }
     const failed = results.filter((r) => r.exitCode !== 0 || r.timedOut)
     const passed = failed.length === 0
+    const partial = taskId === null && commands.some((c) => c.scope === 'CHANGED')
     const summary =
       commands.length === 0
         ? 'No check commands are configured for this project; nothing was run.'
         : passed
-          ? `${results.length} check command(s) passed.`
+          ? `${results.length} check command(s) passed${partial ? ' (tests: only those affected by the mission, as the owner set it; the whole suite was not run)' : ''}${flaky.length > 0 ? `; failed once and passed when run again alone: ${flaky.join(', ')}` : ''}.`
           : `Failed: ${failed.map((r) => r.name).join(', ')}`
 
     return bus.transaction(() => {
@@ -249,7 +286,7 @@ export class Core {
         failures: failed.map((r) => ({
           criterion: `Check "${r.name}" passes`,
           evidence: r.output.slice(-4000),
-          likelyCause: r.timedOut ? 'Command timed out' : `Exit code ${r.exitCode ?? 'n/a'}`,
+          likelyCause: r.timedOut ? `Command timed out after ${this.deps.repos.settings.get().execution.checkTimeoutMinutes} min (the check could not complete; this says nothing about the task's code)` : `Exit code ${r.exitCode ?? 'n/a'}`,
           relevantFiles: [],
         })),
         createdAt: nowIso(),
@@ -303,16 +340,24 @@ export class Core {
   }
 
   private async runOne(name: string, command: string, cwd: string, run: Run, taskId: string | null): Promise<CommandResult> {
-    const timeoutMs = this.deps.repos.settings.get().execution.checkTimeoutMinutes * 60_000
+    // A task's checks are scoped to its changes; the integration runs every command whole, the full test suite
+    // included, once: it gets three times the limit (45 to 120 minutes), so that a large suite is not cut off.
+    const minutes = this.deps.repos.settings.get().execution.checkTimeoutMinutes
+    const timeoutMs = (taskId === null ? Math.min(120, Math.max(minutes * 3, 45)) : minutes) * 60_000
     const started = Date.now()
+    // 0.9.1: the end of a long output is what is kept; a test run's failed files are printed as they fail, so they
+    // are kept apart and put first when the output was cut (a contained full suite with 25 failed files kept 8 of them).
+    const keepLines = name === 'test' ? FAILURE_LINE : undefined
+    const withFailures = (r: { output: string; truncated: boolean; keptLines?: string[] }): string =>
+      r.truncated && (r.keptLines?.length ?? 0) > 0 ? `[The output is longer than what is kept; the failures it reported:]\n${(r.keptLines ?? []).join('\n')}\n[...]\n${r.output}` : r.output
     try {
       // 0.8: in an enrolled project these commands run inside its containment. They are project code: an install
       // hook, a test. A containment that cannot be made is a failed command, never an uncontained run.
-      const contained = await this.deps.execution?.runProjectCommand({ projectId: run.projectId, sessionKey: `${run.id}:${taskId ?? 'run'}`, worktree: cwd, commandLine: command }, { timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES })
-      if (contained) return { name, command, cwd, exitCode: contained.exitCode, timedOut: contained.timedOut, durationMs: contained.durationMs, output: contained.output }
+      const contained = await this.deps.execution?.runProjectCommand({ projectId: run.projectId, sessionKey: `${run.id}:${taskId ?? 'run'}`, worktree: cwd, commandLine: command }, { timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, ...(keepLines ? { keepLines } : {}) })
+      if (contained) return { name, command, cwd, exitCode: contained.exitCode, timedOut: contained.timedOut, durationMs: contained.durationMs, output: withFailures(contained) }
       // Setup and check commands run code the agents wrote: they get no Claude credentials.
-      const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, env: projectCommandEnv() })
-      return { name, command, cwd, exitCode: r.exitCode, timedOut: r.timedOut, durationMs: r.durationMs, output: r.output }
+      const r = await runCommandLine(command, { cwd, timeoutMs, maxOutputBytes: CHECK_OUTPUT_BYTES, env: projectCommandEnv(), ...(keepLines ? { keepLines } : {}) })
+      return { name, command, cwd, exitCode: r.exitCode, timedOut: r.timedOut, durationMs: r.durationMs, output: withFailures(r) }
     } catch (e) {
       // Unresolvable executable or a command line NEXUS refuses to interpret: recorded as a failed check.
       return { name, command, cwd, exitCode: null, timedOut: false, durationMs: Date.now() - started, output: errorMessage(e) }

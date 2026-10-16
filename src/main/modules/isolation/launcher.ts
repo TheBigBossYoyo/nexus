@@ -33,7 +33,14 @@ export interface SandboxAccountRef {
 }
 
 export interface LaunchSpec {
-  profile: ContainmentProfile
+  /**
+   * The containment, or 0.9.1's PRESENT: no containment at all (the user's own rights and environment), only a
+   * desktop of its own and a job, so that a command of a project that is not contained shows nothing on the
+   * user's screen and takes no focus. Presentation, not authority.
+   */
+  profile: ContainmentProfile | 'PRESENT'
+  /** PRESENT only: the command gets the launcher's own environment (the agent shell's), not `env`. */
+  inheritEnv?: boolean
   cwd: string
   /** The Windows command line, as CreateProcess takes it. */
   commandLine: string
@@ -120,6 +127,11 @@ export function renderSpec(spec: LaunchSpec): string {
     lines.push(`desktop=${spec.desktop}`)
   }
   if (spec.reportPath !== undefined) lines.push(`report=${b64(spec.reportPath)}`)
+  if (spec.inheritEnv === true) {
+    if (spec.profile !== 'PRESENT') throw new Error('Only the PRESENT profile inherits the environment.')
+    lines.push('inherit-env=1')
+  }
+  if (spec.profile === 'PRESENT' && (spec.sandbox !== undefined || spec.appContainer !== undefined || (spec.capabilities ?? []).length > 0)) throw new Error("The PRESENT profile is the user's own: no account, AppContainer or capability.")
   if (spec.profile === 'ISOLATED') {
     if (spec.sandbox === undefined) throw new Error('The ISOLATED profile needs the sandbox account.')
     lines.push(`credential=${b64(spec.sandbox.credentialPath)}`, `stage2=${b64(spec.sandbox.stage2Path)}`, `stage2-dir=${b64(spec.sandbox.stage2Dir)}`)
@@ -366,6 +378,13 @@ export class Launcher {
       writeFileSync(join(secret, 'sentinel.txt'), 'nexus-verify-sentinel')
       if (userOnly !== null) {
         mkdirSync(userOnly, { recursive: true })
+        // 0.9.1: the user's own file, wherever the folder is: its access list is narrowed to the user and the system,
+        // without what it would inherit. The check assumed the folder was in the user's profile; a NEXUS checkout in a
+        // mission's worktree (under ProgramData, which the sandbox account may read) made every containment test
+        // report "the sandbox account read a file in the user's profile" when it read a file anyone may read.
+        const system32 = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')
+        const user = `${process.env['USERDOMAIN'] ?? ''}\\${process.env['USERNAME'] ?? ''}`
+        await runProcess(join(system32, 'icacls.exe'), [userOnly, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '/Q'], { cwd: system32, timeoutMs: 30_000, env: minimalEnv(), maxOutputBytes: 16 * 1024 })
         writeFileSync(join(userOnly, 'sentinel.txt'), 'nexus-verify-user-sentinel')
       }
       await this.label('low', inside)

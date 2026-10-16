@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { CommunicationPolicy } from '@shared/director-line'
 import { fakeUpdate } from '@main/modules/director-line/provider'
 import { MemoryDeliveryStore, MemoryIdentityStore, MemoryOutboxStore, MemoryPairingStateStore, MemoryPolicyStore, MemorySeenStore } from '@main/modules/director-line/stores'
 import { snapshot, makeRig, OPERATOR, STRANGER } from './harness'
@@ -227,46 +226,76 @@ describe('actions', () => {
   })
 })
 
-describe('voice input through the line', () => {
-  async function voiceRig(mutate?: (p: CommunicationPolicy) => void) {
+describe('"call me"', () => {
+  it.each([
+    ['CALLING', 'Calling you now.'],
+    ['NOT_CONFIGURED', 'The voice line is not set up.'],
+    ['NOT_PAIRED', 'The voice line is not set up.'],
+    ['LINE_BUSY', 'The line is busy.'],
+    ['NOT_REGISTERED', 'The voice line is not connected right now.'],
+    ['SUPPRESSED', 'Not calling: the limit of calls for today is reached.'],
+    ['SOMETHING_ELSE', 'The call could not be placed.'],
+  ])('by message, the runtime says %s and the reply is: %s', async (said, reply) => {
     const r = makeRig()
-    await r.pairing.pairPhoneFromSettings('TWILIO_VOICE', '+33612345678', 'me')
-    await r.pairing.setPin('482915')
-    if (mutate) await r.setPolicy(mutate)
-    return r
-  }
-
-  it('needs the paired number and the PIN; refuses with one fixed sentence otherwise', async () => {
-    const r = await voiceRig()
-    expect((await r.line.handleVoiceInput({ from: '+33612345678', pin: '111111', text: 'status', callId: 'c1' })).speak).toBe('Not authorised.')
-    expect((await r.line.handleVoiceInput({ from: '+33699999999', pin: '482915', text: 'status', callId: 'c2' })).speak).toBe('Not authorised.')
-    expect((await r.line.handleVoiceInput({ from: '+33612345678', pin: null, text: 'status', callId: 'c3' })).speak).toBe('Not authorised.')
-    const ok = await r.line.handleVoiceInput({ from: '+33612345678', pin: '482915', text: 'status', callId: 'c4' })
-    expect(ok.authenticated).toBe(true)
-    expect(ok.speak).toContain('RaceDeck')
+    r.voice.askReply = said
+    await r.pairOperator()
+    await r.inbound('call me')
+    expect(r.voice.asked).toBe(1)
+    expect(lastReply(r)).toBe(reply)
   })
 
-  it('creates no task by voice and refuses dangerous requests', async () => {
-    const r = await voiceRig()
-    const task = await r.line.handleVoiceInput({ from: '+33612345678', pin: '482915', text: 'create a task for RaceDeck: add dark mode', callId: 'c1' })
-    expect(task.speak).toContain('cannot be added by phone')
-    const push = await r.line.handleVoiceInput({ from: '+33612345678', pin: '482915', text: 'push it', callId: 'c2' })
-    expect(push.speak).toContain('decided at the machine')
-    expect(r.spies.submit).not.toHaveBeenCalled()
+  it('in French too, and nothing is placed for a stranger', async () => {
+    const r = makeRig()
+    await r.pairOperator()
+    await r.inbound('appelle-moi')
+    expect(r.voice.asked).toBe(1)
+    await r.inbound('call me', STRANGER)
+    expect(r.voice.asked).toBe(1)
   })
 
-  it('without a PIN (only when the owner chose so) reads but does not act', async () => {
-    const r = await voiceRig((p) => { p.requirePinForStatus = false })
-    expect((await r.line.handleVoiceInput({ from: '+33612345678', pin: null, text: 'status', callId: 'c1' })).speak).toContain('RaceDeck')
-    expect((await r.line.handleVoiceInput({ from: '+33612345678', pin: null, text: 'pause', callId: 'c2' })).speak).toContain('PIN is needed')
-    expect(r.spies.pause).not.toHaveBeenCalled()
+  it('says the voice line is not set up when nothing can call', async () => {
+    const r = makeRig({ callOperator: undefined })
+    await r.pairOperator()
+    await r.inbound('call me')
+    expect(lastReply(r)).toBe('The voice line is not set up.')
   })
 
-  it('a replayed envelope id is processed once', async () => {
-    const r = await voiceRig()
-    const input = { from: '+33612345678', pin: '482915', text: 'pause', callId: 'c1', envelopeId: 'e1' }
-    await r.line.handleVoiceInput(input)
-    await r.line.handleVoiceInput(input)
-    expect(r.spies.pause).toHaveBeenCalledTimes(1)
+  it('on a call it places nothing: "We are already talking."', async () => {
+    const r = makeRig()
+    await r.pairing.pairVoiceIdentityFromSettings('SIP_VOICE', 'sip:me@sip.linphone.org', 'Phone')
+    const said = await r.line.performSpoken({ from: 'sip:me@sip.linphone.org', callId: 'c1', turnId: '1', text: 'call me', command: { kind: 'CALL_ME' }, channel: 'SIP_VOICE', transcript: [] })
+    expect(said).toBe('We are already talking.')
+    expect(r.voice.asked).toBe(0)
+  })
+
+  it('a stranger on a call is not authorised, whatever the command', async () => {
+    const r = makeRig()
+    const said = await r.line.performSpoken({ from: 'sip:other@sip.linphone.org', callId: 'c1', turnId: '1', text: 'call me', command: { kind: 'CALL_ME' }, channel: 'SIP_VOICE', transcript: [] })
+    expect(said).toBe('Not authorised.')
+  })
+})
+
+describe('sendToOperator', () => {
+  it('sends by message when it can, and says so', async () => {
+    const r = makeRig()
+    await r.pairOperator()
+    expect(await r.line.sendToOperator('I called and there was no answer.')).toBe(true)
+    expect(r.provider.sent.map((m) => m.text)).toEqual(['NEXUS: I called and there was no answer.'])
+    expect(r.spies.notify).not.toHaveBeenCalled()
+  })
+
+  it('uses the notification on the PC when the message provider is not configured or nobody is paired', async () => {
+    const r = makeRig()
+    expect(await r.line.sendToOperator('NEXUS: hello')).toBe(true)
+    expect(r.spies.notify).toHaveBeenCalledTimes(1)
+    await r.pairOperator()
+    r.provider.configured = false
+    expect(await r.line.sendToOperator('again')).toBe(true)
+    expect(r.spies.notify).toHaveBeenCalledTimes(2)
+  })
+
+  it('is false when nothing can deliver', async () => {
+    const r = makeRig({ localNotify: undefined })
+    expect(await r.line.sendToOperator('hello')).toBe(false)
   })
 })

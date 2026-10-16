@@ -1,3 +1,4 @@
+import { constants, setPriority } from 'node:os'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,6 +11,14 @@ import type { UiRequest, UiResponse } from '@shared/runtime-protocol'
 import { CLOSE_DIALOG, closeBehaviour, type CloseChoice } from './modules/overnight/tray-model'
 import { RuntimeClient } from './modules/runtime/client'
 import { RUNTIME_FLAG } from './runtime-electron'
+
+// 0.9.1: the window is started by the runtime, whose work runs below normal priority (Settings > Execution), and
+// Windows hands that priority down; what the owner looks at and clicks keeps the normal one, and so do its renderers.
+try {
+  setPriority(process.pid, constants.priority.PRIORITY_NORMAL)
+} catch {
+  // Left as it was started.
+}
 
 const devUrl = !app.isPackaged ? process.env['ELECTRON_RENDERER_URL'] : undefined
 const rendererFile = join(import.meta.dirname, '../renderer/index.html')

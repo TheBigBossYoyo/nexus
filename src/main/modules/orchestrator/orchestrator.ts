@@ -1,3 +1,4 @@
+import { repositoryFacts } from './repo-facts'
 import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import {
@@ -28,6 +29,7 @@ import type { PauseCause } from '@shared/events'
 import type { RecoverableRun } from '@shared/ipc'
 import { newId, nowIso } from '@shared/ids'
 import { errorMessage, NexusError } from '@shared/result'
+import { profileProject } from '../profile/project-profiler'
 import { buildRunConfig } from '@shared/settings'
 import type { ConcreteStrategy, PolicyDecision, RunStrategyInfo, Strategy, TaskProfile } from '@shared/v3'
 import {
@@ -207,6 +209,27 @@ export class Orchestrator implements PipelineHost {
         : await git.headCommit(project.rootPath).catch(() => null)
     if (!readOnly && !baseCommit) {
       throw new NexusError('invalid_state', 'The repository has no commits yet. Create an initial commit first.')
+    }
+    // 0.9.1: the profile is the project as it was when it was last read (its branch, its check commands). One
+    // taken at another commit is read again before the run uses it: a project added at 0.2.1 kept saying so, and
+    // told the agents so, ten days and a hundred commits later.
+    if (isRepo && baseCommit && project.profile !== null && project.profile.headCommit !== baseCommit) {
+      try {
+        const profile = await profileProject(project.rootPath, {
+          isRepository: (p) => git.isRepository(p),
+          repoRoot: (p) => git.repoRoot(p).catch(() => null),
+          currentBranch: (p) => git.currentBranch(p).catch(() => null),
+          headCommit: (p) => git.headCommit(p).catch(() => null),
+          status: async (p) => ({ dirty: !(await git.status(p)).clean }),
+          trackedFiles: async (p) => {
+            const r = await git.run(p, ['ls-files', '-z'], { maxOutputBytes: 8 * 1024 * 1024, timeoutMs: 30_000 }).catch(() => null)
+            return r === null || r.exitCode !== 0 ? null : r.stdout.split('\0').filter((f) => f !== '')
+          },
+        })
+        Object.assign(project, repos.projects.update(project.id, { profile }))
+      } catch (e) {
+        this.core.log(`the profile of ${project.name} could not be read again: ${errorMessage(e)}`)
+      }
     }
 
     const checks = project.profile?.commands ?? { build: null, test: null, lint: null, typecheck: null }
@@ -451,7 +474,12 @@ export class Orchestrator implements PipelineHost {
     // plans, waits or is paused: the plan then described one state of the repository and the workers, in
     // worktrees made from the base commit, executed another. A run with no base commit (a folder that is not a
     // repository, a read-only question) has only the checkout to read.
-    const planningRoot = run.baseCommit && run.mode !== 'ask' && run.mode !== 'audit' ? (await this.ensureIntegration(run)).path : project.rootPath
+    // 0.9.1: a read-only mission of a contained project reads a snapshot too. Its commands run as the sandbox
+    // account, which cannot reach the user's checkout: the owner's first audit of an enrolled project had every
+    // shell command of every session refused ("The worktree is not inside the sandbox root").
+    const readOnly = run.mode === 'ask' || run.mode === 'audit'
+    const snapshot = run.baseCommit !== null && (!readOnly || this.deps.execution?.contained?.(run.projectId) === true)
+    const planningRoot = snapshot ? (await this.ensureIntegration(run)).path : project.rootPath
     if (this.closing || repos.runs.require(runId).state !== 'planning') return
 
     if ((run.config.planningMode ?? 'single') === 'consensus') {
@@ -1049,13 +1077,17 @@ export class Orchestrator implements PipelineHost {
     const integration = repos.worktrees.listByRun(runId).find((w) => w.taskId === null && w.state === 'active')
     const criteria = repos.criteria.listByRun(runId).filter((c) => c.taskId === null)
 
-    if (integration && run.baseCommit && existsSync(integration.path)) {
+    // A read-only mission's worktree is a snapshot to read (0.9.1, a contained project): nothing was merged into it to check.
+    if (integration && run.baseCommit && existsSync(integration.path) && run.mode !== 'ask' && run.mode !== 'audit') {
       const control = this.runControl(runId)
       const cycle = tasks.filter((t) => t.key.startsWith('mission-fix-')).length + 1
       // Under the merge lock: a task merging into the integration worktree must not race the checks
       // (or the cleaning that follows them).
+      // 0.9.1: the owner may have chosen the affected tests only for the final verification (Settings > Execution).
+      const affectedOnly = repos.settings.get().execution.finalTests === 'AFFECTED'
+      const changedFiles = affectedOnly ? await git.changedFiles(integration.path, run.baseCommit, 'HEAD').catch(() => null) : null
       const checks = await this.withMergeLock(runId, async () => {
-        const result = await this.core.runChecks(run, null, integration.path, cycle)
+        const result = await this.core.runChecks(run, null, integration.path, cycle, changedFiles === null ? undefined : { changedFiles })
         // Checks can leave files behind; only merges are committed in the integration worktree, so restore
         // it before a mission-fix task merges into it.
         await this.core.cleanWorktree(integration.path)
@@ -1083,6 +1115,9 @@ export class Orchestrator implements PipelineHost {
             instructions: renderInstructionsInForce(repos, run, null, { withRequest: false }),
             missionCriteria: criteria.map((c) => c.text),
             diffStat: stat || '(no changes)',
+            patch: diff.patch,
+            repoFacts: await repositoryFacts(git, integration.path, run.baseCommit),
+            fullChecks: changedFiles === null,
             checkResults: checks.commands,
             checkOutputMode: checkOutputMode(this.deps.repos.settings.get().tokens),
             planSummary: run.plan?.summary,
@@ -1624,7 +1659,7 @@ export class Orchestrator implements PipelineHost {
   private async removeReadSnapshot(runId: string): Promise<void> {
     const { repos, git } = this.deps
     const run = repos.runs.get(runId)
-    if (!run || run.mode !== 'ask' || !TERMINAL_RUN_STATES.includes(run.state)) return
+    if (!run || (run.mode !== 'ask' && run.mode !== 'audit') || !TERMINAL_RUN_STATES.includes(run.state)) return
     const snapshots = repos.worktrees.listByRun(runId).filter((w) => w.taskId === null && w.state !== 'removed')
     if (snapshots.length === 0) return
     await this.idle(runId)

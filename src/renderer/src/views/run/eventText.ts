@@ -92,6 +92,7 @@ const RENDER: Renderers = {
 
   'checks.started': (p) => `Checks started: ${p.commands.join(', ')}`,
   'checks.completed': (p) => (p.passed ? 'Checks passed' : `Checks failed: ${p.failed.join(', ')}`),
+  'checks.flaky': (p) => `Failed once, passed when run again: ${p.files.join(', ')}`,
 
   'review.started': (p) => `Review started (attempt ${p.attempt})`,
   'review.finding': (p) => `Finding [${p.severity}] ${trunc(p.title)}${p.file ? ` in ${p.file}` : ''}`,
@@ -211,6 +212,8 @@ export function eventTone(event: RunEvent): Tone {
       return 'waiting'
     case 'checks.completed':
       return (event.payload as EventPayloads['checks.completed']).passed ? 'success' : 'danger'
+    case 'checks.flaky':
+      return 'warning'
     case 'review.completed':
       return (event.payload as EventPayloads['review.completed']).verdict === 'approved' ? 'success' : 'warning'
     case 'agent.tool.completed':
@@ -283,6 +286,26 @@ export function pauseDetailFromEvents(events: readonly RunEvent[]): string | nul
     }
   }
   return null
+}
+
+/**
+ * 0.9.1: who paused the run, from its last run.paused event: 'intervention' when NEXUS stopped because nothing could
+ * make progress without the owner (failed or blocked tasks), 'user' when the owner paused it. Null when unknown.
+ */
+export function pauseCauseFromEvents(events: readonly RunEvent[]): EventPayloads['run.paused']['cause'] | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]
+    if (e?.type === 'run.paused') return (e.payload as EventPayloads['run.paused']).cause ?? null
+  }
+  return null
+}
+
+/** The words for a paused run: NEXUS's own stop is never said to be the owner's. */
+export function pauseLabel(reason: string | null, cause: EventPayloads['run.paused']['cause'] | null): string {
+  if (cause === 'intervention') return 'Needs your attention'
+  if (reason === 'user') return 'Paused by you'
+  if (reason === 'recovery') return 'Paused after a restart'
+  return 'Paused'
 }
 
 /** Merge a fetched page into the accumulated list, ordered by seq, without duplicates. */

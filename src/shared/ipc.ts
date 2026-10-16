@@ -1,3 +1,5 @@
+import { PrivilegePrepareInputSchema, type PrivilegeSessionStatus, type PrivilegedOperationReceipt } from './privilege'
+import type { UserDisturbanceMetrics } from './presentation'
 import type { ProgressSnapshot } from './progress'
 import { z } from 'zod'
 import type { BuildIdentity } from './build-identity'
@@ -254,10 +256,12 @@ const WorkspaceKey = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
 
 import type { ConnectionState, RuntimeStatus } from './runtime-protocol'
 import type { WorkersOverview } from './workers'
-import { OPERATOR_CHANNEL_KINDS, REPORT_EVENT_KINDS, type DirectorLineSettingsView } from './director-line'
+import {
+  normalizeSipIdentity, OPERATOR_CHANNEL_KINDS, REPORT_EVENT_KINDS,
+  type CallRecordView, type CallSecurityView, type DirectorLineSettingsView, type PlaceCallResult, type VoiceLinePolicyView, type VoiceLineState, type VoiceMediaEncryption,
+} from './director-line'
 
 /** 0.9: the Director Line. A secret is accepted as input once and is never part of any output. */
-const E164 = /^\+[1-9]\d{6,14}$/
 const DirectorLineEventPolicy = z
   .object({
     enabled: z.boolean(),
@@ -558,7 +562,7 @@ export const ipcInputs = {
   'graph.revisions': z.object({ runId: Id }).strict(),
   'graph.proposals': z.object({ runId: Id }).strict(),
   'planning.candidates': z.object({ runId: Id }).strict(),
-  'planning.recommend': z.object({ projectId: Id, prompt: z.string().max(20_000) }).strict(),
+  'planning.recommend': z.object({ projectId: Id, prompt: z.string().max(20_000), mode: RunModeSchema.optional() }).strict(),
   'routing.list': z.object({ runId: Id }).strict(),
   'performance.summary': z.object({ projectId: Id.optional() }).strict(),
   'intelligence.list': z
@@ -592,6 +596,8 @@ export const ipcInputs = {
       reviewMode: z.enum(['standard', 'dual', 'auto']).optional(),
       /** v0.3. Absent: BUILD, which configures the run exactly as before 0.3 and lets its outcome be recorded. */
       strategy: StrategySchema.optional(),
+      /** 0.9.1: prepare a temporary administrator broker for this night (one UAC prompt now). */
+      adminRecovery: z.boolean().optional(),
     })
     .strict(),
   /**
@@ -1054,6 +1060,13 @@ export const ipcInputs = {
   'research.list': z.object({ projectId: Id, runId: Id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
   'isolation.status': Empty,
   'isolation.setup': Empty,
+  /** 0.9.1: privilege sessions. Preparing one raises ONE UAC prompt; revoking ends its broker. */
+  'privilege.status': Empty,
+  'privilege.prepare': PrivilegePrepareInputSchema,
+  'privilege.revoke': Empty,
+  'privilege.activity': z.object({ runId: Id.optional(), sessionId: Id.optional() }).strict(),
+  /** 0.9.1: what NEXUS's work did to the owner's screen during a mission. */
+  'presentation.metrics': z.object({ runId: Id }).strict(),
   'isolation.apps': z.object({ projectId: Id.optional() }).strict(),
   /** A screenshot of an application session, as a data URL. `index` counts from the newest (0). */
   'isolation.appScreenshot': z.object({ appId: z.string().regex(/^[0-9a-f]{12}$/), index: z.number().int().min(0).max(500).optional() }).strict(),
@@ -1063,19 +1076,10 @@ export const ipcInputs = {
   'directorLine.setEnabled': z.object({ enabled: z.boolean() }).strict(),
   'directorLine.setProvider': z
     .object({
-      kind: z.enum(['TELEGRAM', 'TWILIO_VOICE']),
-      /** The bot token or the Twilio API key secret. Goes straight to protected storage; null clears it. */
+      /** 0.9.1: the message channel only. Voice is SIP (directorLine.setSip). */
+      kind: z.enum(['TELEGRAM']),
+      /** The bot token. Goes straight to protected storage; null clears it. */
       secret: z.string().min(8).max(256).regex(/^\S+$/).nullable(),
-      extra: z
-        .object({
-          fromNumber: z.string().regex(E164).optional(),
-          operatorNumber: z.string().regex(E164).optional(),
-          accountSid: z.string().regex(/^AC[0-9a-fA-F]{32}$/).optional(),
-          apiKeySid: z.string().regex(/^SK[0-9a-fA-F]{32}$/).optional(),
-          relayBaseUrl: z.string().url().max(300).startsWith('https://').optional(),
-        })
-        .strict()
-        .optional(),
     })
     .strict(),
   'directorLine.setPolicy': z.object({ policy: DirectorLinePolicy }).strict(),
@@ -1083,7 +1087,31 @@ export const ipcInputs = {
   'directorLine.setPin': z.object({ pin: z.string().regex(/^\d{6,12}$/) }).strict(),
   'directorLine.unpair': z.object({ channel: DirectorLineChannel.optional() }).strict(),
   'directorLine.sendTestMessage': Empty,
-  'directorLine.testCall': Empty,
+  'directorLine.setSip': z
+    .object({
+      identity: z.string().max(200).refine((v) => normalizeSipIdentity(v) !== null, 'not a SIP address'),
+      /** null keeps the stored password. The password goes straight to protected storage and is never returned. */
+      password: z.string().min(1).max(128).nullable(),
+      operatorIdentity: z.string().max(200).refine((v) => normalizeSipIdentity(v) !== null, 'not a SIP address'),
+      mediaEncryption: z.enum(['none', 'srtp', 'zrtp', 'dtls']),
+      mediaEncryptionMandatory: z.boolean(),
+      stunServer: z.string().min(1).max(253).regex(/^[a-zA-Z0-9.:-]+$/).nullable(),
+      ice: z.boolean(),
+    })
+    .strict(),
+  'directorLine.removeSip': Empty,
+  'directorLine.setVoicePolicy': z
+    .object({
+      requirePin: z.boolean(),
+      ringSeconds: z.number().int().min(10).max(60),
+      maxPlacedCallsPerDay: z.number().int().min(0).max(24),
+      minMinutesBetweenPlacedCalls: z.number().int().min(0).max(240),
+    })
+    .strict(),
+  'directorLine.callMe': Empty,
+  'directorLine.hangUpCall': Empty,
+  /** The person compared the ZRTP verification code with the telephone's. The code itself is read by the runtime, never sent. */
+  'directorLine.confirmCallSas': Empty,
   // v0.7.1: the Context Graph. Every call names a project; listings are paged; a path or an id is only looked up.
   'knowledge.health': z.object({ projectId: Id }).strict(),
   'knowledge.tree': z
@@ -1132,10 +1160,29 @@ export const ipcInputs = {
 export interface DirectorLineView extends DirectorLineSettingsView {
   /** Why the connection is in the state it is in, in a sentence. */
   statusReason: string
-  /** Why the test call is unavailable, or null when it is available. */
-  voiceReason: string | null
   /** The machine's time zone, for the quiet-hours default. */
   machineTimeZone: string
+  /** 0.9.1: the voice line (standard SIP). The password is never part of it. */
+  voice: {
+    available: boolean
+    unavailableReason: string | null
+    configured: boolean
+    identity: string | null
+    passwordSet: boolean
+    operatorIdentity: string | null
+    state: VoiceLineState
+    stateDetail: string | null
+    inCall: boolean
+    /** What the call in progress has negotiated so far, with its ZRTP verification code; null when there is no call. */
+    callSecurity: CallSecurityView | null
+    mediaEncryption: VoiceMediaEncryption
+    mediaEncryptionMandatory: boolean
+    stunServer: string | null
+    ice: boolean
+    policy: VoiceLinePolicyView
+    speech: { stt: { kind: string; local: boolean } | null; tts: { kind: string; local: boolean } | null }
+    lastCalls: CallRecordView[]
+  }
 }
 
 export type IpcChannel = keyof typeof ipcInputs
@@ -1227,7 +1274,7 @@ export interface IpcOutputs {
   'intelligence.list': RepositoryFact[]
   'intelligence.refresh': { facts: number; stale: number }
   'context.packs': ContextPack[]
-  'overnight.start': { run: Run; overnight: OvernightStatus }
+  'overnight.start': { run: Run; overnight: OvernightStatus; privilege?: { ok: boolean; reason: string | null } }
   'overnight.startArena': { campaignId: string; overnight: OvernightStatus }
   'overnight.startProgram': { programId: string; overnight: OvernightStatus }
   'overnight.startWorkspaceMission': { missionId: string; overnight: OvernightStatus }
@@ -1331,6 +1378,11 @@ export interface IpcOutputs {
   'research.list': { artifacts: ResearchArtifact[]; downloads: ResearchDownloadView[] }
   'isolation.status': IsolationStatusView
   'isolation.setup': SandboxSetupOutcome
+  'privilege.status': { available: boolean; unavailableReason: string | null; active: PrivilegeSessionStatus | null; recent: PrivilegeSessionStatus[] }
+  'privilege.prepare': { ok: boolean; reason: string | null; status: PrivilegeSessionStatus | null }
+  'privilege.revoke': { ok: boolean }
+  'privilege.activity': { receipts: PrivilegedOperationReceipt[]; report: string }
+  'presentation.metrics': UserDisturbanceMetrics
   'isolation.apps': AppSessionView[]
   'isolation.appScreenshot': { dataUrl: string; takenAt: string } | null
   'directorLine.get': DirectorLineView
@@ -1342,7 +1394,12 @@ export interface IpcOutputs {
   'directorLine.setPin': { configured: true }
   'directorLine.unpair': { removed: number }
   'directorLine.sendTestMessage': { ok: boolean; errorClass: string | null }
-  'directorLine.testCall': { ok: boolean; errorClass: string | null }
+  'directorLine.setSip': DirectorLineView
+  'directorLine.removeSip': DirectorLineView
+  'directorLine.setVoicePolicy': DirectorLineView
+  'directorLine.callMe': { result: PlaceCallResult }
+  'directorLine.hangUpCall': DirectorLineView
+  'directorLine.confirmCallSas': DirectorLineView
   'knowledge.health': {
     spaces: {
       space: ContextSpace

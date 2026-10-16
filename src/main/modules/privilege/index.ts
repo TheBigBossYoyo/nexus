@@ -1,0 +1,8 @@
+export { ElevatedBrokerClient, type BrokerExecRequest, type BrokerExecResult, type BrokerStart, type ElevatedBrokerOptions } from './broker-client'
+export { PrivilegedPolicyEngine, redactArgs, redactText, type PrivilegedPolicyContext } from './policy'
+export { buildPrivilegedActivityReport, buildPrivilegedActivitySummary, privilegedActivitySpoken, shownCommand } from './report'
+export { PrivilegedReviewPipeline, reviewMaterial, type PrivilegedReviewProviders } from './review'
+export { PrivilegeService, receiptForAgent, type BrokerHandle, type PrivilegeServiceDeps, type PrivilegedRequester } from './service'
+export { MemoryPrivilegeStore, SqlitePrivilegeStore, type PrivilegeStore } from './store'
+export { createPrivilegedTools } from './tools'
+export { createPrivilegeVerifier } from './verify'

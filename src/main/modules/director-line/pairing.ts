@@ -19,6 +19,8 @@ export const MAX_WRONG_CODES_PER_CODE = 40
 export const CHAT_COOLING_MS = 30 * 60 * 1000
 export const MAX_PIN_ATTEMPTS = 3
 export const PIN_COOLING_MS = 30 * 60 * 1000
+/** A counter that changed, or a lock that ended, longer ago than this is forgotten when the state is saved. */
+const ATTEMPT_KEEP_MS = 24 * 3600 * 1000
 export const MIN_PIN_LENGTH = 6
 export const MAX_PIN_LENGTH = 12
 
@@ -59,10 +61,25 @@ export class PairingService {
     this.rand = options.randomBytes ?? nodeRandomBytes
   }
 
+  /**
+   * Saves the state, first dropping the counters nobody needs: one with no lock that has not changed for a day (or
+   * is from before counters carried a time), and one whose lock ended more than a day ago. They would otherwise only grow.
+   */
+  private async persist(state: PairingState): Promise<void> {
+    const nowMs = this.now().getTime()
+    for (const [key, counter] of Object.entries(state.attempts)) {
+      const lockEnd = counter.lockedUntil ? Date.parse(counter.lockedUntil) : Number.NaN
+      const changed = counter.at ? Date.parse(counter.at) : Number.NaN
+      const stale = Number.isFinite(lockEnd) ? nowMs - lockEnd > ATTEMPT_KEEP_MS : !Number.isFinite(changed) || nowMs - changed > ATTEMPT_KEEP_MS
+      if (stale) delete state.attempts[key]
+    }
+    await this.o.state.save(state)
+  }
+
   private async salt(state: PairingState): Promise<Buffer> {
     if (!state.installSalt) {
       state.installSalt = this.rand(16).toString('hex')
-      await this.o.state.save(state)
+      await this.persist(state)
     }
     return Buffer.from(state.installSalt, 'hex')
   }
@@ -98,14 +115,14 @@ export class PairingService {
     const code = Array.from(bytes, (b) => BASE32[b % 32]).join('')
     const expiresAt = new Date(this.now().getTime() + PAIRING_CODE_TTL_MS).toISOString()
     state.code = { channel, hash: this.hashCode(code, salt), expiresAt, wrongAttempts: 0 }
-    await this.o.state.save(state)
+    await this.persist(state)
     return { code, displayCode: PairingService.formatCode(code), expiresAt }
   }
 
   async cancelPairing(): Promise<void> {
     const state = await this.o.state.load()
     state.code = null
-    await this.o.state.save(state)
+    await this.persist(state)
   }
 
   async isPairingOpen(): Promise<boolean> {
@@ -126,7 +143,7 @@ export class PairingService {
     if (!open || open.channel !== channel) return { kind: 'NOT_A_CODE' }
     if (open.expiresAt <= this.now().toISOString()) {
       state.code = null
-      await this.o.state.save(state)
+      await this.persist(state)
       return { kind: 'NOT_A_CODE' }
     }
     const candidate = PairingService.normalizeCode(text.slice(0, 200))
@@ -138,11 +155,12 @@ export class PairingService {
       delete state.attempts[key]
       const identity: OperatorIdentity = { channel, providerUserId, label: label.slice(0, 60), pairedAt: this.now().toISOString(), pairedVia: 'PAIRING_CODE' }
       await this.o.identities.put(identity)
-      await this.o.state.save(state)
+      await this.persist(state)
       return { kind: 'PAIRED', identity }
     }
     const counter = (state.attempts[key] ??= { count: 0, lockedUntil: null })
     counter.count += 1
+    counter.at = this.now().toISOString()
     if (counter.count >= MAX_WRONG_CODES_PER_CHAT) {
       counter.lockedUntil = new Date(this.now().getTime() + CHAT_COOLING_MS).toISOString()
       counter.count = 0
@@ -150,7 +168,7 @@ export class PairingService {
     open.wrongAttempts += 1
     // Many chats guessing one code: the code is burned rather than left open to a patient crowd.
     if (open.wrongAttempts >= MAX_WRONG_CODES_PER_CODE) state.code = null
-    await this.o.state.save(state)
+    await this.persist(state)
     return { kind: 'WRONG_CODE' }
   }
 
@@ -174,7 +192,7 @@ export class PairingService {
     }
     const state = await this.o.state.load()
     state.code = null
-    await this.o.state.save(state)
+    await this.persist(state)
     return n
   }
 
@@ -185,7 +203,7 @@ export class PairingService {
     const salt = await this.salt(state)
     state.pin = { hash: this.hashPin(pin, salt) }
     for (const k of Object.keys(state.attempts)) if (k.startsWith('pin:')) delete state.attempts[k]
-    await this.o.state.save(state)
+    await this.persist(state)
   }
 
   async hasPin(): Promise<boolean> {
@@ -196,6 +214,10 @@ export class PairingService {
    * A phone caller claims to be the operator. The number must be the paired number AND the PIN must be right. A wrong
    * number is not told apart from a wrong PIN by what the caller hears (the caller gets one refusal); the distinction
    * here is for the log only.
+   *
+   * The paired address is a text that a caller supplies: whoever can present it (any account of a SIP service can try
+   * to call as another one) can burn its three attempts and lock the real operator out for half an hour. That is the
+   * price of a lockout; the alternative is a PIN that can be guessed without limit.
    */
   async authenticatePhone(channel: OperatorChannelKind, fromNumber: string, pin: string | null): Promise<PhoneAuthResult> {
     const paired = await this.findPaired(channel, fromNumber)
@@ -206,8 +228,9 @@ export class PairingService {
       // Unknown numbers also count, so that a number cannot be probed without bound.
       const counter = (state.attempts[key] ??= { count: 0, lockedUntil: null })
       counter.count += 1
+      counter.at = this.now().toISOString()
       if (counter.count >= MAX_PIN_ATTEMPTS) { counter.lockedUntil = new Date(this.now().getTime() + PIN_COOLING_MS).toISOString(); counter.count = 0 }
-      await this.o.state.save(state)
+      await this.persist(state)
       return 'WRONG_NUMBER'
     }
     if (!state.pin) return 'NO_PIN_SET'
@@ -215,14 +238,23 @@ export class PairingService {
     const salt = await this.salt(state)
     if (sameSecret(this.hashPin(pin, salt), state.pin.hash)) {
       delete state.attempts[key]
-      await this.o.state.save(state)
+      await this.persist(state)
       return 'OK'
     }
     const counter = (state.attempts[key] ??= { count: 0, lockedUntil: null })
     counter.count += 1
+    counter.at = this.now().toISOString()
     if (counter.count >= MAX_PIN_ATTEMPTS) { counter.lockedUntil = new Date(this.now().getTime() + PIN_COOLING_MS).toISOString(); counter.count = 0 }
-    await this.o.state.save(state)
+    await this.persist(state)
     return 'WRONG_PIN'
+  }
+
+  /** Pairs the one identity that may call and be called (from Settings, on the PC, where the user is present). It replaces the one before. */
+  async pairVoiceIdentityFromSettings(channel: OperatorChannelKind, identity: string, label: string): Promise<OperatorIdentity> {
+    await this.unpair(channel)
+    const paired: OperatorIdentity = { channel, providerUserId: identity, label: label.slice(0, 60), pairedAt: this.now().toISOString(), pairedVia: 'CONFIGURED' }
+    await this.o.identities.put(paired)
+    return paired
   }
 
   /** Pairs a phone number directly (from Settings, on the PC, where the user is present). */

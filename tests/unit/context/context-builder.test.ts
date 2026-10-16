@@ -318,6 +318,16 @@ describe('buildContextPack', () => {
     expect(pack.prompt).toMatch(/\[\.\.\. \d+ more dependency outputs omitted \.\.\.\]/)
   })
 
+  // 0.9.1: the owner's first audit gave its report task five reviews cut to 2,500 characters each.
+  it('gives a synthesis task its dependencies whole', () => {
+    const reviews = Array.from({ length: 5 }, (_, i) => ({ key: `review-${i}`, title: `Review ${i}`, summary: `${'z'.repeat(17_000)}END-${i}` }))
+    const synthesis = buildContextPack(baseInput({ task: makeTask({ kind: 'synthesis' }), dependencyOutputs: reviews }))
+    for (let i = 0; i < 5; i++) expect(synthesis.prompt).toContain(`END-${i}`)
+    expect(synthesis.prompt).not.toMatch(/truncated|omitted/)
+    const worker = buildContextPack(baseInput({ dependencyOutputs: reviews }))
+    expect(worker.prompt).not.toContain('END-0')
+  })
+
   it('reports section sizes matching rendered bodies', () => {
     const pack = buildContextPack(baseInput({ decisions: [decision] }))
     for (const s of pack.sections) expect(s.chars).toBeGreaterThan(0)
@@ -478,6 +488,22 @@ describe('other stage prompts', () => {
       checkResults: [],
     })
     expect(without.sections.map((s) => s.name)).not.toContain('Review summary')
+  })
+
+  // 0.9.1: verifiers of real missions began with `git diff` and `git tag --points-at`, and the final one reran the suite.
+  it('verifier prompts carry the patch and the measured git facts; the final one does not rerun the suite', () => {
+    const v = buildVerifierPrompt({ task: makeTask(), missionCriteria: [], diffStat: 'x', checkResults: [], patch: '+added line', repoFacts: 'HEAD: abc' })
+    expect(v.prompt).toContain('+added line')
+    expect(v.prompt).toContain('HEAD: abc')
+    const mv = buildMissionVerifierPrompt({ run: makeRun('mission'), missionCriteria: ['c'], diffStat: 'stat', checkResults: [], patch: '+other', repoFacts: 'Tags on HEAD: none' })
+    expect(mv.prompt).toContain('+other')
+    expect(mv.prompt).toContain('Tags on HEAD: none')
+    expect(mv.prompt).not.toContain('Run the project checks yourself')
+    expect(mv.prompt).toContain('Do not run the whole suite')
+    // With the owner's choice of the affected tests only, the verifier is told the whole suite was not run.
+    const affected = buildMissionVerifierPrompt({ run: makeRun('mission'), missionCriteria: ['c'], diffStat: 'stat', checkResults: [], fullChecks: false }).prompt
+    expect(affected).toContain('only the tests that name a file the mission changed')
+    expect(affected).not.toContain('NEXUS ran every project check in full')
   })
 
   it('repair prompt renders findings, failed criteria and check output', () => {

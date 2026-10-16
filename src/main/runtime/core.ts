@@ -1,9 +1,14 @@
+import { getPriority, constants as osConstants, setPriority } from 'node:os'
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { BUILD_STAMP } from '@shared/build-identity'
 import { ChatGPTConnection, type ProtectedStorage } from '../modules/intelligence/connection'
 import { IntelligenceOperations } from '../modules/intelligence/operations'
 import { TaskAdmissionService } from '../modules/intelligence/admission'
 import { createProductionAdvisoryRouting } from '../modules/intelligence/production-routing'
+import { createPrivilegedTools } from '../modules/privilege/tools'
+import { privilegedActivitySpoken } from '../modules/privilege/report'
+import { createPrivilegeHost } from './privilege-host'
+import { createPresentationHost } from './presentation-host'
 import { MIGRATIONS } from '../modules/persistence/migrations'
 import { CapacityRegistry } from '../modules/capacity/registry'
 import { WorkerCapacityRouting } from '../modules/capacity/worker-routing'
@@ -13,6 +18,7 @@ import type { PushMessage } from '@shared/events'
 import type { AppInfo } from '@shared/ipc'
 import { newId } from '@shared/ids'
 import { errorMessage } from '@shared/result'
+import type { Settings } from '@shared/settings'
 import {
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeIdentity,
@@ -54,6 +60,8 @@ import { DEFAULT_PROGRESS_REFRESH_SECONDS, type ProgressSnapshot } from '@shared
 import { createDirectorLineRuntime } from '../modules/director-line/runtime'
 import type { HttpFetch } from '../modules/director-line'
 import { createDirectorLineHost, protectedSecretStore } from './director-line-host'
+import { createDirectorVoiceHost, createLocalVoiceSpeech } from './director-voice-host'
+import { composeStatus } from '../modules/director-line/replies'
 import { DirectorLineReporter } from './director-line-reports'
 import { ClaudeSdkRuntime } from '../modules/agent-runtime/claude-sdk-runtime'
 import { createDemoScript } from '../modules/agent-runtime/demo-script'
@@ -90,7 +98,7 @@ import { createRepositories, openDatabase } from '../modules/persistence'
 import { attachOutcomeRecording, learnOnCampaignEnd, PolicyService } from '../modules/policy'
 import { attachAdviceOutcomes } from '../modules/intelligence/outcomes'
 import { FakePowerController, WindowsPowerController, type PowerController } from '../modules/power'
-import { killProcessTree } from '../modules/process'
+import { killProcessTree, runProcess } from '../modules/process'
 import { BackgroundEngineering, ProgramEngine } from '../modules/program'
 import {
   ClaudeAgentRuntimeProvider,
@@ -195,6 +203,19 @@ function testNumber(host: RuntimeHost, name: string): number | undefined {
  * asked, that it was not done, and that it waits for the user. A reviewer or a verifier reads the task's
  * artifacts; without this the only evidence of a refused action is the word of the session that tried it.
  */
+/**
+ * 0.9.1: a folder of NEXUS's own made "not content indexed": Windows Search leaves alone what is created in it from
+ * now on. The folder's own setting only; the owner's indexing options are not touched.
+ */
+function markNotIndexed(dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true })
+    void runProcess('attrib', ['+I', dir], { cwd: dir, timeoutMs: 15_000 }).catch(() => undefined)
+  } catch {
+    // Indexed as before.
+  }
+}
+
 export function recordBoundaryEvidence(repos: ReturnType<typeof createRepositories>, request: { id: string; runId: string | null; taskId: string | null; capability: string; action: string; occurrences: number }): void {
   if (request.runId === null) return
   const task = request.taskId !== null ? repos.tasks.get(request.taskId) : null
@@ -354,6 +375,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     dataDir,
     sandboxStateDir: sandboxStateDir(env),
     sandboxOnRecord: () => sandboxRecorded,
+    // 0.9.1: the commands of projects that are not contained start on a desktop of their own (zero-disturbance).
+    quietCommands: () => process.platform === 'win32' && host.launcherPath !== undefined && existsSync(host.launcherPath) && repos.settings.get().execution.quietCommands !== false && (host.isPackaged || env['NEXUS_QUIET_COMMANDS'] !== '0'),
+    onVisibleCommand: (reason) => logger(`presentation: a command ran visibly (${reason})`),
     logger,
   })
   const isolationStatus = await isolation.start()
@@ -374,6 +398,47 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   }
   executionBroker.sweep()
   const bus = new EventBus(repos.events, repos.transaction)
+  // 0.9.1: the owner's PC suffered during missions (measured on NEXUS itself: 23 % CPU on average and peaks at 73 %
+  // while its suite ran, two thousand pages a second at times). Missions' work runs below normal priority: Windows
+  // gives it to every process started from here (workers, Claude Code, shells, checks, git), so the owner's own
+  // programs come first and, with nobody else asking, the work gets the whole machine as before. The window and
+  // the call helper set their own priority back to normal.
+  // Measured on the installed build: set here, at the start, the runtime was found at normal priority a minute later
+  // (Chromium sets its own while it starts), and stayed lowered when set again afterwards. So it is set again a few
+  // seconds after the start and when a mission is created or starts, before it forks anything.
+  let workPriority: number | null = null
+  const applyWorkPriority = (s: Settings): void => {
+    if (process.platform !== 'win32') return
+    // A runtime started by NEXUS's own tests keeps normal priority (never read in a packaged build).
+    const testNormal = !host.isPackaged && env['NEXUS_RUNTIME_PRIORITY'] === 'normal'
+    const wanted = s.execution.backgroundPriority === false || testNormal ? osConstants.priority.PRIORITY_NORMAL : osConstants.priority.PRIORITY_BELOW_NORMAL
+    // Workers are kept and reused: one started before the priority was set keeps the one it was started with, and
+    // so would the sessions it runs.
+    for (const worker of repos.workers.listLive()) {
+      if (worker.pid === null) continue
+      try {
+        if (getPriority(worker.pid) !== wanted) setPriority(worker.pid, wanted)
+      } catch {
+        // Gone, or not ours to change: its next sessions keep its priority.
+      }
+    }
+    try {
+      const found = getPriority(process.pid)
+      if (found === wanted) return
+      setPriority(process.pid, wanted)
+      logger(`work priority: ${wanted === osConstants.priority.PRIORITY_NORMAL ? 'normal' : 'below normal'} (it was ${found}${workPriority === null ? ', at the start' : ', changed since'})`)
+      workPriority = wanted
+    } catch (e) {
+      logger(`work priority: ${errorMessage(e)}`)
+    }
+  }
+  applyWorkPriority(repos.settings.get())
+  // When Chromium sets its own depends on how long the start takes (measured: before 7 s on one start, after 10 s on
+  // a slower one): the priority is checked every 30 s (a system call) and set again when it was changed.
+  setInterval(() => applyWorkPriority(repos.settings.get()), 30_000).unref?.()
+  // The worktrees and the sandbox's state are written and rewritten by every check: Windows Search indexing them
+  // (measured: 2 % of the machine during a suite) is work for nothing. New files there are made unindexed.
+  if (process.platform === 'win32') for (const dir of [worktreesDir, join(dataDir, 'sandbox')]) markNotIndexed(dir)
   const git = new GitService()
   // In its own worktrees NEXUS never lets the `.git` file an agent can rewrite say where the repository is: the
   // Git directory comes from the repository NEXUS's own record names for the worktree.
@@ -435,6 +500,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const finishedTaskRows = db.prepare("SELECT kind, complexity, started_at AS s, finished_at AS f FROM tasks WHERE state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?")
   const repairRateRow = db.prepare("SELECT AVG(CASE WHEN repair_cycles > 0 THEN 1.0 ELSE 0.0 END) AS r, COUNT(*) AS n FROM tasks WHERE state = 'completed' AND kind = 'implement'")
   const progressListeners: ((snapshot: ProgressSnapshot, why: string) => void)[] = []
+  const taskCheckRows = db.prepare("SELECT commands FROM verification_results WHERE run_id = ? AND task_id IS NOT NULL AND kind = 'checks' ORDER BY created_at DESC LIMIT 50")
+  const finaleRows = db.prepare("SELECT v.commands FROM verification_results v JOIN runs r ON r.id = v.run_id WHERE r.project_id = ? AND (v.run_id != ? OR v.created_at < ?) AND v.task_id IS NULL AND v.kind = 'checks' ORDER BY v.created_at DESC LIMIT 20")
   const progress = new ProgressService({
     now: () => Date.now(),
     run: (runId) => repos.runs.get(runId) ?? null,
@@ -449,6 +516,35 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     parallelism: (run) => Math.max(1, run.config.maxParallelAgents),
     refreshSeconds: () => repos.settings.get().execution.progressRefreshSeconds ?? DEFAULT_PROGRESS_REFRESH_SECONDS,
     waitOf: (run) => progressWaitOf(run),
+    // 0.9.1: how long the final checks of this project's earlier missions took (the integration's checks).
+    finaleSeconds: (projectId, runId, before) =>
+      (finaleRows.all(projectId, runId, before ?? '') as { commands: string }[]).flatMap((r) => {
+        try {
+          const total = (JSON.parse(r.commands) as { durationMs?: number }[]).reduce((n, c) => n + (c.durationMs ?? 0), 0) / 1000
+          return total > 0 ? [total] : []
+        } catch {
+          return []
+        }
+      }),
+    // 0.9.1: the run's check commands as its tasks ran them whole (not scoped, not skipped), the latest of each.
+    fullChecksSeconds: (runId) => {
+      const run = repos.runs.get(runId)
+      if (run === null) return null
+      const configured = Object.entries(run.config.checks).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== '')
+      if (configured.length === 0) return null
+      const latest = new Map<string, number>()
+      for (const row of taskCheckRows.all(runId) as { commands: string }[]) {
+        try {
+          for (const c of JSON.parse(row.commands) as { name?: string; command?: string; durationMs?: number; output?: string }[]) {
+            const whole = configured.some(([n, cmd]) => n === c.name && cmd === c.command) && (c.durationMs ?? 0) > 0 && !(c.output ?? '').startsWith('[')
+            if (whole && c.name !== undefined && !latest.has(c.name)) latest.set(c.name, (c.durationMs ?? 0) / 1000)
+          }
+        } catch {
+          // A row that cannot be read measures nothing.
+        }
+      }
+      return configured.every(([n]) => latest.has(n)) ? [...latest.values()].reduce((a, b) => a + b, 0) : null
+    },
     onChange: (snapshot, why) => {
       push({ kind: 'progress', snapshot })
       for (const listener of progressListeners) listener(snapshot, why)
@@ -726,6 +822,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     repos,
     contained: (projectId) => isolation.isolated(projectId),
     confined: (projectId) => isolation.contained(projectId),
+    // The applications NEXUS launched for a session: a fetch from one of their ports is the project's own endpoint.
+    localPorts: (session) => apps.portsOf(session),
     runActive: (runId) => {
       const run = repos.runs.get(runId)
       return run !== null && !TERMINAL_RUN_STATES.includes(run.state)
@@ -835,7 +933,70 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const packageConfigTools = createPackageConfigTools({
     gateFor: (session) => autonomy.gateFor({ projectId: session.run.projectId, runId: session.run.id, taskId: session.task?.id ?? null, role: session.role, provider: null, cwd: session.cwd }),
   })
-  const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools)
+  // 0.9.1: privilege sessions: one UAC prompt for a mission or a night, a temporary broker that holds the elevated
+  // token, every privileged attempt checked, reviewed and recorded. The reviewers come from the advisory routing
+  // built further down (asked only when an operation is submitted).
+  const privilegeHost = createPrivilegeHost({
+    db,
+    dataDir,
+    ...(host.protectedStorage ? { protectedStorage: host.protectedStorage } : {}),
+    launcherPath: host.launcherPath,
+    resourcesPath: host.resourcesPath,
+    sandboxSetupDir: host.sandboxSetupDir,
+    isPackaged: host.isPackaged,
+    env,
+    runtimePid: process.pid,
+    projectRoots: (runId) => {
+      const run = runId !== null ? repos.runs.get(runId) : null
+      if (!run) return []
+      const project = repos.projects.get(run.projectId)
+      return [...(project ? [project.rootPath] : []), ...repos.worktrees.listByRun(run.id).map((w) => w.path)]
+    },
+    reviewers: (projectId, operationId) => advisoryRouting.service.providers(projectId ?? 'nexus', operationId, 'DIRECTOR'),
+    securityEvent: (e) => autonomy.record({ projectId: e.projectId, runId: e.runId, taskId: e.taskId, agentId: e.agentId, severity: e.severity, action: e.action, resource: 'privilege session', reason: e.reason.slice(0, 600) }),
+    onChange: (status) => push({ kind: 'privilege', status }),
+    // 0.9.1 (review F3): natively, as Overnight's authorization: no page script can answer it; nobody there is a no.
+    confirmOwner: (o) => confirm(o.title, o.message, o.detail, 'Run as administrator').catch(() => false),
+    // 0.9.1 (second review, H1): a mission whose commands run as the owner, outside any containment (a project that is
+    // not enrolled, or no containment on this machine), could reach the broker's relay as the owner and use the
+    // session. No session while one is in progress, and none for such a mission itself.
+    blockedBy: (runId) => {
+      const uncontained = repos.runs.listActive().filter((r) => !isolation.contained(r.projectId))
+      const own = runId !== null ? repos.runs.get(runId) : null
+      if (own && !isolation.contained(own.projectId)) return "This mission's project does not run its commands inside NEXUS's containment, so its agents act as you: administrator sessions are offered only to contained projects (enroll the project, with the sandbox set up)."
+      if (uncontained.length > 0) return `A mission of a project whose commands are not contained is in progress (${uncontained[0]?.prompt.split('\n')[0]?.slice(0, 80) ?? 'a mission'}): no administrator session while it runs.`
+      return null
+    },
+    log: logger,
+  })
+  bus.subscribe((event) => {
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+      void privilegeHost.service?.endForRun(event.runId, `the run ${event.type.slice(4)}`).catch(() => undefined)
+      // 0.9.1 (second review, L2): an UNTIL_IDLE session ends when no mission is left.
+      if (repos.runs.listActive().length === 0) void privilegeHost.service?.idle().catch(() => undefined)
+    }
+    // A mission of an uncontained project that starts now ends the session in progress (second review, H1).
+    if (event.type === 'run.created' || event.type === 'run.started') {
+      applyWorkPriority(repos.settings.get())
+      void privilegeHost.service?.recheck().catch(() => undefined)
+    }
+  })
+  const privilegedTools = createPrivilegedTools({ service: () => privilegeHost.service })
+  // 0.9.1: zero-disturbance testing: the presence meter and the per-mission metrics of what NEXUS's work did to the
+  // owner's screen.
+  const presentationHost = createPresentationHost({
+    db,
+    launcherPath: host.launcherPath,
+    isPackaged: host.isPackaged,
+    scripted: !host.isPackaged && (env['NEXUS_FAKE_RUNTIME'] === '1' || env['NEXUS_FAKE_WORKERS'] === '1'),
+    env,
+    runtimePid: process.pid,
+    uacPrompts: (runId) => privilegeHost.uacPrompts(runId),
+    quietCommands: () => executionBroker.quietCount(),
+    onChange: (runIds) => push({ kind: 'presentation', runIds }),
+    log: logger,
+  })
+  const extensionTools = combineExtensions(researchTools, appTools, packageConfigTools, privilegedTools)
   // The worker admission is built further down; the scheduler asks it before it retries a held task.
   let heldTaskReady: ((taskId: string) => Promise<boolean>) | null = null
   const orchestrator = new Orchestrator({
@@ -916,6 +1077,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
         reportsDir: join(dataDir, 'reports'),
         sealer: host.createSealer(dataDir),
         probe,
+        privilege: { endForRun: (runId, reason) => privilegeHost.service?.endForRun(runId, reason) ?? Promise.resolve(), section: (runId) => `${privilegeHost.section(runId)}\n\n${presentationHost.service.section(runId)}` },
         ...(overnightTick !== undefined && overnightTick >= 100
           ? { tickIntervalMs: overnightTick }
           : {}),
@@ -935,6 +1097,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     logger(`power: the idle-sleep request is ${wanted ? 'held' : 'released'}`)
   }
   keepAwake()
+  let voiceNetworkChanged: () => void = () => undefined
   // Network resilience. Not where agents are scripted (the tests of the runtime make no connectivity check),
   // unless a test asks for it.
   const scripted = env['NEXUS_FAKE_RUNTIME'] === '1' || env['NEXUS_FAKE_WORKERS'] === '1'
@@ -962,6 +1125,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       onState: (snapshot) => {
         push({ kind: 'connectivity', snapshot })
         for (const runId of progress.open()) progress.refresh(runId)
+        // 0.9.1: the voice line registers again when the network is back or has changed.
+        voiceNetworkChanged()
       },
       logger,
     })
@@ -1448,6 +1613,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     clearInterval(progressTick)
     clearInterval(lineTick)
     void directorLine.stop().catch(() => undefined)
+    // No administrator broker outlives the runtime (it would end with it anyway: it watches this process).
+    void privilegeHost.service?.dispose().catch(() => undefined)
+    void presentationHost.stop().catch(() => undefined)
+    void localSpeech.dispose().catch(() => undefined)
     void network?.stop().catch(() => undefined)
     chatgpt.dispose()
     const advisoryStopping = advisoryRouting.dispose()
@@ -1592,6 +1761,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     eventsOf: (runId, afterSeq) => repos.events.listByRun(runId, afterSeq, 5000),
     pendingBoundaryRequests: () => repos.boundaryRequests.countPending(),
     isOnline: () => network?.isOnline() ?? true,
+    privilegedActivity: () => privilegedActivitySpoken(privilegeHost.service?.receipts({ since: new Date(Date.now() - 24 * 3600_000).toISOString(), limit: 200 }) ?? []),
     latestOvernightReport: () => {
       try {
         const row = lastOvernightReport.get() as { run_id: string } | undefined
@@ -1606,6 +1776,8 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     subscribe: (listener) => bus.subscribe(listener),
     logger,
   })
+  // 0.9.1: speech for calls is recognised and made on this PC. Nothing of it is loaded where agents are scripted.
+  const localSpeech = createLocalVoiceSpeech({ launcherPath: useFake ? undefined : host.launcherPath, resourcesPath: useFake ? undefined : host.resourcesPath, languages: ['en', 'fr'], log: (line) => logger(`director line: ${line}`) })
   const directorLine = createDirectorLineRuntime({
     db,
     secrets: protectedSecretStore(join(dataDir, 'director-line'), host.protectedStorage),
@@ -1616,7 +1788,23 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     localNotify: async (title, text) => host.notify?.(title, text.slice(0, 400)),
     recordNote: (note) => logger(`director line: refused a remote request (${note.topic})`),
     log: (line) => logger(`director line: ${line}`),
+    // 0.9.1: the voice line (SIP). The session that words an answer is the plain runtime, not a worker session:
+    // a call takes no slot from the work in progress.
+    voice: createDirectorVoiceHost({
+      launcherPath: host.launcherPath,
+      resourcesPath: host.resourcesPath,
+      dataDir,
+      runtime: claudeRuntime,
+      model: () => repos.settings.get().models.tiers.fast,
+      subscriptionMode: () => repos.settings.get().claude.subscriptionMode,
+      admitted: () => usage.canDispatch(),
+      status: async () => composeStatus(await directorLineHost.reads.getStatus()),
+      speech: localSpeech.speech,
+      onCall: () => localSpeech.setHints(repos.projects.list().map((p) => p.name)),
+      log: (line) => logger(`director line: ${line}`),
+    }),
   })
+  voiceNetworkChanged = () => directorLine.networkChanged()
   const lineReporter = new DirectorLineReporter({ report: (event) => directorLine.line.report(event), now: () => Date.now() })
   progressListeners.push((snapshot) => {
     const run = repos.runs.get(snapshot.subject.id)
@@ -1627,6 +1815,11 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const lineTick = setInterval(() => lineReporter.tick(), 60_000)
   lineTick.unref()
   void directorLine.start().catch((e: unknown) => logger(`director line: could not start: ${errorMessage(e)}`))
+  // The models are loaded ahead only where the voice line is set up: they take some hundred megabytes.
+  void directorLine
+    .settingsView()
+    .then((view) => (view.enabled && view.voice.configured ? localSpeech.warm() : undefined))
+    .catch(() => logger('director line: the speech models could not be loaded ahead'))
 
   const handlers = createIpcHandlers({
     progress,
@@ -1648,6 +1841,16 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       confirm('NEXUS Overnight Mode', message, detail, 'Authorize').catch(() => false),
     autonomy,
     confirmAutonomy: (title, message, detail, accept) => confirm(title, message, detail.slice(0, 6000), accept).catch(() => false),
+    presentation: { metrics: (runId) => presentationHost.service.metrics(runId) },
+    privilege: {
+      service: () => privilegeHost.service,
+      unavailableReason: privilegeHost.unavailableReason,
+      records: privilegeHost.records,
+      integrity: () => privilegeHost.integrity(),
+      projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null,
+      // 0.9.1 (review F5): as Overnight's authorization, natively; nobody there is a no.
+      confirm: (message, detail) => confirm('NEXUS administrator session', message, detail, 'Prepare').catch(() => false),
+    },
     isolation: {
       status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
       setup: async () => {
@@ -1673,6 +1876,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       },
       apps: () => apps.sessions(),
     },
+    onSettingsSaved: (s) => applyWorkPriority(s),
     confirmSettings: (changes) =>
       confirm(
         'NEXUS Settings',

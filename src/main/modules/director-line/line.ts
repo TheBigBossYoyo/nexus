@@ -11,7 +11,7 @@ import {
   type ReportEvent,
   type ReportEventKind,
 } from '@shared/director-line'
-import { commandRisk, interpretMessage, sanitizeInbound, type IntentClassifier } from './intent'
+import { interpretMessage, sanitizeInbound, type IntentClassifier } from './intent'
 import type { PairingService } from './pairing'
 import type { OperatorChannelProvider, RawProviderUpdate, SendResult } from './provider'
 import {
@@ -19,7 +19,7 @@ import {
   PAIRED_TEXT, UNKNOWN_TEXT, UNPAIRED_TEXT, type LatestChecks, type StatusFacts,
 } from './replies'
 import type { DeliveryStore, OutboxItem, OutboxStore, PolicyStore, SeenStore } from './stores'
-import type { VoiceProvider } from './voice'
+import type { PlaceResult } from './voice-line'
 
 /**
  * DirectorLine: the service between the phone and NEXUS.
@@ -34,6 +34,8 @@ export interface DirectorLineReads {
   getStatus(): Promise<StatusFacts>
   getOvernightReport(): Promise<string | null>
   getLatestChecks(): Promise<LatestChecks | null>
+  /** 0.9.1: what ran with administrator rights in the last day, from the receipts. Absent: nothing to say. */
+  getPrivilegedActivity?(): Promise<string>
 }
 
 export interface SubmitResult {
@@ -61,7 +63,16 @@ export interface RefusalNote {
 
 export interface DirectorLineOptions {
   messageProvider: OperatorChannelProvider | null
-  voiceProvider: VoiceProvider | null
+  /**
+   * 0.9.1: "call me" asked by message. Starts the call and answers at once with what happened so far: 'CALLING' when a
+   * call is being placed, else a reason ('NOT_CONFIGURED', 'LINE_BUSY', 'NOT_REGISTERED', 'NOT_PAIRED', 'SUPPRESSED').
+   */
+  callOperator?: () => Promise<string>
+  /**
+   * 0.9.1: a call about an event worth one. `fallbackSent` is true only when the voice line itself delivered the same
+   * report by message (or on the PC) because the call did not take place, so that the outbox does not send it twice.
+   */
+  callForEvent?: (report: string) => Promise<{ result: PlaceResult | 'NOT_CONFIGURED'; fallbackSent: boolean }>
   pairing: PairingService
   seen: SeenStore
   outbox: OutboxStore
@@ -87,6 +98,14 @@ const UNPAIRED_REPLY_INTERVAL_MS = 10 * 60 * 1000
 const MAX_TRACKED_CHATS = 500
 const MAX_REPORT_CHARS = 1500
 const DIGEST_ABOVE = 3
+const CALL_REPLIES: Record<string, string> = {
+  CALLING: 'Calling you now.',
+  NOT_CONFIGURED: 'The voice line is not set up.',
+  NOT_PAIRED: 'The voice line is not set up.',
+  LINE_BUSY: 'The line is busy.',
+  NOT_REGISTERED: 'The voice line is not connected right now.',
+  SUPPRESSED: 'Not calling: the limit of calls for today is reached.',
+}
 
 /** Minutes below which the same kind about the same subject is not sent again. */
 function kindIntervalMinutes(kind: ReportEventKind, policy: CommunicationPolicy): number {
@@ -125,16 +144,6 @@ export function collapseTexts(items: OutboxItem[]): string {
   if (resolved && wasBlocked) return `${newest.event.text} It had been blocked earlier and is no longer.`
   if (earlier.length > 0 && earlier.every((i) => i.event.kind === newest.event.kind)) return `${newest.event.text} (${items.length} similar notices combined.)`
   return earlier.length > 0 ? `${newest.event.text} (${earlier.length} earlier update(s) combined.)` : newest.event.text
-}
-
-export interface VoiceInput {
-  from: string
-  /** Digits entered on the keypad. */
-  pin: string | null
-  /** What the caller said or pressed after the PIN. */
-  text: string
-  callId: string
-  envelopeId?: string
 }
 
 export class DirectorLine {
@@ -203,32 +212,32 @@ export class DirectorLine {
     await this.reply(update.providerUserId, UNPAIRED_TEXT, `reply:${update.providerMessageId}`)
   }
 
-  /** The phone side, fed by opened relay envelopes. Returns the words to speak. */
-  async handleVoiceInput(input: VoiceInput): Promise<{ speak: string; authenticated: boolean }> {
-    const at = this.now().toISOString()
-    if (input.envelopeId && !(await this.o.seen.addIfAbsent(`voice:${input.callId}:${input.envelopeId}`, at))) return { speak: '', authenticated: false }
-    const policy = await this.getPolicy()
-    const denied = { speak: 'Not authorised.', authenticated: false }
-    let readOnlyOnly = false
-    if (input.pin === null && !policy.requirePinForStatus) {
-      // The number alone is weak (caller ID can be spoofed). Allowed only for reading, and only when the owner chose so.
-      if (!(await this.o.pairing.findPaired('TWILIO_VOICE', input.from))) return denied
-      readOnlyOnly = true
-    } else if ((await this.o.pairing.authenticatePhone('TWILIO_VOICE', input.from, input.pin)) !== 'OK') {
-      return denied
-    }
-    const identity = (await this.o.pairing.findPaired('TWILIO_VOICE', input.from))!
-    const text = sanitizeInbound(input.text)
-    const command = await interpretMessage(text, this.o.classify)
-    const risk = commandRisk(command)
-    // Speech recognition errs, so no task is created by voice, and a PIN-less call reads only.
-    if (risk === 'TASK_HANDOFF') return { speak: 'Tasks cannot be added by phone. Send a message instead.', authenticated: true }
-    if (readOnlyOnly && risk !== 'READ_ONLY' && command.kind !== 'HELP') return { speak: 'The PIN is needed for that.', authenticated: true }
-    const spoken = await this.act(identity, { channel: 'TWILIO_VOICE', providerUserId: input.from, providerMessageId: `${input.callId}:${input.envelopeId ?? ''}`, dedupeKey: '', senderLabel: '', text, receivedAt: at, providerAuthenticated: true }, text, command, true)
-    return { speak: inert(spoken.replace(/\n+/g, '. '), 500), authenticated: true }
+  /**
+   * 0.9.1: what a sentence of a live call asks for. The same closed set of commands as a message; the text is
+   * cleaned the same way. Nothing is done by this.
+   */
+  async interpretSpoken(text: string): Promise<{ text: string; command: OperatorCommand }> {
+    const cleaned = sanitizeInbound(text)
+    return { text: cleaned, command: await interpretMessage(cleaned, this.o.classify) }
   }
 
-  private async act(identity: OperatorIdentity, update: RawProviderUpdate, text: string, command: OperatorCommand, spoken: boolean): Promise<string> {
+  /**
+   * 0.9.1: carries out one command of a live call and returns what is said back. Only for a call that the voice
+   * session authenticated (the paired number and the PIN): the caller must be a paired phone, and each turn is
+   * done once (a turn that is delivered twice is answered with nothing the second time). Tasks are allowed here,
+   * unlike a message: the session reads a task back and waits for a yes before it calls this.
+   */
+  async performSpoken(input: { from: string; callId: string; turnId: string; text: string; command: OperatorCommand; channel?: OperatorChannelKind; transcript?: string[] }): Promise<string> {
+    const at = this.now().toISOString()
+    const channel = input.channel ?? 'SIP_VOICE'
+    const identity = await this.o.pairing.findPaired(channel, input.from)
+    if (!identity) return 'Not authorised.'
+    if (!(await this.o.seen.addIfAbsent(`voice-turn:${input.callId}:${input.turnId}`, at))) return ''
+    const spoken = await this.act(identity, { channel, providerUserId: input.from, providerMessageId: `${input.callId}:${input.turnId}`, dedupeKey: '', senderLabel: '', text: input.text, receivedAt: at, providerAuthenticated: true }, input.text, input.command, true, { transcript: (input.transcript ?? []).slice(-40).map((l) => inert(l, 400)) })
+    return inert(spoken.replace(/\n+/g, '. '), 600)
+  }
+
+  private async act(identity: OperatorIdentity, update: RawProviderUpdate, text: string, command: OperatorCommand, spoken: boolean, call?: { transcript: string[] }): Promise<string> {
     const { reads, actions } = this.o
     try {
       switch (command.kind) {
@@ -243,6 +252,11 @@ export class DirectorLine {
         case 'CONTINUE':
           await actions.resume()
           return 'Done: NEXUS continues.'
+        case 'CALL_ME': {
+          // On a call there is nothing to place. By message, the runtime starts the call and says how it went so far.
+          if (spoken) return 'We are already talking.'
+          return CALL_REPLIES[this.o.callOperator ? await this.o.callOperator() : 'NOT_CONFIGURED'] ?? 'The call could not be placed.'
+        }
         case 'ADD_TASK_AFTER_CURRENT':
         case 'CREATE_TASK': {
           // The operator's words are the user's words. They go to the ordinary creation path, which applies the Task
@@ -250,7 +264,8 @@ export class DirectorLine {
           const intent: RawUserIntent = {
             text: command.text,
             projectHint: command.kind === 'CREATE_TASK' ? command.project : null,
-            source: 'OPERATOR_REMOTE',
+            source: call ? 'DIRECTOR_LINE_VOICE' : 'OPERATOR_REMOTE',
+            ...(call ? { transcript: call.transcript } : {}),
             channel: update.channel,
             operatorId: identity.providerUserId,
             messageId: update.providerMessageId,
@@ -260,6 +275,8 @@ export class DirectorLine {
           return result.accepted ? `Task received and sent through the normal checks${result.reference ? ` (ref ${inert(result.reference, 40)})` : ''}.` : `The task was not accepted${result.reason ? `: ${inert(result.reason, 160)}` : ''}.`
         }
         case 'LATEST_TEST_RESULTS': return await this.phrase(composeChecks(await reads.getLatestChecks()), spoken)
+        // The receipts as they are, never reworded: what ran as administrator is said exactly.
+        case 'PRIVILEGED_ACTIVITY': return reads.getPrivilegedActivity ? inert(await reads.getPrivilegedActivity(), 1500) : 'Nothing ran as administrator.'
         default: {
           const facts = await reads.getStatus()
           const template =
@@ -411,17 +428,23 @@ export class DirectorLine {
     for (const cls of policy.precedence) {
       if (cls === 'PHONE') {
         const callWorthy = event.kind !== 'PROGRESS' && policy.events[event.kind].call && (!event.resolved || event.kind === 'PROGRAM_COMPLETE')
-        if (!callWorthy || item.callAttempts >= policy.maxCallAttempts || !this.o.voiceProvider) continue
-        const health = await this.o.voiceProvider.health()
-        const number = (await this.o.pairing.listPaired()).find((i) => i.channel === 'TWILIO_VOICE')
-        if (health.status === 'UNCONFIGURED' || !number) { await this.record('TWILIO_VOICE', 'NOT_CONFIGURED', item.id); continue }
+        if (!callWorthy || item.callAttempts >= policy.maxCallAttempts || !this.o.callForEvent) continue
         // Counted and stored BEFORE dialling: a crash during the call must not lead to a second call.
         item.callAttempts += 1
         await this.o.outbox.put(item)
-        const call = await this.o.voiceProvider.placeCall({ to: number.providerUserId, spokenText: inert(event.text, 400) })
-        const answered = call.finalState === 'ANSWERED' || call.finalState === 'COMPLETED'
-        await this.record('TWILIO_VOICE', answered ? 'ANSWERED' : call.finalState === 'NO_ANSWER' ? 'NO_ANSWER' : call.finalState === 'BUSY' ? 'BUSY' : 'FAILED', item.id, { providerReference: call.providerCallId, errorClass: call.errorClass })
-        if (answered) { await this.o.outbox.remove(item.id); return true }
+        const out = await this.o.callForEvent(inert(event.text, 400))
+        if (out.result === 'NOT_CONFIGURED' || out.result === 'NOT_PAIRED') {
+          // Nothing was dialled: the attempt is not spent.
+          item.callAttempts -= 1
+          await this.o.outbox.put(item)
+          await this.record('SIP_VOICE', 'NOT_CONFIGURED', item.id)
+          continue
+        }
+        const answered = out.result === 'CONVERSATION'
+        await this.record('SIP_VOICE', answered ? 'ANSWERED' : out.result === 'NO_ANSWER' ? 'NO_ANSWER' : out.result === 'BUSY' ? 'BUSY' : out.result === 'SUPPRESSED' ? 'SUPPRESSED_POLICY' : 'FAILED', item.id)
+        // Answered: the report opened a live conversation. Not answered: the voice line already sent the same report by
+        // message when it could; only then is it done, otherwise the normal message attempt follows.
+        if (answered || out.fallbackSent) { await this.o.outbox.remove(item.id); return true }
         continue
       }
       if (cls === 'MESSAGE') {
@@ -461,13 +484,23 @@ export class DirectorLine {
     return result
   }
 
-  async testCall(): Promise<{ ok: boolean; errorClass: string | null }> {
-    const voice = this.o.voiceProvider
-    const number = (await this.o.pairing.listPaired()).find((i) => i.channel === 'TWILIO_VOICE')
-    if (!voice || !number || (await voice.health()).status === 'UNCONFIGURED') return { ok: false, errorClass: 'NOT_CONFIGURED' }
-    const call = await voice.placeCall({ to: number.providerUserId, spokenText: 'This is a test call from NEXUS. Nothing needs your attention.' })
-    await this.record('TWILIO_VOICE', call.ok ? 'ANSWERED' : 'FAILED', 'test-call', { providerReference: call.providerCallId, errorClass: call.errorClass })
-    return { ok: call.ok, errorClass: call.errorClass }
+  /**
+   * 0.9.1: sends this text to the paired operator now, by message; when the message channel is not configured or does
+   * not deliver, as a notification on the PC. True when it reached one of them.
+   */
+  async sendToOperator(text: string, reportId: string = randomUUID()): Promise<boolean> {
+    const body = inert(text.startsWith('NEXUS') ? text : `NEXUS: ${text}`, 600)
+    const provider = this.o.messageProvider
+    const target = provider ? (await this.o.pairing.listPaired()).find((i) => i.channel === provider.kind) : undefined
+    if (provider && target) {
+      const result = await provider.send({ providerUserId: target.providerUserId, text: body })
+      await this.record(provider.kind, result.ok ? 'SENT' : 'FAILED', reportId, result)
+      if (result.ok) return true
+    }
+    if (!this.o.localNotify) return false
+    await this.o.localNotify('NEXUS', inert(text, 400))
+    await this.record('LOCAL_NOTIFICATION', 'SENT', reportId)
+    return true
   }
 
   async lastDelivery(): Promise<DeliveryAttempt | null> {

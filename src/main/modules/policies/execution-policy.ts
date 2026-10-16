@@ -16,7 +16,7 @@ import {
 import { parsePackageManager, readManifest, scriptNamesFor, scriptsOf, workspaceManifests, type Manifest, type PackageManager } from './package-scripts'
 import { canonicalizePath, isPathInside } from './paths'
 import { originOf, type BaseFileReader, type FileOrigin, type ProvenanceTracker } from './provenance'
-import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, neutralizeInertHeredocs, neutralizePowerShellCommitHereStrings, tokenize } from './shell-tokenizer'
 import type { Redirect, Segment, Shell } from './shell-tokenizer'
 
 /**
@@ -119,7 +119,7 @@ const TEXT_ONLY_CMDS = new Set([
  * ([scriptblock]::Create('shutdown /s').Invoke()) is still seen.
  */
 function inspectableText(command: string, shell: Shell, segs: Segment[]): string {
-  let text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(command)) : command
+  let text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(command)) : neutralizePowerShellCommitHereStrings(command)
   const all = shell === 'bash' && text !== command ? tokenize(text, shell) : segs
   all.forEach((seg, i) => {
     const n = executableName(seg.words[0] ?? '')

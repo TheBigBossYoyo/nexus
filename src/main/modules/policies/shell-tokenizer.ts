@@ -429,3 +429,70 @@ export function neutralizeInertHeredocs(text: string): string {
   }
   return out
 }
+
+/** Start of a command, then an interpreter that is not a shell, with plain arguments (`python3 -`, `node`, `py -X utf8 -`). */
+const PROGRAM_PREFIX = new RegExp(String.raw`(?:^|[\n;&|])[ \t]*(?:[\w.:~-]*[\\/])?(?:python3?|py|node|perl|ruby|php|lua|bun)(?:\.exe)?(?:[ \t]+[\w./=:+-]+)*[ \t]*$`, 'i')
+
+/**
+ * 0.9.1: a quoted heredoc read by an interpreter that is not a shell (`python3 - <<'E'`) is a program in that
+ * language, or data for it: never shell. Its body is taken out of the text analysed as shell and returned on
+ * its own, so the classifier can judge it as it judges `python3 -c "<program>"`. As shell, a line such as
+ * `a: 1` read as the drive A:, and `Map<string | null>` as a redirection and a pipe, and an agent editing a file
+ * with a short script had to wait for the owner's approval. Only quoted delimiters (an unquoted body expands
+ * `$(...)` in the shell) and only these interpreters: a heredoc read by sh, bash, PowerShell or cmd stays shell.
+ */
+export function separateProgramHeredocs(text: string): { text: string; programs: string[] } {
+  if (!text.includes('<<')) return { text, programs: [] }
+  let out = text
+  const programs: string[] = []
+  let scanFrom = 0
+  for (let guard = 0; guard < 64; guard++) {
+    ANY_OPENER.lastIndex = scanFrom
+    const m = ANY_OPENER.exec(out)
+    if (m === null) break
+    const before = out.slice(0, m.index)
+    if (!quotesBalanced(before)) break
+    const openerEnd = m.index + m[0].length
+    const nl = out.indexOf('\n', openerEnd)
+    if (nl < 0) break
+    const restLine = out.slice(openerEnd, nl).replace(/\r$/, '')
+    if (/<<(?!<)/.test(restLine.replace(/(['"]).*?\1/g, ''))) break // several heredocs on one line: give up
+    const quoted = m[2] !== undefined || m[3] !== undefined
+    const delim = m[2] ?? m[3] ?? m[4] ?? ''
+    const end = delim === '' ? -1 : heredocEnd(out, nl + 1, delim, m[1] === '-')
+    if (end < 0) break
+    if (quoted && PROGRAM_PREFIX.test(before) && OPENER_REST.test(restLine)) {
+      programs.push(out.slice(nl + 1, end))
+      out = `${before.replace(/[ \t]+$/, '')}${restLine}\n${out.slice(end)}`
+      scanFrom = 0
+      continue
+    }
+    scanFrom = end
+  }
+  return { text: out, programs }
+}
+
+const PS_COMMIT_HERESTRING = /(?:^|[\n;|])[ \t]*git(?:[ \t]+-C[ \t]+(?:"[^"\n$`]*"|'[^'\n]*'|[^\s"'$`;&|()<>]+))*[ \t]+commit(?:[ \t]+--?[A-Za-z][A-Za-z-]*)*[ \t]+(?:-[A-Za-z]*m|--message)[ \t]+@'[ \t]*\r?\n/g
+
+/**
+ * 0.9.1: PowerShell's form of the commit message heredoc. `git commit -m @'` ... `'@` passes a single-quoted
+ * here-string, which PowerShell never expands: its text is the message, not commands (an agent's message that
+ * quoted `git branch --list` and its own <noreply@...> address was put to the owner as a branch write and a
+ * redirection). Only the single-quoted form, as the message of git commit, with the terminator `'@` at the start
+ * of a line as PowerShell requires; the double-quoted form expands $(...) and stays as written.
+ */
+export function neutralizePowerShellCommitHereStrings(text: string): string {
+  if (!text.includes("@'")) return text
+  let out = text
+  for (let guard = 0; guard < 16; guard++) {
+    PS_COMMIT_HERESTRING.lastIndex = 0
+    const m = PS_COMMIT_HERESTRING.exec(out)
+    if (m === null) break
+    const bodyStart = m.index + m[0].length
+    const close = /^'@/m.exec(out.slice(bodyStart))
+    if (close === null) break
+    const opener = m[0].replace(/@'[ \t]*\r?\n$/, '')
+    out = `${out.slice(0, m.index)}${opener}MESSAGE${out.slice(bodyStart + close.index + 2)}`
+  }
+  return out
+}

@@ -128,15 +128,10 @@ describe('generalized heredoc neutralization', () => {
   })
 
   it.each([
-    // interpreters and anything that executes stdin
+    // shells and anything that executes stdin as shell
     `bash <<'EOF'\nrm -rf /\nEOF`,
     `sh <<'EOF'\nrm -rf /\nEOF`,
     `zsh <<'EOF'\nrm -rf /\nEOF`,
-    `python - <<'EOF'\nimport os; os.system('rm -rf /')\nrm -rf /\nEOF`,
-    `python3 - <<'EOF'\nrm -rf /\nEOF`,
-    `node - <<'EOF'\nrm -rf /\nEOF`,
-    `perl <<'EOF'\nrm -rf /\nEOF`,
-    `ruby <<'EOF'\nrm -rf /\nEOF`,
     `pwsh -Command - <<'EOF'\nrm -rf /\nEOF`,
     `powershell - <<'EOF'\nrm -rf /\nEOF`,
     `cmd <<'EOF'\nrm -rf /\nEOF`,
@@ -200,8 +195,21 @@ describe('generalized heredoc neutralization', () => {
   })
 
   it('does not look inside the body of a heredoc it cannot vouch for', () => {
-    const c = `python - <<'EOF'\ncat > f <<'EOF2'\nrm -rf /\nEOF2\nEOF`
+    const c = `xargs <<'EOF'\ncat > f <<'EOF2'\nrm -rf /\nEOF2\nEOF`
     expect(bash(c).level).toBe('needs_approval')
+  })
+
+  // 0.9.1: a quoted heredoc read by python, node, perl or ruby is a program in that language, judged as the same
+  // program given with -c (opaque, with the power and NEXUS-data checks). Read as shell, it only caught shell text
+  // the interpreter would refuse, and stopped real edits for an approval (see program-heredocs.test.ts).
+  it.each([
+    [`python - <<'EOF'\nimport os; os.system('rm -rf /')\nrm -rf /\nEOF`, `python -c "import os; os.system('rm -rf /')\nrm -rf /"`],
+    [`python3 - <<'EOF'\nrm -rf /\nEOF`, `python3 -c "rm -rf /"`],
+    [`node - <<'EOF'\nrm -rf /\nEOF`, `node -e "rm -rf /"`],
+    [`perl <<'EOF'\nrm -rf /\nEOF`, `perl -e "rm -rf /"`],
+    [`ruby <<'EOF'\nrm -rf /\nEOF`, `ruby -e "rm -rf /"`],
+  ])('judges an interpreter heredoc as the inline form of the same program: %s', (heredoc, inline) => {
+    expect(bash(heredoc).level, heredoc).toBe(bash(inline).level)
   })
 
   it('an unterminated heredoc is left alone', () => {

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { canonicalizePath, isPathInside, isSecretPath, isTopLevelGit, pathNamesGit } from './paths'
 import { EXEC_API, hasPowerApiText, NEXUS_DATA_TEXT, POWER_COMMAND_NAMES, POWER_WORDS } from './power-patterns'
-import { neutralizeCommitHeredocs, neutralizeInertHeredocs, tokenize } from './shell-tokenizer'
+import { neutralizeCommitHeredocs, neutralizeInertHeredocs, neutralizePowerShellCommitHereStrings, separateProgramHeredocs, tokenize } from './shell-tokenizer'
 import type { Segment, Shell } from './shell-tokenizer'
 
 export type CommandLevel = 'safe' | 'write' | 'needs_approval' | 'forbidden'
@@ -87,6 +87,8 @@ class Analysis {
   hiddenGlob = false
   /** Literal variable assignments found in the command text, lowercase name to value. */
   readonly vars = new Map<string, string>()
+  /** 0.9.1: where relative paths are read from, once a `cd` of the same command moved inside the roots. */
+  cwd: string | null = null
 
   constructor(readonly opts: ClassifyOptions) {
     this.roots = []
@@ -168,7 +170,7 @@ const DOTNET_NETWORK = /net\.webclient|downloadstring|downloadfile|start-bitstra
 
 function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number): void {
   // A quoted heredoc used only as a git commit message is inert prose, not shell (bash only).
-  const text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(rawText)) : rawText
+  const text = shell === 'bash' ? neutralizeInertHeredocs(neutralizeCommitHeredocs(rawText)) : neutralizePowerShellCommitHereStrings(rawText)
   if (depth > MAX_NESTING) {
     a.ask('high', 'shell commands are nested too deeply to inspect')
     return
@@ -194,7 +196,14 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
     a.ask('medium', 'network operation (.NET web client / BITS transfer)', 'NETWORK')
   }
   checkDotNetFileWrites(text, a)
-  const segs = tokenize(text, shell)
+  // A program read from a quoted heredoc by python, node & co. is judged as that program given with -c: the
+  // text checks above saw it, the power and NEXUS-data checks of an inline program apply, and it is not shell.
+  const separated = shell === 'bash' ? separateProgramHeredocs(text) : { text, programs: [] }
+  for (const program of separated.programs) {
+    if (POWER_WORDS.test(squash(program)) || hasPowerApiText(squash(program))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
+    if (NEXUS_DATA.test(program) || NEXUS_DATA.test(squash(program))) a.add('forbidden', 'high', NEXUS_DATA_REASON, 'SYSTEM_CHANGE')
+  }
+  const segs = tokenize(separated.text, shell)
   segs.forEach((seg, i) => {
     const next = segs[i + 1]
     if (['get-childitem', 'gci', 'ls', 'dir'].includes(normalizeName(seg.words[0] ?? '')) && seg.words.some((w) => /^-(hidden|force|attributes|h)$/i.test(w)) && next?.sep === '|' && GIT_ENTRY_WRITERS.has(normalizeName(next.words[0] ?? ''))) {
@@ -203,8 +212,9 @@ function analyzeText(rawText: string, shell: Shell, a: Analysis, depth: number):
   })
   for (const seg of segs) analyzeSegment(seg, shell, a, depth)
   // Adjacent literals joined ('.gi'+'t') are read as one word by the shell: look at that text too.
-  const joined = squash(text)
-  if (joined !== text && /(["'])\s*\+\s*(["'])|(["'])(["'])/.test(text)) {
+  const shellText = separated.text
+  const joined = squash(shellText)
+  if (joined !== shellText && /(["'])\s*\+\s*(["'])|(["'])(["'])/.test(shellText)) {
     for (const seg of tokenize(joined, shell)) {
       const n = normalizeName(seg.words[0] ?? '')
       checkWords(seg, seg.words, a, DELETE_CMDS.has(n) || MOVE_CMDS.has(n), n === 'git')
@@ -342,7 +352,7 @@ function dropExistenceFindings(a: Analysis): void {
   }
   const kept = a.findings.filter((f) => {
     if (f.reason.startsWith("touching Git's own files: ")) return false
-    const outside = /^path outside the worktree: (.*)$/.exec(f.reason)
+    const outside = /^(?:reads )?path outside the worktree: (.*)$/.exec(f.reason)
     return !(outside !== null && inProject(outside[1] ?? ''))
   })
   a.findings.length = 0
@@ -493,6 +503,22 @@ function analyzeSegment(seg: Segment, shell: Shell, a: Analysis, depth: number):
   }
 
   checkWords(seg, words, a, DELETE_CMDS.has(normalizeName(words[i] ?? '')) || MOVE_CMDS.has(normalizeName(words[i] ?? '')), normalizeName(words[i] ?? '') === 'git')
+
+  // 0.9.1: `cd dir; head ../x` reads `x` from where the cd went, not from the worktree's top. Only a literal
+  // directory inside the roots moves the base; anything else leaves it where it was (and was checked above).
+  if (['cd', 'chdir', 'set-location', 'sl', 'pushd'].includes(normalizeName(words[i] ?? ''))) {
+    const target = words.slice(i + 1).filter((w) => !w.startsWith('-'))
+    const dir = target[0]
+    if (target.length === 1 && dir !== undefined && !/[$`%*?~]/.test(dir)) {
+      try {
+        const msys = /^\/(?:mnt\/)?([a-zA-Z])(?:\/(.*))?$/.exec(dir)
+        const next = canonicalizePath(msys?.[1] !== undefined ? `${msys[1].toUpperCase()}:\\${msys[2] ?? ''}` : dir, a.cwd ?? a.roots[0] ?? dir)
+        if (a.roots.some((r) => r.toLowerCase() === next.toLowerCase() || isPathInside(r, next))) a.cwd = next
+      } catch {
+        // An unreadable directory leaves the base where it was.
+      }
+    }
+  }
 
   const nameWord = words[i]
   if (nameWord === undefined) {
@@ -665,6 +691,7 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
     for (const w of positional) writePositions.add(w)
   }
   const candidates = [...words, ...seg.redirects.map((r) => r.target)]
+  const commandWord = words.find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && w !== '&' && w !== '.')
   for (const w of candidates) {
     if (w === '') continue
     if ((writePositions.has(w) || /^of=/.test(w)) && !HARMLESS_REDIRECT_TARGET.has(w.toLowerCase())) {
@@ -695,7 +722,11 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
       }
       // What echo and printf are given is text they print, not a place: only where their output is sent is one.
       const outside = TEXT_PRINTERS.has(head[0] ?? '') && !redirectTargets.has(w) ? null : outsideRoots(v, a)
-      if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
+      // 0.9.1: a path outside that nothing writes to (not a redirect target, not a word of a writing or deleting
+      // command, not the program being run) is a read, and is said to be one: `ls /c/Program Files/nodejs` was put
+      // to the owner as "write or delete files outside the task roots".
+      const reading = outside !== null && !destructive && !writer && !writePositions.has(w) && !/^of=/.test(w) && w !== commandWord
+      if (outside !== null) a.ask(destructive ? 'high' : 'medium', `${destructive ? 'deleting/moving ' : reading ? 'reads ' : ''}${outside}`, destructive ? 'DESTRUCTIVE' : 'UNKNOWN')
     }
   }
   for (const r of seg.redirects) {
@@ -877,8 +908,9 @@ function escapesThroughLink(v: string, base: string, a: Analysis): string | null
 
 /** Returns a description when `v` refers to a location outside every root, otherwise null. */
 function outsideRoots(v: string, a: Analysis): string | null {
-  const base = a.roots[0]
-  if (base === undefined) return null
+  if (a.roots[0] === undefined) return null
+  // Relative paths are read from where a `cd` of this command went (inside the roots), else from the worktree.
+  const base = a.cwd ?? a.roots[0]
   if (/^[a-z][a-z0-9+.-]+:\/\//i.test(v)) return null
   if (v === '/dev/null' || v === '/dev/stdin' || v === '/dev/stdout' || v === '/dev/stderr') return null
   if (/^\/[A-Za-z?](:.*)?$/.test(v)) return null // cmd switches such as /s /q /c
@@ -1039,6 +1071,51 @@ const MEDIUM_ALWAYS: Record<string, string> = {
   'invoke-command': 'runs commands that cannot be inspected',
 }
 
+/**
+ * 0.9.1: `kill %1` and `kill $!` name jobs of the shell that runs the command, so only processes the same command
+ * line started: stopping the server a test just started is not a change to the machine. Signal options are allowed.
+ */
+function killsOwnJobs(cmd: string, args: string[]): boolean {
+  if (cmd !== 'kill') return false
+  const targets: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const x = args[i] ?? ''
+    if (x === '-s' || x === '-n') i++
+    else if (!/^-/.test(x)) targets.push(x)
+  }
+  return targets.length > 0 && targets.every((t) => /^%(?:\d+|%|\+|-)?$/.test(t) || t === '$!' || t === '"$!"')
+}
+
+/** Flags of curl and wget that only shape the request or what is printed: nothing reroutes it, follows it or reads options from a file. */
+const LOCAL_FETCH_SWITCHES = new Set(['-s', '-S', '-i', '-I', '-v', '-f', '--fail', '--silent', '--show-error', '--include', '--head', '--verbose', '-q', '-O-', '--quiet', '-qO-'])
+const LOCAL_FETCH_VALUED = new Set(['-X', '--request', '-H', '--header', '-d', '--data', '--data-raw', '--json', '-m', '--max-time', '-w', '--write-out'])
+const LOOPBACK_URL = /^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|\[::1\]):(\d{2,5})(?:[/?#][^\s]*)?$/i
+
+/**
+ * 0.9.1: the loopback ports a curl or wget command line fetches from, when that is all it does (every address is
+ * 127.0.0.1, localhost or [::1] with a port, and every flag is a plain one); null otherwise. Whether such a port is
+ * the project's own application is decided by the boundary: only the endpoints NEXUS registered for the session are.
+ */
+export function localFetchPorts(cmd: string, args: string[]): number[] | null {
+  if (cmd !== 'curl' && cmd !== 'wget') return null
+  const ports: number[] = []
+  for (let i = 0; i < args.length; i++) {
+    const x = args[i] ?? ''
+    if (LOCAL_FETCH_VALUED.has(x)) {
+      i++
+      continue
+    }
+    if (x.startsWith('-')) {
+      if (LOCAL_FETCH_SWITCHES.has(x) || /^-[sSiIvf]+$/.test(x)) continue
+      return null
+    }
+    const m = LOOPBACK_URL.exec(x)
+    if (m === null) return null
+    ports.push(Number(m[1]))
+  }
+  return ports.length > 0 ? [...new Set(ports)] : null
+}
+
 const NETWORK_HIGH = new Set(['ssh', 'scp', 'sftp', 'nc', 'ncat', 'netcat', 'telnet'])
 const EXEC_HIGH = new Set(['iex', 'invoke-expression', 'eval'])
 const PROCESS_KILL = new Set(['taskkill', 'stop-process', 'kill', 'pkill', 'killall', 'spps'])
@@ -1054,7 +1131,10 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
   const high = HIGH_ALWAYS[cmd]
   if (high !== undefined) a.ask('high', high, NETWORK_HIGH.has(cmd) ? 'NETWORK' : EXEC_HIGH.has(cmd) ? 'UNKNOWN' : 'SYSTEM_CHANGE')
   const medium = MEDIUM_ALWAYS[cmd]
-  if (medium !== undefined) a.ask('medium', medium, PROCESS_KILL.has(cmd) ? 'SYSTEM_CHANGE' : cmd === 'invoke-command' ? 'UNKNOWN' : 'NETWORK')
+  const local = medium !== undefined ? localFetchPorts(cmd, args) : null
+  if (medium !== undefined && !killsOwnJobs(cmd, args)) {
+    a.ask('medium', local !== null ? `${medium} to the local port${local.length > 1 ? 's' : ''} ${local.join(', ')}` : medium, PROCESS_KILL.has(cmd) ? 'SYSTEM_CHANGE' : cmd === 'invoke-command' ? 'UNKNOWN' : 'NETWORK')
+  }
   if (cmd === 'wmic' && lc.some((x) => /^(win32)?(shutdown|reboot)$/.test(x))) a.add('forbidden', 'high', POWER_REASON, 'SYSTEM_CHANGE')
 
   if (DELETE_CMDS.has(cmd)) analyzeDelete(cmd, args, lc, a)

@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { progressRows, type ProgressSnapshot } from '@shared/progress'
+import { Button } from '../../components/ui'
 import { api, type IpcError } from '../../lib/bridge'
+import { useUiStore } from '../../store/ui'
 
 /**
  * 0.9: how far a mission is, what it is doing, and how much active work remains. Everything shown here is the
@@ -28,6 +30,7 @@ const clock = (iso: string): string => {
 
 export function ProgressPanel({ runId }: { runId: string }) {
   const { data: s } = useProgress(runId)
+  const setDrawer = useUiStore((st) => st.setDrawer)
   if (!s || s.tasks.total === 0) return null
   const waiting = s.wait !== 'ACTIVE' && s.wait !== 'FINISHED'
   return (
@@ -46,6 +49,14 @@ export function ProgressPanel({ runId }: { runId: string }) {
       <p className="progress-summary" data-testid="progress-summary">
         {s.summary}
       </p>
+      {/* 0.9.1: the owner read "waiting for your decision" and found nothing to decide: the inbox opens only from the status bar. */}
+      {(s.wait === 'WAITING_FOR_USER_BOUNDARY' || /boundary request/i.test(s.stage)) && (
+        <p className="progress-scope" role="status">
+          <Button size="sm" onClick={() => setDrawer('boundary')} data-testid="progress-open-boundary">
+            Open the boundary request
+          </Button>
+        </p>
+      )}
       {s.scopeChange && (
         <p className="progress-scope" role="status" data-testid="progress-scope">
           {s.scopeChange}

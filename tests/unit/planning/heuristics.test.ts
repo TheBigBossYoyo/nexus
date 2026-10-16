@@ -79,6 +79,11 @@ describe('recommendPlanningMode', () => {
   it('combines moderate signals', () => {
     const prompt = `Refactor and migrate the auth module.\n- tokens\n- sessions\n- cookies\n${'detail '.repeat(100)}`
     expect(recommendPlanningMode(prompt, profile(800)).mode).toBe('consensus')
+    // 0.9.1: a read-only mission is planned by one planner whatever its length (the owner's first audit spent 4.5
+    // of its 16.5 minutes in consensus planning).
+    expect(recommendPlanningMode(prompt, profile(800), 'audit').mode).toBe('single')
+    expect(recommendPlanningMode(prompt, profile(800), 'ask').mode).toBe('single')
+    expect(recommendPlanningMode(prompt, profile(800), 'build').mode).toBe('consensus')
   })
 
   it('is deterministic', () => {

@@ -104,7 +104,7 @@ export function composeChecks(c: LatestChecks | null): string {
 
 export const HELP_TEXT = [
   'NEXUS can answer: status, how long is left, what is blocking, details <project>, latest test results.',
-  'It can: pause after the current task, continue.',
+  'It can: pause after the current task, continue, call you ("call me", when the voice line is set up).',
   'It can queue: "after this add <task>" or "create a task for <project>: <task>" (goes through the normal checks).',
   'Pushing, deleting, permissions, the sandbox, credentials, power and commands are decided at the machine.',
 ].join('\n')

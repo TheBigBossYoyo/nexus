@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import {
   buildMcpServer,
+  isQuietCommandsOn,
   isSameSettings,
   normalizeSettings,
+  quietCommandsPatch,
   validateSettings,
 } from '../../../src/renderer/src/views/settings/settingsForm'
 
@@ -85,5 +87,25 @@ describe('settings form', () => {
     const s = clone()
     s.usage.maxQuotaWaitMinutes = 0
     expect(validateSettings(s).ok).toBe(true)
+  })
+})
+
+describe('quiet commands switch', () => {
+  it('reads as checked when the value is absent or true, unchecked only when false', () => {
+    const s = clone()
+    delete s.execution.quietCommands
+    expect(isQuietCommandsOn(s.execution)).toBe(true)
+    expect(isQuietCommandsOn({ ...s.execution, quietCommands: true })).toBe(true)
+    expect(isQuietCommandsOn({ ...s.execution, quietCommands: false })).toBe(false)
+  })
+
+  it('saves an explicit false when unticked and true when ticked again', () => {
+    const s = clone()
+    delete s.execution.quietCommands
+    const off = { ...s, execution: { ...s.execution, ...quietCommandsPatch(false) } }
+    expect(normalizeSettings(off).execution.quietCommands).toBe(false)
+    expect(validateSettings(normalizeSettings(off)).ok).toBe(true)
+    const on = { ...off, execution: { ...off.execution, ...quietCommandsPatch(true) } }
+    expect(normalizeSettings(on).execution.quietCommands).toBe(true)
   })
 })

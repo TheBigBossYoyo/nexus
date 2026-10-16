@@ -310,6 +310,11 @@ export class ApplicationUnderTestManager {
     return { profile, contain: profile }
   }
 
+  /** 0.9.1: the loopback ports of the endpoints registered for a session (shown to be held by its application). */
+  portsOf(session: { projectId: string; runId: string | null; taskId: string | null }): number[] {
+    return this.endpoints.filter((e) => e.projectId === session.projectId && e.runId === session.runId && e.taskId === session.taskId).map((e) => e.port)
+  }
+
   /**
    * Starts the application of the project in the owner's worktree and opens a browser session on it. An
    * application already running for the owner is stopped first: one application per task.
@@ -493,6 +498,14 @@ export class ApplicationUnderTestManager {
     app.proxy = null
     await session?.close().catch(() => undefined)
     await app.process?.stop().catch(() => undefined)
+    // 0.9.1: the application runs in the launcher's job, which Windows ends after the launcher: for a moment its port
+    // still answered once stop() had returned (a full run of the suite, under load), and an application started again
+    // at once could have found its own port taken. Stopped means the port answers nobody, within a few seconds.
+    const port = app.endpoint?.port
+    if (port !== undefined) {
+      const until = Date.now() + 3000
+      while (Date.now() < until && (await portListening(port, app.endpoint?.host ?? '127.0.0.1', 200))) await delay(100)
+    }
     await proxy?.close().catch(() => undefined)
     if (app.specPath !== null) this.deps.broker.releaseSpec(app.specPath)
     app.specPath = null

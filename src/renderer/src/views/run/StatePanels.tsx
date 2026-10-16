@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { TERMINAL_RUN_STATES, type Task } from '@shared/domain'
-import { Badge, Button, CodeBlock, ErrorNote, Loading, Notice, PlayIcon } from '../../components/ui'
+import { Badge, Button, CodeBlock, ErrorNote, Loading, Markdown, Notice, PlayIcon } from '../../components/ui'
 import { DASH, formatCost, formatDuration } from '../../lib/format'
 import { useResumeRun, useRetryTask, useRunSummary } from '../../lib/queries'
 import { useUiStore } from '../../store/ui'
 import { CandidatesSection } from './CandidatesSection'
-import { capacityWaitLines, pauseDetailFromEvents } from './eventText'
+import { capacityWaitLines, pauseCauseFromEvents, pauseDetailFromEvents } from './eventText'
+import { reportOf } from './reportModel'
 import { useRunCtx } from './runContext'
 
 const PAUSE_LABEL = {
@@ -69,7 +70,7 @@ export function RunStatePanel() {
   if (run.state === 'paused' && run.pauseReason === 'quota') return <QuotaPaused />
 
   if (run.state === 'paused') {
-    const reason = run.pauseReason ? PAUSE_LABEL[run.pauseReason] : 'Paused'
+    const reason = pauseCauseFromEvents(events) === 'intervention' ? 'Needs your attention' : run.pauseReason ? PAUSE_LABEL[run.pauseReason] : 'Paused'
     const waitingOn = run.pauseReason === 'capacity' ? capacityWaitLines(events) : []
     // A capacity wait says what it waits on in words; the raw routing reasons stay in the event log.
     const detailText = waitingOn.length > 0 ? null : pauseDetailFromEvents(events)
@@ -148,6 +149,9 @@ export function MissionComplete() {
   const { run } = detail
   const query = useRunSummary(run.id)
   const setView = useUiStore((s) => s.setView)
+  const selectTask = useUiStore((s) => s.selectTask)
+  const readOnly = run.mode === 'audit' || run.mode === 'ask'
+  const report = readOnly ? reportOf(detail.tasks) : null
 
   if (query.isPending) return <Loading label="Loading summary" />
   if (query.isError) return <ErrorNote error={query.error} className="m-3" />
@@ -178,9 +182,9 @@ export function MissionComplete() {
       <div className="mx-auto flex max-w-4xl flex-col gap-5 p-5">
         <dl className="m-0 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-body">
           {fact('Tasks', `${s.tasksCompleted}/${s.tasksTotal}`, 'stat-tasks')}
-          {fact('Reviews approved', `${s.reviewsApproved}/${s.reviewsTotal}`, 'stat-reviews')}
-          {fact('Verification', `${s.verificationsPassed} passed`, 'stat-verification', `${s.verificationsFailed} failed`)}
-          {fact('Files changed', String(s.filesChanged), undefined, `${s.commits} commits`)}
+          {readOnly ? null : fact('Reviews approved', `${s.reviewsApproved}/${s.reviewsTotal}`, 'stat-reviews')}
+          {readOnly ? null : fact('Verification', `${s.verificationsPassed} passed`, 'stat-verification', `${s.verificationsFailed} failed`)}
+          {readOnly ? null : fact('Files changed', String(s.filesChanged), undefined, `${s.commits} commits`)}
           {fact('Duration', formatDuration(s.durationMs))}
           {fact('Agent sessions', String(s.agentSessions), undefined, 'observed')}
           {fact('List-price estimate', s.costUsd === null ? DASH : formatCost(s.costUsd), undefined, 'estimated, not a bill')}
@@ -191,6 +195,28 @@ export function MissionComplete() {
           </div>
         ) : null}
 
+        {report ? (
+          <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4" data-testid="mission-report">
+            <div className="flex items-center gap-2">
+              <h3 className="m-0 min-w-0 flex-1 text-heading font-semibold">Report</h3>
+              <CopyButton text={report.task.resultSummary ?? ''} testId="copy-report" />
+            </div>
+            <div className="text-small text-text-muted">{report.task.title}</div>
+            <Markdown>{report.task.resultSummary ?? ''}</Markdown>
+            {report.others.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 border-t pt-2 text-small" data-testid="mission-report-parts">
+                <span className="text-text-muted">The reports it was made from:</span>
+                {report.others.map((t) => (
+                  <Button key={t.id} size="sm" onClick={() => selectTask(t.id)}>
+                    {t.title}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {readOnly ? null : (
         <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4" data-testid="merge-instructions">
           <h3 className="m-0 text-heading font-semibold">Bring the result into your branch</h3>
           {run.integrationBranch ? (
@@ -210,9 +236,11 @@ export function MissionComplete() {
             <div className="text-text-secondary">This run has no integration branch to merge.</div>
           )}
         </section>
+        )}
 
         <CandidatesSection />
 
+        {readOnly && s.lastChecks.length === 0 ? null : (
         <Block title={`Final checks${s.lastChecks.length > 0 ? ` (${checksPassed}/${s.lastChecks.length} passed)` : ''}`} testId="final-checks">
           {s.lastChecks.length === 0 ? (
             <div className="text-text-secondary">No check commands were recorded.</div>
@@ -234,6 +262,7 @@ export function MissionComplete() {
             </ul>
           )}
         </Block>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           {links.map((l) => (
@@ -247,7 +276,7 @@ export function MissionComplete() {
   )
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, testId = 'copy-merge' }: { text: string; testId?: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <Button
@@ -257,7 +286,7 @@ function CopyButton({ text }: { text: string }) {
           setTimeout(() => setCopied(false), 2000)
         })
       }}
-      data-testid="copy-merge"
+      data-testid={testId}
     >
       {copied ? 'Copied' : 'Copy'}
     </Button>

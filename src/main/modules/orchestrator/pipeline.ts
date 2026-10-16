@@ -1,3 +1,4 @@
+import { repositoryFacts } from './repo-facts'
 import { checkOutputMode } from '@shared/token'
 import { existsSync } from 'node:fs'
 import type { ZodType } from 'zod'
@@ -227,9 +228,21 @@ export class TaskPipeline {
         this.host.setStage(taskId, 'checks')
         if (task.state !== 'running') task = this.core.setTaskState(taskId, 'running')
         await this.commitLeftovers(run, task, worktree)
-        const checks = await this.core.runChecks(run, taskId, worktree.path, cycle)
+        // The task's own files: what its checks are scoped to (the integration checks everything).
+        const changedFiles = await git.changedFiles(worktree.path, worktree.baseCommit, 'HEAD').catch(() => null)
+        const checks = await this.core.runChecks(run, taskId, worktree.path, cycle, changedFiles === null ? undefined : { changedFiles })
         lastChecks = checks.commands
         if (this.halted(runId, control)) return
+        const unfinished = checks.commands.filter((c) => c.exitCode !== 0 || c.timedOut)
+        if (!checks.passed && unfinished.length > 0 && unfinished.every((c) => c.timedOut)) {
+          // A check that ran out of time says nothing about the task's code: no repair agent is sent to fix it.
+          const reason = `The ${unfinished.map((c) => c.name).join(', ')} check did not finish within the check time limit (${repos.settings.get().execution.checkTimeoutMinutes} min), so the task's code was neither passed nor failed. Raise "Check timeout" in Settings > Execution, or fix the test that hangs, then retry the task.`
+          bus.transaction(() => {
+            this.core.setTaskState(task.id, 'blocked', { blockedReason: reason })
+            bus.emit({ runId: run.id, taskId: task.id, type: 'task.blocked', payload: { reason } })
+          })
+          return
+        }
         if (!checks.passed) {
           const repaired = await this.repair(run, task, worktree, control, {
             kind: 'checks',
@@ -733,8 +746,9 @@ export class TaskPipeline {
     attempt: number,
     control: SessionControl,
   ): Promise<{ status: 'passed' } | { status: 'failed'; failure: Failure } | { status: 'halt' }> {
-    const { repos, bus } = this.core.deps
+    const { repos, bus, git } = this.core.deps
     bus.emit({ runId: run.id, taskId: task.id, type: 'verification.started', payload: { attempt } })
+    const repoFacts = await repositoryFacts(git, worktree.path, worktree.baseCommit)
     const gate = await this.gate(run, task, worktree, control, {
       role: 'verifier',
       purpose: 'verify',
@@ -744,6 +758,8 @@ export class TaskPipeline {
         instructions: renderInstructionsInForce(repos, run, task, { withRequest: true }),
         missionCriteria: run.plan?.acceptanceCriteria ?? [],
         diffStat: diffStat(diff),
+        patch: diff.patch,
+        repoFacts,
         checkResults: checks,
         checkOutputMode: checkOutputMode(this.core.deps.repos.settings.get().tokens),
         reviewSummary,
@@ -1142,7 +1158,11 @@ export class TaskPipeline {
     const integration = repos.worktrees
       .listByRun(run.id)
       .find((w) => w.taskId === null && w.state === 'active' && existsSync(w.path))
-    return integration?.path ?? this.core.project(run).rootPath
+    if (integration) return integration.path
+    // 0.9.1: a contained session cannot reach the user's checkout; it reads a snapshot at the run's base commit
+    // (what is not committed there is not in it).
+    if (run.baseCommit && this.core.deps.execution?.contained?.(run.projectId) === true) return (await this.host.ensureIntegration(run)).path
+    return this.core.project(run).rootPath
   }
 
   private async ensureWorktree(run: Run, task: Task): Promise<Worktree> {

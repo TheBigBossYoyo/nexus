@@ -3,17 +3,24 @@ import type { CommunicationPolicy } from '@shared/director-line'
 import type { DirectorLineView } from '@shared/ipc'
 import {
   useDirectorLine,
+  useDirectorLineCallMe,
+  useDirectorLineConfirmSas,
+  useDirectorLineLiveWhile,
+  useDirectorLineHangUp,
+  useDirectorLineRemoveSip,
   useDirectorLineSetEnabled,
+  useDirectorLineSetPin,
   useDirectorLineSetPolicy,
   useDirectorLineSetProvider,
+  useDirectorLineSetSip,
+  useDirectorLineSetVoicePolicy,
   useDirectorLineStartPairing,
-  useDirectorLineTestCall,
   useDirectorLineTestMessage,
   useDirectorLineUnpair,
 } from '../../lib/queries-director-line'
 import { formatDateTime } from '../../lib/format'
 import { useNow } from '../../lib/useNow'
-import { Badge, Button, ErrorNote, Field, Input, Loading, NumberField, Toggle } from '../../components/ui'
+import { Badge, Button, ErrorNote, Field, Input, Loading, NumberField, Select, Toggle } from '../../components/ui'
 import {
   CAN_AND_CANNOT,
   CLASS_LABEL,
@@ -21,7 +28,27 @@ import {
   EVENT_ORDER,
   STATUS_WORDS,
   THRESHOLD_WORDS,
-  VOICE_COST_LINE,
+  ENCRYPTION_LABEL,
+  ENCRYPTION_NOTE,
+  ENCRYPTION_ORDER,
+  PIN_OFF_NOTE,
+  SIP_SETUP_STEPS,
+  answerTimeWords,
+  callDirectionWords,
+  callMeDisabledReason,
+  callOutcomeWords,
+  placeResultWords,
+  sameVoicePolicy,
+  liveSecurityWords,
+  securityText,
+  sipFormFromView,
+  sipFormInput,
+  sipFormProblems,
+  speechLine,
+  voicePolicyProblems,
+  voiceStatus,
+  type SipForm,
+  type VoicePolicyForm,
   clock,
   deliveryLine,
   isValidTimeZone,
@@ -62,15 +89,28 @@ export function DirectorLineSettings() {
   const startPairing = useDirectorLineStartPairing()
   const unpair = useDirectorLineUnpair()
   const testMessage = useDirectorLineTestMessage()
-  const testCall = useDirectorLineTestCall()
+  const setSip = useDirectorLineSetSip()
+  const removeSip = useDirectorLineRemoveSip()
+  const setVoicePolicy = useDirectorLineSetVoicePolicy()
+  const callMe = useDirectorLineCallMe()
+  const hangUp = useDirectorLineHangUp()
+  const confirmSas = useDirectorLineConfirmSas()
+  const setPin = useDirectorLineSetPin()
+  const [pin, setPinText] = useState('')
+  const [pinAgain, setPinAgain] = useState('')
 
   const [token, setToken] = useState('')
+  const [sipDraft, setSipDraft] = useState<SipForm | null>(null)
+  const [sipTried, setSipTried] = useState(false)
+  const [policyDraft, setPolicyDraft] = useState<VoicePolicyForm | null>(null)
+  const [callResult, setCallResult] = useState<string | null>(null)
   const [code, setCode] = useState<{ displayCode: string; expiresAt: string } | null>(null)
   const [draft, setDraft] = useState<CommunicationPolicy | null>(null)
   const [announce, setAnnounce] = useState('')
   const now = useNow(code !== null)
 
   const view: DirectorLineView | undefined = query.data
+  useDirectorLineLiveWhile(query.data?.voice.inCall === true)
   const paired = view?.pairedOperator ?? null
   const left = code ? secondsLeft(code.expiresAt, now) : 0
 
@@ -104,9 +144,25 @@ export function DirectorLineSettings() {
     change(next)
     setDraft(next)
   }
-  const failure = setEnabled.error ?? setProvider.error ?? setPolicy.error ?? startPairing.error ?? unpair.error ?? testMessage.error ?? testCall.error
+  const failure =
+    setEnabled.error ?? setProvider.error ?? setPolicy.error ?? startPairing.error ?? unpair.error ?? testMessage.error ?? setPin.error ?? setSip.error ?? removeSip.error ?? setVoicePolicy.error ?? callMe.error ?? hangUp.error ?? confirmSas.error
   const working = setEnabled.isPending || setProvider.isPending || setPolicy.isPending || startPairing.isPending
-  const voiceReady = view.voiceProvider.configured
+  const voice = view.voice
+  const voiceReady = voice.available && voice.configured
+  const vstatus = voiceStatus(voice)
+  const sip = sipDraft ?? sipFormFromView(voice)
+  const sipProblems = sipTried ? sipFormProblems(sip, voice.passwordSet) : {}
+  const editSip = (change: Partial<SipForm>): void => setSipDraft({ ...sip, ...change })
+  const saveSip = (): void => {
+    setSipTried(true)
+    if (Object.keys(sipFormProblems(sip, voice.passwordSet)).length > 0) return
+    setSip.mutate(sipFormInput(sip), { onSuccess: () => { setSipDraft(null); setSipTried(false); setAnnounce('The voice line is saved.') } })
+  }
+  const vpolicy: VoicePolicyForm = policyDraft ?? voice.policy
+  const policyProblems = voicePolicyProblems(vpolicy)
+  const policyDirty = policyDraft !== null && !sameVoicePolicy(policyDraft, voice.policy)
+  const editPolicy = (change: Partial<VoicePolicyForm>): void => setPolicyDraft({ ...vpolicy, ...change })
+  const callBlocked = callMeDisabledReason(voice)
   const status = view.messageProvider.status
   const tone = status === 'CONNECTED' ? 'success' : status === 'ERROR' ? 'danger' : 'neutral'
 
@@ -229,11 +285,206 @@ export function DirectorLineSettings() {
         </div>
       </Block>
 
-      <Block title="Voice provider: Twilio">
+      <Block title="Voice (Linphone / SIP)">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={voiceReady ? 'success' : 'neutral'}>{voiceReady ? `Configured ····${view.voiceProvider.tokenSuffix ?? ''}` : 'Ready, not configured'}</Badge>
+          <Badge tone={vstatus.tone}>{vstatus.text}</Badge>
+          {voice.inCall ? (
+            <Button variant="danger" loading={hangUp.isPending} onClick={() => hangUp.mutate({}, { onSuccess: () => setAnnounce('The call was ended.') })} data-testid="director-line-hang-up">
+              Hang up
+            </Button>
+          ) : null}
         </div>
-        <p className="m-0 text-text-secondary">{VOICE_COST_LINE}</p>
+        {voice.inCall && voice.callSecurity !== null ? (
+          <div className="flex flex-wrap items-center gap-2" data-testid="director-line-call-security">
+            <span className="text-small">{liveSecurityWords(voice.callSecurity).text}</span>
+            {liveSecurityWords(voice.callSecurity).canConfirm ? (
+              <Button variant="primary" loading={confirmSas.isPending} onClick={() => confirmSas.mutate({}, { onSuccess: () => setAnnounce('The call is verified.') })} data-testid="director-line-confirm-sas">
+                They match
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+            <ol className="m-0 flex flex-col gap-0.5 pl-5 text-small text-text-secondary" data-testid="director-line-sip-help">
+              {SIP_SETUP_STEPS.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+            {voice.passwordSet ? (
+              <p className="m-0 text-text-secondary" data-testid="director-line-sip-password-state">
+                A password is stored.
+              </p>
+            ) : null}
+            <Field label="NEXUS's SIP address" hint="The second account, for example sip:nexus-me@sip.linphone.org." error={sipProblems.identity}>
+              {(id) => (
+                <Input id={id} autoComplete="off" spellCheck={false} className="font-mono" value={sip.identity} onChange={(e) => editSip({ identity: e.target.value })} data-testid="director-line-sip-identity" />
+              )}
+            </Field>
+            <Field
+              label="NEXUS's SIP password"
+              hint={voice.passwordSet ? 'Leave empty to keep the stored one. It is kept in protected storage and never shown again.' : 'It is kept in protected storage and never shown again.'}
+              error={sipProblems.password}
+            >
+              {(id) => (
+                <Input id={id} type="password" autoComplete="off" spellCheck={false} className="font-mono" value={sip.password} onChange={(e) => editSip({ password: e.target.value })} data-testid="director-line-sip-password" />
+              )}
+            </Field>
+            <Field label="Your phone's SIP address" hint="The first account, signed in to the Linphone app. Only this address can call NEXUS, and NEXUS calls only this address." error={sipProblems.operatorIdentity}>
+              {(id) => (
+                <Input id={id} autoComplete="off" spellCheck={false} className="font-mono" value={sip.operatorIdentity} onChange={(e) => editSip({ operatorIdentity: e.target.value })} data-testid="director-line-sip-operator" />
+              )}
+            </Field>
+            <Field label="Media encryption" hint={ENCRYPTION_NOTE}>
+              {(id) => (
+                <Select
+                  id={id}
+                  value={sip.mediaEncryption}
+                  onChange={(v) => editSip({ mediaEncryption: v })}
+                  options={ENCRYPTION_ORDER.map((value) => ({ value, label: ENCRYPTION_LABEL[value] }))}
+                  className="max-w-xs"
+                  data-testid="director-line-sip-encryption"
+                />
+              )}
+            </Field>
+            <Checkbox checked={sip.mediaEncryptionMandatory} label="Refuse calls that are not encrypted" onChange={(v) => editSip({ mediaEncryptionMandatory: v })} />
+            <Field label="STUN server (optional)" hint="Helps a call get through a router. Leave empty to use none." error={sipProblems.stunServer}>
+              {(id) => (
+                <Input id={id} autoComplete="off" spellCheck={false} className="max-w-sm font-mono" value={sip.stunServer} onChange={(e) => editSip({ stunServer: e.target.value })} data-testid="director-line-sip-stun" />
+              )}
+            </Field>
+            <Checkbox checked={sip.ice} label="ICE (finds the best path for the sound)" onChange={(v) => editSip({ ice: v })} />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" loading={setSip.isPending} disabled={sipDraft === null && voice.configured} onClick={saveSip} data-testid="director-line-save-sip">
+                {voice.configured ? 'Save changes' : 'Save voice line'}
+              </Button>
+              {voice.configured ? (
+                <Button variant="danger" busy={removeSip.isPending} onClick={() => removeSip.mutate({}, { onSuccess: () => { setSipDraft(null); setAnnounce('The voice line was removed. NEXUS will not call.') } })} data-testid="director-line-remove-sip">
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+            {voice.configured && voice.state !== 'REGISTERED' && voice.stateDetail ? (
+              <p className="m-0 text-small text-text-muted" data-testid="director-line-sip-detail">
+                {voice.stateDetail}
+              </p>
+            ) : null}
+
+            <h4 className="m-0 mt-2 text-body font-medium">Calls</h4>
+            <Checkbox checked={vpolicy.requirePin} label="Ask for the PIN on every call" onChange={(v) => editPolicy({ requirePin: v })} />
+            {!vpolicy.requirePin ? (
+              <p className="m-0 text-small text-text-muted" data-testid="director-line-pin-off-note">
+                {PIN_OFF_NOTE}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-start gap-3">
+              <Field label="Ring for (seconds)" error={policyProblems.ringSeconds}>
+                {(id) => <NumberField id={id} className="w-24" value={vpolicy.ringSeconds} min={10} max={60} onChange={(v) => editPolicy({ ringSeconds: Math.round(v) })} data-testid="director-line-ring-seconds" />}
+              </Field>
+              <Field label="Calls per day at most" error={policyProblems.maxPlacedCallsPerDay}>
+                {(id) => <NumberField id={id} className="w-24" value={vpolicy.maxPlacedCallsPerDay} min={0} max={24} onChange={(v) => editPolicy({ maxPlacedCallsPerDay: Math.round(v) })} data-testid="director-line-calls-per-day" />}
+              </Field>
+              <Field label="Minutes between calls" hint="For calls NEXUS places about an event." error={policyProblems.minMinutesBetweenPlacedCalls}>
+                {(id) => <NumberField id={id} className="w-24" value={vpolicy.minMinutesBetweenPlacedCalls} min={0} max={240} onChange={(v) => editPolicy({ minMinutesBetweenPlacedCalls: Math.round(v) })} data-testid="director-line-minutes-between" />}
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                loading={setVoicePolicy.isPending}
+                disabled={!policyDirty || Object.keys(policyProblems).length > 0}
+                onClick={() => policyDraft && setVoicePolicy.mutate(policyDraft, { onSuccess: () => { setPolicyDraft(null); setAnnounce('Call settings saved.') } })}
+                data-testid="director-line-save-voice-policy"
+              >
+                Save call settings
+              </Button>
+              {policyDirty && !vpolicy.requirePin && voice.policy.requirePin ? <span className="text-small text-text-secondary">Turning the PIN off asks for confirmation on this PC.</span> : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                loading={callMe.isPending}
+                disabled={callBlocked !== null}
+                onClick={() => callMe.mutate({}, { onSuccess: (r) => { setCallResult(placeResultWords(r.result)); setAnnounce(placeResultWords(r.result)) } })}
+                data-testid="director-line-call-me"
+                aria-describedby={callBlocked ? 'dl-call-why' : undefined}
+              >
+                Call me now
+              </Button>
+              {callResult ? (
+                <span className="text-text-secondary" data-testid="director-line-call-result">
+                  {callResult}
+                </span>
+              ) : null}
+            </div>
+            {callBlocked ? (
+              <p id="dl-call-why" className="m-0 text-small text-text-muted" data-testid="director-line-call-why">
+                Call me now is unavailable: {callBlocked}
+              </p>
+            ) : null}
+
+            <h4 className="m-0 mt-2 text-body font-medium">Speech</h4>
+            <p className="m-0 text-text-secondary" data-testid="director-line-speech">
+              {speechLine(voice.speech)}
+            </p>
+
+            <h4 className="m-0 mt-2 text-body font-medium">Last calls</h4>
+            {voice.lastCalls.length === 0 ? (
+              <p className="m-0 text-text-secondary" data-testid="director-line-calls-empty">
+                No call yet. Nothing that was said is ever kept; only when, how it ended and what security was negotiated.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-small" data-testid="director-line-calls">
+                  <thead>
+                    <tr className="text-left text-text-secondary">
+                      <th className="py-1 pr-3 font-medium">When</th>
+                      <th className="py-1 pr-3 font-medium">Direction</th>
+                      <th className="py-1 pr-3 font-medium">Outcome</th>
+                      <th className="py-1 pr-3 font-medium">PIN</th>
+                      <th className="py-1 pr-3 font-medium">Security</th>
+                      <th className="py-1 font-medium">Answer time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {voice.lastCalls.map((c, i) => (
+                      <tr key={`${c.callId}-${c.startedAt}-${i}`} className="border-t">
+                        <td className="py-1 pr-3">{formatDateTime(c.startedAt)}</td>
+                        <td className="py-1 pr-3">{callDirectionWords(c.direction)}</td>
+                        <td className="py-1 pr-3">{callOutcomeWords(c.outcome)}</td>
+                        <td className="py-1 pr-3">{c.authenticated ? 'accepted' : 'no'}</td>
+                        <td className="py-1 pr-3 font-mono">{securityText(c.security)}</td>
+                        <td className="py-1">{answerTimeWords(c.medianAnswerMs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+      </Block>
+
+      <Block title="Voice PIN">
+        <p className="m-0 text-text-secondary" data-testid="director-line-pin-state">
+          {view.pinConfigured ? 'A PIN is set.' : 'No PIN is set. Without one nobody can be authenticated on a call, so NEXUS ends it.'}
+        </p>
+        <p className="m-0 text-small text-text-muted">
+          A caller's address can be forged, so the address alone opens nothing unless you choose so below and the SIP service itself vouches for it. By default the PIN is asked on every call, said or keyed in. It is kept as a salted hash and never shown.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label={view.pinConfigured ? 'New PIN' : 'PIN'} hint="6 to 12 digits.">
+            {(id) => <Input id={id} type="password" inputMode="numeric" autoComplete="off" className="font-mono" value={pin} onChange={(e) => setPinText(e.target.value.replace(/\D/g, '').slice(0, 12))} data-testid="director-line-pin" />}
+          </Field>
+          <Field label="Again" error={pinAgain !== '' && pinAgain !== pin ? 'The two do not match.' : undefined}>
+            {(id) => <Input id={id} type="password" inputMode="numeric" autoComplete="off" className="font-mono" value={pinAgain} onChange={(e) => setPinAgain(e.target.value.replace(/\D/g, '').slice(0, 12))} data-testid="director-line-pin-again" />}
+          </Field>
+          <Button
+            variant="primary"
+            loading={setPin.isPending}
+            disabled={pin.length < 6 || pin !== pinAgain}
+            onClick={() => setPin.mutate({ pin }, { onSuccess: () => { setPinText(''); setPinAgain(''); setAnnounce('The voice PIN is set.') } })}
+            data-testid="director-line-save-pin"
+          >
+            {view.pinConfigured ? 'Change PIN' : 'Set PIN'}
+          </Button>
+        </div>
       </Block>
 
       <Block title="Report policy">
@@ -258,7 +509,7 @@ export function DirectorLineSettings() {
                   checked={rule.call}
                   label="Call"
                   disabled={!rule.enabled || (!voiceReady && !rule.call)}
-                  title={voiceReady ? undefined : 'Voice is not configured'}
+                  title={voiceReady ? undefined : 'The voice line is not set up'}
                   onChange={(v) => edit((p) => { p.events[kind].call = v })}
                 />
               </div>
@@ -332,18 +583,8 @@ export function DirectorLineSettings() {
           >
             Send test message
           </Button>
-          <Button
-            loading={testCall.isPending}
-            disabled={view.voiceReason !== null}
-            onClick={() => testCall.mutate({}, { onSuccess: (r) => setAnnounce(r.ok ? 'The test call was answered.' : `The test call did not connect (${r.errorClass ?? 'not answered'}).`) })}
-            data-testid="director-line-test-call"
-            aria-describedby={view.voiceReason ? 'dl-call-why' : undefined}
-          >
-            Test call
-          </Button>
         </div>
         {!paired ? <p id="dl-test-why" className="m-0 text-small text-text-muted">Pair a phone to send a test message.</p> : null}
-        {view.voiceReason ? <p id="dl-call-why" className="m-0 text-small text-text-muted" data-testid="director-line-call-why">Test call unavailable: {view.voiceReason}</p> : null}
         {working ? <span className="sr-only">Working</span> : null}
       </Block>
     </div>

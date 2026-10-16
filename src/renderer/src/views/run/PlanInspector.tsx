@@ -56,7 +56,7 @@ function CandidateCard({ candidate: c }: { candidate: PlanningCandidate }) {
         <span className="ml-auto flex gap-3 font-mono text-small text-text-secondary">
           <span>{c.model ?? 'model unknown'}</span>
           <span>{formatDuration(c.durationMs)}</span>
-          {c.costUsd !== null ? <span>{formatCost(c.costUsd)}</span> : null}
+          {c.costUsd !== null ? <span title="List-price estimate, not a bill">{formatCost(c.costUsd)} est.</span> : null}
         </span>
       </div>
       {c.errors.length > 0 ? (

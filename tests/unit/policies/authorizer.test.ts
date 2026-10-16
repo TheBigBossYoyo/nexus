@@ -7,6 +7,7 @@ import { AGENT_ROLES } from '@shared/domain'
 import type { AgentRole } from '@shared/domain'
 import type { ToolDecision } from '@main/modules/agent-runtime/types'
 import { createAuthorizer } from '@main/modules/policies'
+import { claudeProjectSlug } from '@main/modules/policies/authorizer'
 import type { PolicyContext } from '@main/modules/policies'
 
 let tmp: string
@@ -132,6 +133,25 @@ describe('file reads', () => {
       expect(await behavior('worker', 'Write', { file_path: path.join(outsideDir, 'o.txt').replace(/^./, (c) => (root === flipped ? c.toLowerCase() : c.toUpperCase())) })).toBe('deny')
     }
     expect(await behavior('worker', 'Read', { file_path: path.join(flipped, 'src', 'a.ts') }, { worktreeRoot: upper })).toBe('allow')
+  })
+
+  // 0.9.1: Claude Code keeps a long tool result in a file of the session's own; the owner's audit was asked about it.
+  it("reads the session's own tool-results files, and no other session's", async () => {
+    const config = path.join(tmp, 'claude-config')
+    const before = process.env['CLAUDE_CONFIG_DIR']
+    process.env['CLAUDE_CONFIG_DIR'] = config
+    try {
+      const own = path.join(config, 'projects', claudeProjectSlug(wt), '61bd82a6-5076-4314-9190-ba9446c8582f', 'tool-results')
+      expect(await behavior('reviewer', 'Read', { file_path: path.join(own, 'toolu_016FNKNbbhijwcWrvhZcNBEU.txt') })).toBe('allow')
+      expect(await behavior('reviewer', 'Grep', { pattern: 'privilege', path: path.join(own, 'toolu_016FNKNbbhijwcWrvhZcNBEU.txt') })).toBe('allow')
+      const other = path.join(config, 'projects', 'C--Users-owner-other-project', '61bd82a6-5076-4314-9190-ba9446c8582f', 'tool-results', 'toolu_1.txt')
+      expect(await behavior('reviewer', 'Read', { file_path: other })).toBe('deny')
+      expect(await behavior('reviewer', 'Read', { file_path: path.join(config, 'projects', claudeProjectSlug(wt), '61bd82a6-5076-4314-9190-ba9446c8582f.jsonl') })).toBe('deny')
+      expect(await behavior('reviewer', 'Read', { file_path: path.join(config, '.credentials.json') })).toBe('deny')
+    } finally {
+      if (before === undefined) delete process.env['CLAUDE_CONFIG_DIR']
+      else process.env['CLAUDE_CONFIG_DIR'] = before
+    }
   })
 
   it.skipIf(process.platform !== 'win32')('resolves 8.3 short names of existing directories', async () => {

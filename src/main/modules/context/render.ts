@@ -19,6 +19,10 @@ export const SECTION_LIMITS = {
   decisions: 6_000,
   dependencies: 8_000,
   dependencyItem: 2_500,
+  // 0.9.1: a synthesis task is made of its dependencies' results. The owner's first audit gave its report task five
+  // reviews of 13,000 to 18,000 characters cut to 2,500 each; it re-read every cited line itself (6 of 16.5 minutes).
+  synthesisDependencies: 160_000,
+  synthesisDependencyItem: 40_000,
   memory: 6_000,
   messages: 6_000,
   repo: 2_000,

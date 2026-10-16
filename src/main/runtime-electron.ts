@@ -202,7 +202,10 @@ export async function runRuntime(): Promise<void> {
       await shell.openExternal(url)
     },
     notify: (title, body) => {
-      if (Notification.isSupported()) new Notification({ title, body, silent: true }).show()
+      // 0.9.1: an automated run kept its window and tray off the screen, but its notifications reached the owner's
+      // (a mission of a test instance started while they used the machine). It writes them to its log instead.
+      if (process.env['NEXUS_WINDOW_OFFSCREEN'] === '1') console.error(`[nexus] notification (off-screen run): ${title}: ${body}`)
+      else if (Notification.isSupported()) new Notification({ title, body, silent: true }).show()
     },
     setKeepAwake: (on) => {
       if (on && blocker === null) blocker = powerSaveBlocker.start('prevent-app-suspension')

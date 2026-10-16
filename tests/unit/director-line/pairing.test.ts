@@ -108,6 +108,32 @@ describe('phone and PIN', () => {
     expect(await pairing.authenticatePhone('TWILIO_VOICE', '+33612345678', '482915')).toBe('OK')
   })
 
+  it('forgets the counters nobody needs when the state is saved, and keeps the ones that matter', async () => {
+    const { pairing, clock, state } = await phoneRig()
+    const DAY = 24 * 3600 * 1000
+    const iso = (offset: number): string => new Date(clock.t + offset).toISOString()
+    const seeded = await state.load()
+    seeded.attempts = {
+      'pin:old-count': { count: 2, lockedUntil: null, at: iso(-2 * DAY) },
+      'pin:no-time': { count: 1, lockedUntil: null },
+      'pin:recent-count': { count: 2, lockedUntil: null, at: iso(-3600_000) },
+      'pin:ended-long-ago': { count: 0, lockedUntil: iso(-2 * DAY), at: iso(-3 * DAY) },
+      'pin:ended-recently': { count: 0, lockedUntil: iso(-3600_000), at: iso(-2 * 3600_000) },
+      'pin:locked-now': { count: 0, lockedUntil: iso(20 * 60_000), at: iso(-60_000) },
+    }
+    await state.save(seeded)
+    // any save does it: here the wrong PIN of the paired number
+    expect(await pairing.authenticatePhone('TWILIO_VOICE', '+33612345678', '000000')).toBe('WRONG_PIN')
+    expect(Object.keys((await state.load()).attempts).sort()).toEqual(['pin:+33612345678', 'pin:ended-recently', 'pin:locked-now', 'pin:recent-count'])
+  })
+
+  it('does not forget the count of a caller who is on the way to a lock', async () => {
+    const { pairing } = await phoneRig()
+    for (let i = 0; i < MAX_PIN_ATTEMPTS - 1; i += 1) await pairing.authenticatePhone('TWILIO_VOICE', '+33612345678', '000000')
+    expect(await pairing.authenticatePhone('TWILIO_VOICE', '+33612345678', '000000')).toBe('WRONG_PIN')
+    expect(await pairing.authenticatePhone('TWILIO_VOICE', '+33612345678', '482915')).toBe('LOCKED')
+  })
+
   it('refuses a weak or malformed PIN', async () => {
     const { pairing } = rig()
     await expect(pairing.setPin('1234')).rejects.toThrow()

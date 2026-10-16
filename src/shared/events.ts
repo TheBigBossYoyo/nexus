@@ -1,3 +1,4 @@
+import type { PrivilegeSessionStatus } from './privilege'
 import type { ConnectivitySnapshot } from './connectivity'
 import type { ProgressSnapshot } from './progress'
 import type {
@@ -111,6 +112,8 @@ export interface EventPayloads {
 
   'checks.started': { commands: string[] }
   'checks.completed': { passed: boolean; failed: string[] }
+  /** 0.9.1: test files that failed in a check and passed when run again alone (possibly flaky). */
+  'checks.flaky': { files: string[] }
 
   'review.started': { attempt: number }
   'review.finding': { severity: Severity; title: string; file: string | null }
@@ -203,6 +206,10 @@ export type PushMessage =
   | { kind: 'auth.changed' }
   /** 0.9. The progress of a mission changed in a way worth showing, or its estimate was refreshed. */
   | { kind: 'progress'; snapshot: ProgressSnapshot }
+  /** 0.9.1: the privilege session changed (prepared, an operation recorded, ended). */
+  | { kind: 'privilege'; status: PrivilegeSessionStatus | null }
+  /** 0.9.1: NEXUS's work did something on the owner's screen during these runs (the disturbance metrics changed). */
+  | { kind: 'presentation'; runIds: string[] }
   /** 0.9. What the network supervisor sees changed. */
   | { kind: 'connectivity'; snapshot: ConnectivitySnapshot }
   | { kind: 'overnight'; status: OvernightStatus }

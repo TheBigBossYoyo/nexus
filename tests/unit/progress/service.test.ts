@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { Run, Task } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
 import { progressRows, type ProgressSnapshot } from '@shared/progress'
-import { ProgressService, milestoneLine, milestoneOf, type ProgressChange } from '@main/modules/progress/service'
+import { ProgressService, checkLabel, milestoneLine, milestoneOf, type ProgressChange } from '@main/modules/progress/service'
 
 // 0.9: the service that keeps the progress of missions current and says when a change is worth showing.
 const T0 = Date.parse('2026-10-13T19:00:00Z')
 const iso = (minutes: number): string => new Date(T0 + minutes * 60_000).toISOString()
 
-function world() {
+function world(opts: { fullChecksSeconds?: number | null } = {}) {
   let now = T0
   let seq = 0
   const run = { id: 'run-1', projectId: 'p', state: 'executing', pauseReason: null, startedAt: iso(0), createdAt: iso(0), finishedAt: null, config: { maxParallelAgents: 2 } } as unknown as Run
@@ -17,7 +17,7 @@ function world() {
   const changes: { why: ProgressChange; snapshot: ProgressSnapshot }[] = []
   const recorded: { lowSeconds: number; highSeconds: number }[] = []
   const accuracy: { coverage: number; samples: number }[] = []
-  let wait: { kind: 'WAITING_FOR_NETWORK'; detail: string } | null = null
+  let wait: { kind: 'WAITING_FOR_NETWORK' | 'WAITING_FOR_USER_BOUNDARY'; detail: string } | null = null
   const task = (key: string, state: Task['state'], over: Partial<Task> = {}): Task => {
     const t = { id: key, runId: run.id, key, title: `Task ${key}`, kind: 'implement', complexity: 'medium', state, startedAt: null, finishedAt: null, parentTaskId: null, blockedReason: null, repairCycles: 0, ...over } as unknown as Task
     const at = tasks.findIndex((x) => x.id === key)
@@ -41,6 +41,7 @@ function world() {
     onChange: (snapshot, why) => changes.push({ why, snapshot }),
     record: (entry) => recorded.push(entry),
     recordAccuracy: (entry) => accuracy.push(entry),
+    fullChecksSeconds: () => opts.fullChecksSeconds ?? null,
   })
   return { run, task, emit, service, changes, recorded, accuracy, advance: (minutes: number) => (now += minutes * 60_000), setWait: (w: typeof wait) => (wait = w), now: () => now }
 }
@@ -57,6 +58,13 @@ describe('milestones', () => {
     expect(milestoneOf(ev('task.created', { kind: 'implement', title: 'x', key: 'k', role: 'worker' }), titleOf)).toBeNull()
     for (const quiet of ['agent.tool.started', 'agent.tool.completed', 'agent.usage', 'agent.message', 'task.state_changed', 'run.state_changed']) expect(milestoneOf(ev(quiet), titleOf), quiet).toBeNull()
     expect(milestoneLine({ at: '2026-10-13T19:04:00', text: 'Unit suite passed' })).toBe('19:04 Unit suite passed')
+  })
+
+  it('shows the test files that passed only when run again, by name and at most three', () => {
+    const titleOf = (): string => 'x'
+    const ev = (files: string[]): RunEvent => ({ seq: 1, runId: 'r', taskId: 't', agentId: null, type: 'checks.flaky', payload: { files }, createdAt: '2026-10-13T19:04:00' }) as unknown as RunEvent
+    expect(milestoneOf(ev(['tests/unit/progress/service.test.ts']), titleOf)?.text).toBe('Passed when run again: service.test.ts')
+    expect(milestoneOf(ev(['tests/a.test.ts', 'src/x/b.test.ts', 'tests\\win\\c.test.ts', 'd/d.test.ts', 'e.test.ts']), titleOf)?.text).toBe('Passed when run again: a.test.ts, b.test.ts, c.test.ts and 2 more')
   })
 })
 
@@ -111,6 +119,58 @@ describe('the progress service', () => {
     w.service.refresh('run-1')
     expect(w.changes.filter((c) => c.why === 'COMPLETION')).toHaveLength(1)
     expect(w.service.open()).toEqual([])
+  })
+
+  it('names the checks of a task while they run, and goes back to the estimator\'s stage when they complete', () => {
+    const w = world()
+    w.task('a', 'running', { startedAt: iso(0) })
+    w.service.refresh('run-1')
+    w.emit('checks.started', { commands: ['pnpm run typecheck', 'pnpm test'] }, 'a')
+    w.service.refresh('run-1')
+    expect(w.changes.at(-1)).toMatchObject({ why: 'STAGE', snapshot: { stage: 'Running checks of Task a: pnpm run typecheck, pnpm test' } })
+    w.emit('checks.completed', { passed: true, failed: [] }, 'a')
+    w.service.refresh('run-1')
+    expect(w.service.snapshot('run-1')?.stage).toBe('Working on: Task a')
+  })
+
+  it('names the checks of a running task during a boundary wait, with the boundary said after them', () => {
+    const w = world()
+    w.task('a', 'running', { startedAt: iso(0) })
+    w.setWait({ kind: 'WAITING_FOR_USER_BOUNDARY', detail: 'git push' })
+    w.emit('checks.started', { commands: ['pnpm run typecheck', 'pnpm test'] }, 'a')
+    const s = w.service.refresh('run-1')
+    expect(s?.stage).toBe('Running checks of Task a: pnpm run typecheck, pnpm test (a boundary request waits for your decision)')
+    expect(s?.wait).toBe('WAITING_FOR_USER_BOUNDARY')
+  })
+
+  it('names the final checks of the mission while they run, but leaves a wait as it is', () => {
+    const w = world()
+    w.task('a', 'completed', { startedAt: iso(0), finishedAt: iso(10) })
+    w.run.state = 'verifying'
+    w.emit('checks.started', { commands: ['pnpm run build', 'pnpm test'] }, null)
+    // The estimate's word on their length stays (here a first mission of the project: not known yet).
+    expect(w.service.refresh('run-1')?.stage).toBe('Final checks: pnpm run build, pnpm test (its first time on this project, so its length is not known yet)')
+    w.setWait({ kind: 'WAITING_FOR_NETWORK', detail: 'Wi-Fi disconnected' })
+    expect(w.service.refresh('run-1')?.stage).not.toContain('Final checks')
+  })
+
+  // 0.9.1: a first mission of a small project (checks of one second) was shown at least 7 minutes, then at least 3 for its last minute.
+  it('estimates a first mission final checks from the check durations its tasks measured, else from the wide prior', () => {
+    const finish = (w: ReturnType<typeof world>) => {
+      w.task('a', 'completed', { startedAt: iso(0), finishedAt: iso(3) })
+      w.run.state = 'verifying'
+      w.emit('checks.started', { commands: ['npm test'] }, null)
+      return w.service.refresh('run-1')?.eta.highSeconds ?? 0
+    }
+    expect(finish(world({ fullChecksSeconds: 2 }))).toBeLessThan(300)
+    expect(finish(world())).toBeGreaterThan(1000)
+  })
+
+  it('names a check by what it runs, not by the files a scoped command lists', () => {
+    expect(checkLabel('pnpm exec vitest run --passWithNoTests tests/a.test.ts tests/b b.test.ts')).toBe('vitest (2 files)')
+    expect(checkLabel('pnpm exec eslint src/x.ts')).toBe('eslint (1 file)')
+    expect(checkLabel('pnpm typecheck')).toBe('pnpm typecheck')
+    expect(checkLabel('cargo test --all')).toBe('cargo test --all')
   })
 
   it('keeps what it predicted and, at the end, how good that was', () => {

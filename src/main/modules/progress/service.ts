@@ -1,7 +1,7 @@
 import type { Run, Task, TaskDependency } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
 import { DEFAULT_PROGRESS_REFRESH_SECONDS, MAX_PROGRESS_REFRESH_SECONDS, MIN_PROGRESS_REFRESH_SECONDS, type ProgressMilestone, type ProgressSnapshot, type ProgressWait } from '@shared/progress'
-import { DurationModel, estimateProgress, etaAccuracy, type FinishedTask } from './estimator'
+import { blend, BOUNDARY_SUFFIX, DurationModel, estimateProgress, etaAccuracy, FINALE_PRIOR, statsOf, type FinishedTask } from './estimator'
 
 /**
  * 0.9: the progress of the missions that are going on, kept current. It reads what the runtime already has
@@ -29,6 +29,18 @@ export interface ProgressServiceDeps {
   /** Kept for learning: what was predicted, and at the end how good it was. */
   record?: (entry: { runId: string; at: number; lowSeconds: number; highSeconds: number; percent: number; confidence: string; wait: ProgressWait }) => void
   recordAccuracy?: (entry: { runId: string; finishedAt: number; samples: number; coverage: number; bias: number; meanWidthRatio: number }) => void
+  /** 0.9.1: how long the final verification of earlier missions of this project took, in seconds, most recent first. */
+  /**
+   * How long the final checks of this project's missions took: earlier missions, and this run's own final checks
+   * from before `before` (a repeat after a repair); never the ones in progress or just finished.
+   */
+  finaleSeconds?: (projectId: string, runId: string, before: string | null) => number[]
+  /**
+   * 0.9.1: how long this run's check commands took when its tasks ran them whole (each as configured), summed;
+   * null unless every configured check was measured so. On a project's first mission it is the best measure of its
+   * final checks: a mission of six minutes was shown "at least 7 minutes" from the wide prior alone.
+   */
+  fullChecksSeconds?: (runId: string) => number | null
 }
 
 export type ProgressChange = 'STAGE' | 'BLOCKER' | 'WAIT' | 'RECOVERY' | 'SCOPE' | 'COMPLETION' | 'REFRESH'
@@ -59,6 +71,10 @@ export function milestoneOf(event: RunEvent, titleOf: (taskId: string | null) =>
       return p['kind'] === 'repair' ? { at, text: `Repair task created: ${String(p['title'] ?? title).slice(0, 70)}` } : null
     case 'checks.completed':
       return { at, text: p['passed'] === true ? 'Checks passed' : `Checks failed (${Array.isArray(p['failed']) ? p['failed'].length : 0})` }
+    case 'checks.flaky': {
+      const names = (Array.isArray(p['files']) ? p['files'] : []).map((f) => String(f).split(/[/\\]/).pop() ?? '')
+      return { at, text: `Passed when run again: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}` }
+    }
     case 'review.completed':
       return { at, text: p['verdict'] === 'approved' ? `Review approved: ${title}` : `Review asked for changes: ${title} (${String(p['findings'])} findings)` }
     case 'verification.passed':
@@ -90,9 +106,34 @@ export function milestoneLine(m: ProgressMilestone): string {
   return `${two(d.getHours())}:${two(d.getMinutes())} ${m.text}`
 }
 
+/**
+ * A check command as the stage names it: what it runs, without the files a task's scoped command lists
+ * (`pnpm exec vitest run --passWithNoTests a.test.ts b.test.ts` is "vitest (2 files)").
+ */
+export function checkLabel(command: string): string {
+  const words = command.trim().split(/\s+/)
+  const at = words[1] === 'exec' || words[1] === 'run' ? 2 : 1
+  const tool = ['pnpm', 'npm', 'yarn', 'bun', 'npx'].includes(words[0] ?? '') ? (words[at] ?? words[0] ?? '') : (words[0] ?? '')
+  const files = words.filter((w) => /\.[cm]?[jt]sx?$|\.vue$|\.svelte$/i.test(w)).length
+  return files > 0 ? `${tool} (${files} file${files === 1 ? '' : 's'})` : words.slice(0, 3).join(' ')
+}
+
+/**
+ * The stage while checks run: of a task (its title), or the mission's final ones (null). The final checks keep what
+ * the estimate says of their length (`hint`, from "Verifying the whole mission (usually about 17 min ...)").
+ */
+function checksStage(title: string | null, commands: string[], hint: string | null): string {
+  const names = commands.map(checkLabel).join(', ').slice(0, 160)
+  return title === null ? `Final checks: ${names}${hint ? ` ${hint}` : ''}` : `Running checks of ${title.slice(0, 70)}: ${names}`
+}
+
 interface Kept {
   snapshot: ProgressSnapshot
   seq: number
+  /** When the mission's own final checks began (its integration's checks.started), or null. */
+  finaleStartedAt: number | null
+  /** Checks in flight, by task id (null: the mission's), in start order. */
+  checking: Map<string | null, string[]>
   milestones: ProgressMilestone[]
   predictions: { at: number; lowSeconds: number; highSeconds: number }[]
   shownAt: number
@@ -121,6 +162,27 @@ export class ProgressService {
     return this.model
   }
 
+  private readonly finales = new Map<string, { at: number; stats: ReturnType<typeof statsOf> }>()
+
+  /** How long this project's final verification takes: its history blended with a wide prior, read every ten minutes. */
+  private finaleStats(projectId: string, runId: string, startedAt: number | null): ReturnType<typeof statsOf> {
+    const now = this.deps.now()
+    // 0.9.1: the run's own final checks are not its history: once they had run, a first mission's estimate went back
+    // to the wide prior for its last minute.
+    const history = (this.deps.finaleSeconds?.(projectId, runId, startedAt === null ? null : new Date(startedAt).toISOString()) ?? []).filter((s) => Number.isFinite(s) && s > 0).slice(0, 20)
+    const measured = history.length === 0 ? (this.deps.fullChecksSeconds?.(runId) ?? null) : null
+    // No earlier mission of this project, but its checks were run whole by this one's tasks: the final checks are
+    // those commands again, then the final verifier (half a minute to a few minutes).
+    if (measured !== null && Number.isFinite(measured)) return { n: 0, p25: measured + 20, median: measured * 1.2 + 45, p75: measured * 1.6 + 90, p90: measured * 2.5 + 180 }
+    const known = this.finales.get(`${projectId}|${runId}|${startedAt ?? ''}`)
+    if (known !== undefined && now - known.at < 10 * 60_000) return known.stats
+    // Few missions of one project: three of them are already its best measure, so the history is trusted sooner than for tasks.
+    const past = history.length > 0 ? statsOf(history) : undefined
+    const stats = past !== undefined && past.n >= 3 ? past : blend(past !== undefined ? { ...past, n: past.n * 3 } : undefined, FINALE_PRIOR)
+    this.finales.set(`${projectId}|${runId}|${startedAt ?? ''}`, { at: now, stats })
+    return stats
+  }
+
   /** The snapshot of a run as of now, or null when there is no such run. Computing it tells nobody. */
   snapshot(runId: string): ProgressSnapshot | null {
     return this.compute(runId)?.snapshot ?? null
@@ -134,13 +196,22 @@ export class ProgressService {
     const titles = new Map(tasks.map((t) => [t.id, t.title]))
     const milestones = [...(before?.milestones ?? [])]
     let seq = before?.seq ?? 0
+    let finaleStartedAt = before?.finaleStartedAt ?? null
+    const checking = new Map(before?.checking ?? [])
     for (const event of this.deps.events(runId, seq)) {
       seq = Math.max(seq, event.seq)
+      if (event.type === 'checks.started' && event.taskId === null) finaleStartedAt = Date.parse(event.createdAt)
+      if (event.type === 'checks.started') {
+        const commands = (event.payload as { commands?: unknown }).commands
+        // Deleted first so that a restarted entry counts as the most recent.
+        checking.delete(event.taskId)
+        checking.set(event.taskId, Array.isArray(commands) ? commands.map(String) : [])
+      } else if (event.type === 'checks.completed') checking.delete(event.taskId)
       const m = milestoneOf(event, (id) => (id === null ? null : (titles.get(id) ?? null)))
       if (m !== null) milestones.push(m)
     }
     const now = this.deps.now()
-    const snapshot = estimateProgress({
+    const estimated = estimateProgress({
       now,
       run,
       tasks,
@@ -151,8 +222,14 @@ export class ProgressService {
       previous: before?.snapshot ?? null,
       milestones: milestones.slice(-40),
       refreshSeconds: this.refreshMs() / 1000,
+      finale: { stats: this.finaleStats(run.projectId, run.id, finaleStartedAt), startedAt: finaleStartedAt },
     })
-    const kept: Kept = { snapshot, seq, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
+    const latest = [...checking.entries()].at(-1)
+    // A boundary request that waits while work goes on (the estimator says so in the stage) shows the checks too.
+    const boundary = estimated.wait === 'WAITING_FOR_USER_BOUNDARY'
+    const hint = /\((usually about [^)]*|its first time[^)]*)\)$/.exec(boundary ? estimated.stage.replace(BOUNDARY_SUFFIX, '') : estimated.stage)?.[0] ?? null
+    const snapshot = (estimated.wait === 'ACTIVE' || (boundary && estimated.stage.endsWith(BOUNDARY_SUFFIX))) && latest !== undefined ? { ...estimated, stage: `${checksStage(latest[0] === null ? null : (titles.get(latest[0]) ?? 'a task'), latest[1], hint)}${boundary ? BOUNDARY_SUFFIX : ''}` } : estimated
+    const kept: Kept = { snapshot, seq, finaleStartedAt, checking, milestones: milestones.slice(-40), predictions: before?.predictions ?? [], shownAt: before?.shownAt ?? 0, closed: before?.closed ?? false }
     this.kept.set(runId, kept)
     return kept
   }

@@ -18,6 +18,11 @@ import { autonomySchema } from './017-autonomy'
 import { researchSchema } from './018-research'
 import { boundaryActionHashSchema } from './019-boundary-action-hash'
 import { operationalAutonomySchema } from './020-operational-autonomy'
+import { voiceLineSchema } from './021-voice-line'
+import { voiceLineVerificationSchema } from './022-voice-line-verification'
+import { privilegeSessionsSchema } from './023-privilege-sessions'
+import { userDisturbanceSchema } from './024-user-disturbance'
+import { privilegeReceiptChainSchema } from './025-privilege-receipt-chain'
 
 export interface Migration {
   version: number
@@ -47,4 +52,9 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 18, name: 'research', sql: researchSchema },
   { version: 19, name: 'boundary-action-hash', sql: boundaryActionHashSchema },
   { version: 20, name: 'operational-autonomy', sql: operationalAutonomySchema },
+  { version: 21, name: 'voice-line', sql: voiceLineSchema },
+  { version: 22, name: 'voice-line-verification', sql: voiceLineVerificationSchema },
+  { version: 23, name: 'privilege-sessions', sql: privilegeSessionsSchema },
+  { version: 24, name: 'user-disturbance', sql: userDisturbanceSchema },
+  { version: 25, name: 'privilege-receipt-chain', sql: privilegeReceiptChainSchema },
 ]

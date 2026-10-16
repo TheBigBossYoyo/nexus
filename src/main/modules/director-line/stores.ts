@@ -14,6 +14,8 @@ export interface IdentityStore {
 export interface AttemptCounter {
   count: number
   lockedUntil: string | null
+  /** When the count last changed. Absent on a counter written before 0.9.1. */
+  at?: string
 }
 
 /** Pairing state. Only hashes are kept: neither the pairing code nor the PIN is stored in the clear. */

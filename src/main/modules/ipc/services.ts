@@ -50,6 +50,10 @@ export class ProjectService {
       currentBranch: (p) => git.currentBranch(p).catch(() => null),
       headCommit: (p) => git.headCommit(p).catch(() => null),
       status: async (p) => ({ dirty: !(await git.status(p)).clean }),
+      trackedFiles: async (p) => {
+        const r = await git.run(p, ['ls-files', '-z'], { maxOutputBytes: 8 * 1024 * 1024, timeoutMs: 30_000 }).catch(() => null)
+        return r === null || r.exitCode !== 0 ? null : r.stdout.split('\0').filter((f) => f !== '')
+      },
     }
   }
 

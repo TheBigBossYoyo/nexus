@@ -229,6 +229,34 @@ describe('scenario: AUDIT and ASK modes are read-only', () => {
     expect(h.repos.artifacts.listByRun(run.id).filter((a) => a.kind === 'report')).toHaveLength(3)
   })
 
+  // 0.9.1: the owner's first audit of an enrolled project had every shell command refused: its sessions worked in
+  // the user's checkout, which the sandbox account cannot reach.
+  it('AUDIT of a contained project reads a snapshot inside the worktrees of NEXUS, runs no final checks and removes it', async () => {
+    const auditPlan = plan([
+      plannedTask('scan', { role: 'researcher', suggestedFiles: [], acceptanceCriteria: [] }),
+      plannedTask('report', { role: 'researcher', dependencies: ['scan'], suggestedFiles: [], acceptanceCriteria: [] }),
+    ])
+    h = await createHarness({
+      script: scenarioScript({ plan: auditPlan, researcher: completeWith({ text: 'Findings: none.' }) }),
+      commands: { test: 'node -e "process.exit(1)"' },
+      execution: { shellFor: () => undefined, runProjectCommand: async () => null, contained: () => true },
+    })
+    const headBefore = await git(h.repoDir, 'rev-parse', 'HEAD')
+    const run = await h.startRun({ mode: 'audit', prompt: 'Audit the code base' })
+    expect((await h.waitForState(run.id, ['completed', 'failed', 'paused'])).state).toBe('completed')
+    const sessions = [...sessionsOf(h, 'planner'), ...sessionsOf(h, 'researcher')]
+    expect(sessions.length).toBeGreaterThanOrEqual(3)
+    for (const s of sessions) expect(s.cwd.toLowerCase().startsWith(h.worktreesDir.toLowerCase())).toBe(true)
+    // The failing test command was never run: there is nothing to check in a snapshot.
+    expect(h.eventsOfType(run.id, 'checks.completed')).toHaveLength(0)
+    expect(await git(h.repoDir, 'rev-parse', 'HEAD')).toBe(headBefore)
+    // The snapshot and its branch go when the mission ends.
+    for (let i = 0; i < 100 && h.repos.worktrees.listByRun(run.id).some((w) => w.state !== 'removed'); i++) await new Promise((r) => setTimeout(r, 100))
+    expect(h.repos.worktrees.listByRun(run.id).every((w) => w.state === 'removed')).toBe(true)
+    for (let i = 0; i < 50 && (await git(h.repoDir, 'branch', '--format=%(refname:short)')) !== 'main'; i++) await new Promise((r) => setTimeout(r, 100))
+    expect(await git(h.repoDir, 'branch', '--format=%(refname:short)')).toBe('main')
+  })
+
   it('AUDIT also rejects a user-added writing task', async () => {
     h = await createHarness({ script: scenarioScript({ plan: plan([plannedTask('scan', { role: 'researcher', suggestedFiles: [], acceptanceCriteria: [] })]) }) })
     const run = await h.startRun({ mode: 'audit' })

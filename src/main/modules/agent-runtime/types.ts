@@ -132,6 +132,12 @@ export interface SessionSpec {
   subscriptionMode: boolean
   /** v0.7.1: context options. Absent means the 0.7.0 behaviour. */
   contextOptions?: SessionContextOptions
+  /**
+   * 0.9.1: a session that only converses (the Director's voice on a call). The role text is its whole system
+   * prompt instead of an addition to the coding one, and the model does not think before it answers: both are
+   * for the time to the first word. It changes nothing about what the session may do.
+   */
+  conversational?: boolean
 }
 
 export interface UsageInfo {

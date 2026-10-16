@@ -68,6 +68,25 @@ export const SettingsSchema = z.object({
     profile: ExecutionProfileSchema.default('STANDARD'),
     /** 0.8: the operating-system containment of project code in enrolled projects. Old stored settings read as STRONGEST. */
     containment: ContainmentSettingSchema.default('STRONGEST'),
+    /**
+     * 0.9.1: the commands of projects that are not contained run on a desktop of their own (as the user, nothing
+     * else changed), so that tests and applications they open show nothing on the screen and take no focus.
+     * Absent (older settings): on.
+     */
+    quietCommands: z.boolean().optional(),
+    /**
+     * 0.9.1: the tests of a mission's final verification. FULL (absent: older settings): the whole suite, so every
+     * test passed on the integrated code. AFFECTED: only the test files that name a file the mission changed (as a
+     * task's checks), the type check, linter and build still whole; faster on a project with a long suite, and what
+     * it can miss (a test that reaches a changed module through another one) is said in the record of the checks.
+     */
+    finalTests: z.enum(['FULL', 'AFFECTED']).optional(),
+    /**
+     * 0.9.1: missions' work (agents, their commands, checks, git) runs at Windows' below-normal priority, so that the
+     * owner's own programs get the processor first; with nobody else asking, the work gets all of it as before.
+     * Nothing is limited: no agent, no worker, no check fewer. Absent (older settings): on.
+     */
+    backgroundPriority: z.boolean().optional(),
   }),
   git: z.object({
     /** Remove task worktrees after a successful merge into the integration branch. */

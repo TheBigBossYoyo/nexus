@@ -27,6 +27,27 @@ extraResources:
   # 0.9: the helper that reads the Wi-Fi state and reconnects a saved profile (native/nexus-wlan).
   - from: out/native/nexus-wlan.exe
     to: bin/nexus-wlan.exe
+  # 0.9.1: the SIP endpoint of the Director's voice line (native/nexus-sip) and the Linphone libraries it loads
+  # (AGPL-3.0-or-later; fetched by scripts/fetch-linphone-sdk.mjs, with their licences and NOTICE.txt). A program
+  # of its own, started as a process; the libraries are real files next to it.
+  - from: out/native/nexus-sip.exe
+    to: bin/nexus-sip.exe
+  - from: vendor/linphone-sdk/win64
+    to: linphone
+  # 0.9.1: the temporary administrator broker of a privilege session and its relay (native/nexus-elevate). Started
+  # elevated once per session, with the owner's UAC consent; never a service, never left running.
+  - from: out/native/nexus-elevate.exe
+    to: bin/nexus-elevate.exe
+  # 0.9.1: the meter of what NEXUS's work shows on the owner's screen (native/nexus-presence): reads window classes
+  # and the foreground, changes nothing.
+  - from: out/native/nexus-presence.exe
+    to: bin/nexus-presence.exe
+  # The privilege acceptance fixture (a folder and a registry key of NEXUS's own name; never in a session by default).
+  - from: native/privilege-fixture
+    to: privilege-fixture
+  # 0.9.1: the speech models of the voice line (scripts/fetch-speech-models.mjs), with their NOTICE.txt.
+  - from: vendor/speech-models
+    to: speech-models
   # The POSIX shell of the isolated profile (vendor/busybox, GPL-2.0): it runs inside the AppContainer.
   - from: out/native/busybox.exe
     to: bin/busybox.exe
@@ -42,6 +63,11 @@ asar: true
 asarUnpack:
   - "**/node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**"
   - "**/node_modules/better-sqlite3/**"
+  # 0.9.1: the speech engine of the voice line is a native module, and its worker is started as a file.
+  - "**/node_modules/sherpa-onnx-node/**"
+  - "**/node_modules/sherpa-onnx-win-x64/**"
+  - "out/main/speech-worker.js"
+  - "out/main/chunks/**"
 # better-sqlite3 13 ships an N-API prebuild; no rebuild against Electron headers is needed.
 npmRebuild: false
 win:
@@ -50,7 +76,12 @@ win:
       arch: [x64]
 nsis:
   oneClick: false
-  perMachine: false
+  # 0.9.1 (security review F1, the owner's decision): installed for all users, under Program Files, which only
+  # administrators can change. The privilege broker is the one program NEXUS starts with administrator rights; in a
+  # per-user folder any program running as the user could replace it before the UAC prompt. One administrator prompt
+  # at install. A folder chosen elsewhere works, but privilege sessions then refuse to start (the runtime and the
+  # broker both check where the broker is).
+  perMachine: true
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
   artifactName: NEXUS-Setup-${version}.${ext}

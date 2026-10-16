@@ -65,6 +65,8 @@ puppeteer_download_host=https://mirror.example
 let root: string
 
 beforeAll(() => {
+  // A fresh clone has no test-results folder (it is ignored by git): made first, or mkdtemp fails (0.9.1).
+  mkdirSync(path.join(process.cwd(), 'test-results'), { recursive: true })
   root = mkdtempSync(path.join(process.cwd(), 'test-results', 'pkgcfg-'))
 })
 afterAll(() => rmSync(root, { recursive: true, force: true }))

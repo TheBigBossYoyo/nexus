@@ -35,6 +35,11 @@ export interface NeedContext {
    * unprotected files and use the network, which is why this is not `contained`.
    */
   confined?: boolean
+  /**
+   * 0.9.1: the loopback ports of the applications NEXUS launched for this session and registered (their ports were
+   * shown to be held by a process of the application). A fetch from one of these is the project's own endpoint.
+   */
+  localPorts?: readonly number[]
 }
 
 const ANY: CapabilityResource = { kind: 'ANY', value: '' }
@@ -85,8 +90,18 @@ const BOUNDARY_RULES: Rule[] = [
       return unreadable && (ctx.contained || ctx.confined === true) ? need('WRITE_WORKTREE', r, ANY, true) : need('WRITE_OUTSIDE_PROJECT', r, resource)
     },
   },
+  // 0.9.1: a read outside the worktree. Inside a containment Windows decides what can be read (the sandbox account
+  // reads none of the user's files): it is work of the task. Without one it is a read of the user's machine.
+  { test: /^reads (a )?(UNC )?path/, to: (r, _m, ctx) => (ctx.contained || ctx.confined === true ? need('READ_PROJECT', r, ANY, true) : need('READ_OUTSIDE_PROJECT', r)) },
   { test: /outside the worktree/, to: (r) => need('WRITE_OUTSIDE_PROJECT', r) },
   { test: /^network operation \(git (fetch|pull|clone|submodule)|^network operation \(git /, to: (r) => need('EXTERNAL_HOST_NETWORK', r) },
+  {
+    test: /^network operation \((?:curl|wget)\) to the local ports? ([\d, ]+)$/,
+    to: (r, m, ctx) => {
+      const ports = (m[1] ?? '').split(/,\s*/).map(Number)
+      return ports.every((p) => ctx.localPorts?.includes(p) === true) ? need('LOCALHOST_APP_NETWORK', r) : need('EXTERNAL_HOST_NETWORK', r)
+    },
+  },
   { test: /^network (operation|download)/, to: (r) => need('EXTERNAL_HOST_NETWORK', r) },
 ]
 

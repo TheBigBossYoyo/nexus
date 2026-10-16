@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Complexity, TaskDependency, TaskKind, TaskState } from '@shared/domain'
 import { formatElapsed, formatEtaRange } from '@shared/progress'
-import { DurationModel, estimateProgress, etaAccuracy, type FinishedTask, type ProgressInput } from '@main/modules/progress/estimator'
+import { DurationModel, estimateProgress, FINALE_PRIOR, etaAccuracy, type FinishedTask, type ProgressInput } from '@main/modules/progress/estimator'
 
 // 0.9: progress and time remaining are computed from the task graph and from how long tasks took before.
 const T0 = Date.parse('2026-10-13T19:00:00Z')
@@ -43,11 +43,22 @@ describe('the duration model', () => {
   it('does not believe three samples: few are mixed with general figures, none means general figures', () => {
     const empty = new DurationModel([])
     const few = new DurationModel(history('implement', 'medium', [1, 1, 1]))
-    expect(empty.of('implement', 'medium').median).toBe(600)
+    expect(empty.of('implement', 'medium').median).toBe(480)
     expect(few.of('implement', 'medium').median).toBeGreaterThan(60)
-    expect(few.of('implement', 'medium').median).toBeLessThan(600)
+    expect(few.of('implement', 'medium').median).toBeLessThan(480)
     // A kind never seen falls back to what tasks of that size took, whatever their kind.
     expect(learned.of('research', 'medium').median / 60).toBeGreaterThan(15)
+  })
+})
+
+// 0.9.1: a repair-mode mission was shown "Repairing (1 repair in work)" while it diagnosed, as if a failure were fixed.
+describe('the stage of repairs', () => {
+  it('names a repair only for a task added to fix a failure', () => {
+    const diagnose = task('diagnose', 'running', { kind: 'repair', startedAt: at(28) })
+    expect(snap([diagnose], { run: run('executing', { mode: 'repair' }) }).stage).toBe('Working on: Task diagnose')
+    expect(snap([task('fix', 'running', { kind: 'repair', parentTaskId: 'a', startedAt: at(28) })], { run: run('executing', { mode: 'repair' }) }).stage).toBe('Repairing (1 repair in work)')
+    expect(snap([task('mission-fix-1', 'running', { startedAt: at(28) })]).stage).toBe('Repairing (1 repair in work)')
+    expect(snap([diagnose], { run: run('executing', { mode: 'build' }) }).stage).toBe('Repairing (1 repair in work)')
   })
 })
 
@@ -121,6 +132,32 @@ describe('progress of a mission', () => {
     expect(snap([task('b', 'waiting')], { run: run('paused', { pauseReason: 'user' }) }).wait).toBe('WAITING_FOR_USER')
   })
 
+  it('a boundary request that waits while a task runs says what is worked on, and gives the estimate', () => {
+    const wait = { kind: 'WAITING_FOR_USER_BOUNDARY' as const, detail: 'git push origin' }
+    const s = snap([task('a', 'completed', { startedAt: at(0), finishedAt: at(20) }), task('b', 'running', { startedAt: at(20) })], { wait })
+    expect(s.stage).toBe('Working on: Task b (a boundary request waits for your decision)')
+    expect(s.summary).toMatch(/of active work remain\.$/)
+    expect(s.summary).not.toContain('when that ends is not known')
+    expect(s.eta.lowSeconds).not.toBeNull()
+    expect(s.wait).toBe('WAITING_FOR_USER_BOUNDARY')
+    expect(s.blocker).toContain('git push origin')
+  })
+
+  it('a boundary request with nothing else running says it waits, and withholds the clock', () => {
+    const wait = { kind: 'WAITING_FOR_USER_BOUNDARY' as const, detail: 'git push origin' }
+    const s = snap([task('a', 'completed', { startedAt: at(0), finishedAt: at(20) }), task('b', 'waiting'), task('c', 'ready')], { wait })
+    expect(s.stage).toBe('Waiting for your decision on a boundary request')
+    expect(s.summary).toContain('Waiting for your decision on a boundary request; when that ends is not known')
+    expect(s.wait).toBe('WAITING_FOR_USER_BOUNDARY')
+    expect(s.blocker).toContain('git push origin')
+  })
+
+  it('a wait for the network stops the running tasks too', () => {
+    const s = snap([task('b', 'running', { startedAt: at(20) })], { wait: { kind: 'WAITING_FOR_NETWORK', detail: 'Wi-Fi disconnected' } })
+    expect(s.stage).toBe('Waiting for the Internet')
+    expect(s.summary).toContain('when that ends is not known')
+  })
+
   it('before there is a plan it gives no number at all', () => {
     const s = snap([], { run: run('planning') })
     expect(s.percent).toBe(0)
@@ -166,5 +203,35 @@ describe('how good the estimates were', () => {
     expect(enormous?.coverage).toBe(1)
     expect(enormous?.meanWidthRatio).toBeGreaterThan(5)
     expect(etaAccuracy([], end)).toBeNull()
+  })
+})
+
+// 0.9.1: the mission's own final verification (the integration's full checks). The first mission NEXUS ran on
+// itself said "finishing" through a 17-minute full suite, and never counted it while its tasks ran.
+describe('the final verification of the mission', () => {
+  const finale = { stats: { n: 5, p25: 900, median: 1020, p75: 1100, p90: 1300 }, startedAt: null }
+
+  it('is counted after the tasks while they run', () => {
+    const tasks = [task('a', 'running', { kind: 'implement', complexity: 'small', startedAt: at(29) })]
+    const without = snap(tasks)
+    const withFinale = snap(tasks, { finale })
+    expect((withFinale.eta.lowSeconds ?? 0) - (without.eta.lowSeconds ?? 0)).toBe(900)
+    expect((withFinale.eta.highSeconds ?? 0) - (without.eta.highSeconds ?? 0)).toBe(1300)
+  })
+
+  it('is what remains once every task is done, with its own stage, instead of "finishing"', () => {
+    const tasks = [task('a', 'completed', { kind: 'implement', complexity: 'small', startedAt: at(1), finishedAt: at(10) })]
+    const s = snap(tasks, { run: run('verifying'), finale: { ...finale, startedAt: T0 + 25 * 60_000 } })
+    expect(s.eta.text).not.toBe('finishing')
+    expect(s.eta.lowSeconds).toBe(600)
+    expect(s.eta.highSeconds).toBe(1000)
+    expect(s.stage).toBe('Verifying the whole mission (usually about 17 min on this project)')
+    expect(s.percent).toBeLessThan(99)
+  })
+
+  it('names no duration before this project measured one (the prior is a guess, not this project)', () => {
+    const tasks = [task('a', 'completed', { kind: 'implement', complexity: 'small', startedAt: at(1), finishedAt: at(10) })]
+    const s = snap(tasks, { run: run('verifying'), finale: { stats: FINALE_PRIOR, startedAt: T0 + 25 * 60_000 } })
+    expect(s.stage).toBe('Verifying the whole mission (its first time on this project, so its length is not known yet)')
   })
 })

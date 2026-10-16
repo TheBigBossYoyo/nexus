@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readSandboxAccount } from '@main/modules/isolation/sandbox-account'
 import { verifySandboxSetup } from '@main/modules/isolation/sandbox-setup'
+// @ts-expect-error a build script without types
+import { buildLauncher } from '../../../scripts/build-launcher.mjs'
 
 // The elevated setup of the sandbox account trusts no name: an account, a folder or a firewall rule that is
 // already there is judged by what it is. The judgements are plain functions (native/sandbox-setup/
@@ -160,7 +162,8 @@ d('the sandbox setup trusts no name', () => {
 
   /** What NEXUS passes at start: the AppContainer and its capability, as the launcher derives them. */
   const containerIds = (): { sid: string; capabilitySid: string } => {
-    const exe = resolve('out', 'native', 'nexus-launch.exe')
+    // Built when this checkout has no build yet (a fresh clone), as the other tests of the launcher do (0.9.1).
+    const exe = buildLauncher() as string
     const derive = (what: string): string => execFileSync(exe, [what, 'NexusSandbox.Contained.1'], { encoding: 'utf8', windowsHide: true }).trim()
     return { sid: derive('appcontainer-sid'), capabilitySid: derive('capability-sid') }
   }

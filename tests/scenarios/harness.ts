@@ -163,6 +163,8 @@ export interface HarnessOptions {
   /** 0.8: give sessions the application tools (needs `containment`): a real headless browser on a real proxy. */
   apps?: boolean
   baseDir?: string
+  /** 0.9.1: a stand-in for the containment service, when `containment` (a real launcher) is not wanted. */
+  execution?: ConstructorParameters<typeof Orchestrator>[0]['execution']
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -330,7 +332,7 @@ export async function createHarness(options: HarnessOptions): Promise<Harness> {
     bus,
     runtime: admitted,
     autonomy,
-    ...(isolationService ? { execution: isolationService } : {}),
+    ...(isolationService ? { execution: isolationService } : options.execution ? { execution: options.execution } : {}),
     ...(extensionMakers.length > 0 ? { extensions: combineExtensions(...extensionMakers) } : {}),
     ...(capacity ? { capacityReady: (taskId: string) => capacity.routing.taskReady(taskId) } : {}),
     git: gitService,

@@ -1,5 +1,15 @@
 import { McpServerSettingSchema, SettingsSchema, type McpServerSetting, type Settings } from '@shared/settings'
 
+/** Quiet commands are on unless explicitly switched off: an absent value means on. */
+export function isQuietCommandsOn(execution: Settings['execution']): boolean {
+  return execution.quietCommands !== false
+}
+
+/** The execution patch for the quiet-commands switch, so the saved value is an explicit boolean. */
+export function quietCommandsPatch(checked: boolean): Partial<Settings['execution']> {
+  return { quietCommands: checked }
+}
+
 /** Trim free-text fields and drop blank list entries so what is validated is what is saved. */
 export function normalizeSettings(s: Settings): Settings {
   return {

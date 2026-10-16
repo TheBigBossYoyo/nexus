@@ -14,6 +14,9 @@ describe('intent patterns, English and French', () => {
     ['pause', 'PAUSE_AFTER_CURRENT_TASK'], ['Pause after the current task', 'PAUSE_AFTER_CURRENT_TASK'], ['mets en pause', 'PAUSE_AFTER_CURRENT_TASK'], ['pause après la tâche en cours', 'PAUSE_AFTER_CURRENT_TASK'],
     ['continue', 'CONTINUE'], ['resume', 'CONTINUE'], ['Reprends', 'CONTINUE'], ['continue please', 'CONTINUE'],
     ['help', 'HELP'], ['aide', 'HELP'], ['/start', 'HELP'],
+    ['call me', 'CALL_ME'], ['Call me now', 'CALL_ME'], ['call me!', 'CALL_ME'], ['please call me', 'CALL_ME'], ['can you call me back', 'CALL_ME'], ['ring me', 'CALL_ME'],
+    ['appelle-moi', 'CALL_ME'], ['appelle moi', 'CALL_ME'], ['Appelle-moi maintenant', 'CALL_ME'], ['rappelle-moi', 'CALL_ME'], ["s'il te plaît appelle-moi", 'CALL_ME'], ['téléphone-moi', 'CALL_ME'],
+    ['call me a taxi', 'UNKNOWN'], ['do not call me', 'UNKNOWN'], ['appelle moi quand tu auras fini le test', 'UNKNOWN'],
     ['banana smoothie recipe', 'UNKNOWN'], ['', 'UNKNOWN'],
   ])('%s -> %s', (text, expected) => {
     expect(kind(text)).toBe(expected)
@@ -71,6 +74,7 @@ describe('dangerous requests become REFUSED_AT_MACHINE and never anything else',
   it('has a risk class for each command', () => {
     expect(commandRisk({ kind: 'STATUS' })).toBe('READ_ONLY')
     expect(commandRisk({ kind: 'PAUSE_AFTER_CURRENT_TASK' })).toBe('LOW_RISK_CONTROL')
+    expect(commandRisk({ kind: 'CALL_ME' })).toBe('LOW_RISK_CONTROL')
     expect(commandRisk({ kind: 'CREATE_TASK', project: 'a', text: 'b' })).toBe('TASK_HANDOFF')
     expect(commandRisk({ kind: 'REFUSED_AT_MACHINE', topic: 'POWER' })).toBe('REFUSED')
   })
@@ -86,6 +90,7 @@ describe('the cheap-model hook', () => {
     expect(validateClassification({ kind: 'GRANT_ALL' }, 'x')).toEqual({ kind: 'UNKNOWN' })
     expect(validateClassification({ kind: 'REFUSED_AT_MACHINE', topic: 'POWER' }, 'x')).toEqual({ kind: 'UNKNOWN' })
     expect(validateClassification('STATUS', 'x')).toEqual({ kind: 'UNKNOWN' })
+    expect(validateClassification({ kind: 'CALL_ME' }, 'phone me when it is done')).toEqual({ kind: 'CALL_ME' })
   })
 
   it('cannot author a task: the text must appear in the operator message', () => {

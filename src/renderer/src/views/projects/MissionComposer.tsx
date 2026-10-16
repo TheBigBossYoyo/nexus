@@ -1,3 +1,4 @@
+import { readDraft, writeDraft } from '../../lib/drafts'
 import { planningWords, strategyWord } from '../../lib/wording'
 import { CompilationPreview } from './CompilationPreview'
 import type { CompilationMode, CompiledTaskSpec } from '@shared/intelligence'
@@ -71,7 +72,13 @@ export function MissionComposer({ project }: { project: Project }) {
   const create = useCreateRun()
   const openRun = useUiStore((s) => s.openRun)
 
-  const [prompt, setPrompt] = useState('')
+  // 0.9.1: the prompt outlives the tab: leaving the composer threw a long mission prompt away.
+  const [prompt, setPromptState] = useState(() => readDraft(`mission:${project.id}`))
+  const setPrompt = (text: string): void => {
+    writeDraft(`mission:${project.id}`, text)
+    setPromptState(text)
+  }
+  useEffect(() => setPromptState(readDraft(`mission:${project.id}`)), [project.id])
   const [composerMode, setComposerMode] = useState<ComposerMode>('build')
   const overnightMode = composerMode === OVERNIGHT_MODE
   // Overnight is a composer mode only: it creates an ordinary MISSION run through overnight.start.
@@ -121,7 +128,7 @@ export function MissionComposer({ project }: { project: Project }) {
   const debouncedPrompt = useDebounced(prompt.trim(), 600)
   const debouncedStrategyPrompt = useDebounced(prompt.trim(), 500)
   const preview = usePolicyPreview(project.id, showStrategy && strategy === 'ADAPTIVE' ? debouncedStrategyPrompt : '')
-  const recommendation = usePlanningRecommendation(project.id, mode === 'ask' ? '' : debouncedPrompt)
+  const recommendation = usePlanningRecommendation(project.id, mode === 'ask' ? '' : debouncedPrompt, mode)
 
   const preset = presetChoice ?? settings?.execution.defaultPreset ?? 'balanced'
   const presetAgents = settings ? presetMaxAgents(preset, settings) : null

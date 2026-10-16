@@ -20,8 +20,11 @@ describe('buildAgentEnv', () => {
     for (const subscriptionMode of [true, false]) {
       const env = buildAgentEnv({ ...base, NEXUS_DATA_DIR: 'C:/data', Nexus_Data_Dir: 'C:/data2', NEXUS_OTHER: 'kept' }, { subscriptionMode })
       expect(Object.keys(env).filter((k) => k.toUpperCase() === 'NEXUS_DATA_DIR')).toEqual([])
-      // A project may have variables of its own that start with NEXUS_: only this one is withheld.
+      // A project may have variables of its own that start with NEXUS_: only NEXUS's own switches are withheld.
       expect(env['NEXUS_OTHER']).toBe('kept')
+      // 0.9.1: a test instance's switches never reach an agent (they reached the tests NEXUS ran on itself).
+      const own = buildAgentEnv({ ...base, NEXUS_ACCEPT_CONFIRM: 'window', NEXUS_WINDOW_OFFSCREEN: '1', NEXUS_FAKE_RUNTIME: '1' }, { subscriptionMode })
+      expect(Object.keys(own).filter((k) => k.startsWith('NEXUS_'))).toEqual([])
     }
   })
 

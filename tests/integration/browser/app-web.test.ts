@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { insideSandboxRoot } from '../../helpers/sandbox-location'
 import { ApplicationUnderTestManager, AppLaunchError, type AppOwner } from '@main/modules/browser/app-manager'
 import { PlaywrightDirectProvider } from '@main/modules/browser/provider'
 import { ExecutionBroker } from '@main/modules/isolation/execution-broker'
@@ -24,7 +25,8 @@ import { buildLauncher } from '../../../scripts/build-launcher.mjs'
 
 const WINDOWS = process.platform === 'win32'
 const provider = new PlaywrightDirectProvider()
-const d = WINDOWS && provider.availability().browser !== null ? describe : describe.skip
+// 0.9.1: not from inside the sandbox's own folder (a mission worktree): see tests/helpers/sandbox-location.ts
+const d = WINDOWS && provider.availability().browser !== null && !insideSandboxRoot() ? describe : describe.skip
 const account = WINDOWS ? readSandboxAccount() : null
 const SCRATCH = resolve('test-results', 'app-web-tests')
 const PROFILES: ContainmentProfile[] = account ? ['RESTRICTED', 'ISOLATED'] : ['RESTRICTED']

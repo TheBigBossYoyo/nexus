@@ -43,7 +43,9 @@ describe('scenario: a read-only run on the admitted snapshot', () => {
     expect(existsSync(seen[0]!.cwd)).toBe(false)
     let branches = ''
     for (let i = 0; i < 100 && branches !== branchesBefore; i++) {
-      branches = await git(h.repoDir, 'branch', '--list')
+      // Deleting the snapshot's branch rewrites .git/config; on Windows a read while it is replaced can fail with
+      // "unable to access '.git/config': Permission denied" (seen once in a full run, 0.9.1). That is a moment, not an answer.
+      branches = await git(h.repoDir, 'branch', '--list').catch(() => '')
       if (branches !== branchesBefore) await new Promise((resolve) => setTimeout(resolve, 50))
     }
     expect(branches).toBe(branchesBefore)

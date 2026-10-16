@@ -37,6 +37,8 @@ export interface AutonomyServiceDeps {
   contained?: (projectId: string) => boolean
   /** Whether they run inside any containment that was verified, RESTRICTED included. */
   confined?: (projectId: string) => boolean
+  /** 0.9.1: the loopback ports of the applications NEXUS launched for a session (registered, owned by the application). */
+  localPorts?: (session: { projectId: string; runId: string | null; taskId: string | null }) => readonly number[]
   /** The inbox changed: a request was created or decided, a grant given or taken back, a project enrolled. */
   onChange?: (change: { kind: 'request' | 'grant' | 'enrollment'; request?: BoundaryRequest; created?: boolean }) => void
   now?: () => number
@@ -102,7 +104,13 @@ export class AutonomyService {
    */
   gateFor(session: { projectId: string; runId: string | null; taskId: string | null; role: AgentRole; provider: string | null; cwd: string | null }): AutonomyGate | undefined {
     if (this.enrollment(session.projectId) === null) return undefined
-    return createAutonomyGate({ broker: this.broker, ...session, contained: this.deps.contained?.(session.projectId) === true, confined: this.deps.confined?.(session.projectId) === true })
+    return createAutonomyGate({
+      broker: this.broker,
+      ...session,
+      contained: this.deps.contained?.(session.projectId) === true,
+      confined: this.deps.confined?.(session.projectId) === true,
+      localPorts: () => this.deps.localPorts?.(session) ?? [],
+    })
   }
 
   private view(request: BoundaryRequest): BoundaryRequestView {
@@ -153,10 +161,14 @@ export class AutonomyService {
     this.broker.expireForRun(runId)
   }
 
-  /** Follows the missions: one that completed, failed or was cancelled takes its unanswered questions with it. */
-  watch(bus: { subscribe(listener: (event: { type: string; runId: string }) => void): unknown }): void {
+  /**
+   * Follows the missions: one that completed, failed or was cancelled takes its unanswered questions with it, and
+   * so does a task that completed (its work no longer depends on them).
+   */
+  watch(bus: { subscribe(listener: (event: { type: string; runId: string; taskId?: string | null }) => void): unknown }): void {
     bus.subscribe((event) => {
       if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') this.runEnded(event.runId)
+      else if (event.type === 'task.completed' && typeof event.taskId === 'string') this.broker.expireForRun(event.runId, event.taskId)
     })
   }
 

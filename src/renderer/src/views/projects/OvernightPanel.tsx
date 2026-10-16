@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { END_ACTIONS, OVERNIGHT_CONFIRMATION_TEXT, type EndAction } from '@shared/overnight'
+import { PRIVILEGE_SESSION_NOTICE } from '@shared/privilege'
 import {
   Button,
   Dialog,
@@ -400,6 +401,16 @@ export function OvernightPanel({
           onChange={(commitCompletedWork) => onChange({ commitCompletedWork })}
           label="Commit unfinished work on task branches"
           testId="overnight-commit-work"
+        />
+      </Group>
+
+      <Group title="Administrator recovery" testId="overnight-admin-recovery">
+        <Check
+          checked={form.adminRecovery}
+          onChange={(adminRecovery) => onChange({ adminRecovery })}
+          label="Prepare temporary administrator broker"
+          hint={PRIVILEGE_SESSION_NOTICE}
+          testId="overnight-admin-recovery-check"
         />
       </Group>
 

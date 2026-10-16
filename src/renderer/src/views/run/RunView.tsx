@@ -11,6 +11,8 @@ import { TaskInspector } from './inspector/TaskInspector'
 import { MissionHeader } from './MissionHeader'
 import { OvernightBanner } from './OvernightBanner'
 import { ProgressPanel } from './ProgressPanel'
+import { PrivilegePanel } from './PrivilegePanel'
+import { TestEnvironmentPanel } from './TestEnvironmentPanel'
 import { PlanInspector } from './PlanInspector'
 import { PlanPanel, PlannerActivity } from './PlanPanel'
 import { RunsList } from './RunsList'
@@ -313,8 +315,14 @@ function RunWorkspace({ runId }: { runId: string }) {
     <RunProvider detail={query.data} events={stream.events} showStage={showStage} showBottom={showBottom}>
       <div className="flex h-full min-h-0 flex-col" data-testid="run-view">
         <MissionHeader />
-        <OvernightBanner runId={runId} />
-        <ProgressPanel runId={runId} />
+        {/* 0.9.1: with a mission paused the panels above took the whole height and the owner could not reach the task
+            list to resolve a blocker. They keep at most 45 % of it and scroll; the work area keeps the rest. */}
+        <div className="max-h-[45%] shrink-0 overflow-y-auto" data-testid="run-panels">
+          <OvernightBanner runId={runId} />
+          <ProgressPanel runId={runId} />
+          <PrivilegePanel runId={runId} live={!['completed', 'failed', 'cancelled'].includes(query.data.run.state)} />
+          <TestEnvironmentPanel runId={runId} live={!['completed', 'failed', 'cancelled'].includes(query.data.run.state)} />
+        </div>
         <div className="relative min-h-0 flex-1">
           {narrow ? (
             <>

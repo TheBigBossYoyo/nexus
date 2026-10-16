@@ -1,5 +1,4 @@
 import type { RepositoryFact } from '@shared/v2'
-import { moduleOf } from './analyze'
 
 export interface TaskForSelection {
   title: string
@@ -32,6 +31,11 @@ function factPaths(f: RepositoryFact): string[] {
   return [...f.files, ...subjects.filter((s) => s.includes('/') || /\.[a-z0-9]+$/i.test(s))]
 }
 
+/** How many folders above a task's file a fact's folder may be and still be about it. */
+const NEAR_FOLDER = 2
+const depth = (p: string): number => p.split('/').length
+const dirOf = (p: string): string => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
+
 interface PathMatch {
   rank: number
   reason: string
@@ -45,12 +49,12 @@ function matchPaths(f: RepositoryFact, suggested: readonly string[]): PathMatch 
   for (const p of factPaths(f)) {
     for (const s of suggested) {
       if (p === s) consider(0, `supporting file ${p} is one of the task's suggested files`)
-      else if (s.startsWith(`${p}/`)) consider(1, `${p} contains the task's suggested file ${s}`)
+      // 0.9.1: only a folder near the file says something about it. `src/main` "contains" every file of an
+      // Electron app's main process, and its facts (import relations of whole folders) filled real workers' packs.
+      else if (s.startsWith(`${p}/`) && depth(s) - depth(p) <= NEAR_FOLDER) consider(1, `${p} contains the task's suggested file ${s}`)
       else if (p.startsWith(`${s}/`)) consider(1, `${p} is inside the task's suggested path ${s}`)
-      else if (p.includes('/')) {
-        const m = moduleOf(p)
-        if (m !== '.' && m === moduleOf(s)) consider(2, `${p} is in module ${m}, shared with suggested file ${s}`)
-      }
+      // A file of the same folder; a module as wide as `src/main` matched files that had nothing in common.
+      else if (p.includes('/') && dirOf(p) !== '' && dirOf(p) === dirOf(s)) consider(2, `${p} is in ${dirOf(p)}, the folder of suggested file ${s}`)
     }
   }
   return best

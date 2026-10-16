@@ -38,11 +38,11 @@ type TaskSpec = Pick<Task, 'key' | 'title' | 'description' | 'suggestedFiles' | 
 const MODE_GUIDANCE: Record<RunMode, string> = {
   ask: 'Mode ASK: the request is a question. Produce a minimal plan: one read-only researcher task that answers it with repository evidence. No implementation tasks.',
   build:
-    'Mode BUILD: plan the implementation of the request as a small DAG of bounded tasks. Prefer fewer, well-scoped tasks; parallelize only where files and outputs are independent. Include tests for new behaviour.',
+    'Mode BUILD: plan the implementation of the request as a small DAG of bounded tasks. Prefer fewer, well-scoped tasks; parallelize only where files and outputs are independent. Include tests for new behaviour. Acceptance criteria are about what each task builds; never make "the whole test suite (or build, or lint) passes" a criterion of a task, and do not add a task whose only purpose is to run the project checks: NEXUS runs the checks scoped to the files of each task after it, and every check in full once when the mission integrates.',
   swarm:
     'Mode SWARM: produce the maximum useful safe parallel decomposition. Split the work into as many independent tasks as file boundaries allow, keep the dependency graph shallow and wide, and keep suggestedFiles disjoint between parallel tasks. Add a final integration or test task only where the pieces genuinely need joining. Do not split work so finely that tasks cannot be verified on their own.',
   repair:
-    'Mode REPAIR: the request describes a defect. Plan reproduce -> diagnose -> fix -> regression test. First a task that reproduces the failure and identifies the root cause with evidence (role debugger or researcher), then a fix task that depends on it, and the regression test as part of the fix task or a following task. Acceptance criteria must include that the original failure no longer occurs.',
+    'Mode REPAIR: the request describes a defect. Plan reproduce -> diagnose -> fix -> regression test. First a task that reproduces the failure and identifies the root cause with evidence (role debugger or researcher), then a fix task that depends on it, and the regression test as part of the fix task or a following task. Acceptance criteria must include that the original failure no longer occurs. Do not add a task whose only purpose is to run the project checks, and never make "the whole test suite passes" a criterion of a task: NEXUS runs the checks scoped to each task after it, and every check in full once when the mission integrates.',
   audit:
     'Mode AUDIT: no modifications. Plan parallel read-only review tasks (roles security_reviewer and reviewer; researcher for performance/quality as needed) covering security, architecture, performance, and code quality, each on a distinct area with its own suggestedFiles, then exactly one synthesis task (kind of work: combine findings) that depends on ALL review tasks. No task may modify files; requiresApproval is false.',
   mission:
@@ -62,6 +62,7 @@ export function renderProfile(profile: ProjectProfile): string {
   ]
   const scripts = Object.keys(profile.scripts)
   if (scripts.length > 0) lines.push(`Scripts: ${scripts.join(', ')}`)
+  if (profile.testLayout && profile.testLayout.length > 0) lines.push(...profile.testLayout)
   if (profile.docs.length > 0) lines.push(`Docs: ${profile.docs.join(', ')}`)
   if (profile.hasClaudeMd) lines.push('CLAUDE.md present')
   if (profile.generatedPaths.length > 0) {
@@ -185,6 +186,10 @@ export interface VerifierPromptInput {
   evidence?: OrchestrationEvidence
   /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
   instructions?: string | null
+  /** 0.9.1: the task's patch, as the reviewer gets it: verifiers of real missions began by running `git diff` for it. */
+  patch?: string
+  /** 0.9.1: git facts measured by NEXUS (`repositoryFacts`): HEAD, base, tags, upstream, remote branches holding HEAD. */
+  repoFacts?: string | null
 }
 
 export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
@@ -193,6 +198,8 @@ export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
     { name: 'User instructions in force', body: input.instructions ?? null },
     { name: 'Acceptance criteria', body: criteriaSection(input.task, input.missionCriteria) },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
+    { name: 'Patch', body: input.patch?.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
+    { name: 'Repository facts (measured by NEXUS)', body: input.repoFacts ?? null },
     { name: 'Check results', body: renderChecks(input.checkResults, input.checkOutputMode) },
     { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
@@ -201,7 +208,7 @@ export function buildVerifierPrompt(input: VerifierPromptInput): Pack {
     },
     {
       name: 'Instructions',
-      body: 'Verify each task criterion independently by inspecting the code and running checks. Return one entry per criterion (task and mission criteria that apply to this task) with evidence. List a failure for every criterion that did not pass.',
+      body: 'Verify each task criterion independently by inspecting the code and running checks. The patch and the repository facts above are measured by NEXUS: use them rather than asking git again. Return one entry per criterion (task and mission criteria that apply to this task) with evidence. List a failure for every criterion that did not pass.',
     },
   ])
 }
@@ -217,6 +224,11 @@ export interface MissionVerifierPromptInput {
   evidence?: OrchestrationEvidence
   /** 0.7.2: the user's instructions in force (the request and every amendment), from `renderInstructionsInForce`. */
   instructions?: string | null
+  /** 0.9.1: the integrated patch against the base, and git facts measured by NEXUS (see VerifierPromptInput). */
+  patch?: string
+  repoFacts?: string | null
+  /** 0.9.1: false when the owner chose the affected tests only for the final verification. Absent: every check whole. */
+  fullChecks?: boolean
 }
 
 /** Final acceptance of the whole mission on the integration branch (the current working directory). */
@@ -236,12 +248,17 @@ export function buildMissionVerifierPrompt(input: MissionVerifierPromptInput): P
       body: branch ? `${branch} (base commit ${input.run.baseCommit ?? 'unknown'}); it is checked out in the current working directory.` : null,
     },
     { name: 'Diff summary', body: truncate(input.diffStat, SECTION_LIMITS.diffStat) },
+    { name: 'Patch', body: input.patch?.trim() ? truncate(input.patch, SECTION_LIMITS.patch) : null },
+    { name: 'Repository facts (measured by NEXUS)', body: input.repoFacts ?? null },
     { name: 'Check results', body: renderChecks(input.checkResults, input.checkOutputMode) },
     { name: 'Orchestration evidence', body: input.evidence ? renderOrchestrationEvidence(input.evidence) : null },
     {
       name: 'Instructions',
       body: [
-        'Verify every mission acceptance criterion against the integrated code. Run the project checks yourself. Return one entry per criterion with evidence and list a failure for each that did not pass.',
+        // 0.9.1: "Run the project checks yourself" had final verifiers rerun what NEXUS had just run in full.
+        input.fullChecks === false
+          ? 'Verify every mission acceptance criterion against the integrated code. NEXUS ran the type check, the linter and the build in full on this tree, and only the tests that name a file the mission changed (the owner chose this for final verifications): the results are above. A criterion about the whole test suite is judged from those results and says that the whole suite was not run. Do not run the whole suite yourself; run a specific test file when a criterion needs evidence the results do not give. The patch and the repository facts are measured by NEXUS: use them rather than asking git again. Return one entry per criterion with evidence and list a failure for each that did not pass.'
+          : 'Verify every mission acceptance criterion against the integrated code. NEXUS ran every project check in full on this tree; the results are above. Do not run the whole suite or the whole build again: judge criteria about them from those results, and run a specific test file only when a criterion needs evidence they do not give. The patch and the repository facts are measured by NEXUS: use them rather than asking git again. Return one entry per criterion with evidence and list a failure for each that did not pass.',
         'The criteria were written with the first version of the plan. If the orchestration evidence lists graph revisions, the plan was changed during the run by a validated proposal: a criterion that only restates the scope of the original plan (for example an exact list of files or tasks) passes when the difference is the work a recorded revision added, and that work itself is correct. Say so in the evidence for that criterion.',
         'A criterion that depends on something you are not allowed to do (for example a command your role may not run) is not a defect of the work: check it by the means you have (read the code and the tests, use the recorded check results and the quoted records) and fail it only when you find evidence that it is not met.',
       ].join('\n'),

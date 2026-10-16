@@ -26,7 +26,7 @@ import {
   type SelectOption,
 } from '../../components/ui'
 import { PROFILE_EXPLANATION } from '../security/securityModel'
-import { buildMcpServer, type McpDraft } from './settingsForm'
+import { buildMcpServer, isQuietCommandsOn, quietCommandsPatch, type McpDraft } from './settingsForm'
 
 export interface SectionProps {
   draft: Settings
@@ -189,6 +189,37 @@ export function ExecutionSection({ draft, set, error }: SectionProps) {
         onChange={(v) => set('execution', { requirePlanApproval: v })}
         label="Require plan approval by default"
       />
+      <Toggle
+        checked={e.backgroundPriority !== false}
+        onChange={(v) => set('execution', { backgroundPriority: v })}
+        label="Keep the computer responsive during missions (missions' work runs below normal priority: your programs come first; nothing is limited when you are not using the computer)"
+        data-testid="exec-backgroundPriority"
+      />
+      <Toggle
+        checked={isQuietCommandsOn(e)}
+        onChange={(v) => set('execution', quietCommandsPatch(v))}
+        label="Run commands quietly (on a hidden desktop)"
+        description="Commands of projects that are not enrolled still run as you; only their windows go to a desktop nobody sees. Turn off only if a command must show a window."
+        data-testid="exec-quietCommands"
+      />
+      <Field
+        label="Final tests of a mission"
+        hint="The whole suite proves every test passes on the merged code. Affected tests only runs the tests that name a changed file (type check, linter and build stay whole): much faster on a long suite, but a test that reaches a change through another module is not run. The record says which was used."
+        error={error('execution.finalTests')}
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={e.finalTests ?? 'FULL'}
+            onChange={(v) => set('execution', { finalTests: v })}
+            options={[
+              { value: 'FULL', label: 'Whole suite (recommended)' },
+              { value: 'AFFECTED', label: 'Affected tests only (faster)' },
+            ]}
+            data-testid="exec-finalTests"
+          />
+        )}
+      </Field>
       <Field label="Execution profile" hint="How strictly NEXUS gates the commands and scripts agents run." error={error('execution.profile')}>
         {(id) => (
           <Select

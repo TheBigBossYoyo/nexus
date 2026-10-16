@@ -68,7 +68,9 @@ export interface RuntimeProcess {
 export async function startRuntime(dataDir: string, env: Record<string, string> = {}): Promise<RuntimeProcess> {
   await buildRuntime()
   const child = spawn(process.execPath, [RUNTIME_ENTRY], {
-    env: { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_FAKE_RUNTIME: '1', NEXUS_WORKER_ENTRY: WORKER_ENTRY, NEXUS_CASES_DIR: join(REPO, 'arena', 'cases'), ...env },
+    // NEXUS_RUNTIME_PRIORITY: a runtime of a test keeps normal priority. Below it (the default), it lost the processor
+    // to the suite's other workers and a test bounded in time failed under load (0.9.1).
+    env: { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_FAKE_RUNTIME: '1', NEXUS_WORKER_ENTRY: WORKER_ENTRY, NEXUS_CASES_DIR: join(REPO, 'arena', 'cases'), NEXUS_RUNTIME_PRIORITY: 'normal', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   })
