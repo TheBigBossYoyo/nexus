@@ -162,7 +162,8 @@ export function createPersistenceCollector(deps: PersistenceCollectorDeps = {}):
     ((file: string, args: readonly string[], opts: { signal: AbortSignal; maxOutputBytes: number }) =>
       runProcess(file, args, {
         cwd: systemRoot,
-        env: { SystemRoot: systemRoot, windir: systemRoot, PATH: `${systemRoot}\\System32` },
+        // schtasks reaches the Task Scheduler through COM, which fails with "class not registered" without SystemDrive.
+        env: { SystemRoot: systemRoot, windir: systemRoot, SystemDrive: systemRoot.slice(0, 2), PATH: `${systemRoot}\\System32` },
         timeoutMs: deadlineMs + 1000,
         maxOutputBytes: opts.maxOutputBytes,
         keep: 'head',
@@ -205,6 +206,8 @@ export function createPersistenceCollector(deps: PersistenceCollectorDeps = {}):
           if (parent.exitCode === 0 && !parent.truncated && !parseRegListing(parent.stdout).keys.has(key.toLowerCase())) return { items: [] }
           throw new Failed('FAILED', `${key} could not be read (exit ${r.exitCode})`)
         }
+        // A key that exists but has no values or subkeys is listed as a blank line only.
+        if (!r.truncated && r.stdout.trim() === '') return { items: [] }
         const listing = parseRegListing(r.stdout)
         const values = listing.keys.get(key.toLowerCase())
         if (!values) throw new Failed('FAILED', `${key} listing did not name the key`)
@@ -251,7 +254,10 @@ export function createPersistenceCollector(deps: PersistenceCollectorDeps = {}):
 
   const tasks = async (signal: AbortSignal): Promise<SurfaceResult> => {
     const r = await query(schtasks, ['/query', '/xml', 'ONE'], signal, LARGE_OUTPUT)
-    if (r.exitCode !== 0) throw new Failed('FAILED', `the task query failed (exit ${r.exitCode})`)
+    if (r.exitCode !== 0) {
+      const cause = (r.stderr ?? '').trim().slice(0, 200)
+      throw new Failed('FAILED', `the task query failed (exit ${r.exitCode})${cause ? `: ${cause}` : ''}`)
+    }
     const result = parseTaskXml(r.stdout, r.truncated === true)
     // Exit 0 with errors on stderr: some tasks could not be read by this account.
     if (result.state === 'COMPLETE' && (r.stderr ?? '').trim() !== '') return { ...result, state: 'PARTIAL', note: 'the task query reported errors for some tasks' }

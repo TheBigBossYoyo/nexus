@@ -191,6 +191,15 @@ describe('persistence collector', () => {
     ])
   })
 
+  it('an existing Run key with no values (reg.exe prints a blank line only) is an empty COMPLETE set', async () => {
+    const { run } = fakeRun({ [`reg.exe query ${CV32}\\RunOnce /reg:64`]: async () => ok('\r\n') })
+    const snap = await collector(run)()
+    expect(snap.coverage.RUN_KEY).toEqual({ state: 'COMPLETE' })
+    expect(of(snap.items, 'RUN_KEY').map((i) => i.id)).toEqual([`${CV}\\Run\\SecurityHealth`, `${CV}\\Run\\My App`, `${CV32}\\Run\\Old Tool`])
+    const cut = await collector(fakeRun({ [`reg.exe query ${CV32}\\RunOnce /reg:64`]: async () => ({ exitCode: 0, stdout: '', truncated: true }) }).run)()
+    expect(cut.coverage.RUN_KEY?.state).toBe('FAILED')
+  })
+
   it('a Run key that fails while its parent still lists it is FAILED, not empty', async () => {
     const listed = `${CV_LISTING}HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce\r\n`
     const { run } = fakeRun({ [`reg.exe query ${CV} /reg:64`]: async () => ok(listed) })
