@@ -377,12 +377,13 @@ describe('verifyReceiptChain', () => {
     expect(broken.findings).toEqual([expect.objectContaining({ kind: 'EDITED', chainSeq: 2, receiptId: '2' })])
   })
 
-  it('collects every finding, capped at 50', () => {
+  it('collects every finding, with no cap', () => {
     const chain = build(Array.from({ length: 80 }, (_, i) => receipt(String(i + 1), 'EXECUTED')))
     for (const row of chain.rows) row.columns.runId = 'other'
     const v = verify(chain)
     expect(v.state).toBe('BROKEN')
-    expect(v.findings).toHaveLength(50)
+    expect(v.findings).toHaveLength(80)
+    expect(v.findings.map((f) => f.receiptId)).toContain('80')
     expect(v.reason).toMatch(/^80 problems found\./)
   })
 

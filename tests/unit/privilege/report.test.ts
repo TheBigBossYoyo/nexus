@@ -45,18 +45,16 @@ describe.each(builders)('integrity verdict in the %s', (_name, build) => {
   })
 })
 
-describe('how many findings are listed', () => {
-  it('the full report lists all of them', () => {
-    const text = buildPrivilegedActivityReport([], [], broken(8))
-    for (let i = 0; i < 8; i++) expect(text).toContain(`rec-${i}`)
+describe.each(builders)('how many findings the %s lists', (_name, build) => {
+  it('lists every one of them, past 50, and says how many there are', () => {
+    const text = build(broken(80))
+    expect(text.split('\n')[2]).toContain('80 findings')
+    for (let i = 0; i < 80; i++) expect(text).toContain(`receipt \` rec-${i} \`, chain position ${5 + i}:`)
+    expect(text).not.toContain('more finding')
   })
+})
 
-  it('the summary lists at least 5 and says how many more', () => {
-    const text = buildPrivilegedActivitySummary([], [], broken(8))
-    for (let i = 0; i < 5; i++) expect(text).toContain(`rec-${i}`)
-    expect(text).toContain('and 3 more findings')
-    expect(text).toContain('Record integrity: BROKEN')
-  })
+describe('findings', () => {
 
   it('cannot be made to inject markdown through a receipt id', () => {
     const v = broken()
