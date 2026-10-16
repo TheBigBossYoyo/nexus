@@ -10,7 +10,7 @@ import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '@
 import { PrivilegedReviewPipeline } from '@main/modules/privilege/review'
 import { PrivilegeService, type BrokerHandle, type PrivilegedRequester } from '@main/modules/privilege/service'
 import { MemoryPrivilegeStore } from '@main/modules/privilege/store'
-import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PrivilegedOperationProposal } from '@shared/privilege'
+import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PersistenceSnapshot, type PrivilegedCapability, type PrivilegedOperationProposal, type PrivilegedPolicyDecision } from '@shared/privilege'
 
 // 0.9.1: privilege sessions with a scripted broker and scripted reviewers. The broker's own protocol and checks are
 // tested against the real helper in tests/integration/privilege.
@@ -320,5 +320,132 @@ describe('privilege sessions', () => {
     const summary = buildPrivilegedActivitySummary(receipts, sessions, intact)
     expect(summary).toContain('3 privileged attempts')
     expect(summary).toContain('No broker is left running.')
+  })
+})
+
+// 0.9.1 (second review, L5): persistence snapshots around an install, repair or uninstall. The policy is stubbed so
+// that every capability reaches the broker; the policy itself is tested in policy.test.ts.
+describe('persistence snapshots around a privileged operation', () => {
+  const allowed: PrivilegedPolicyDecision = { verdict: 'ALLOWED', reason: 'ok', forbidden: null, councilRequired: false, councilWhy: [] }
+  const allowAll = { precheck: () => allowed, final: () => allowed } as unknown as PrivilegedPolicyEngine
+  const RUN = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run'
+  const BEFORE: PersistenceSnapshot = { takenAt: '2026-10-16T01:00:00.000Z', durationMs: 5, items: [{ surface: 'SERVICE', id: 'Spooler', attrs: { startType: 'auto', binaryPath: 'C:\\Windows\\System32\\spoolsv.exe' } }], coverage: {} }
+  const AFTER: PersistenceSnapshot = { ...BEFORE, takenAt: '2026-10-16T01:00:10.000Z', items: [...BEFORE.items, { surface: 'RUN_KEY', id: `${RUN}\\ToolUpdater`, attrs: { data: 'C:\\Tool\\updater.exe' } }] }
+
+  function harness(opts: { answer?: (req: BrokerExecRequest) => BrokerExecResult; collector?: () => Promise<PersistenceSnapshot>; snapshots?: PersistenceSnapshot[] } = {}) {
+    const store = new MemoryPrivilegeStore()
+    const events: { severity: string; action: string; reason: string; runId: string | null; projectId: string | null; taskId: string | null }[] = []
+    const calls: string[] = []
+    const broker = new FakeBroker((req) => {
+      calls.push('exec')
+      return (opts.answer ?? (() => ok()))(req)
+    })
+    const snapshots = opts.snapshots ?? [BEFORE, AFTER]
+    const service = new PrivilegeService({
+      store,
+      policy: allowAll,
+      review: new PrivilegedReviewPipeline({ providers: async () => ({ technical: reviewer() }) }),
+      startBroker: async () => ({ ok: true, client: broker }),
+      verify: async () => ['verified.'],
+      persistence:
+        opts.collector ??
+        (async () => {
+          calls.push('snapshot')
+          return snapshots[calls.filter((c) => c === 'snapshot').length - 1] ?? BEFORE
+        }),
+      securityEvent: (e) => events.push(e),
+    })
+    return { service, store, broker, events, calls, snaps: () => calls.filter((c) => c === 'snapshot').length }
+  }
+
+  const proposal = (capability: PrivilegedCapability, expected: Partial<PrivilegedOperationProposal['expected']> = {}): PrivilegedOperationProposal =>
+    PrivilegedOperationProposalSchema.parse({ capability, goal: 'Install the tool', whyRequired: 'w', whyElevation: 'e', whyNoUnelevatedAlternative: 'n', executable: PS, args: [...HEAD, 'C:\\work\\racedeck\\install.ps1'], expected })
+
+  it('takes one snapshot before exec and one after it for each of the five capabilities', async () => {
+    for (const capability of ['PROJECT_TOOLCHAIN_INSTALL', 'KNOWN_DEPENDENCY_MACHINE_INSTALL', 'PROJECT_TOOLCHAIN_REPAIR', 'APP_INSTALL_TEST', 'APP_UNINSTALL_TEST'] as const) {
+      const h = harness()
+      await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+      const r = await h.service.submit(proposal(capability), who())
+      expect(h.calls, capability).toEqual(['snapshot', 'exec', 'snapshot'])
+      expect(r.outcome).toBe('EXECUTED')
+      expect(r.observed).toContain('verified.')
+      expect(r.observed.some((l) => l.includes('ToolUpdater ADDED') && l.includes('UNEXPECTED'))).toBe(true)
+      expect(r.persistence?.changes).toEqual([{ surface: 'RUN_KEY', id: `${RUN}\\ToolUpdater`, change: 'ADDED', after: { data: 'C:\\Tool\\updater.exe' }, expected: false }])
+    }
+  })
+
+  it('takes no snapshot for the acceptance fixture or any other capability', async () => {
+    for (const capability of PRIVILEGED_CAPABILITIES.filter((c) => !['PROJECT_TOOLCHAIN_INSTALL', 'KNOWN_DEPENDENCY_MACHINE_INSTALL', 'PROJECT_TOOLCHAIN_REPAIR', 'APP_INSTALL_TEST', 'APP_UNINSTALL_TEST'].includes(c))) {
+      const h = harness()
+      await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+      const r = await h.service.submit(proposal(capability), who())
+      expect(h.calls, capability).toEqual(['exec'])
+      expect(r.observed).toEqual(['verified.'])
+      expect(r.persistence).toBeUndefined()
+    }
+  })
+
+  it('takes no after snapshot when the broker refuses', async () => {
+    const h = harness({ answer: () => ({ kind: 'refused', reason: 'not in the session' }) })
+    await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const r = await h.service.submit(proposal('PROJECT_TOOLCHAIN_INSTALL'), who())
+    expect(r.outcome).toBe('REJECTED_BY_POLICY')
+    expect(h.calls).toEqual(['snapshot', 'exec'])
+    expect(r.persistence).toBeUndefined()
+    expect(h.events).toEqual([])
+  })
+
+  it('takes the after snapshot on FAILED, TIMEOUT and lost, and keeps the outcome', async () => {
+    const cases: [BrokerExecResult, string][] = [
+      [ok('', 3), 'FAILED'],
+      [{ ...(ok('', 1) as Extract<BrokerExecResult, { kind: 'result' }>), timedOut: true }, 'TIMEOUT'],
+      [{ kind: 'lost', reason: 'the relay ended' }, 'ABORTED'],
+    ]
+    for (const [answer, outcome] of cases) {
+      const h = harness({ answer: () => answer })
+      await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+      const r = await h.service.submit(proposal('APP_INSTALL_TEST'), who())
+      expect(r.outcome, outcome).toBe(outcome)
+      expect(h.calls).toEqual(['snapshot', 'exec', 'snapshot'])
+      expect(r.persistence?.unexpected).toBe(1)
+      expect(r.observed.some((l) => l.includes('UNEXPECTED'))).toBe(true)
+      expect(h.store.receiptRows.find((x) => x.id === r.id)).toMatchObject({ outcome, persistence: { unexpected: 1 } })
+      expect(h.events.filter((e) => e.severity === 'ISOLATION_FAILURE')).toHaveLength(1)
+    }
+  })
+
+  it('raises exactly one ISOLATION_FAILURE event for unexpected changes, and none when every change was expected', async () => {
+    const both: PersistenceSnapshot = { ...AFTER, items: [...AFTER.items, { surface: 'SERVICE', id: 'ToolSvc', attrs: { startType: 'auto', binaryPath: 'C:\\Tool\\svc.exe' } }] }
+    const h = harness({ snapshots: [BEFORE, both] })
+    await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const r = await h.service.submit(proposal('PROJECT_TOOLCHAIN_INSTALL'), who())
+    expect(r.persistence?.unexpected).toBe(2)
+    expect(h.events).toHaveLength(1)
+    expect(h.events[0]).toMatchObject({ severity: 'ISOLATION_FAILURE', runId: 'run-1', projectId: 'p1', taskId: 'task-1', action: 'privileged operation left unexpected persistence' })
+    expect(h.events[0]?.reason).toContain('ToolUpdater ADDED')
+    expect(h.events[0]?.reason).toContain('ToolSvc ADDED')
+    expect(h.events[0]?.reason.length).toBeLessThanOrEqual(300)
+
+    const fine = harness({ snapshots: [BEFORE, both] })
+    await fine.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const expected = await fine.service.submit(proposal('PROJECT_TOOLCHAIN_INSTALL', { registry: [`${RUN}\\ToolUpdater`], services: ['ToolSvc'] }), who())
+    expect(expected.persistence).toMatchObject({ unexpected: 0 })
+    expect(expected.persistence?.changes).toHaveLength(2)
+    expect(expected.observed.some((l) => l.includes('UNEXPECTED'))).toBe(false)
+    expect(fine.events).toEqual([])
+  })
+
+  it('a collector that rejects gives FAILED coverage, and the operation still runs', async () => {
+    const h = harness({ collector: () => Promise.reject(new Error('reg.exe could not start')) })
+    await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const r = await h.service.submit(proposal('PROJECT_TOOLCHAIN_REPAIR'), who())
+    expect(r.outcome).toBe('EXECUTED')
+    expect(h.broker.ran).toHaveLength(1)
+    expect(r.persistence).toMatchObject({ changes: [], unexpected: 0, coverageBefore: { SERVICE: { state: 'FAILED' }, SCHEDULED_TASK: { state: 'FAILED' }, RUN_KEY: { state: 'FAILED' }, STARTUP_FOLDER: { state: 'FAILED' } } })
+    const coverage = r.observed.filter((l) => l.startsWith('Persistence coverage'))
+    expect(coverage).toHaveLength(4)
+    expect(coverage[0]).toContain('before FAILED, after FAILED')
+    expect(coverage[0]).toContain('reg.exe could not start')
+    expect(h.events).toEqual([])
   })
 })
