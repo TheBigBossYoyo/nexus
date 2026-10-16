@@ -1,4 +1,4 @@
-import type { PrivilegeSessionStatus, PrivilegedOperationReceipt, PrivilegedOperationReview, PrivilegedOutcome } from '@shared/privilege'
+import type { PersistenceChange, PersistenceCoverage, PersistenceReport, PrivilegeSessionStatus,PrivilegedOperationReceipt, PrivilegedOperationReview, PrivilegedOutcome } from '@shared/privilege'
 import type { ReceiptChainVerification } from './chain'
 
 /**
@@ -85,8 +85,49 @@ function shown(r: PrivilegedOperationReceipt): PrivilegedOperationReceipt {
     reviews: r.reviews.map((v) => ({ ...v, reason: inline(v.reason), restrictions: v.restrictions.map(inline) })),
     precheck: { ...r.precheck, reason: inline(r.precheck.reason) },
     finalPolicy: r.finalPolicy ? { ...r.finalPolicy, reason: inline(r.finalPolicy.reason) } : null,
+    ...(r.persistence ? { persistence: shownPersistence(r.persistence) } : {}),
   }
 }
+
+const attrsShown = (a: Record<string, string> | undefined): Record<string, string> | undefined =>
+  a === undefined ? undefined : Object.fromEntries(Object.entries(a).map(([k, v]) => [inline(k), inline(v)]))
+
+const coverageShown = (c: PersistenceCoverage): PersistenceCoverage =>
+  Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.note === undefined ? { state: v.state } : { state: v.state, note: inline(v.note) }])) as PersistenceCoverage
+
+/** The persistence field with every string an installer could have chosen made inline text. */
+function shownPersistence(p: PersistenceReport): PersistenceReport {
+  return {
+    ...p,
+    changes: p.changes.map((c) => {
+      const before = attrsShown(c.before)
+      const after = attrsShown(c.after)
+      return { ...c, id: inline(c.id), ...(before ? { before } : {}), ...(after ? { after } : {}) }
+    }),
+    coverageBefore: coverageShown(p.coverageBefore),
+    coverageAfter: coverageShown(p.coverageAfter),
+    note: inline(p.note),
+  }
+}
+
+const PERSISTENCE_NOTE = 'These differences were observed during the operation and are not proven to have been caused by it; coverage is limited to what an unelevated user can read.'
+
+const attrText = (a: Record<string, string> | undefined): string => {
+  const e = Object.entries(a ?? {})
+  return e.length ? e.map(([k, v]) => `${k}=${v}`).join('; ') : '(none)'
+}
+
+function persistenceLines(p: PersistenceReport): string[] {
+  const n = (k: PersistenceChange['change']): number => p.changes.filter((c) => c.change === k).length
+  const out = [`- Persistence: ${n('ADDED')} added, ${n('REMOVED')} removed, ${n('CHANGED')} changed${p.changes.some((c) => !c.expected) ? `, ${p.changes.filter((c) => !c.expected).length} UNEXPECTED (not declared)` : ''}`]
+  for (const c of p.changes) out.push(`  - ${c.surface} ${c.id}: ${c.change}; ${attrText(c.before)} → ${attrText(c.after)}${c.expected ? '' : ' — UNEXPECTED (not declared)'}`)
+  for (const [when, cov] of [['before', p.coverageBefore], ['after', p.coverageAfter]] as const)
+    for (const [surface, v] of Object.entries(cov)) if (v.state !== 'COMPLETE') out.push(`  - Coverage ${when}: ${surface} ${v.state}${v.note ? ` (${v.note})` : ''}`)
+  out.push(`  - ${PERSISTENCE_NOTE}`)
+  return out
+}
+
+const unexpectedCount = (r: PrivilegedOperationReceipt): number => (r.persistence ? r.persistence.changes.filter((c) => !c.expected).length : 0)
 
 /** Inline code no text inside can close, on one line. */
 function codeSpan(text: string): string {
@@ -143,6 +184,7 @@ export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOpera
     out.push(`- Command: ${codeSpan(shownCommand(r))}`, `- Working directory: ${r.cwd ?? '(the broker\'s own staging folder)'}`, `- Environment set: ${r.envNames.length ? r.envNames.join(', ') : 'none beyond the machine\'s own'}`)
     out.push(`- Expected: files ${r.expected.files.join(', ') || 'none'}; registry ${r.expected.registry.join(', ') || 'none'}; services/tasks ${r.expected.services.join(', ') || 'none'}; network ${r.expected.network}`)
     out.push(`- Observed: ${r.observed.length ? r.observed.join(' ') : 'nothing recorded'}`)
+    if (r.persistence) out.push(...persistenceLines(r.persistence))
     out.push(`- Result: ${OUTCOME_TEXT[r.outcome]} — ${r.outcomeReason}${r.exitCode !== null ? ` Exit code ${r.exitCode}.` : ''}${r.durationMs !== null ? ` Duration ${(r.durationMs / 1000).toFixed(1)} s.` : ''}`)
     if (r.rollback) out.push(`- Rollback: ${r.rollback}`)
     out.push(`- Evidence: receipt ${r.id}${r.stagedSha256 ? `; program SHA-256 ${r.stagedSha256}` : ''}`)
@@ -164,8 +206,13 @@ export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOper
     out.push(`Why admin: ${r.whyElevation}`)
     out.push(`Security review: ${reviewLine(r.reviews, r.precheck.councilRequired)} Deterministic policy: ${r.finalPolicy?.verdict ?? r.precheck.verdict}.`)
     out.push(`Command: ${codeSpan(shownCommand(r))}`)
-    out.push(`Result: ${OUTCOME_TEXT[r.outcome]}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''} — ${r.outcomeReason}${r.observed.length ? ` Changed/seen: ${r.observed.join(' ')}` : ''}`, '')
+    out.push(`Result: ${OUTCOME_TEXT[r.outcome]}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''} — ${r.outcomeReason}${r.observed.length ? ` Changed/seen: ${r.observed.join(' ')}` : ''}`)
+    const u = unexpectedCount(r)
+    if (u > 0) out.push(`Persistence: ${u} UNEXPECTED change${u === 1 ? '' : 's'} (not declared), observed during the operation.`)
+    out.push('')
   }
+  const total = receipts.reduce((s, r) => s + unexpectedCount(r), 0)
+  if (total > 0) out.push(`Unexpected persistence changes in total: ${total}.`, '')
   return out.join('\n')
 }
 

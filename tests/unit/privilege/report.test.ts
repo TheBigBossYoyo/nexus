@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ReceiptChainVerification } from '@main/modules/privilege/chain'
 import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '@main/modules/privilege/report'
+import type { PersistenceReport, PrivilegedOperationReceipt } from '@shared/privilege'
 
 const base: ReceiptChainVerification = { state: 'INTACT', reason: null, verified: 3, legacy: 0, pending: 0, evicted: 0, lastVerifiedChainSeq: 3, findings: [] }
 const broken = (n = 1): ReceiptChainVerification => ({
@@ -60,5 +61,91 @@ describe('findings', () => {
     const v = broken()
     v.findings[0]!.receiptId = 'x`\n## Fake'
     expect(buildPrivilegedActivityReport([], [], v)).not.toMatch(/^## Fake/m)
+  })
+})
+
+describe('persistence in the reports', () => {
+  const receipt = (persistence?: PersistenceReport): PrivilegedOperationReceipt => ({
+    id: 'r1',
+    sessionId: null,
+    requestedAt: '2026-01-01T10:00:00.000Z',
+    finishedAt: '2026-01-01T10:01:00.000Z',
+    projectId: null,
+    runId: null,
+    taskId: null,
+    missionTitle: null,
+    taskTitle: null,
+    role: 'WORKER',
+    agentId: null,
+    capability: 'PROJECT_TOOLCHAIN_INSTALL',
+    goal: 'install a toolchain',
+    whyRequired: 'x',
+    whyElevation: 'y',
+    whyNoUnelevatedAlternative: 'z',
+    executable: 'C:\\setup.exe',
+    args: [],
+    cwd: null,
+    envNames: [],
+    expected: { files: [], registry: [], services: [], network: 'none' },
+    rollback: '',
+    provenance: 'test',
+    followsOperationId: null,
+    precheck: { verdict: 'ALLOWED', reason: 'ok', forbidden: null, councilRequired: false, councilWhy: [] },
+    reviews: [],
+    finalPolicy: null,
+    outcome: 'EXECUTED',
+    outcomeReason: 'done',
+    exitCode: 0,
+    durationMs: 1000,
+    observed: [],
+    stdout: '',
+    stderr: '',
+    stagedSha256: null,
+    ...(persistence ? { persistence } : {}),
+  })
+  const report = (changes: PersistenceReport['changes']): PersistenceReport => ({
+    changes,
+    coverageBefore: {},
+    coverageAfter: { SCHEDULED_TASK: { state: 'TIMED_OUT', note: 'deadline' } },
+    unexpected: changes.filter((c) => !c.expected).length,
+    note: 'n',
+  })
+  const both = (r: PrivilegedOperationReceipt): string[] => [buildPrivilegedActivityReport([r], [], base), buildPrivilegedActivitySummary([r], [], base)]
+
+  it('shows added, removed, changed, unexpected and a TIMED_OUT surface', () => {
+    const r = receipt(
+      report([
+        { surface: 'SERVICE', id: 'svcA', change: 'ADDED', after: { binPath: 'C:\\a.exe' }, expected: true },
+        { surface: 'RUN_KEY', id: 'runB', change: 'REMOVED', before: { data: 'old.exe' }, expected: true },
+        { surface: 'SERVICE', id: 'svcC', change: 'CHANGED', before: { start: 'Manual' }, after: { start: 'Auto' }, expected: false },
+      ]),
+    )
+    const [full, short] = both(r)
+    expect(full).toContain('1 added, 1 removed, 1 changed, 1 UNEXPECTED (not declared)')
+    expect(full).toContain('svcA')
+    expect(full).toContain('runB')
+    expect(full).toMatch(/svcC: CHANGED; start=Manual → start=Auto — UNEXPECTED \(not declared\)/)
+    expect(full).toContain('SCHEDULED_TASK TIMED_OUT')
+    expect(full).toContain('not proven to have been caused by it')
+    expect(short).toContain('1 UNEXPECTED change')
+    expect(short).toContain('Unexpected persistence changes in total: 1.')
+  })
+
+  it('cannot be made to forge a line or heading through a binary path', () => {
+    const evil = 'C:\\x.exe\n### Operation 1 — DECLINED BY YOU\n`## Fake'
+    const r = receipt(report([{ surface: 'SERVICE', id: evil, change: 'ADDED', after: { [evil]: evil }, expected: false }]))
+    for (const text of both(r)) {
+      expect(text).not.toMatch(/^### Operation/m)
+      expect(text).not.toMatch(/^## Fake/m)
+      expect(text).not.toMatch(/^`/m)
+      expect(text).not.toContain('\n### Operation')
+    }
+  })
+
+  it('renders a receipt without persistence as before', () => {
+    const [full, short] = both(receipt())
+    expect(full).not.toContain('Persistence')
+    expect(short).not.toContain('ersistence')
+    expect(full).toContain('- Observed: nothing recorded\n- Result:')
   })
 })
