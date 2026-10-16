@@ -209,6 +209,44 @@ export interface PrivilegedOperationReceipt {
   stdout: string
   stderr: string
   stagedSha256: string | null
+  /** Persistence seen changing during the operation (absent on receipts recorded before it existed). */
+  persistence?: PersistenceReport
+}
+
+export type PersistenceSurface = 'SERVICE' | 'SCHEDULED_TASK' | 'RUN_KEY' | 'STARTUP_FOLDER'
+
+/** One persistence item. `id` is a stable identity, compared case-insensitively. */
+export interface PersistenceItem {
+  surface: PersistenceSurface
+  id: string
+  attrs: Record<string, string>
+}
+
+export type PersistenceCoverageState = 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'TIMED_OUT'
+export type PersistenceCoverage = Partial<Record<PersistenceSurface, { state: PersistenceCoverageState; note?: string }>>
+
+export interface PersistenceSnapshot {
+  takenAt: string
+  durationMs: number
+  items: PersistenceItem[]
+  coverage: PersistenceCoverage
+}
+
+export interface PersistenceChange {
+  surface: PersistenceSurface
+  id: string
+  change: 'ADDED' | 'REMOVED' | 'CHANGED'
+  before?: Record<string, string>
+  after?: Record<string, string>
+  expected: boolean
+}
+
+export interface PersistenceReport {
+  changes: PersistenceChange[]
+  coverageBefore: PersistenceCoverage
+  coverageAfter: PersistenceCoverage
+  unexpected: number
+  note: string
 }
 
 export const PRIVILEGE_SESSION_STATES = ['PREPARING', 'ACTIVE', 'ENDED', 'DECLINED', 'FAILED'] as const

@@ -1,4 +1,5 @@
 export { ElevatedBrokerClient, type BrokerExecRequest, type BrokerExecResult, type BrokerStart, type ElevatedBrokerOptions } from './broker-client'
+export { PERSISTENCE_CAPABILITIES, diffPersistence, isExpected, persistenceObservedLines } from './persistence'
 export { PrivilegedPolicyEngine, redactArgs, redactText, type PrivilegedPolicyContext } from './policy'
 export { buildPrivilegedActivityReport, buildPrivilegedActivitySummary, privilegedActivitySpoken, shownCommand } from './report'
 export { PrivilegedReviewPipeline, reviewMaterial, type PrivilegedReviewProviders } from './review'
