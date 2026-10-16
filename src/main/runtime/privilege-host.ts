@@ -80,8 +80,10 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   const sectionOf = (runId: string, full = false): string => {
     const receipts = store.receipts({ runId, limit: 1000 })
     const sessions = store.sessions({ runId, limit: 20 }).map((s) => ({ ...s, counts: store.counts(s.id) }))
-    if (receipts.length === 0 && sessions.length === 0) return ''
-    return full ? buildPrivilegedActivityReport(receipts, sessions) : buildPrivilegedActivitySummary(receipts, sessions)
+    const integrity = store.verifyChain()
+    // M7: a broken record is never hidden, even from a run with no privileged activity of its own.
+    if (receipts.length === 0 && sessions.length === 0 && integrity.state !== 'BROKEN') return ''
+    return full ? buildPrivilegedActivityReport(receipts, sessions, integrity) : buildPrivilegedActivitySummary(receipts, sessions, integrity)
   }
   let unavailableReason: string | null = null
   if (process.platform !== 'win32') unavailableReason = 'Privilege sessions are a Windows feature.'

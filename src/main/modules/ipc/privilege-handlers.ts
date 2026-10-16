@@ -57,7 +57,7 @@ export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): Privilege
       if (service === null) return { receipts: [], report: '' }
       const receipts = service.receipts({ ...(runId ? { runId } : {}), ...(sessionId ? { sessionId } : {}), limit: 500 })
       const sessions = service.history(50).filter((s) => (runId === undefined || s.runId === runId) && (sessionId === undefined || s.id === sessionId))
-      return { receipts, report: buildPrivilegedActivityReport(receipts, sessions) }
+      return { receipts, report: buildPrivilegedActivityReport(receipts, sessions, service.verifyChain()) }
     },
   }
 }
