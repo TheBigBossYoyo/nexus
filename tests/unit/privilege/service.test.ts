@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AdvisoryProvider } from '@main/modules/intelligence/compiler'
 import type { BrokerExecRequest, BrokerExecResult } from '@main/modules/privilege/broker-client'
+import type { ReceiptChainVerification } from '@main/modules/privilege/chain'
 import { PrivilegedPolicyEngine } from '@main/modules/privilege/policy'
 import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '@main/modules/privilege/report'
 import { PrivilegedReviewPipeline } from '@main/modules/privilege/review'
@@ -313,9 +314,10 @@ describe('privilege sessions', () => {
     await service.endForRun('run-1', 'Overnight completed')
     const receipts = store.receipts({ runId: 'run-1' })
     const sessions = service.history()
-    const full = buildPrivilegedActivityReport(receipts, sessions)
+    const intact: ReceiptChainVerification = { state: 'INTACT', reason: null, verified: receipts.length, legacy: 0, pending: 0, evicted: 0, lastVerifiedChainSeq: receipts.length, findings: [] }
+    const full = buildPrivilegedActivityReport(receipts, sessions, intact)
     for (const field of ['Mission:', 'Task:', 'Requested by: WORKER', 'Goal:', 'Why it was required:', 'Why elevation was required:', 'Security review: Claude Technical Director APPROVED', 'Deterministic policy:', 'Command: `', 'Working directory:', 'Expected:', 'Observed:', 'Result:', 'Exit code 3', 'Rollback: fixture-remove.ps1', 'Evidence: receipt', 'REJECTED BY POLICY', 'UAC prompts: 1']) expect(full).toContain(field)
-    const summary = buildPrivilegedActivitySummary(receipts, sessions)
+    const summary = buildPrivilegedActivitySummary(receipts, sessions, intact)
     expect(summary).toContain('3 privileged attempts')
     expect(summary).toContain('No broker is left running.')
   })
