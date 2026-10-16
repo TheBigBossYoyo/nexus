@@ -674,6 +674,30 @@ refusal to let any agent path reach power control, your approval gate, and the s
 calls from repository configuration. The real fix is an operating-system boundary (a restricted token,
 AppContainer, job object, VM or container); NEXUS does not provide one.
 
+## Tamper-evident privileged receipts (M7)
+
+- **What is chained, and when.** A privileged-operation receipt is chained only when it reaches its final outcome
+  (an `EXECUTING` receipt has no chain values until it is final). It gets the next `chain_seq`, a `chain_hash`
+  (SHA-256 over the previous hash and the receipt's canonical JSON) and a `chain_hmac` (HMAC of that hash). Once
+  chained, a row is never re-chained or cleared.
+- **Where the key lives.** The HMAC key is written only through `ProtectedStorage` (DPAPI) to a file under
+  `<data>/privilege`, never in clear, never in the database, a report or a log. A key file that cannot be decrypted is
+  never replaced. Without protected storage receipts are still hash-chained, but the record reports "not verified".
+- **What verification detects.** An edited receipt or indexed column (outcome, run, session), a deleted interior or
+  tail receipt, every receipt deleted, swapped positions, an inserted row (with or without forged chain values),
+  stripped chain hash/HMAC, and a changed legacy boundary. Each finding names the receipt id or chain position and
+  the last verified position. The verdict is printed under `## Privileged activity` in every report, including the
+  `privilege.activity` report when no broker service exists, and in a run's section even if that run has no receipts.
+- **Eviction.** Old refusals are evicted to bound the table. Each evicted run of chained refusals is replaced by a
+  signed span, so verification of what remains stays intact. Deleting a non-refusal, or forging a span, is BROKEN.
+- **Legacy label.** Receipts written before the chain existed are labelled "recorded before the chain existed"; they
+  are not chained and do not make the record BROKEN.
+- **Limits.** This is tamper evidence, not prevention.
+  - Code running as the owner while DPAPI is unlocked can read the key and forge a consistent chain.
+  - Rolling back the database and the anchor file together to an earlier consistent state is not detected: there is no
+    independent freshness anchor.
+  - The anchor lags by at most one receipt after a crash between the commit and the anchor write.
+
 ## Known gaps
 
 - **No OS sandbox.** Native Windows has none for this design. Agents and everything they launch run as

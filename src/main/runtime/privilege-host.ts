@@ -4,6 +4,9 @@ import { dirname, join, resolve, win32 } from 'node:path'
 import type { SecurityEventSeverity } from '@shared/autonomy'
 import type { PrivilegeSessionStatus, PrivilegedOperationRequest } from '@shared/privilege'
 import type { AdvisoryProvider } from '../modules/intelligence/compiler'
+import type { ProtectedStorage } from '../modules/intelligence/connection'
+import type { ReceiptChainVerification } from '../modules/privilege/chain'
+import { receiptChainVault } from '../modules/privilege/chain-key'
 import type { PrivilegeRecords } from '../modules/ipc/privilege-handlers'
 import type { Database } from '../modules/persistence/database'
 import { ElevatedBrokerClient } from '../modules/privilege/broker-client'
@@ -26,6 +29,8 @@ import { createPrivilegeVerifier } from '../modules/privilege/verify'
 export interface PrivilegeHostDeps {
   db: Database
   dataDir: string
+  /** The protected storage (DPAPI) that keeps the receipt-chain key; absent: receipts are chained without an HMAC. */
+  protectedStorage?: ProtectedStorage
   launcherPath: string | undefined
   resourcesPath: string | undefined
   sandboxSetupDir: string | undefined
@@ -55,6 +60,8 @@ export interface PrivilegeHost {
   uacPrompts(runId: string): number
   /** M7: the receipts, sessions and chain verification in the database, with or without a service. */
   records: PrivilegeRecords
+  /** M7: the verification of the receipt chain. */
+  integrity(): ReceiptChainVerification
 }
 
 const underFolder = (path: string, root: string): boolean => win32.normalize(path).toLowerCase().startsWith(`${win32.normalize(root).toLowerCase().replace(/\\+$/, '')}\\`)
@@ -79,14 +86,15 @@ const sha256 = (path: string): string | null => {
 
 export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   const helper = d.launcherPath !== undefined ? join(dirname(d.launcherPath), 'nexus-elevate.exe') : null
-  const store = new SqlitePrivilegeStore(d.db)
+  const store = new SqlitePrivilegeStore(d.db, { vault: receiptChainVault(join(d.dataDir, 'privilege'), d.protectedStorage), log: d.log })
+  const integrity = (): ReceiptChainVerification => store.verifyChain()
   const sectionOf = (runId: string, full = false): string => {
     const receipts = store.receipts({ runId, limit: 1000 })
     const sessions = store.sessions({ runId, limit: 20 }).map((s) => ({ ...s, counts: store.counts(s.id) }))
-    const integrity = store.verifyChain()
+    const verdict = integrity()
     // M7: a broken record is never hidden, even from a run with no privileged activity of its own.
-    if (receipts.length === 0 && sessions.length === 0 && integrity.state !== 'BROKEN') return ''
-    return full ? buildPrivilegedActivityReport(receipts, sessions, integrity) : buildPrivilegedActivitySummary(receipts, sessions, integrity)
+    if (receipts.length === 0 && sessions.length === 0 && verdict.state !== 'BROKEN') return ''
+    return full ? buildPrivilegedActivityReport(receipts, sessions, verdict) : buildPrivilegedActivitySummary(receipts, sessions, verdict)
   }
   let unavailableReason: string | null = null
   if (process.platform !== 'win32') unavailableReason = 'Privilege sessions are a Windows feature.'
@@ -101,7 +109,7 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
     history: (limit = 10) => store.sessions({ limit }).map((s) => ({ ...s, counts: store.counts(s.id) })),
     verifyChain: () => store.verifyChain(),
   }
-  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf, uacPrompts, records }
+  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf, uacPrompts, records, integrity }
   const helperPath: string = helper
 
   const testMode = !d.isPackaged && d.env['NEXUS_PRIVILEGE_UNELEVATED_TEST'] === '1'
@@ -161,5 +169,5 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
     log: d.log,
   })
   service.recover()
-  return { service, unavailableReason: null, section: sectionOf, uacPrompts, records }
+  return { service, unavailableReason: null, section: sectionOf, uacPrompts, records, integrity }
 }
