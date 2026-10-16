@@ -127,8 +127,15 @@ describe('persistence in the reports', () => {
     expect(full).toMatch(/svcC: CHANGED; start=Manual → start=Auto — UNEXPECTED \(not declared\)/)
     expect(full).toContain('SCHEDULED_TASK TIMED_OUT')
     expect(full).toContain('not proven to have been caused by it')
-    expect(short).toContain('1 UNEXPECTED change')
+    expect(short).toContain('1 added, 1 removed, 1 changed, 1 UNEXPECTED change (not declared)')
+    expect(short).toContain('Coverage not complete: SCHEDULED_TASK TIMED_OUT (after).')
     expect(short).toContain('Unexpected persistence changes in total: 1.')
+  })
+
+  it('shows coverage that was not COMPLETE in the summary even with no change', () => {
+    const short = buildPrivilegedActivitySummary([receipt(report([]))], [], base)
+    expect(short).toContain('Persistence: 0 added, 0 removed, 0 changed, observed during the operation. Coverage not complete: SCHEDULED_TASK TIMED_OUT (after).')
+    expect(short).not.toContain('UNEXPECTED')
   })
 
   it('cannot be made to forge a line or heading through a binary path', () => {

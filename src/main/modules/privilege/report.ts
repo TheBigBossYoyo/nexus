@@ -129,6 +129,18 @@ function persistenceLines(p: PersistenceReport): string[] {
 
 const unexpectedCount = (r: PrivilegedOperationReceipt): number => (r.persistence ? r.persistence.changes.filter((c) => !c.expected).length : 0)
 
+/** The summary's one persistence line: the counts and any coverage that was not COMPLETE; null when there is nothing to say. */
+function persistenceSummaryLine(p: PersistenceReport): string | null {
+  const n = (k: PersistenceChange['change']): number => p.changes.filter((c) => c.change === k).length
+  const u = p.changes.filter((c) => !c.expected).length
+  const gaps: string[] = []
+  for (const [when, cov] of [['before', p.coverageBefore], ['after', p.coverageAfter]] as const)
+    for (const [surface, v] of Object.entries(cov)) if (v.state !== 'COMPLETE') gaps.push(`${surface} ${v.state} (${when})`)
+  if (p.changes.length === 0 && gaps.length === 0) return null
+  const counts = `${n('ADDED')} added, ${n('REMOVED')} removed, ${n('CHANGED')} changed${u > 0 ? `, ${u} UNEXPECTED change${u === 1 ? '' : 's'} (not declared)` : ''}`
+  return `Persistence: ${counts}, observed during the operation.${gaps.length ? ` Coverage not complete: ${gaps.join(', ')}.` : ''}`
+}
+
 /** Inline code no text inside can close, on one line. */
 function codeSpan(text: string): string {
   const flat = text.replace(/[\r\n]+/g, ' ')
@@ -207,8 +219,8 @@ export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOper
     out.push(`Security review: ${reviewLine(r.reviews, r.precheck.councilRequired)} Deterministic policy: ${r.finalPolicy?.verdict ?? r.precheck.verdict}.`)
     out.push(`Command: ${codeSpan(shownCommand(r))}`)
     out.push(`Result: ${OUTCOME_TEXT[r.outcome]}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''} — ${r.outcomeReason}${r.observed.length ? ` Changed/seen: ${r.observed.join(' ')}` : ''}`)
-    const u = unexpectedCount(r)
-    if (u > 0) out.push(`Persistence: ${u} UNEXPECTED change${u === 1 ? '' : 's'} (not declared), observed during the operation.`)
+    const p = r.persistence ? persistenceSummaryLine(r.persistence) : null
+    if (p) out.push(p)
     out.push('')
   }
   const total = receipts.reduce((s, r) => s + unexpectedCount(r), 0)
