@@ -216,6 +216,9 @@ test.describe('NEXUS 0.4 programs', () => {
       await expect(page.getByTestId('background-kind-test_gap_analysis')).toBeDisabled()
       await page.getByTestId('background-enabled').click()
       await expect.poll(async () => (await invoke(page, 'background.settings', {})).enabled).toBe(true)
+      // Flake 2 (V0_9_FLAKES.md): the runtime had the setting, the window had not drawn it yet, and the click landed on
+      // the checkbox while it was still disabled (the error showed `<input disabled ...>`). The window is waited for.
+      await expect(page.getByTestId('background-kind-test_gap_analysis')).toBeEnabled()
       await page.getByTestId('background-kind-test_gap_analysis').check()
       await expect.poll(async () => (await invoke(page, 'background.settings', {})).kinds).toEqual(['test_gap_analysis'])
       await page.getByTestId('background-run-test_gap_analysis').click()
