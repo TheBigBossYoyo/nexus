@@ -1,4 +1,5 @@
 import { lstat, open, readdir } from 'node:fs/promises'
+import { ASAR, PACKAGED_DIR } from '../profile/project-profiler'
 import { join } from 'node:path'
 
 /** Same vendor/generated skip list as the project profiler, plus a few cache directories. */
@@ -71,9 +72,10 @@ export async function walkRepository(
     for (const e of entries) {
       if (e.isSymbolicLink()) continue
       const childRel = rel === '' ? e.name : `${rel}/${e.name}`
+      // 0.9.1: and no Electron package (an lstat of an `.asar` in Electron opens the archive and keeps it open).
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) queue.push(childRel)
-      } else if (e.isFile() && !isSecretName(e.name)) {
+        if (!SKIP_DIRS.has(e.name) && !PACKAGED_DIR.test(e.name)) queue.push(childRel)
+      } else if (e.isFile() && !isSecretName(e.name) && !ASAR.test(e.name)) {
         names.push(childRel)
       }
     }

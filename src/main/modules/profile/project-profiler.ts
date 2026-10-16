@@ -41,6 +41,13 @@ const GENERATED_DIRS = [
   'coverage',
 ] as const
 const SKIP_DIRS: ReadonlySet<string> = new Set(GENERATED_DIRS)
+/**
+ * 0.9.1: an Electron application's packaged output. In Electron (NEXUS's runtime) an lstat of an `.asar` file opens
+ * the archive and keeps it open: profiling NEXUS's own repository locked release\win-unpacked\resources\app.asar and
+ * the owner's next installer could not be built. Neither is source.
+ */
+export const ASAR = /\.asar$/i
+export const PACKAGED_DIR = /-unpacked$/i
 
 const LANGUAGE_BY_EXT: Record<string, string> = {
   ts: 'TypeScript',
@@ -177,8 +184,8 @@ async function walk(root: string, maxEntries: number, maxMillis: number): Promis
       if (e.isSymbolicLink()) continue
       visited++
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) queue.push(join(dir, e.name))
-      } else if (e.isFile()) {
+        if (!SKIP_DIRS.has(e.name) && !PACKAGED_DIR.test(e.name)) queue.push(join(dir, e.name))
+      } else if (e.isFile() && !ASAR.test(e.name)) {
         files.push(e.name)
       }
     }
