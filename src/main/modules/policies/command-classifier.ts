@@ -672,6 +672,10 @@ const GIT_ENTRY_WRITERS = new Set([...PROJECT_WRITE_CMDS, ...DELETE_CMDS, ...MOV
 const PATH_FIRST_ONLY = new Set(['set-content', 'sc', 'add-content', 'ac', 'out-file', 'new-item', 'ni', 'tee-object', 'export-csv', 'export-clixml', 'clear-content'])
 /** Commands whose arguments are text to print. */
 const TEXT_PRINTERS = new Set(['echo', 'printf', 'write-output', 'write-host'])
+/** Windows programs whose options are written /name: such a word is a switch for them, never a path. */
+const SLASH_SWITCH_PROGRAMS = new Set(['schtasks', 'reg', 'sc', 'netsh', 'tasklist', 'taskkill', 'wmic', 'findstr', 'where', 'ipconfig', 'systeminfo', 'driverquery', 'whoami', 'query', 'qprocess', 'chcp', 'certutil', 'msiexec', 'attrib', 'icacls', 'robocopy', 'xcopy', 'fsutil', 'dism', 'sfc', 'timeout', 'choice', 'net', 'net1', 'powercfg', 'bcdedit', 'shutdown', 'cipher', 'sort', 'more', 'fc', 'comp', 'tree'])
+/** A program of Windows' own, named by its full path. */
+const WINDOWS_PROGRAM = /^(?:[a-z]:|\/[a-z])[\\/]windows[\\/](?:system32|syswow64)[\\/](?:windowspowershell[\\/]v1\.0[\\/])?[^\\/]+\.exe$/i
 /** Commands that only read the one file they are named. */
 const GIT_POINTER_READERS = new Set(['cat', 'type', 'get-content', 'gc', 'head', 'tail', 'wc', 'file', 'stat'])
 const GIT_ENTRY_REASON ="writing, moving or deleting a worktree's own .git entry (touching Git's own files) is never allowed: it decides which repository NEXUS's later git commands act on"
@@ -692,6 +696,7 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
   }
   const candidates = [...words, ...seg.redirects.map((r) => r.target)]
   const commandWord = words.find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && w !== '&' && w !== '.')
+  const program = normalizeName(commandWord ?? '')
   for (const w of candidates) {
     if (w === '') continue
     if ((writePositions.has(w) || /^of=/.test(w)) && !HARMLESS_REDIRECT_TARGET.has(w.toLowerCase())) {
@@ -721,7 +726,13 @@ function checkWords(seg: Segment, words: string[], a: Analysis, destructive: boo
         a.ask('high', `touching Git's own files: ${v}`, 'SYSTEM_CHANGE')
       }
       // What echo and printf are given is text they print, not a place: only where their output is sent is one.
-      const outside = TEXT_PRINTERS.has(head[0] ?? '') && !redirectTargets.has(w) ? null : outsideRoots(v, a)
+      // 0.9.1: and a Windows program's switch (`schtasks /query /xml`, `sc queryex`, `tasklist /fo csv`) is not a path
+      // from the root of the drive: an agent listing scheduled tasks was asked "reads path outside the worktree: /query".
+      const slashSwitch = SLASH_SWITCH_PROGRAMS.has(program) && /^\/[A-Za-z?][\w?-]*(:\S*)?$/.test(w) && !redirectTargets.has(w)
+      // 0.9.1: and the program being run, when it is one of Windows' own (System32, SysWOW64), is not a place the
+      // command writes to: `C:\Windows\System32\reg.exe query ...` was put to the owner as "write outside the task roots".
+      const windowsProgram = w === commandWord && WINDOWS_PROGRAM.test(v)
+      const outside = (TEXT_PRINTERS.has(head[0] ?? '') && !redirectTargets.has(w)) || slashSwitch || windowsProgram ? null : outsideRoots(v, a)
       // 0.9.1: a path outside that nothing writes to (not a redirect target, not a word of a writing or deleting
       // command, not the program being run) is a read, and is said to be one: `ls /c/Program Files/nodejs` was put
       // to the owner as "write or delete files outside the task roots".
@@ -1129,7 +1140,10 @@ function analyzeCommand(cmd: string, args: string[], lc: string[], a: Analysis):
   const pos = positional.map((x) => x.toLowerCase())
 
   const high = HIGH_ALWAYS[cmd]
-  if (high !== undefined) a.ask('high', high, NETWORK_HIGH.has(cmd) ? 'NETWORK' : EXEC_HIGH.has(cmd) ? 'UNKNOWN' : 'SYSTEM_CHANGE')
+  // 0.9.1: `schtasks /query` only lists (an agent writing a persistence snapshot raised six requests with it); any
+  // verb that changes a task (or none named) is the question it was.
+  const onlyLists = cmd === 'schtasks' && lc.includes('/query') && !lc.some((x) => /^\/(create|delete|change|run|end)$/.test(x))
+  if (high !== undefined && !onlyLists) a.ask('high', high, NETWORK_HIGH.has(cmd) ? 'NETWORK' : EXEC_HIGH.has(cmd) ? 'UNKNOWN' : 'SYSTEM_CHANGE')
   const medium = MEDIUM_ALWAYS[cmd]
   const local = medium !== undefined ? localFetchPorts(cmd, args) : null
   if (medium !== undefined && !killsOwnJobs(cmd, args)) {

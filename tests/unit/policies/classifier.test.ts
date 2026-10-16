@@ -306,6 +306,24 @@ describe('publishing, installs, environment, privileges', () => {
     expectLevel('$env:FOO = "bar"', 'write', 'powershell')
   })
 
+  // 0.9.1: an agent writing a persistence snapshot raised six boundary requests listing scheduled tasks.
+  it('does not gate a scheduled-task listing, and still gates every verb that changes a task', () => {
+    expectLevel('schtasks /query /xml ONE', 'write', 'powershell')
+    expectLevel('schtasks /query /fo csv', 'write')
+    expectLevel('& C:\\Windows\\System32\\schtasks.exe /query /xml ONE', 'write', 'powershell')
+    expectLevel('tasklist /fo csv /nh', 'write', 'powershell')
+    // A switch-like word of a program that takes paths is still a path: only Windows' own /switch programs.
+    approve('Get-Content /etc/hosts', 'powershell')
+    // Windows' own program named by its full path is not a place written to (it was "write outside the task roots").
+    expectLevel("C:/Windows/System32/reg.exe query 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce' /reg:64", 'write')
+    expectLevel("& C:\\Windows\\System32\\reg.exe query 'HKLM\\SOFTWARE\\X'", 'write', 'powershell')
+    // What such a program does is judged as before.
+    approve('C:\\Windows\\System32\\reg.exe add HKLM\\Software\\X /v a /d b', 'powershell')
+    approve('C:\\Windows\\System32\\schtasks.exe /create /tn x /tr y', 'powershell')
+    approve('C:\\Windows\\System32\\..\\..\\Users\\x\\evil.exe', 'powershell')
+    for (const c of ['schtasks /create /tn x /tr y', 'schtasks /query /tn x /run', 'schtasks /delete /tn x /f', 'schtasks /change /tn x /disable', 'schtasks /end /tn x', 'schtasks']) approve(c, 'powershell')
+  })
+
   it('rates dependency upgrades at large as medium', () => {
     for (const c of ['npm update', 'pnpm up -L', 'pnpm update --latest', 'yarn upgrade', 'npm upgrade', 'cargo update']) {
       expect(bash(c).level, c).toBe('needs_approval')
