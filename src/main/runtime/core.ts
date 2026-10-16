@@ -421,16 +421,19 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       }
     }
     try {
-      if (getPriority(process.pid) === wanted) return
+      const found = getPriority(process.pid)
+      if (found === wanted) return
       setPriority(process.pid, wanted)
-      if (workPriority !== wanted) logger(`work priority: ${wanted === osConstants.priority.PRIORITY_NORMAL ? 'normal' : 'below normal'}`)
+      logger(`work priority: ${wanted === osConstants.priority.PRIORITY_NORMAL ? 'normal' : 'below normal'} (it was ${found}${workPriority === null ? ', at the start' : ', changed since'})`)
       workPriority = wanted
     } catch (e) {
       logger(`work priority: ${errorMessage(e)}`)
     }
   }
   applyWorkPriority(repos.settings.get())
-  setTimeout(() => applyWorkPriority(repos.settings.get()), 10_000).unref?.()
+  // When Chromium sets its own depends on how long the start takes (measured: before 7 s on one start, after 10 s on
+  // a slower one): the priority is checked every 30 s (a system call) and set again when it was changed.
+  setInterval(() => applyWorkPriority(repos.settings.get()), 30_000).unref?.()
   // The worktrees and the sandbox's state are written and rewritten by every check: Windows Search indexing them
   // (measured: 2 % of the machine during a suite) is work for nothing. New files there are made unindexed.
   if (process.platform === 'win32') for (const dir of [worktreesDir, join(dataDir, 'sandbox')]) markNotIndexed(dir)
