@@ -4,6 +4,7 @@ import { dirname, join, resolve, win32 } from 'node:path'
 import type { SecurityEventSeverity } from '@shared/autonomy'
 import type { PrivilegeSessionStatus, PrivilegedOperationRequest } from '@shared/privilege'
 import type { AdvisoryProvider } from '../modules/intelligence/compiler'
+import type { PrivilegeRecords } from '../modules/ipc/privilege-handlers'
 import type { Database } from '../modules/persistence/database'
 import { ElevatedBrokerClient } from '../modules/privilege/broker-client'
 import { PrivilegedPolicyEngine } from '../modules/privilege/policy'
@@ -52,6 +53,8 @@ export interface PrivilegeHost {
   section(runId: string, full?: boolean): string
   /** The UAC prompts the privilege sessions of a run caused. */
   uacPrompts(runId: string): number
+  /** M7: the receipts, sessions and chain verification in the database, with or without a service. */
+  records: PrivilegeRecords
 }
 
 const underFolder = (path: string, root: string): boolean => win32.normalize(path).toLowerCase().startsWith(`${win32.normalize(root).toLowerCase().replace(/\\+$/, '')}\\`)
@@ -93,7 +96,12 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
   // started only from under Program Files, which only administrators can change; the broker checks its folder too.
   else if (d.isPackaged && !underFolder(helper, d.env['ProgramFiles'] ?? 'C:\\Program Files')) unavailableReason = 'NEXUS is installed for this user only, in a folder any program you run can change; privilege sessions need NEXUS installed for all users (under Program Files).'
   const uacPrompts = (runId: string): number => store.sessions({ runId, limit: 50 }).reduce((n, s) => n + s.uacPrompts, 0)
-  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf, uacPrompts }
+  const records: PrivilegeRecords = {
+    receipts: (opts) => store.receipts(opts),
+    history: (limit = 10) => store.sessions({ limit }).map((s) => ({ ...s, counts: store.counts(s.id) })),
+    verifyChain: () => store.verifyChain(),
+  }
+  if (unavailableReason !== null || helper === null) return { service: null, unavailableReason, section: sectionOf, uacPrompts, records }
   const helperPath: string = helper
 
   const testMode = !d.isPackaged && d.env['NEXUS_PRIVILEGE_UNELEVATED_TEST'] === '1'
@@ -153,5 +161,5 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
     log: d.log,
   })
   service.recover()
-  return { service, unavailableReason: null, section: sectionOf, uacPrompts }
+  return { service, unavailableReason: null, section: sectionOf, uacPrompts, records }
 }

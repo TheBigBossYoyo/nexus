@@ -1839,6 +1839,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     privilege: {
       service: () => privilegeHost.service,
       unavailableReason: privilegeHost.unavailableReason,
+      records: privilegeHost.records,
       projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null,
       // 0.9.1 (review F5): as Overnight's authorization, natively; nobody there is a no.
       confirm: (message, detail) => confirm('NEXUS administrator session', message, detail, 'Prepare').catch(() => false),
