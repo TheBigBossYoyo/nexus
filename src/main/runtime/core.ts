@@ -409,7 +409,9 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   let workPriority: number | null = null
   const applyWorkPriority = (s: Settings): void => {
     if (process.platform !== 'win32') return
-    const wanted = s.execution.backgroundPriority === false ? osConstants.priority.PRIORITY_NORMAL : osConstants.priority.PRIORITY_BELOW_NORMAL
+    // A runtime started by NEXUS's own tests keeps normal priority (never read in a packaged build).
+    const testNormal = !host.isPackaged && env['NEXUS_RUNTIME_PRIORITY'] === 'normal'
+    const wanted = s.execution.backgroundPriority === false || testNormal ? osConstants.priority.PRIORITY_NORMAL : osConstants.priority.PRIORITY_BELOW_NORMAL
     // Workers are kept and reused: one started before the priority was set keeps the one it was started with, and
     // so would the sessions it runs.
     for (const worker of repos.workers.listLive()) {
