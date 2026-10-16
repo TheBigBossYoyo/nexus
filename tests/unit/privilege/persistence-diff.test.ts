@@ -39,7 +39,7 @@ describe('diffPersistence', () => {
     const r = diffPersistence(snap([svc('A', 'auto', 'C:\\a.exe'), svc('B', 'auto', 'C:\\b.exe')]), snap([svc('A', 'manual', 'C:\\a.exe'), svc('B', 'auto', 'C:\\evil.exe')]), none)
     expect(r.changes).toHaveLength(2)
     expect(r.changes[0]).toMatchObject({ id: 'A', change: 'CHANGED', before: { startType: 'auto' }, after: { startType: 'manual' } })
-    expect(r.changes[1].after?.binaryPath).toBe('C:\\evil.exe')
+    expect(r.changes[1]?.after?.binaryPath).toBe('C:\\evil.exe')
   })
 
   it('detects removed Run values in the 64-bit and WOW6432Node views, and a RunOnce addition', () => {
@@ -59,9 +59,9 @@ describe('diffPersistence', () => {
 
   it('gives an identical result for shuffled input', () => {
     const b = [svc('A'), svc('B'), task('\\T'), run(`${RUN}\\R`), su(`${SU}\\s`), svc('Gone')]
-    const a = [svc('A', 'manual'), svc('C'), task('\\T2'), run(`${RUN32}\\Q`), su(`${SU}\\s`, 'zz'), svc('B')]
-    const r1 = diffPersistence(snap(b), snap(a), none)
-    const r2 = diffPersistence(snap([...b].reverse()), snap([a[3], a[0], a[5], a[1], a[4], a[2]]), none)
+    const [a0, a1, a2, a3, a4, a5] = [svc('A', 'manual'), svc('C'), task('\\T2'), run(`${RUN32}\\Q`), su(`${SU}\\s`, 'zz'), svc('B')]
+    const r1 = diffPersistence(snap(b), snap([a0, a1, a2, a3, a4, a5]), none)
+    const r2 = diffPersistence(snap([...b].reverse()), snap([a3, a0, a5, a1, a4, a2]), none)
     expect(JSON.stringify(r2)).toBe(JSON.stringify(r1))
   })
 })
