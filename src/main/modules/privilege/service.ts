@@ -15,6 +15,7 @@ import {
 } from '@shared/privilege'
 import type { SecurityEventSeverity } from '@shared/autonomy'
 import type { BrokerExecRequest, BrokerExecResult, BrokerStart } from './broker-client'
+import type { ReceiptChainVerification } from './chain'
 import { redactArgs, redactText, type PrivilegedPolicyEngine } from './policy'
 import type { PrivilegedReviewPipeline } from './review'
 import type { PrivilegeSessionRow, PrivilegeStore } from './store'
@@ -141,6 +142,11 @@ export class PrivilegeService {
 
   receipts(opts: { runId?: string; sessionId?: string; since?: string; limit?: number }): PrivilegedOperationReceipt[] {
     return this.d.store.receipts(opts)
+  }
+
+  /** M7: the receipt chain walked over every receipt kept, for the privileged activity report. */
+  verifyChain(): ReceiptChainVerification {
+    return this.d.store.verifyChain()
   }
 
   /**

@@ -1,4 +1,5 @@
 import type { PrivilegeSessionStatus, PrivilegedOperationReceipt, PrivilegedOperationReview, PrivilegedOutcome } from '@shared/privilege'
+import type { ReceiptChainVerification } from './chain'
 
 /**
  * 0.9.1: the PRIVILEGED ACTIVITY report (B12 to B14). Every privileged attempt of a run or a session, what it was
@@ -102,9 +103,35 @@ function fenced(text: string): string[] {
   return [fence, text, fence]
 }
 
+/**
+ * The integrity verdict of the record, printed first. A BROKEN record is never left out: `limit` only shortens the
+ * list of findings, and says how many more there are.
+ */
+function integrityLines(integrity: ReceiptChainVerification, limit: number): string[] {
+  if (integrity.state === 'UNAVAILABLE') return [`Record integrity: not verified — ${inline(integrity.reason ?? 'the record could not be checked')}`, '']
+  if (integrity.state === 'INTACT') {
+    const extra = [
+      ...(integrity.legacy > 0 ? [`${integrity.legacy} recorded before the chain existed`] : []),
+      ...(integrity.pending > 0 ? [`${integrity.pending} pending`] : []),
+      ...(integrity.evicted > 0 ? [`${integrity.evicted} evicted refusals`] : []),
+    ]
+    return [`Record integrity: intact — ${integrity.verified} receipt${integrity.verified === 1 ? '' : 's'} verified${extra.length ? `, ${extra.join(', ')}` : ''}.`, '']
+  }
+  const last = integrity.lastVerifiedChainSeq === null ? 'none' : String(integrity.lastVerifiedChainSeq)
+  const shownFindings = integrity.findings.slice(0, limit)
+  const lines = [`Record integrity: BROKEN — the record was changed after it was written. Last verified position ${last}.`, '']
+  for (const f of shownFindings) {
+    const where = [f.receiptId !== null ? `receipt ${codeSpan(f.receiptId)}` : null, f.chainSeq !== null ? `chain position ${f.chainSeq}` : null].filter((x) => x !== null).join(', ')
+    lines.push(`- ${f.kind}${where ? ` — ${where}` : ''}: ${inline(f.detail)}`)
+  }
+  if (integrity.findings.length > shownFindings.length) lines.push(`- … and ${integrity.findings.length - shownFindings.length} more finding${integrity.findings.length - shownFindings.length === 1 ? '' : 's'}.`)
+  lines.push('')
+  return lines
+}
+
 /** The full report: every attempt with every field (the Activity screen, the report file). */
-export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[]): string {
-  const out = ['## Privileged activity', '']
+export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[], integrity: ReceiptChainVerification): string {
+  const out = ['## Privileged activity', '', ...integrityLines(integrity, Number.POSITIVE_INFINITY)]
   if (sessions.length === 0 && receipts.length === 0) return [...out, 'No privilege session was prepared and no administrator operation was asked for.', ''].join('\n')
   out.push(headline(receipts), '', ...sessionLines(sessions), '')
   for (const raw of receipts) {
@@ -130,8 +157,8 @@ export function buildPrivilegedActivityReport(receipts: readonly PrivilegedOpera
 }
 
 /** The short form for the morning report and the Director Line: one block per attempt, the essentials. */
-export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[]): string {
-  const out = ['## Privileged activity', '']
+export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOperationReceipt[], sessions: readonly PrivilegeSessionStatus[], integrity: ReceiptChainVerification): string {
+  const out = ['## Privileged activity', '', ...integrityLines(integrity, 5)]
   if (sessions.length === 0 && receipts.length === 0) return [...out, 'No administrator access was prepared for this run.', ''].join('\n')
   const uac = sessions.reduce((n, s) => n + s.uacPrompts, 0)
   out.push(`${headline(receipts)} UAC prompts: ${uac}.${sessions.some((s) => s.state === 'ACTIVE') ? ' A broker is still active.' : ' No broker is left running.'}`, '')

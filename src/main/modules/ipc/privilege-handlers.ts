@@ -12,9 +12,14 @@ import { buildPrivilegedActivityReport } from '../privilege/report'
  * prompt. An Overnight run that prepares its session was confirmed by its own authorization.
  */
 
+/** M7: the receipts, the sessions and the chain verification, readable from the database with or without a service. */
+export type PrivilegeRecords = Pick<PrivilegeService, 'receipts' | 'history' | 'verifyChain'>
+
 export interface PrivilegeHandlerContext {
   service: () => PrivilegeService | null
   unavailableReason: string | null
+  /** The records kept in the database, for the activity report when there is no service. Absent: no records. */
+  records?: PrivilegeRecords
   /** The project a run belongs to, or null. */
   projectOfRun: (runId: string) => string | null
   /** The owner's confirmation, natively; no answer is a no. Absent: no session is prepared. */
@@ -53,11 +58,13 @@ export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): Privilege
       return { ok: true }
     },
     'privilege.activity': ({ runId, sessionId }) => {
-      const service = ctx.service()
-      if (service === null) return { receipts: [], report: '' }
-      const receipts = service.receipts({ ...(runId ? { runId } : {}), ...(sessionId ? { sessionId } : {}), limit: 500 })
-      const sessions = service.history(50).filter((s) => (runId === undefined || s.runId === runId) && (sessionId === undefined || s.id === sessionId))
-      return { receipts, report: buildPrivilegedActivityReport(receipts, sessions) }
+      // M7: with no service (another platform, no broker, an install for this user only) the receipts are still in the
+      // database and still verified: a broken record is never hidden.
+      const records = ctx.service() ?? ctx.records ?? null
+      if (records === null) return { receipts: [], report: '' }
+      const receipts = records.receipts({ ...(runId ? { runId } : {}), ...(sessionId ? { sessionId } : {}), limit: 500 })
+      const sessions = records.history(50).filter((s) => (runId === undefined || s.runId === runId) && (sessionId === undefined || s.id === sessionId))
+      return { receipts, report: buildPrivilegedActivityReport(receipts, sessions, records.verifyChain()) }
     },
   }
 }
