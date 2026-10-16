@@ -934,6 +934,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const privilegeHost = createPrivilegeHost({
     db,
     dataDir,
+    ...(host.protectedStorage ? { protectedStorage: host.protectedStorage } : {}),
     launcherPath: host.launcherPath,
     resourcesPath: host.resourcesPath,
     sandboxSetupDir: host.sandboxSetupDir,
@@ -1840,6 +1841,7 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       service: () => privilegeHost.service,
       unavailableReason: privilegeHost.unavailableReason,
       records: privilegeHost.records,
+      integrity: () => privilegeHost.integrity(),
       projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null,
       // 0.9.1 (review F5): as Overnight's authorization, natively; nobody there is a no.
       confirm: (message, detail) => confirm('NEXUS administrator session', message, detail, 'Prepare').catch(() => false),

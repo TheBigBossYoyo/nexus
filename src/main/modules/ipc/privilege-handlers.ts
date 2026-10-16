@@ -1,6 +1,7 @@
 import type { IpcChannel, IpcInput, IpcOutputs } from '@shared/ipc'
 import { NexusError } from '@shared/result'
 import { DEFAULT_SESSION_CAPABILITIES } from '@shared/privilege'
+import type { ReceiptChainVerification } from '../privilege/chain'
 import type { PrivilegeService } from '../privilege/service'
 import { buildPrivilegedActivityReport } from '../privilege/report'
 
@@ -20,6 +21,8 @@ export interface PrivilegeHandlerContext {
   unavailableReason: string | null
   /** The records kept in the database, for the activity report when there is no service. Absent: no records. */
   records?: PrivilegeRecords
+  /** M7: the verification of the receipt chain, with or without a service. */
+  integrity: () => ReceiptChainVerification
   /** The project a run belongs to, or null. */
   projectOfRun: (runId: string) => string | null
   /** The owner's confirmation, natively; no answer is a no. Absent: no session is prepared. */
@@ -60,11 +63,12 @@ export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): Privilege
     'privilege.activity': ({ runId, sessionId }) => {
       // M7: with no service (another platform, no broker, an install for this user only) the receipts are still in the
       // database and still verified: a broken record is never hidden.
+      const integrity = ctx.integrity()
       const records = ctx.service() ?? ctx.records ?? null
-      if (records === null) return { receipts: [], report: '' }
+      if (records === null) return { receipts: [], report: buildPrivilegedActivityReport([], [], integrity) }
       const receipts = records.receipts({ ...(runId ? { runId } : {}), ...(sessionId ? { sessionId } : {}), limit: 500 })
       const sessions = records.history(50).filter((s) => (runId === undefined || s.runId === runId) && (sessionId === undefined || s.id === sessionId))
-      return { receipts, report: buildPrivilegedActivityReport(receipts, sessions, records.verifyChain()) }
+      return { receipts, report: buildPrivilegedActivityReport(receipts, sessions, integrity) }
     },
   }
 }
