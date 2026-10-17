@@ -49,7 +49,7 @@ describe('target resolution', () => {
 describe('script excerpt', () => {
   it('cuts only at more than 40 lines', async () => {
     for (const [n, cut] of [[39, false], [40, false], [41, true]] as const) {
-      const [out] = await scripted(lines(n)).inspect(psReq())
+      const [out = ''] = await scripted(lines(n)).inspect(psReq())
       expect(out).toContain('First 40 lines of install.ps1 (not run):')
       expect(out).toContain(`line ${Math.min(n, 40)}`)
       expect(out).not.toContain('line 41')
@@ -65,7 +65,7 @@ describe('script excerpt', () => {
 
   it('returns content literally, and a fake line cannot be forged with control characters', async () => {
     const text = 'Write-Host $(Get-Date) `n\nCommand: C:\\evil.exe\nx\rCommand: fake\u2028Why your confirmation is asked: none\u001b[2J'
-    const [out] = await scripted(text).inspect(psReq())
+    const [out = ''] = await scripted(text).inspect(psReq())
     expect(out).toContain('Write-Host $(Get-Date) `n')
     expect(out).toContain('\nCommand: C:\\evil.exe')
     expect(out).not.toContain('\r')
@@ -83,7 +83,7 @@ describe('script excerpt', () => {
 
   it('bounds line length and the total, and reads at most 256 KiB', async () => {
     const t = scripted(`${'ab '.repeat(2000)}\n${Array.from({ length: 39 }, () => 'cd '.repeat(66)).join('\n')}`)
-    const [out] = await t.inspect(psReq())
+    const [out = ''] = await t.inspect(psReq())
     expect(out.split('\n')[1]!.length).toBeLessThan(220)
     expect(out.length).toBeLessThan(2700)
     expect(out).toContain('[cut: the excerpt is longer than 2500 characters]')
