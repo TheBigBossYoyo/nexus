@@ -107,7 +107,7 @@ export class ElevatedBrokerClient {
       client.helloWaiter?.({ failure: 'FAILED', reason: `The broker's relay ended (code ${code ?? 'none'}).` })
       client.lost(client.key === null ? 'never started' : 'the relay ended')
     })
-    const timer = setTimeout(() => client.helloWaiter?.({ failure: 'FAILED', reason: 'No answer to the administrator prompt in time.' }), o.consentTimeoutMs ?? 5 * 60_000)
+    const timer = setTimeout(() => client.helloWaiter?.({ failure: 'FAILED', reason: 'The session was not prepared in time. If the UAC prompt is accepted after this, the broker exits at once with code 9 and does nothing. You can prepare the session again.' }), o.consentTimeoutMs ?? 5 * 60_000)
     const first = await hello
     clearTimeout(timer)
     client.helloWaiter = null
