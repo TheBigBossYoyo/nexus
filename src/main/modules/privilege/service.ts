@@ -73,6 +73,8 @@ export interface PrivilegeServiceDeps {
    * answer). Without anyone to ask the answer is no. Absent: an operation that needs it does not run.
    */
   confirmOwner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>
+  /** 0.9.1 (second review, L7): lines about what really runs (a script's first lines, a signature), shown in the owner's confirmation. Read-only; never changes a verdict. */
+  inspect?: (req: PrivilegedOperationRequest) => Promise<string[]>
   /**
    * 0.9.1 (second review, H1): why no session may be prepared now, or null. A mission whose commands run as the owner
    * outside any containment could reach the broker's relay as the owner: no session while one runs.
@@ -98,6 +100,8 @@ const REFUSALS_BEFORE_BLOCK = 8
 const OUTPUT_KEPT = 4000
 /** How long the owner's confirmation of one operation is waited for. */
 const OWNER_ANSWER_MS = 10 * 60_000
+/** The most the native confirmation shows. */
+const DETAIL_CHARS = 6000
 
 export type PrepareResult = { ok: true; status: PrivilegeSessionStatus } | { ok: false; reason: string; status: PrivilegeSessionStatus | null }
 
@@ -490,15 +494,29 @@ export class PrivilegeService {
   /** The owner's confirmation of one operation: what runs, why, what the reviews said. No model's words decide it. */
   private async askOwner(req: PrivilegedOperationRequest, final: PrivilegedPolicyDecision, reviews: readonly PrivilegedOperationReview[]): Promise<boolean> {
     if (this.d.confirmOwner === undefined) return false
-    const detail = [
+    let inspection: string[] = []
+    if (this.d.inspect) {
+      try {
+        inspection = await this.d.inspect(req)
+      } catch {
+        inspection = ['The file could not be inspected.']
+      }
+    }
+    const warning = 'It runs with administrator rights. If you did not expect it, choose Do not run.'
+    const head = [
       `Command: ${[req.executable, ...redactArgs(req.args, req.secretArgs)].join(' ')}`,
       `Why your confirmation is asked: ${(final.ownerWhy ?? []).join('; ')}.`,
       `Requested by: ${req.role.toLowerCase()}${req.taskTitle ? `, task "${req.taskTitle}"` : ''}${req.missionTitle ? `, mission "${req.missionTitle}"` : ''}.`,
       `Its stated goal (the agent's words): ${redactText(req.goal)}`,
       `Why administrator rights (the agent's words): ${redactText(req.whyElevation)}`,
       ...reviews.map((r) => `${r.reviewer === 'DIRECTOR_COUNCIL' ? 'Council' : 'Technical Director'}: ${r.failed ? 'no valid review' : `${r.verdict} (risk ${r.risk})`}. ${r.reason}`),
-      'It runs with administrator rights. If you did not expect it, choose Do not run.',
-    ].join('\n\n')
+    ]
+    // Only the inspection block is cut, so that the command, the reasons and the closing warning always fit.
+    const fixed = [...head, warning].join('\n\n').length
+    const room = Math.max(0, DETAIL_CHARS - fixed - 4)
+    let block = inspection.join('\n\n')
+    if (block.length > room) block = room > 40 ? `${block.slice(0, room - 20)}\n[cut: too long]` : ''
+    const detail = [...head, ...(block ? [block] : []), warning].join('\n\n')
     // Not answered in time (an Overnight run, the owner away) is a no: the operations behind it wait in the same queue.
     let timer: ReturnType<typeof setTimeout> | undefined
     const late = new Promise<boolean>((done) => {
@@ -506,7 +524,7 @@ export class PrivilegeService {
       timer.unref?.()
     })
     try {
-      return await Promise.race([this.d.confirmOwner({ title: 'NEXUS: run as administrator?', message: `An agent asks to run ${win32.basename(req.executable)} with administrator rights.`, detail: detail.slice(0, 6000) }), late])
+      return await Promise.race([this.d.confirmOwner({ title: 'NEXUS: run as administrator?', message: `An agent asks to run ${win32.basename(req.executable)} with administrator rights.`, detail: detail.slice(0, DETAIL_CHARS) }), late])
     } catch {
       return false
     } finally {
