@@ -10,7 +10,8 @@ import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '@
 import { PrivilegedReviewPipeline } from '@main/modules/privilege/review'
 import { PrivilegeService, type BrokerHandle, type PrivilegedRequester } from '@main/modules/privilege/service'
 import { MemoryPrivilegeStore } from '@main/modules/privilege/store'
-import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PersistenceSnapshot, type PrivilegedCapability, type PrivilegedOperationProposal, type PrivilegedPolicyDecision } from '@shared/privilege'
+import { createTargetInspector } from '@main/modules/privilege/inspect'
+import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PersistenceSnapshot, type PrivilegedOperationRequest, type PrivilegedCapability, type PrivilegedOperationProposal, type PrivilegedPolicyDecision } from '@shared/privilege'
 
 // 0.9.1: privilege sessions with a scripted broker and scripted reviewers. The broker's own protocol and checks are
 // tested against the real helper in tests/integration/privilege.
@@ -47,7 +48,7 @@ function reviewer(verdict: 'APPROVE' | 'REJECT' = 'APPROVE', calls: { n: number 
   }
 }
 
-function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore; blocked?: (runId: string | null) => string | null } = {}) {
+function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore; blocked?: (runId: string | null) => string | null; inspect?: (req: PrivilegedOperationRequest) => Promise<string[]> } = {}) {
   const store = opts.store ?? new MemoryPrivilegeStore()
   const broker = opts.broker ?? new FakeBroker((req, n) => (req.args[5]?.endsWith('fixture-install.ps1') && n === 1 ? ok('', 3) : ok()))
   let uac = 0
@@ -71,6 +72,7 @@ function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strate
     },
     verify: async (req) => req.expected.files.map((f) => `${f}: present.`),
     ...(opts.owner ? { confirmOwner: opts.owner } : {}),
+    ...(opts.inspect ? { inspect: opts.inspect } : {}),
     ...(opts.blocked ? { blockedBy: opts.blocked } : {}),
   })
   return { service, store, broker, uac: () => uac }
@@ -232,6 +234,65 @@ describe('privilege sessions', () => {
     expect(strategicCalls.n).toBe(1)
     expect(install.reviews.map((r) => r.reviewer)).toEqual(['CLAUDE_TECHNICAL_DIRECTOR', 'DIRECTOR_COUNCIL'])
     expect(broker.ran).toHaveLength(2)
+  })
+
+  // 0.9.1 (second review, L7): the owner sees what really runs, and no inspection outcome changes whether they are asked.
+  describe('inspection in the owner confirmation', () => {
+    const script = PrivilegedOperationProposalSchema.parse({ capability: 'KNOWN_DEPENDENCY_MACHINE_INSTALL', goal: 'Install the Visual C++ runtime', whyRequired: 'The native module loads it.', whyElevation: 'Machine-wide runtime.', whyNoUnelevatedAlternative: 'There is no per-user package.', executable: 'C:\\Windows\\System32\\msiexec.exe', args: ['/i', 'C:\\work\\racedeck\\vc.msi', '/qn'], inputs: [{ arg: 1, sha256: 'c'.repeat(64) }] })
+    const ask = async (inspect: (req: PrivilegedOperationRequest) => Promise<string[]>) => {
+      const asked: string[] = []
+      const h = setup({ broker: new FakeBroker(() => ok()), owner: async (o) => (asked.push(o.detail), true), strategic: reviewer('APPROVE'), inspect })
+      await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+      const r = await h.service.submit(script, who())
+      return { asked, r }
+    }
+    const WARNING = 'It runs with administrator rights. If you did not expect it, choose Do not run.'
+
+    it('shows the command, the reasons, the inspection lines and the closing warning', async () => {
+      const { asked, r } = await ask(async () => ['First 40 lines of repair.ps1 (not run):\nWrite-Host hi'])
+      expect(r.outcome).toBe('EXECUTED')
+      expect(asked).toHaveLength(1)
+      const d = asked[0]!
+      expect(d).toContain('Command: ')
+      expect(d).toContain('Why your confirmation is asked: ')
+      expect(d).toContain('First 40 lines of repair.ps1 (not run):\nWrite-Host hi')
+      expect(d.endsWith(WARNING)).toBe(true)
+      expect(d.indexOf('Write-Host hi')).toBeLessThan(d.indexOf(WARNING))
+      expect(d.indexOf('Requested by:')).toBeLessThan(d.indexOf('Write-Host hi'))
+    })
+
+    it('keeps the command, the reasons and the warning with a 40-line script of maximum-length lines', async () => {
+      const lines = Array.from({ length: 40 }, (_, i) => `${String(i).padStart(2, '0')}${'x'.repeat(300)}`).join('\n')
+      const real = createTargetInspector({ readFile: async () => ({ size: lines.length, head: Buffer.from(lines) }) })
+      const excerpt = await real({ executable: PS, args: [...HEAD, 'C:\\work\\racedeck\\repair.ps1'] } as unknown as PrivilegedOperationRequest)
+      const { asked } = await ask(async () => excerpt)
+      const d = asked[0]!
+      expect(d.length).toBeLessThanOrEqual(6000)
+      expect(d).toContain('Command: ')
+      expect(d).toContain('Why your confirmation is asked: ')
+      expect(d).toContain('First 40 lines of repair.ps1 (not run):')
+      expect(d.endsWith(WARNING)).toBe(true)
+    })
+
+    it('cuts only the inspection block when it is longer than the dialog allows', async () => {
+      const { asked } = await ask(async () => [`First 40 lines of x.ps1 (not run):\n${'word '.repeat(5000)}`])
+      const d = asked[0]!
+      expect(d.length).toBeLessThanOrEqual(6000)
+      expect(d).toContain('Command: ')
+      expect(d).toContain('Why your confirmation is asked: ')
+      expect(d).toContain('[cut: too long]')
+      expect(d.endsWith(WARNING)).toBe(true)
+    })
+
+    it('still asks the owner when the inspection throws, and says the file could not be inspected', async () => {
+      const { asked, r } = await ask(async () => {
+        throw new Error('boom')
+      })
+      expect(r.outcome).toBe('EXECUTED')
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toContain('could not be inspected')
+      expect(asked[0]!.endsWith(WARNING)).toBe(true)
+    })
   })
 
   // 0.9.1 (review F3): a package the run may have fetched runs only once the owner confirmed it, whatever the reviews.

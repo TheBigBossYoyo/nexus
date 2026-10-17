@@ -10,6 +10,7 @@ import { receiptChainVault } from '../modules/privilege/chain-key'
 import type { PrivilegeRecords } from '../modules/ipc/privilege-handlers'
 import type { Database } from '../modules/persistence/database'
 import { ElevatedBrokerClient } from '../modules/privilege/broker-client'
+import { createTargetInspector } from '../modules/privilege/inspect'
 import { createPersistenceCollector } from '../modules/privilege/persistence-snapshot'
 import { PrivilegedPolicyEngine } from '../modules/privilege/policy'
 import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '../modules/privilege/report'
@@ -157,6 +158,7 @@ export function createPrivilegeHost(d: PrivilegeHostDeps): PrivilegeHost {
       })
     },
     verify: createPrivilegeVerifier({ systemRoot }),
+    inspect: createTargetInspector({ systemRoot }),
     // 0.9.1 (second review, L5): unelevated, read-only snapshots around an install, repair or uninstall.
     persistence: createPersistenceCollector({ systemRoot, programData }),
     // setup-sandbox.ps1 reads its checks from the file beside it: staged beside it, with its own hash.
