@@ -1378,7 +1378,7 @@ export interface IpcOutputs {
   'research.list': { artifacts: ResearchArtifact[]; downloads: ResearchDownloadView[] }
   'isolation.status': IsolationStatusView
   'isolation.setup': SandboxSetupOutcome
-  'privilege.status': { available: boolean; unavailableReason: string | null; active: PrivilegeSessionStatus | null; recent: PrivilegeSessionStatus[] }
+  'privilege.status': { available: boolean; unavailableReason: string | null; active: PrivilegeSessionStatus | null; recent: PrivilegeSessionStatus[]; uacWarning: string | null }
   'privilege.prepare': { ok: boolean; reason: string | null; status: PrivilegeSessionStatus | null }
   'privilege.revoke': { ok: boolean }
   'privilege.activity': { receipts: PrivilegedOperationReceipt[]; report: string }

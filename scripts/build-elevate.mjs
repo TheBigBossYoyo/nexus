@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { trustedCsc } from './trusted-csc.mjs'
 
 const here = resolve(import.meta.dirname, '..')
 
@@ -16,18 +17,20 @@ export function elevateSource() {
 }
 
 /** Compiles the privilege broker into `outDir`, always afresh. Returns its path. */
-export function buildElevateHelper(outDir = join(here, 'out', 'native')) {
+export function buildElevateHelper(outDir = join(here, 'out', 'native'), { findCsc = trustedCsc, run = spawnSync } = {}) {
   if (process.platform !== 'win32') throw new Error('The privilege broker is a Windows program.')
   const source = elevateSource()
   const output = join(outDir, 'nexus-elevate.exe')
   // Always rebuilt (it takes a second): a binary left from an earlier build, or one put there by someone else, is never reused
   // for a package. (Review L13.)
-  const csc = join(process.env.SystemRoot ?? 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
-  if (!existsSync(csc)) throw new Error(`The C# compiler of Windows was not found: ${csc}`)
+  const csc = findCsc()
   mkdirSync(outDir, { recursive: true })
   rmSync(output, { force: true })
-  const run = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', `/out:${output}`, source], { encoding: 'utf8', windowsHide: true })
-  if (run.status !== 0 || !existsSync(output)) throw new Error(`The privilege broker did not compile:\n${run.stdout}\n${run.stderr}`)
+  const result = run(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', `/out:${output}`, source], { encoding: 'utf8', windowsHide: true })
+  if (result.status !== 0 || !existsSync(output)) {
+    rmSync(output, { force: true })
+    throw new Error(`The privilege broker did not compile:\n${result.stdout}\n${result.stderr}`)
+  }
   return output
 }
 

@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { trustedCsc } from './trusted-csc.mjs'
 
 const here = resolve(import.meta.dirname, '..')
 
@@ -16,19 +17,20 @@ export function presenceSource() {
 }
 
 /** Compiles the SIP helper into `outDir` unless an up-to-date one is there. Returns its path. */
-export function buildPresenceHelper(outDir = join(here, 'out', 'native')) {
+export function buildPresenceHelper(outDir = join(here, 'out', 'native'), { fresh = false, findCsc = trustedCsc, run = spawnSync } = {}) {
   if (process.platform !== 'win32') throw new Error('The presence meter is a Windows program.')
   const source = presenceSource()
   const output = join(outDir, 'nexus-presence.exe')
-  if (existsSync(output) && statSync(output).mtimeMs >= statSync(source).mtimeMs) return output
-  const csc = join(process.env.SystemRoot ?? 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
-  if (!existsSync(csc)) throw new Error(`The C# compiler of Windows was not found: ${csc}`)
+  if (!fresh && existsSync(output) && statSync(output).mtimeMs >= statSync(source).mtimeMs) return output
+  const csc = findCsc()
   mkdirSync(outDir, { recursive: true })
-  const run = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', `/out:${output}`, source], { encoding: 'utf8', windowsHide: true })
-  if (run.status !== 0 || !existsSync(output)) throw new Error(`The presence meter did not compile:\n${run.stdout}\n${run.stderr}`)
+  const result = run(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', `/out:${output}`, source], { encoding: 'utf8', windowsHide: true })
+  if (result.status !== 0 || !existsSync(output)) throw new Error(`The presence meter did not compile:\n${result.stdout}\n${result.stderr}`)
   return output
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log(buildPresenceHelper(process.argv[2] ? resolve(process.argv[2]) : undefined))
+  const args = process.argv.slice(2)
+  const positional = args.filter((a) => a !== '--fresh')
+  console.log(buildPresenceHelper(positional[0] ? resolve(positional[0]) : undefined, { fresh: args.includes('--fresh') }))
 }

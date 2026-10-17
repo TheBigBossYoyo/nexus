@@ -6,6 +6,7 @@ import { IntelligenceOperations } from '../modules/intelligence/operations'
 import { TaskAdmissionService } from '../modules/intelligence/admission'
 import { createProductionAdvisoryRouting } from '../modules/intelligence/production-routing'
 import { createPrivilegedTools } from '../modules/privilege/tools'
+import { createUacPolicyReader, uacWarning } from '../modules/privilege/uac-policy'
 import { privilegedActivitySpoken } from '../modules/privilege/report'
 import { createPrivilegeHost } from './privilege-host'
 import { createPresentationHost } from './presentation-host'
@@ -1850,6 +1851,10 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
       projectOfRun: (runId) => repos.runs.get(runId)?.projectId ?? null,
       // 0.9.1 (review F5): as Overnight's authorization, natively; nobody there is a no.
       confirm: (message, detail) => confirm('NEXUS administrator session', message, detail, 'Prepare').catch(() => false),
+      uacWarning: (() => {
+        const readUacPolicy = createUacPolicyReader({ systemRoot: process.env['SystemRoot'] ?? 'C:\\Windows' })
+        return async () => uacWarning(await readUacPolicy())
+      })(),
     },
     isolation: {
       status: () => ({ ...isolation.status(), setupAvailable: process.platform === 'win32' && host.sandboxSetupDir !== undefined && existsSync(join(host.sandboxSetupDir, 'setup-sandbox.ps1')) && host.launcherPath !== undefined && existsSync(host.launcherPath) }),
