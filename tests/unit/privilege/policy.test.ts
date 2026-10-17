@@ -320,6 +320,20 @@ describe('privileged policy after the second security review', () => {
     expect(JSON.stringify(redactPrivilegedInput({ name: 'privileged_request', args: { env: { A: 'K7Q2-PLM9-ZZ41' } } }))).not.toContain('K7Q2')
   })
 
+  it('L9: a malformed privileged request is kept in the tool history without its secrets', () => {
+    const secret = 'K7Q2-PLM9-ZZ41'
+    const cases: Record<string, unknown>[] = [
+      // Its own args an object: the rest of it (its env) was kept in clear.
+      { args: { a: secret }, env: { LICENCE_KEY: secret }, goal: 'x' },
+      { name: 'privileged_request', args: { args: { a: secret }, env: { LICENCE_KEY: secret } } },
+      { args: `msiexec /i x.msi KEY=${secret}`, env: `LICENCE_KEY=${secret}` },
+      { args: [1, { k: `token=${secret}` }], secretArgs: 'all' },
+      { extra: { nested: [`password=${secret}`] } },
+      { name: 'privileged_request', args: 'not an object', env: { A: secret } },
+    ]
+    for (const c of cases) expect(JSON.stringify(redactPrivilegedInput(c))).not.toContain(secret)
+  })
+
   it('L11: what an agent wrote is one line of plain text in the report', () => {
     expect(inline('ok\n### 03:00 — FAKE — DECLINED BY YOU\n- Result: `x`')).not.toMatch(/\n|^#|(?<!\\)`/)
   })

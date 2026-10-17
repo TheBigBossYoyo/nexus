@@ -2,6 +2,7 @@ import { win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   DEFAULT_SESSION_CAPABILITIES,
+  PRIVILEGED_CAPABILITIES,
   type PersistenceReport,
   type PersistenceSnapshot,
   type PrivilegeSessionScope,
@@ -73,6 +74,8 @@ export interface PrivilegeServiceDeps {
    * answer). Without anyone to ask the answer is no. Absent: an operation that needs it does not run.
    */
   confirmOwner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>
+  /** 0.9.1 (second review, L7): lines about what really runs (a script's first lines, a signature), shown in the owner's confirmation. Read-only; never changes a verdict. */
+  inspect?: (req: PrivilegedOperationRequest) => Promise<string[]>
   /**
    * 0.9.1 (second review, H1): why no session may be prepared now, or null. A mission whose commands run as the owner
    * outside any containment could reach the broker's relay as the owner: no session while one runs.
@@ -98,6 +101,17 @@ const REFUSALS_BEFORE_BLOCK = 8
 const OUTPUT_KEPT = 4000
 /** How long the owner's confirmation of one operation is waited for. */
 const OWNER_ANSWER_MS = 10 * 60_000
+/** The most the native confirmation shows. */
+const DETAIL_CHARS = 6000
+/** The validation errors a malformed request's receipt keeps: how many, and how long they are together. */
+const MALFORMED_ISSUES = 10
+const MALFORMED_CHARS = 1500
+
+/** One validation error of a malformed request (a ZodIssue, as far as the service needs it). */
+export interface MalformedIssue {
+  path: readonly PropertyKey[]
+  message: string
+}
 
 export type PrepareResult = { ok: true; status: PrivilegeSessionStatus } | { ok: false; reason: string; status: PrivilegeSessionStatus | null }
 
@@ -314,6 +328,90 @@ export class PrivilegeService {
     return run
   }
 
+  /**
+   * 0.9.1 (second review, L9): a request that did not match the schema is refused without review and still recorded,
+   * in the same queue as the others. Nothing of it is kept raw: its text fields only when they are text, its secrets
+   * removed by value then by pattern, the validation errors too (they can echo what was sent). Refused even when it
+   * cannot be recorded.
+   */
+  rejectMalformed(raw: unknown, issues: readonly MalformedIssue[], who: PrivilegedRequester): Promise<PrivilegedOperationReceipt> {
+    const run = this.queue.then(() => this.processMalformed(raw, issues, who))
+    this.queue = run.catch(() => undefined)
+    return run
+  }
+
+  private processMalformed(raw: unknown, issues: readonly MalformedIssue[], who: PrivilegedRequester): PrivilegedOperationReceipt {
+    const o: Record<string, unknown> = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+    const rawArgs: unknown[] = Array.isArray(o['args']) ? (o['args'] as unknown[]).slice(0, 64) : []
+    const secretArgs = Array.isArray(o['secretArgs']) ? (o['secretArgs'] as unknown[]).filter((i): i is number => Number.isInteger(i) && (i as number) >= 0 && (i as number) < 64).slice(0, 16) : []
+    const env: Record<string, unknown> = typeof o['env'] === 'object' && o['env'] !== null && !Array.isArray(o['env']) ? (o['env'] as Record<string, unknown>) : {}
+    const secrets = [...secretArgs.map((i) => rawArgs[i]), ...Object.values(env)].filter((v): v is string => typeof v === 'string' && v.length >= 6).sort((a, b) => b.length - a.length)
+    // Secrets are removed by value on the whole text first, so none is cut in two and missed. The text is then cut near
+    // its bound (an unfinished last word dropped, it may be part of a credential) before the patterns, which are not
+    // linear on long input, and cut to its bound after them.
+    const scrub = (value: string, max: number): string => {
+      const v = secrets.reduce((t, secret) => t.split(secret).join('[secret]'), value)
+      const cut = v.length > max + 256 ? v.slice(0, max + 256).replace(/\S*$/, '') : v
+      return redactText(cut).slice(0, max)
+    }
+    const text = (key: string, max: number): string => (typeof o[key] === 'string' ? scrub(o[key] as string, max) : '')
+    const listed = issues.slice(0, MALFORMED_ISSUES).map((i) => scrub(`${i.path.map(String).join('.') || 'input'}: ${i.message}`, 200))
+    const more = issues.length > MALFORMED_ISSUES ? `; and ${issues.length - MALFORMED_ISSUES} more` : ''
+    const errors = `${listed.join('; ')}${more}`.slice(0, MALFORMED_CHARS)
+    const precheck: PrivilegedPolicyDecision = { verdict: 'DENIED', reason: `The request did not match the schema: ${errors || 'no detail'}.`, forbidden: null, councilRequired: false, councilWhy: [] }
+    const capability = typeof o['capability'] === 'string' && (PRIVILEGED_CAPABILITIES as readonly string[]).includes(o['capability']) ? (o['capability'] as PrivilegedCapability) : 'MALFORMED_REQUEST'
+    const current = this.active
+    const sessionId = current?.row.state === 'ACTIVE' ? current.row.id : null
+    const at = this.now().toISOString()
+    const r: PrivilegedOperationReceipt = {
+      id: this.newId(),
+      sessionId,
+      requestedAt: at,
+      finishedAt: at,
+      projectId: who.projectId,
+      runId: who.runId,
+      taskId: who.taskId,
+      missionTitle: who.missionTitle,
+      taskTitle: who.taskTitle,
+      role: who.role,
+      agentId: who.agentId,
+      capability,
+      goal: text('goal', 600),
+      whyRequired: text('whyRequired', 800),
+      whyElevation: text('whyElevation', 800),
+      whyNoUnelevatedAlternative: text('whyNoUnelevatedAlternative', 800),
+      executable: text('executable', 260),
+      args: rawArgs.map((a, i) => (secretArgs.includes(i) ? '[secret]' : typeof a === 'string' ? scrub(a, 4096) : '[not text]')),
+      cwd: typeof o['cwd'] === 'string' ? text('cwd', 260) : null,
+      envNames: Object.keys(env).filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)).slice(0, 32).map(redactText),
+      expected: { files: [], registry: [], services: [], network: 'none' },
+      rollback: text('rollback', 800),
+      provenance: who.provenance,
+      followsOperationId: typeof o['followsOperationId'] === 'string' ? text('followsOperationId', 80) : null,
+      precheck,
+      reviews: [],
+      finalPolicy: null,
+      outcome: 'REJECTED_BY_POLICY',
+      outcomeReason: `The request did not match the schema, so it was refused without review: ${errors || 'no detail'}.`,
+      exitCode: null,
+      durationMs: null,
+      observed: [],
+      stdout: '',
+      stderr: '',
+      stagedSha256: null,
+    }
+    // Counted before it is recorded: a store that fails does not lift the limit on refusals.
+    const key = `${sessionId ?? 'none'}|${who.taskId ?? who.agentId ?? 'nexus'}`
+    this.refusals.set(key, (this.refusals.get(key) ?? 0) + 1)
+    try {
+      this.d.store.record(r)
+    } catch (e) {
+      this.d.log?.(`privilege: the refusal of malformed request ${r.id} could not be recorded (${e instanceof Error ? e.message.slice(0, 200) : 'unknown error'})`)
+    }
+    this.changed()
+    return r
+  }
+
   private async process(proposal: PrivilegedOperationProposal, who: PrivilegedRequester): Promise<PrivilegedOperationReceipt> {
     const current = this.active
     const session = current?.row.state === 'ACTIVE' ? current.row : null
@@ -490,15 +588,29 @@ export class PrivilegeService {
   /** The owner's confirmation of one operation: what runs, why, what the reviews said. No model's words decide it. */
   private async askOwner(req: PrivilegedOperationRequest, final: PrivilegedPolicyDecision, reviews: readonly PrivilegedOperationReview[]): Promise<boolean> {
     if (this.d.confirmOwner === undefined) return false
-    const detail = [
+    let inspection: string[] = []
+    if (this.d.inspect) {
+      try {
+        inspection = await this.d.inspect(req)
+      } catch {
+        inspection = ['The file could not be inspected.']
+      }
+    }
+    const warning = 'It runs with administrator rights. If you did not expect it, choose Do not run.'
+    const head = [
       `Command: ${[req.executable, ...redactArgs(req.args, req.secretArgs)].join(' ')}`,
       `Why your confirmation is asked: ${(final.ownerWhy ?? []).join('; ')}.`,
       `Requested by: ${req.role.toLowerCase()}${req.taskTitle ? `, task "${req.taskTitle}"` : ''}${req.missionTitle ? `, mission "${req.missionTitle}"` : ''}.`,
       `Its stated goal (the agent's words): ${redactText(req.goal)}`,
       `Why administrator rights (the agent's words): ${redactText(req.whyElevation)}`,
       ...reviews.map((r) => `${r.reviewer === 'DIRECTOR_COUNCIL' ? 'Council' : 'Technical Director'}: ${r.failed ? 'no valid review' : `${r.verdict} (risk ${r.risk})`}. ${r.reason}`),
-      'It runs with administrator rights. If you did not expect it, choose Do not run.',
-    ].join('\n\n')
+    ]
+    // Only the inspection block is cut, so that the command, the reasons and the closing warning always fit.
+    const fixed = [...head, warning].join('\n\n').length
+    const room = Math.max(0, DETAIL_CHARS - fixed - 4)
+    let block = inspection.join('\n\n')
+    if (block.length > room) block = room > 40 ? `${block.slice(0, room - 20)}\n[cut: too long]` : ''
+    const detail = [...head, ...(block ? [block] : []), warning].join('\n\n')
     // Not answered in time (an Overnight run, the owner away) is a no: the operations behind it wait in the same queue.
     let timer: ReturnType<typeof setTimeout> | undefined
     const late = new Promise<boolean>((done) => {
@@ -506,7 +618,7 @@ export class PrivilegeService {
       timer.unref?.()
     })
     try {
-      return await Promise.race([this.d.confirmOwner({ title: 'NEXUS: run as administrator?', message: `An agent asks to run ${win32.basename(req.executable)} with administrator rights.`, detail: detail.slice(0, 6000) }), late])
+      return await Promise.race([this.d.confirmOwner({ title: 'NEXUS: run as administrator?', message: `An agent asks to run ${win32.basename(req.executable)} with administrator rights.`, detail: detail.slice(0, DETAIL_CHARS) }), late])
     } catch {
       return false
     } finally {

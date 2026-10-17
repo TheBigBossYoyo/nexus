@@ -1,16 +1,21 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AdvisoryProvider } from '@main/modules/intelligence/compiler'
+import type { ProtectedStorage } from '@main/modules/intelligence/connection'
+import { openDatabase } from '@main/modules/persistence'
+import { receiptChainVault } from '@main/modules/privilege/chain-key'
 import type { BrokerExecRequest, BrokerExecResult } from '@main/modules/privilege/broker-client'
 import type { ReceiptChainVerification } from '@main/modules/privilege/chain'
 import { PrivilegedPolicyEngine } from '@main/modules/privilege/policy'
 import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '@main/modules/privilege/report'
 import { PrivilegedReviewPipeline } from '@main/modules/privilege/review'
-import { PrivilegeService, type BrokerHandle, type PrivilegedRequester } from '@main/modules/privilege/service'
-import { MemoryPrivilegeStore } from '@main/modules/privilege/store'
-import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PersistenceSnapshot, type PrivilegedCapability, type PrivilegedOperationProposal, type PrivilegedPolicyDecision } from '@shared/privilege'
+import { PrivilegeService, receiptForAgent, type BrokerHandle, type PrivilegedRequester } from '@main/modules/privilege/service'
+import { MemoryPrivilegeStore, SqlitePrivilegeStore } from '@main/modules/privilege/store'
+import { createTargetInspector } from '@main/modules/privilege/inspect'
+import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PersistenceSnapshot, type PrivilegedOperationRequest, type PrivilegedCapability, type PrivilegedOperationProposal, type PrivilegedPolicyDecision } from '@shared/privilege'
 
 // 0.9.1: privilege sessions with a scripted broker and scripted reviewers. The broker's own protocol and checks are
 // tested against the real helper in tests/integration/privilege.
@@ -47,7 +52,7 @@ function reviewer(verdict: 'APPROVE' | 'REJECT' = 'APPROVE', calls: { n: number 
   }
 }
 
-function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore; blocked?: (runId: string | null) => string | null } = {}) {
+function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strategic?: AdvisoryProvider; decline?: boolean; owner?: (o: { title: string; message: string; detail: string }) => Promise<boolean>; store?: MemoryPrivilegeStore; blocked?: (runId: string | null) => string | null; inspect?: (req: PrivilegedOperationRequest) => Promise<string[]> } = {}) {
   const store = opts.store ?? new MemoryPrivilegeStore()
   const broker = opts.broker ?? new FakeBroker((req, n) => (req.args[5]?.endsWith('fixture-install.ps1') && n === 1 ? ok('', 3) : ok()))
   let uac = 0
@@ -71,6 +76,7 @@ function setup(opts: { broker?: FakeBroker; technical?: AdvisoryProvider; strate
     },
     verify: async (req) => req.expected.files.map((f) => `${f}: present.`),
     ...(opts.owner ? { confirmOwner: opts.owner } : {}),
+    ...(opts.inspect ? { inspect: opts.inspect } : {}),
     ...(opts.blocked ? { blockedBy: opts.blocked } : {}),
   })
   return { service, store, broker, uac: () => uac }
@@ -234,6 +240,65 @@ describe('privilege sessions', () => {
     expect(broker.ran).toHaveLength(2)
   })
 
+  // 0.9.1 (second review, L7): the owner sees what really runs, and no inspection outcome changes whether they are asked.
+  describe('inspection in the owner confirmation', () => {
+    const script = PrivilegedOperationProposalSchema.parse({ capability: 'KNOWN_DEPENDENCY_MACHINE_INSTALL', goal: 'Install the Visual C++ runtime', whyRequired: 'The native module loads it.', whyElevation: 'Machine-wide runtime.', whyNoUnelevatedAlternative: 'There is no per-user package.', executable: 'C:\\Windows\\System32\\msiexec.exe', args: ['/i', 'C:\\work\\racedeck\\vc.msi', '/qn'], inputs: [{ arg: 1, sha256: 'c'.repeat(64) }] })
+    const ask = async (inspect: (req: PrivilegedOperationRequest) => Promise<string[]>) => {
+      const asked: string[] = []
+      const h = setup({ broker: new FakeBroker(() => ok()), owner: async (o) => (asked.push(o.detail), true), strategic: reviewer('APPROVE'), inspect })
+      await h.service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+      const r = await h.service.submit(script, who())
+      return { asked, r }
+    }
+    const WARNING = 'It runs with administrator rights. If you did not expect it, choose Do not run.'
+
+    it('shows the command, the reasons, the inspection lines and the closing warning', async () => {
+      const { asked, r } = await ask(async () => ['First 40 lines of repair.ps1 (not run):\nWrite-Host hi'])
+      expect(r.outcome).toBe('EXECUTED')
+      expect(asked).toHaveLength(1)
+      const d = asked[0]!
+      expect(d).toContain('Command: ')
+      expect(d).toContain('Why your confirmation is asked: ')
+      expect(d).toContain('First 40 lines of repair.ps1 (not run):\nWrite-Host hi')
+      expect(d.endsWith(WARNING)).toBe(true)
+      expect(d.indexOf('Write-Host hi')).toBeLessThan(d.indexOf(WARNING))
+      expect(d.indexOf('Requested by:')).toBeLessThan(d.indexOf('Write-Host hi'))
+    })
+
+    it('keeps the command, the reasons and the warning with a 40-line script of maximum-length lines', async () => {
+      const lines = Array.from({ length: 40 }, (_, i) => `${String(i).padStart(2, '0')}${'x'.repeat(300)}`).join('\n')
+      const real = createTargetInspector({ readFile: async () => ({ size: lines.length, head: Buffer.from(lines) }) })
+      const excerpt = await real({ executable: PS, args: [...HEAD, 'C:\\work\\racedeck\\repair.ps1'] } as unknown as PrivilegedOperationRequest)
+      const { asked } = await ask(async () => excerpt)
+      const d = asked[0]!
+      expect(d.length).toBeLessThanOrEqual(6000)
+      expect(d).toContain('Command: ')
+      expect(d).toContain('Why your confirmation is asked: ')
+      expect(d).toContain('First 40 lines of repair.ps1 (not run):')
+      expect(d.endsWith(WARNING)).toBe(true)
+    })
+
+    it('cuts only the inspection block when it is longer than the dialog allows', async () => {
+      const { asked } = await ask(async () => [`First 40 lines of x.ps1 (not run):\n${'word '.repeat(5000)}`])
+      const d = asked[0]!
+      expect(d.length).toBeLessThanOrEqual(6000)
+      expect(d).toContain('Command: ')
+      expect(d).toContain('Why your confirmation is asked: ')
+      expect(d).toContain('[cut: too long]')
+      expect(d.endsWith(WARNING)).toBe(true)
+    })
+
+    it('still asks the owner when the inspection throws, and says the file could not be inspected', async () => {
+      const { asked, r } = await ask(async () => {
+        throw new Error('boom')
+      })
+      expect(r.outcome).toBe('EXECUTED')
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toContain('could not be inspected')
+      expect(asked[0]!.endsWith(WARNING)).toBe(true)
+    })
+  })
+
   // 0.9.1 (review F3): a package the run may have fetched runs only once the owner confirmed it, whatever the reviews.
   it('runs a file NEXUS does not ship only when the owner confirms this very operation', async () => {
     const msi = PrivilegedOperationProposalSchema.parse({ capability: 'KNOWN_DEPENDENCY_MACHINE_INSTALL', goal: 'Install the Visual C++ runtime', whyRequired: 'The native module loads it.', whyElevation: 'Machine-wide runtime.', whyNoUnelevatedAlternative: 'There is no per-user package.', executable: 'C:\\Windows\\System32\\msiexec.exe', args: ['/i', 'C:\\work\\racedeck\\vc.msi', '/qn'], inputs: [{ arg: 1, sha256: 'c'.repeat(64) }] })
@@ -320,6 +385,125 @@ describe('privilege sessions', () => {
     const summary = buildPrivilegedActivitySummary(receipts, sessions, intact)
     expect(summary).toContain('3 privileged attempts')
     expect(summary).toContain('No broker is left running.')
+  })
+})
+
+// 0.9.1 (second review, L9): a request that does not match the schema is refused and recorded, its secrets removed.
+describe('malformed privileged requests', () => {
+  const issuesOf = (raw: unknown) => PrivilegedOperationProposalSchema.safeParse(raw).error?.issues ?? []
+  const SECRETS = ['Z9Y8X7W6V5-LICENCE', 'K7Q2PLM9ZZ41', 'ghp_abcdefghijklmnopqrstuvwx', 'HIDDEN-VALUE-UNDER-EXTRA']
+
+  it('keeps neither secret values nor an unrecognized key\'s value in the receipt or the agent\'s answer', async () => {
+    const { service, store, broker } = setup()
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const raw = {
+      capability: 'PROJECT_TOOLCHAIN_INSTALL',
+      goal: 'install with ghp_abcdefghijklmnopqrstuvwx',
+      executable: 'C:\\Windows\\System32\\msiexec.exe',
+      args: ['/i', 'x.msi', 'K7Q2PLM9ZZ41', 'echo ghp_abcdefghijklmnopqrstuvwx'],
+      secretArgs: [2],
+      env: { LICENCE: 'Z9Y8X7W6V5-LICENCE' },
+      timeoutMs: 'soon',
+      extra: { hidden: 'HIDDEN-VALUE-UNDER-EXTRA' },
+    }
+    // Validation messages can echo what was sent: these do on purpose.
+    const issues = [...issuesOf(raw), { path: ['env', 'Z9Y8X7W6V5-LICENCE'], message: 'value K7Q2PLM9ZZ41 is not allowed' }, { path: ['goal'], message: 'saw ghp_abcdefghijklmnopqrstuvwx' }]
+    const r = await service.rejectMalformed(raw, issues, who())
+    expect(r).toMatchObject({ outcome: 'REJECTED_BY_POLICY', capability: 'PROJECT_TOOLCHAIN_INSTALL', reviews: [], precheck: { verdict: 'DENIED' }, envNames: ['LICENCE'] })
+    expect(r.args[2]).toBe('[secret]')
+    expect(r.outcomeReason).toMatch(/did not match the schema/)
+    expect(r.precheck.reason).toMatch(/timeoutMs: /)
+    expect(store.receiptRows).toHaveLength(1)
+    const kept = JSON.stringify(store.receiptRows)
+    const told = receiptForAgent(r)
+    for (const secret of SECRETS) {
+      expect(kept).not.toContain(secret)
+      expect(told).not.toContain(secret)
+    }
+    expect(broker.ran).toHaveLength(0)
+  })
+
+  it('removes a secret that straddles a field\'s bound, and bounds long text before the patterns', async () => {
+    const { service, store } = setup()
+    const secret = 'Z9Y8X7W6V5-LICENCE'
+    const raw = {
+      capability: 'PROJECT_TOOLCHAIN_INSTALL',
+      goal: `${' '.repeat(590)}${secret}`,
+      args: ['/i', `${' '.repeat(4090)}${secret}`, `${'a-'.repeat(200_000)}`, `${'x '.repeat(3000)}ghp_abcdefghijklmnopqrstuvwx${'y'.repeat(5000)}`],
+      env: { LICENCE: secret },
+      timeoutMs: 'soon',
+    }
+    const issues = [{ path: ['args', 1], message: `${' '.repeat(190)}${secret}` }]
+    const started = Date.now()
+    const r = await service.rejectMalformed(raw, issues, who())
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(r.args[1]?.length).toBeLessThanOrEqual(4096)
+    expect(r.args[2]?.length).toBeLessThanOrEqual(4096)
+    expect(r.goal.length).toBeLessThanOrEqual(600)
+    const kept = JSON.stringify(store.receiptRows)
+    const told = receiptForAgent(r)
+    for (const fragment of ['Z9Y8X7', 'ghp_abcdef']) {
+      expect(kept).not.toContain(fragment)
+      expect(told).not.toContain(fragment)
+    }
+  })
+
+  it('handles null, arrays, numbers, strings and wrong-typed objects without throwing, and bounds the errors', async () => {
+    const { service, store } = setup()
+    const many = { capability: 'NOT_A_CAPABILITY', args: 'x', env: [1], inputs: Array.from({ length: 30 }, () => ({ arg: 'no' })), secretArgs: 'all', expected: 5, goal: 7 }
+    for (const raw of [null, [1, 2], 42, 'a string', many]) {
+      const r = await service.rejectMalformed(raw, issuesOf(raw), who())
+      expect(r).toMatchObject({ outcome: 'REJECTED_BY_POLICY', capability: 'MALFORMED_REQUEST', goal: '', executable: '', args: [], envNames: [], taskId: 'task-1', runId: 'run-1', role: 'WORKER', agentId: 'agent-1' })
+    }
+    const last = store.receiptRows.at(-1)
+    expect(last?.precheck.reason.length).toBeLessThanOrEqual(1600)
+    expect(last?.precheck.reason).toMatch(/and \d+ more/)
+    expect(store.receiptRows).toHaveLength(5)
+    // The report renders it.
+    expect(buildPrivilegedActivitySummary(store.receiptRows, [], { state: 'UNAVAILABLE', reason: 'test', verified: 0, legacy: 0, pending: 0, evicted: 0, lastVerifiedChainSeq: null, findings: [] })).toContain('MALFORMED_REQUEST')
+  })
+
+  it('counts toward the refusals after which a task gets no more reviews', async () => {
+    const calls = { n: 0 }
+    const { service, broker } = setup({ technical: reviewer('APPROVE', calls) })
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    for (let i = 0; i < 8; i++) await service.rejectMalformed({ goal: i }, issuesOf({ goal: i }), who())
+    const next = await service.submit(fixture('fixture-repair.ps1'), who())
+    expect(next.outcome).toBe('REJECTED_BY_POLICY')
+    expect(next.precheck.reason).toMatch(/refused too many privileged requests/)
+    expect(calls.n).toBe(0)
+    expect(broker.ran).toHaveLength(0)
+  })
+
+  it('is still refused, without the broker, when the store cannot record it', async () => {
+    class Failing extends MemoryPrivilegeStore {
+      override record(): void {
+        throw new Error('disk full')
+      }
+    }
+    const { service, broker } = setup({ store: new Failing() })
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const r = await service.rejectMalformed({ goal: 1 }, issuesOf({ goal: 1 }), who())
+    expect(r.outcome).toBe('REJECTED_BY_POLICY')
+    expect(broker.ran).toHaveLength(0)
+  })
+
+  it('is chained with the other receipts, and the chain verifies', async () => {
+    const db = openDatabase(':memory:')
+    const dir = mkdtempSync(join(tmpdir(), 'malformed-chain-'))
+    try {
+      const storage: ProtectedStorage = { available: () => true, encrypt: (v) => Buffer.from(v, 'utf8'), decrypt: (b) => b.toString('utf8') }
+      const store = new SqlitePrivilegeStore(db, { vault: receiptChainVault(dir, storage) })
+      const { service } = setup({ store: store as unknown as MemoryPrivilegeStore })
+      await service.submit(fixture('fixture-repair.ps1'), who())
+      await service.rejectMalformed(null, issuesOf(null), who())
+      await service.submit(fixture('fixture-repair.ps1'), who())
+      expect(store.receipts({}).map((r) => r.capability)).toContain('MALFORMED_REQUEST')
+      expect(store.verifyChain()).toMatchObject({ state: 'INTACT', verified: 3 })
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3 })
+    }
   })
 })
 

@@ -116,8 +116,12 @@ export class AutonomyService {
   private view(request: BoundaryRequest): BoundaryRequestView {
     const { repos } = this.deps
     const run = request.runId !== null ? repos.runs.get(request.runId) : null
+    const task = request.taskId !== null ? repos.tasks.get(request.taskId) : null
+    const agent = request.agentId !== null ? repos.agents.get(request.agentId) : null
     return {
       ...request,
+      taskTitle: task ? task.title.trim().slice(0, 120) || null : null,
+      agentRole: agent?.role ?? task?.role ?? null,
       action: cleanAgentText(request.action),
       actionTruncated: actionWasShortened(request.action),
       capabilityLabel: AUTONOMY_CAPABILITIES[request.capability].label,
