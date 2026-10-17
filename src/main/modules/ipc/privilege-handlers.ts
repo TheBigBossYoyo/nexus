@@ -27,15 +27,18 @@ export interface PrivilegeHandlerContext {
   projectOfRun: (runId: string) => string | null
   /** The owner's confirmation, natively; no answer is a no. Absent: no session is prepared. */
   confirm?: (message: string, detail: string) => Promise<boolean>
+  /** Informational: the sentence to show when Windows elevates without a UAC prompt, or null. Gates nothing. */
+  uacWarning?: () => Promise<string | null>
 }
 
 type PrivilegeHandlers = { [C in Extract<IpcChannel, `privilege.${string}`>]: (input: IpcInput<C>) => IpcOutputs[C] | Promise<IpcOutputs[C]> }
 
 export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): PrivilegeHandlers {
   return {
-    'privilege.status': () => {
+    'privilege.status': async () => {
       const service = ctx.service()
-      return { available: service !== null, unavailableReason: service === null ? ctx.unavailableReason ?? 'Privilege sessions are not available.' : null, active: service?.status() ?? null, recent: service?.history(10) ?? [] }
+      const uacWarning = service !== null && ctx.uacWarning ? await ctx.uacWarning().catch(() => null) : null
+      return { available: service !== null, unavailableReason: service === null ? ctx.unavailableReason ?? 'Privilege sessions are not available.' : null, active: service?.status() ?? null, recent: service?.history(10) ?? [], uacWarning }
     },
     'privilege.prepare': async (input) => {
       const service = ctx.service()
@@ -44,10 +47,12 @@ export function createPrivilegeHandlers(ctx: PrivilegeHandlerContext): Privilege
       const projectId = runId !== null ? ctx.projectOfRun(runId) : null
       if (runId !== null && projectId === null) throw new NexusError('not_found', 'No such run.')
       const capabilities = input.capabilities ?? DEFAULT_SESSION_CAPABILITIES
-      const asked = service.status() === null && ctx.confirm !== undefined
+      const willAsk = service.status() === null && ctx.confirm !== undefined
+      const warning = willAsk && ctx.uacWarning ? await ctx.uacWarning().catch(() => null) : null
+      const asked = willAsk && ctx.confirm !== undefined
         ? await ctx.confirm(
             'Prepare an administrator session for NEXUS?',
-            [`Scope: ${input.scope.toLowerCase().replace(/_/g, ' ')}${runId ? ` (mission ${runId})` : ''}${input.hours !== undefined ? `, at most ${input.hours} h` : ''}.`, `What it may be used for: ${capabilities.join(', ')}.`, 'Windows will then ask for administrator rights once (UAC). Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again.', 'While it lasts, other programs you run yourself (outside NEXUS) are not kept away from it: prepare it only while nothing untrusted runs on this computer. If you did not ask for this, choose Cancel.'].join('\n\n'),
+            [...(warning ? [warning] : []), `Scope: ${input.scope.toLowerCase().replace(/_/g, ' ')}${runId ? ` (mission ${runId})` : ''}${input.hours !== undefined ? `, at most ${input.hours} h` : ''}.`, `What it may be used for: ${capabilities.join(', ')}.`, `${warning ? 'The administrator broker is then started through Windows (UAC).' : 'Windows will then ask for administrator rights once (UAC).'} Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again.`, 'While it lasts, other programs you run yourself (outside NEXUS) are not kept away from it: prepare it only while nothing untrusted runs on this computer. If you did not ask for this, choose Cancel.'].join('\n\n'),
           ).catch(() => false)
         : service.status() !== null
       if (!asked) return { ok: false, reason: ctx.confirm === undefined ? 'NEXUS cannot ask for your confirmation here, so no administrator session is prepared.' : 'Not confirmed: no administrator session was prepared.', status: service.status() }

@@ -48,6 +48,59 @@ describe('privilege.prepare', () => {
   })
 })
 
+describe('privilege.prepare UAC policy warning', () => {
+  const W = 'Windows will not show a UAC prompt for this session, so your confirmation in NEXUS is the only consent.'
+  it('reads the warning before confirm, puts it first, and still prepares when confirmed', async () => {
+    const order: string[] = []
+    const s = fakeService()
+    let detail = ''
+    const h = createPrivilegeHandlers({
+      service: () => s.service, unavailableReason: null, integrity: intact, projectOfRun: () => 'p1',
+      uacWarning: async () => (order.push('warn'), W),
+      confirm: async (_m, d) => (order.push('confirm'), (detail = d), true),
+    })
+    expect((await h['privilege.prepare']({ scope: 'UNTIL_IDLE' })).ok).toBe(true)
+    expect(order).toEqual(['warn', 'confirm'])
+    expect(detail.split('\n\n')[0]).toBe(W)
+    expect(detail).not.toMatch(/will then ask for administrator rights/)
+    expect(detail).toMatch(/The administrator broker is then started through Windows \(UAC\)\. Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again\./)
+    expect(s.prepared).toBe(1)
+  })
+  it('changes only the UAC-promise sentence when a warning is shown', async () => {
+    const details: string[] = []
+    for (const uacWarning of [async () => null, async () => W]) {
+      const s = fakeService()
+      const h = createPrivilegeHandlers({ service: () => s.service, unavailableReason: null, integrity: intact, projectOfRun: () => 'p1', uacWarning, confirm: async (_m, d) => (details.push(d), true) })
+      await h['privilege.prepare']({ scope: 'UNTIL_IDLE' })
+    }
+    const expected = `${W}\n\n${details[0]!.replace('Windows will then ask for administrator rights once (UAC).', 'The administrator broker is then started through Windows (UAC).')}`
+    expect(details[1]).toBe(expected)
+  })
+  it('keeps the existing detail without a warning, and a rejected read counts as none', async () => {
+    for (const uacWarning of [async () => null, async () => { throw new Error('x') }]) {
+      const s = fakeService()
+      let detail = ''
+      const h = createPrivilegeHandlers({ service: () => s.service, unavailableReason: null, integrity: intact, projectOfRun: () => 'p1', uacWarning, confirm: async (_m, d) => (detail = d, true) })
+      await h['privilege.prepare']({ scope: 'UNTIL_IDLE' })
+      expect(detail).toMatch(/^Scope:/)
+      expect(detail).toMatch(/Windows will then ask for administrator rights once \(UAC\)/)
+    }
+  })
+  it('does not prepare when not confirmed, warning or not', async () => {
+    const s = fakeService()
+    const h = createPrivilegeHandlers({ service: () => s.service, unavailableReason: null, integrity: intact, projectOfRun: () => 'p1', uacWarning: async () => W, confirm: async () => false })
+    expect((await h['privilege.prepare']({ scope: 'UNTIL_IDLE' })).ok).toBe(false)
+    expect(s.prepared).toBe(0)
+  })
+  it('privilege.status returns the warning only when the service is available', async () => {
+    const s = fakeService()
+    const base = { unavailableReason: null, integrity: intact, projectOfRun: () => 'p1', uacWarning: async () => W }
+    expect((await createPrivilegeHandlers({ ...base, service: () => s.service })['privilege.status']({})).uacWarning).toBe(W)
+    expect((await createPrivilegeHandlers({ ...base, service: () => null })['privilege.status']({})).uacWarning).toBeNull()
+    expect((await createPrivilegeHandlers({ ...base, service: () => s.service, uacWarning: undefined })['privilege.status']({})).uacWarning).toBeNull()
+  })
+})
+
 describe('privilege.activity', () => {
   it('puts the verdict of the receipt chain at the top of the report, even with no receipts (M7)', async () => {
     const service = {
