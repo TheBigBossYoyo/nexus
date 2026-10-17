@@ -665,8 +665,12 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
               .filter(([, on]) => on)
               .map(([name]) => name)
               .join(', ') || 'never'
+          // 0.9.1: the owner's first real night ran on the project left selected (F1) instead of NEXUS; the project was a
+          // line among the policy's. It is now in the question itself, with its folder and branch.
+          const project = repos.projects.require(input.projectId)
+          const where = `${project.name} (${project.rootPath}${project.profile?.currentBranch ? `, branch ${project.profile.currentBranch}` : ''})`
           const detail = [
-            `Project: ${repos.projects.require(input.projectId).name}`,
+            `Project: ${where}`,
             `Maximum duration: ${Math.floor(p.maxDurationMinutes / 60)} h ${p.maxDurationMinutes % 60} min`,
             `End action: ${p.endAction} (applies on: ${conditions}), ${p.finalDelaySeconds} s after the mission ends`,
             `Force close applications: ${p.forceCloseApplications ? 'yes: unsaved work in other applications may be lost' : 'no'}`,
@@ -677,8 +681,8 @@ export function createIpcHandlers(ctx: IpcContext): Handlers {
           ].join('\n')
           const ok = await ctx.confirmPower(
             p.endAction === 'NONE'
-              ? 'Start an unattended overnight run?'
-              : 'Authorize NEXUS to control Windows power state for this run?',
+              ? `Start an unattended overnight run on ${project.name}?`
+              : `Authorize NEXUS to control Windows power state for this run on ${project.name}?`,
             detail,
           )
           if (!ok) throw new NexusError('invalid_state', 'The overnight run was not authorized.')
