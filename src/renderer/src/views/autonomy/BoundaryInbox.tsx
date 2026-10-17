@@ -22,6 +22,8 @@ import {
   recentNotes,
   resolveErrorText,
   sortRecent,
+  missionLink,
+  whoAsked,
 } from './autonomyModel'
 
 /**
@@ -40,6 +42,17 @@ function RequestCard({ request }: { request: BoundaryRequestView }) {
     if (resolve.isPending) return
     resolve.mutate({ requestId: request.id, decision })
   }
+  const who = whoAsked(request)
+  const link = missionLink(request)
+  const openRun = useUiStore((s) => s.openRun)
+  const selectTask = useUiStore((s) => s.selectTask)
+  const setDrawer = useUiStore((s) => s.setDrawer)
+  const openMission = () => {
+    if (link === null) return
+    openRun(link.runId, link.projectId)
+    if (link.taskId !== null) selectTask(link.taskId)
+    setDrawer(null)
+  }
   return (
     <li
       data-testid="boundary-request"
@@ -52,6 +65,16 @@ function RequestCard({ request }: { request: BoundaryRequestView }) {
         {times ? <Badge>{times}</Badge> : null}
         <TimeAgo iso={request.createdAt} className="ml-auto text-small text-text-muted" />
       </div>
+      {who || link ? (
+        <div className="flex flex-wrap items-center gap-2 text-small text-text-secondary" data-testid="boundary-who">
+          {who ? <span className="min-w-0 break-words">{who}</span> : null}
+          {link ? (
+            <Button size="sm" variant="ghost" onClick={openMission} data-testid="boundary-open-mission">
+              Open mission
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="min-w-0 break-words text-text-secondary">
         <span className="text-text-muted">Resource: </span>
         {request.resourceLabel}
@@ -126,6 +149,7 @@ function RecentRow({ request }: { request: BoundaryRequestView }) {
         {': '}
         {request.resourceLabel}
       </div>
+      {whoAsked(request) ? <div className="text-small text-text-muted">{whoAsked(request)}</div> : null}
       <code className="break-all font-mono text-code [unicode-bidi:isolate]" data-testid="boundary-recent-command">
         {recentCommand(request)}
       </code>

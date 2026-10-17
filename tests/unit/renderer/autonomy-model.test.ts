@@ -18,6 +18,8 @@ import {
   recentCommand,
   recentNotes,
   unattendedSummary,
+  whoAsked,
+  missionLink,
   UNATTENDED_ANSWER_LINE,
   resolveErrorText,
   severityWords,
@@ -49,6 +51,8 @@ function req(id: string, extra: Partial<BoundaryRequestView> = {}): BoundaryRequ
     resourceLabel: 'origin',
     projectName: 'Alpha',
     missionTitle: 'Fix login',
+    taskTitle: null,
+    agentRole: null,
     scopes: ['ONCE', 'MISSION', 'PROJECT'],
     followUp: null,
     ...extra,
@@ -213,5 +217,30 @@ describe('actionShown', () => {
     expect(actionShown(req('a', { action: 'git push origin main' })).note).toBeNull()
     expect(actionShown(req('a', { action: 'git push origin ...…', actionTruncated: true })).note).toBe('Shortened; allow once covers exactly the command that was attempted.')
     expect(actionShown(req('a', { action: 'curl -H x [redacted]', actionTruncated: true })).note).toContain('allow once covers exactly')
+  })
+})
+
+describe('whoAsked', () => {
+  it('names the role, the task and the mission', () => {
+    expect(whoAsked(req('a', { agentRole: 'worker', taskTitle: 'Fix it' }))).toBe('worker on "Fix it" in mission "Fix login"')
+  })
+  it('leaves out what is unknown', () => {
+    expect(whoAsked(req('a', { agentRole: 'worker', taskTitle: null, missionTitle: null }))).toBe('worker')
+    expect(whoAsked(req('a', { agentRole: null, taskTitle: 'Fix it' }))).toBe('An agent on "Fix it" in mission "Fix login"')
+    expect(whoAsked(req('a', { agentRole: 'reviewer', taskTitle: null }))).toBe('reviewer in mission "Fix login"')
+  })
+  it('is empty when nothing is known', () => {
+    expect(whoAsked(req('a', { agentRole: null, taskTitle: null, missionTitle: null }))).toBe('')
+  })
+})
+
+describe('missionLink', () => {
+  it('is null without a run or when the mission is missing', () => {
+    expect(missionLink(req('a', { runId: null }))).toBeNull()
+    expect(missionLink(req('a', { missionTitle: null }))).toBeNull()
+  })
+  it('carries the task when there is one', () => {
+    expect(missionLink(req('a', { taskId: 't1' }))).toEqual({ runId: 'r1', projectId: 'p1', taskId: 't1' })
+    expect(missionLink(req('a'))).toEqual({ runId: 'r1', projectId: 'p1', taskId: null })
   })
 })

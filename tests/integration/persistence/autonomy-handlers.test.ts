@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AutonomyService } from '@main/modules/autonomy/service'
 import { createAutonomyHandlers } from '@main/modules/ipc/v8-handlers'
-import { makeProject, openMemory } from './fixtures'
+import { makeAgent, makeProject, makeRun, makeTask, openMemory } from './fixtures'
 
 // What gives lasting authority is confirmed natively by the runtime. With no way to ask, it is not given; and
 // what the user is asked to confirm says plainly how far it reaches.
@@ -103,5 +103,38 @@ describe('boundary requests of different actions', () => {
     expect(pending.map((p) => p.occurrences)).toEqual([2, 1])
     expect(() => h.repos.boundaryRequests.insert({ ...(pending[0] as (typeof pending)[number]), id: 'dup' })).toThrow()
     expect(h.repos.boundaryRequests.countForCapability(h.project.id, 'run-1', 'GIT_PUSH')).toBe(2)
+  })
+})
+
+describe('who asked, in the view of a boundary request', () => {
+  const ask = (h: ReturnType<typeof setup>, taskId: string, agentId: string) =>
+    h.autonomy
+      .gateFor({ projectId: h.project.id, runId: 'run-1', taskId, role: 'worker', provider: null, cwd: null })
+      ?.resolve({ agentId, toolName: 'Bash', input: { command: 'git push' }, toolUseId: 't' }, 'git push', [{ capability: 'GIT_PUSH', resource: { kind: 'ANY', value: '' }, why: 'pushes', inBoundary: false }])
+
+  it('carries the task title and the agent role from the repositories', () => {
+    const h = setup()
+    h.autonomy.enroll(h.project.id, 'AUTONOMOUS_PROJECT')
+    const run = h.repos.runs.insert(makeRun(h.project.id))
+    const task = h.repos.tasks.insert(makeTask(run.id, 'a', { title: `  ${'T'.repeat(300)}  `, role: 'worker' }))
+    const agent = h.repos.agents.insert(makeAgent(run.id, task.id, { role: 'reviewer' }))
+    ask(h, task.id, agent.id)
+    const [view] = h.autonomy.pending()
+    expect(view?.taskTitle).toBe('T'.repeat(120))
+    expect(view?.agentRole).toBe('reviewer')
+    h.autonomy.resolve({ requestId: view!.id, decision: 'DENY' })
+    expect(h.autonomy.recent()[0]).toMatchObject({ taskTitle: 'T'.repeat(120), agentRole: 'reviewer' })
+  })
+
+  it('falls back to the role of the task, and gives null for rows that do not exist', () => {
+    const h = setup()
+    h.autonomy.enroll(h.project.id, 'AUTONOMOUS_PROJECT')
+    const run = h.repos.runs.insert(makeRun(h.project.id))
+    const task = h.repos.tasks.insert(makeTask(run.id, 'a', { role: 'verifier' }))
+    ask(h, task.id, 'gone-agent')
+    expect(h.autonomy.pending()[0]).toMatchObject({ taskTitle: 'Task a', agentRole: 'verifier' })
+    h.push('git push origin other')
+    const missing = h.autonomy.pending().find((v) => v.action.includes('other'))
+    expect(missing).toMatchObject({ taskTitle: null, agentRole: null })
   })
 })
