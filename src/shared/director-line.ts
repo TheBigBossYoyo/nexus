@@ -55,6 +55,11 @@ export const OPERATOR_COMMAND_KINDS = [
   'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'CALL_ME', 'HELP', 'REFUSED_AT_MACHINE', 'UNKNOWN',
   /** 0.9.1: what ran with administrator rights (read only: a remote message never creates that authority). */
   'PRIVILEGED_ACTIVITY',
+  /**
+   * 0.9.1: the owner's own words given to blocked work (the same as resolving its blocker with a note at the machine,
+   * then continuing the mission); a task added to a mission in progress; stopping a mission, asked to be confirmed.
+   */
+  'ANSWER_BLOCKED', 'ADD_TASK_TO_RUN', 'STOP_RUN',
 ] as const
 export type OperatorCommandKind = (typeof OPERATOR_COMMAND_KINDS)[number]
 
@@ -63,6 +68,13 @@ export type OperatorCommand =
   | { kind: 'DETAILS'; subject: string }
   | { kind: 'ADD_TASK_AFTER_CURRENT'; text: string }
   | { kind: 'CREATE_TASK'; project: string; text: string }
+  /**
+   * `text` is always the operator's whole message, never words of a model. `target` is a reference NEXUS gave in the
+   * context (a run's or a task's), or a name; null means "the one there is" (every blocked task, the only open mission).
+   */
+  | { kind: 'ANSWER_BLOCKED'; text: string; target: string | null }
+  | { kind: 'ADD_TASK_TO_RUN'; text: string; target: string | null }
+  | { kind: 'STOP_RUN'; target: string | null }
   /** Something destructive or high-authority. Never executed through the line; `topic` is a fixed label, not the user's text. */
   | { kind: 'REFUSED_AT_MACHINE'; topic: RefusedTopic }
 

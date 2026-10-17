@@ -10,6 +10,7 @@ import {
 import type { DirectorLineView } from '@shared/ipc'
 import { NexusError } from '@shared/result'
 import type { Database } from '../persistence/database'
+import type { IntentClassifier } from './intent'
 import { DirectorLine, type DirectorLineActions, type DirectorLineReads, type RefusalNote } from './line'
 import { PairingService } from './pairing'
 import type { HttpFetch, OperatorChannelProvider, SendResult } from './provider'
@@ -79,6 +80,8 @@ export interface DirectorLineRuntimeDeps {
   /** The voice line's provider and speech engines, supplied by the application. Absent: voice is not available. */
   voice?: VoiceHost
   machineTimeZone?: string
+  /** 0.9.1: the model that understands a sentence of the operator; it chooses among the closed set only. */
+  classify?: IntentClassifier
 }
 
 export interface DirectorLineRuntime {
@@ -334,6 +337,7 @@ export function createDirectorLineRuntime(deps: DirectorLineRuntimeDeps): Direct
     policy,
     reads: deps.reads,
     actions: deps.actions,
+    ...(deps.classify ? { classify: deps.classify } : {}),
     localNotify: deps.localNotify,
     isOnline: deps.isOnline,
     recordNote: deps.recordNote,

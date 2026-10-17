@@ -105,7 +105,9 @@ export function composeChecks(c: LatestChecks | null): string {
 export const HELP_TEXT = [
   'NEXUS can answer: status, how long is left, what is blocking, details <project>, latest test results.',
   'It can: pause after the current task, continue, call you ("call me", when the voice line is set up).',
-  'It can queue: "after this add <task>" or "create a task for <project>: <task>" (goes through the normal checks).',
+  'Blocked work: "answer: <what to do>" or "fix the blockers" gives your words to the blocked tasks, which start again.',
+  'Tasks: "add a task to the mission: <task>", "after this add <task>", "create a task for <project>: <task>" (normal checks apply).',
+  '"Stop the mission <name>" stops it after you reply yes. You can also just write what you want in a sentence.',
   'Pushing, deleting, permissions, the sandbox, credentials, power and commands are decided at the machine.',
 ].join('\n')
 

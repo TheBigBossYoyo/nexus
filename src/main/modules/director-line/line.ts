@@ -36,6 +36,14 @@ export interface DirectorLineReads {
   getLatestChecks(): Promise<LatestChecks | null>
   /** 0.9.1: what ran with administrator rights in the last day, from the receipts. Absent: nothing to say. */
   getPrivilegedActivity?(): Promise<string>
+  /** 0.9.1: what is going on, as data for the classifier: the open missions and their blocked tasks, with references. */
+  getInterpretationContext?(): Promise<string>
+}
+
+/** What a mission-changing action did, in a sentence for the operator. */
+export interface ActionOutcome {
+  ok: boolean
+  text: string
 }
 
 export interface SubmitResult {
@@ -49,6 +57,16 @@ export interface DirectorLineActions {
   pauseAfterCurrentTask(): Promise<void>
   resume(): Promise<void>
   submitIntent(intent: RawUserIntent): Promise<SubmitResult>
+  /**
+   * 0.9.1: the operator's words to the blocked tasks (all, or the one or the mission `target` names): each blocker is
+   * resolved with them as the note, as at the machine, and its mission continues. Absent: not offered.
+   */
+  answerBlocked?(text: string, target: string | null): Promise<ActionOutcome>
+  /** 0.9.1: a task added to the mission `target` names, or to the only open one, which then continues. */
+  addTaskToRun?(text: string, target: string | null): Promise<ActionOutcome>
+  /** 0.9.1: which mission "stop" means, without stopping it: the confirmation names it. */
+  stopTarget?(target: string | null): Promise<{ ok: true; runId: string; name: string } | { ok: false; text: string }>
+  stopRun?(runId: string): Promise<ActionOutcome>
 }
 
 export interface RefusalNote {
@@ -98,6 +116,9 @@ const UNPAIRED_REPLY_INTERVAL_MS = 10 * 60 * 1000
 const MAX_TRACKED_CHATS = 500
 const MAX_REPORT_CHARS = 1500
 const DIGEST_ABOVE = 3
+const CONFIRM_MS = 5 * 60_000
+const YES = /^\s*(?:yes|yeah|yep|y|ok|okay|confirm\w*|do it|go|oui|ouais|d'accord|vas-y|confirme\w*)\s*[.!]*\s*$/i
+const NO = /^\s*(?:no|nope|n|cancel|don't|do not|non|annule\w*|laisse)\b/i
 const CALL_REPLIES: Record<string, string> = {
   CALLING: 'Calling you now.',
   NOT_CONFIGURED: 'The voice line is not set up.',
@@ -151,6 +172,9 @@ export class DirectorLine {
   private readonly now: () => Date
   private readonly unpairedReplies = new Map<string, number>()
   private readonly lastSent = new Map<string, number>()
+  private readonly lastSaid = new Map<string, string>()
+  /** A mission to stop once the operator says yes, per chat; it lapses after CONFIRM_MS or at any other message. */
+  private readonly pendingStop = new Map<string, { runId: string; name: string; until: number }>()
   private lastProgressText: string | null = null
   private chain: Promise<unknown> = Promise.resolve()
 
@@ -190,9 +214,44 @@ export class DirectorLine {
       return
     }
     const text = sanitizeInbound(update.text)
-    const command = await interpretMessage(text, this.o.classify)
+    const confirmed = await this.confirmation(update.providerUserId, text)
+    if (confirmed !== null) {
+      await this.reply(update.providerUserId, confirmed, `reply:${update.providerMessageId}`)
+      return
+    }
+    const command = await interpretMessage(text, this.o.classify, await this.context(update.providerUserId))
     const reply = await this.act(identity, update, text, command, false)
     await this.reply(update.providerUserId, reply, `reply:${update.providerMessageId}`)
+  }
+
+  /** The answer to a pending "stop this mission?": yes stops it, no keeps it, anything else drops the question. */
+  private async confirmation(chat: string, text: string): Promise<string | null> {
+    const pending = this.pendingStop.get(chat)
+    if (!pending) return null
+    this.pendingStop.delete(chat)
+    if (this.now().getTime() > pending.until) return YES.test(text) ? 'That question had expired: nothing was stopped. Ask again.' : null
+    if (NO.test(text)) return `Kept: ${inert(pending.name, 80)} goes on.`
+    if (!YES.test(text)) return null
+    if (!this.o.actions.stopRun) return 'Stopping a mission is not available here.'
+    try {
+      return inert((await this.o.actions.stopRun(pending.runId)).text, 400)
+    } catch {
+      this.o.log?.('director-line: action STOP_RUN failed')
+      return 'That did not work on the PC. Nothing more was done.'
+    }
+  }
+
+  /** What the classifier is given besides the message: the work going on and the last thing NEXUS said here. */
+  private async context(chat: string): Promise<string | undefined> {
+    if (!this.o.classify) return undefined
+    let work: string
+    try {
+      work = (await this.o.reads.getInterpretationContext?.()) ?? ''
+    } catch {
+      work = ''
+    }
+    const said = this.lastSaid.get(chat)
+    return [work, said ? `Last message NEXUS sent the operator:\n${said}` : ''].filter(Boolean).join('\n\n') || undefined
   }
 
   /** Everything from a chat that is not paired is UNTRUSTED_EXTERNAL: it is never interpreted, and gets at most one fixed reply. */
@@ -218,7 +277,7 @@ export class DirectorLine {
    */
   async interpretSpoken(text: string): Promise<{ text: string; command: OperatorCommand }> {
     const cleaned = sanitizeInbound(text)
-    return { text: cleaned, command: await interpretMessage(cleaned, this.o.classify) }
+    return { text: cleaned, command: await interpretMessage(cleaned, this.o.classify, await this.context(''), { onlyUnknown: true }) }
   }
 
   /**
@@ -274,6 +333,20 @@ export class DirectorLine {
           const result = await actions.submitIntent(intent)
           return result.accepted ? `Task received and sent through the normal checks${result.reference ? ` (ref ${inert(result.reference, 40)})` : ''}.` : `The task was not accepted${result.reason ? `: ${inert(result.reason, 160)}` : ''}.`
         }
+        // 0.9.1: the operator's own words go to the blocked work or into the mission; what was done is said back.
+        case 'ANSWER_BLOCKED':
+          return actions.answerBlocked ? inert((await actions.answerBlocked(command.text, command.target)).text, 600) : 'Answering blocked work is not available here.'
+        case 'ADD_TASK_TO_RUN':
+          return actions.addTaskToRun ? inert((await actions.addTaskToRun(command.text, command.target)).text, 400) : 'Adding a task to a mission is not available here.'
+        case 'STOP_RUN': {
+          if (!actions.stopTarget || !actions.stopRun) return 'Stopping a mission is not available here.'
+          const which = await actions.stopTarget(command.target)
+          if (!which.ok) return inert(which.text, 300)
+          // On a call the session has already read it back and heard a yes.
+          if (spoken) return inert((await actions.stopRun(which.runId)).text, 400)
+          this.pendingStop.set(update.providerUserId, { runId: which.runId, name: which.name, until: this.now().getTime() + CONFIRM_MS })
+          return `Stop ${inert(which.name, 80)}? Its work so far is kept on its branch. Reply "yes" within 5 minutes to stop it.`
+        }
         case 'LATEST_TEST_RESULTS': return await this.phrase(composeChecks(await reads.getLatestChecks()), spoken)
         // The receipts as they are, never reworded: what ran as administrator is said exactly.
         case 'PRIVILEGED_ACTIVITY': return reads.getPrivilegedActivity ? inert(await reads.getPrivilegedActivity(), 1500) : 'Nothing ran as administrator.'
@@ -308,7 +381,14 @@ export class DirectorLine {
     const provider = this.o.messageProvider
     if (!provider) return
     const result = await provider.send({ providerUserId: to, text })
+    if (result.ok) this.remember(to, text)
     await this.record(provider.kind, result.ok ? 'SENT' : 'FAILED', reportId, result)
+  }
+
+  /** The last message sent to a chat, kept in memory only: what "fix it" or "yes" answers. */
+  private remember(to: string, text: string): void {
+    this.lastSaid.set(to, inert(text, 600))
+    if (this.lastSaid.size > MAX_TRACKED_CHATS) this.lastSaid.delete(this.lastSaid.keys().next().value as string)
   }
 
   private async record(channel: DeliveryAttempt['channel'], outcome: DeliveryOutcome, reportId: string, result?: SendResult | { providerReference: string | null; errorClass: string | null }): Promise<void> {
@@ -452,7 +532,7 @@ export class DirectorLine {
         const target = provider ? (await this.o.pairing.listPaired()).find((i) => i.channel === provider.kind) : undefined
         if (!provider || !target) { await this.record('TELEGRAM', 'NOT_CONFIGURED', item.id); continue }
         const result = await provider.send({ providerUserId: target.providerUserId, text })
-        if (result.ok) { await this.record(provider.kind, 'SENT', item.id, result); await this.o.outbox.remove(item.id); return true }
+        if (result.ok) { this.remember(target.providerUserId, text); await this.record(provider.kind, 'SENT', item.id, result); await this.o.outbox.remove(item.id); return true }
         await this.record(provider.kind, 'FAILED', item.id, result)
         item.messageAttempts += 1
         if (result.retryable && item.messageAttempts < MAX_MESSAGE_ATTEMPTS) {
@@ -495,7 +575,10 @@ export class DirectorLine {
     if (provider && target) {
       const result = await provider.send({ providerUserId: target.providerUserId, text: body })
       await this.record(provider.kind, result.ok ? 'SENT' : 'FAILED', reportId, result)
-      if (result.ok) return true
+      if (result.ok) {
+        this.remember(target.providerUserId, body)
+        return true
+      }
     }
     if (!this.o.localNotify) return false
     await this.o.localNotify('NEXUS', inert(text, 400))

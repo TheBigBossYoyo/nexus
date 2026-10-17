@@ -215,7 +215,7 @@ export class VoiceSession {
     if (this.pendingTask !== null) {
       const pending = this.pendingTask
       this.pendingTask = null
-      if (NO.test(said)) return { say: 'Cancelled. Nothing was added.', end: false }
+      if (NO.test(said)) return { say: pending.command.kind === 'STOP_RUN' ? 'Kept. Nothing was stopped.' : 'Cancelled. Nothing was added.', end: false }
       if (YES.test(said)) return this.run(pending.text, pending.command)
       // Anything else replaces the question: the task is dropped, not created by a sentence that was not a yes.
     }
@@ -225,12 +225,18 @@ export class VoiceSession {
   }
 
   private async act(text: string, command: OperatorCommand): Promise<VoiceReply> {
+    // 0.9.1: stopping a mission is said back and done only on a yes, as on a message.
+    if (command.kind === 'STOP_RUN') {
+      this.pendingTask = { text, command }
+      return { say: `Stop the mission${command.target ? ` ${command.target}` : ''}? Say yes or no.`, end: false }
+    }
     if (commandRisk(command) === 'TASK_HANDOFF') {
-      const task = command.kind === 'ADD_TASK_AFTER_CURRENT' || command.kind === 'CREATE_TASK' ? command.text : text
+      const task = 'text' in command ? command.text : text
       if (task.length > MAX_SPOKEN_TASK_CHARS) return { say: 'That task is too long to read back, so it was not added. Say it shorter, or send it as a message.', end: false }
       // Read back whole, because speech recognition errs; created only on a yes.
       this.pendingTask = { text, command }
-      const where = command.kind === 'CREATE_TASK' ? ` for ${command.project}` : command.kind === 'ADD_TASK_AFTER_CURRENT' ? ' after the current work' : ''
+      if (command.kind === 'ANSWER_BLOCKED') return { say: `I heard an answer for the blocked work: ${task}. Shall I send it? Say yes or no.`, end: false }
+      const where = command.kind === 'CREATE_TASK' ? ` for ${command.project}` : command.kind === 'ADD_TASK_AFTER_CURRENT' ? ' after the current work' : command.kind === 'ADD_TASK_TO_RUN' ? ' for the mission in progress' : ''
       return { say: `I heard a task${where}: ${task}. Shall I add it? Say yes or no.`, end: false }
     }
     return this.run(text, command)

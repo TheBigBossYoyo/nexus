@@ -4,8 +4,9 @@ import type { OperatorCommand, OperatorCommandKind, RefusedTopic } from '@shared
  * Turns an AUTHENTICATED message from the paired operator into one command of a closed set. Deterministic patterns
  * first (English and French); an optional cheap-model hook only for what the patterns do not recognise.
  *
- * Authority: a command here is never more than "read this", "pause/continue", or "hand this text to the ordinary
- * mission-creation path". The words of the operator are carried as the user's words, and nothing in them can widen
+ * Authority: a command here is never more than "read this", "pause/continue", "hand this text to the ordinary
+ * mission-creation path", and (0.9.1) what the owner does at the machine with their own work: give their words to a
+ * blocked task, add a task to an open mission, stop a mission once they confirm. The words of the operator are carried as the user's words, and nothing in them can widen
  * what NEXUS may do: this module imports nothing that could (no broker, no settings, no power), so there is no
  * code path to take even if the text says "ignore previous instructions". Whatever looks destructive or
  * high-authority is turned into REFUSED_AT_MACHINE with a fixed topic label and never executed through the line.
@@ -49,7 +50,8 @@ const DANGER: DangerRule[] = [
   { topic: 'BOUNDARY_REQUEST', pattern: /\b(?:allow|grant|approve|accept|authori[sz]e|autorise\w*|approuve\w*|accorde\w*|permets?|valide\w*)\b/ },
   { topic: 'POWER', pattern: /\b(?:shut\s?down|power\s?off|hibernate|reboot|restart\s+(?:the\s+)?(?:pc|computer|machine)|eteins|eteindre|arrete\s+(?:le\s+)?(?:pc|ordinateur)|redemarr\w*|mise? en veille|mets? en veille)\b/ },
   { topic: 'CREDENTIALS', pattern: /\b(?:credentials?|passwords?|passwd|api[\s_-]?keys?|secrets?|tokens?|ssh[\s_-]?keys?|private[\s_-]?keys?|mots? de passe|identifiants?|cles? api)\b/ },
-  { topic: 'RUN_COMMAND', pattern: /^\s*(?:run|exec|execute|sudo|lance|execute)\b|\b(?:run|execute|exec|lance|execute)\b[^\n]{0,25}\b(?:command|commande|script|shell|terminal|powershell|cmd)\b|\b(?:powershell|cmd\.exe|bash\s+-c|invoke-expression|iex)\b/ },
+  // "Lance une nouvelle tâche …" asks for a task, not a command: the task's own text is scanned again (guardTask).
+  { topic: 'RUN_COMMAND', pattern: /^\s*(?:run|exec|execute|sudo|lance|execute)\b(?!\s+(?:(?:une?|la|le|a|the|another)\s+)?(?:(?:new|nouvelle|autre)\s+)?(?:tache|task|mission)\b)|\b(?:run|execute|exec|lance|execute)\b[^\n]{0,25}\b(?:command|commande|script|shell|terminal|powershell|cmd)\b|\b(?:powershell|cmd\.exe|bash\s+-c|invoke-expression|iex)\b/ },
 ]
 
 /** The first dangerous topic in a message, or null. Run on the folded text of the whole message. */
@@ -71,6 +73,13 @@ const CREATE_FOR: RegExp[] = [
   /\b(?:cree\w*|creer|ajoute\w*|nouvelle|ouvre)\s+(?:une\s+)?(?:nouvelle\s+)?tache\s+(?:pour|dans|sur)\s+(?:le\s+)?(?:projet\s+)?([\p{L}\p{N}][\p{L}\p{N} ._-]{0,59}?)\s*[:,]\s*(.+)/dsu,
 ]
 
+// 0.9.1: the owner's answer to blocked work. "answer: …", "tell it to …", or asking for the blockers to be fixed: the
+// whole message is the instruction (an owner once wrote "start a new task to fix all the blockers" and was sent the list
+// of blockers three times, because "block" matched the read-only question first).
+const ANSWER_PREFIX = /^\s*(?:(?:answer|reply|respond|instructions?|reponds?|reponse|consignes?)\s*[:,-]|tell (?:it|them|the agents?|the tasks?) to\b|dis[- ](?:lui|leur) de\b)\s*(.+)/ds
+const FIX_BLOCKERS = /\b(?:fix|solve|resolve|handle|unblock|sort out|deal with|corrige\w*|regle\w*|resou\w*|debloque\w*|repare\w*|traite\w*)\b[^\n]{0,60}\b(?:block\w*|stuck|bloqu\w*|coince\w*|blocages?)\b|\bunblock\w*\b|\bdebloque\w*\b/
+const ADD_TO_RUN = /\b(?:add|create|start|open|put|ajoute\w*|cree\w*|lance\w*)\s+(?:a\s+|an?other\s+|une\s+)?(?:new\s+|nouvelle\s+)?(?:task|tache)\s+(?:to|in|into|inside|a|dans)\s+(?:the\s+|this\s+|la\s+|cette\s+)?(?:current\s+|running\s+|en cours\s+)?(?:mission|run|programme?)\b(?:\s+en cours)?\s*[:,-]?\s*(.+)/ds
+const STOP_RUN = /^\s*(?:please\s+)?(?:stop|cancel|abort|end|kill|arrete|stoppe|annule|termine)\s+(?:the\s+|this\s+|that\s+|la\s+|cette\s+|le\s+)?(?:mission|run|program|programme|travail|work)(?:\s+(?:on|for|in|of|sur|de|du|dans)\s+(?:the\s+|le\s+|la\s+)?(.{1,60}?))?\s*[.!]*\s*$/ds
 const ETA = /\b(?:how long|time (?:left|remaining)|remaining time|eta\b|when (?:will|does|is)\b[^\n]{0,30}(?:finish|done|ready|complete|over)|how much (?:time|longer)|combien de temps|il reste|reste[- ]t[- ]il|temps restant|quand (?:est[- ]ce que )?(?:ca|cela|ce)\b[^\n]{0,20}(?:fini|term|pret|sera)|ca finit quand|fini(?:ra|t) quand|termine quand)/
 const BLOCKERS = /\b(?:block\w*|stuck|waiting (?:on|for)|what(?:'s| is) (?:wrong|the problem)|any problems?|bloqu\w*|coince\w*|empeche\w*|probleme\w*|qu'est[- ]ce qui (?:coince|bloque))/
 const TESTS = /\b(?:tests?\s+(?:results?|status)|latest tests?|last tests?|did (?:the )?tests? pass|tests? (?:pass|fail)\w*|resultats? (?:des )?tests?|les tests?|derniers tests?|tests? ok)/
@@ -121,6 +130,16 @@ export function interpretDeterministic(original: string): OperatorCommand {
       if (task) return guardTask({ kind: 'ADD_TASK_AFTER_CURRENT', text: task })
     }
   }
+  const toRun = text.match(ADD_TO_RUN)
+  if (toRun) {
+    const task = takeTaskText(original, toRun, 1)
+    if (task) return guardTask({ kind: 'ADD_TASK_TO_RUN', text: task, target: null })
+  }
+  const answer = text.match(ANSWER_PREFIX)
+  if (answer) {
+    const said = takeTaskText(original, answer, 1)
+    if (said) return guardTask({ kind: 'ANSWER_BLOCKED', text: said, target: null })
+  }
 
   const refused = detectRefusedTopic(text)
   if (refused) return { kind: 'REFUSED_AT_MACHINE', topic: refused }
@@ -128,6 +147,12 @@ export function interpretDeterministic(original: string): OperatorCommand {
   if (PRIVILEGED.test(text) && text.length <= 200) return { kind: 'PRIVILEGED_ACTIVITY' }
   if (CALL_ME.test(text)) return { kind: 'CALL_ME' }
   if (HELP.test(text)) return { kind: 'HELP' }
+  const stop = text.match(STOP_RUN)
+  if (stop) {
+    const span = (stop as RegExpMatchArray & { indices?: ([number, number] | undefined)[] }).indices?.[1]
+    const target = span ? cleanProject(original.slice(span[0], span[1])) : ''
+    return { kind: 'STOP_RUN', target: target || null }
+  }
   if (CONTINUE.test(text) && !PAUSE.test(text)) return { kind: 'CONTINUE' }
   if (PAUSE.test(text) && text.length <= 120) return { kind: 'PAUSE_AFTER_CURRENT_TASK' }
   const details = text.match(DETAILS)
@@ -145,21 +170,34 @@ export function interpretDeterministic(original: string): OperatorCommand {
   }
   if (ETA.test(text)) return { kind: 'ETA' }
   if (TESTS.test(text)) return { kind: 'LATEST_TEST_RESULTS' }
+  // Asked to fix them is not asked about them: the whole message goes to the blocked work.
+  if (FIX_BLOCKERS.test(text)) return guardTask({ kind: 'ANSWER_BLOCKED', text: original.slice(0, MAX_TASK_CHARS), target: null })
   if (BLOCKERS.test(text)) return { kind: 'BLOCKERS' }
   if (STATUS.test(text)) return { kind: 'STATUS' }
   return { kind: 'UNKNOWN' }
 }
 
 /** A task whose own text asks for something high-authority is not queued from away: it must be written at the machine. */
-function guardTask(command: Extract<OperatorCommand, { kind: 'CREATE_TASK' | 'ADD_TASK_AFTER_CURRENT' }>): OperatorCommand {
+function guardTask(command: Extract<OperatorCommand, { text: string }>): OperatorCommand {
   const refused = detectRefusedTopic(fold(command.text))
   return refused ? { kind: 'REFUSED_AT_MACHINE', topic: refused } : command
 }
 
 /** What the hook may return. REFUSED_AT_MACHINE is deliberately not choosable by a model. */
-const HOOK_KINDS: readonly OperatorCommandKind[] = ['STATUS', 'ETA', 'BLOCKERS', 'DETAILS', 'LATEST_TEST_RESULTS', 'PRIVILEGED_ACTIVITY', 'PAUSE_AFTER_CURRENT_TASK', 'CONTINUE', 'CALL_ME', 'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'HELP', 'UNKNOWN']
+const HOOK_KINDS: readonly OperatorCommandKind[] = ['STATUS', 'ETA', 'BLOCKERS', 'DETAILS', 'LATEST_TEST_RESULTS', 'PRIVILEGED_ACTIVITY', 'PAUSE_AFTER_CURRENT_TASK', 'CONTINUE', 'CALL_ME', 'ADD_TASK_AFTER_CURRENT', 'CREATE_TASK', 'HELP', 'UNKNOWN', 'ANSWER_BLOCKED', 'ADD_TASK_TO_RUN', 'STOP_RUN']
 
-export type IntentClassifier = (text: string) => Promise<unknown>
+/**
+ * The classifier is given the operator's sanitized message and, as data, what is going on (the open missions and their
+ * blocked tasks, with references, and the last message NEXUS sent). It returns one object of the closed set.
+ */
+export type IntentClassifier = (text: string, context?: string) => Promise<unknown>
+
+/** What the patterns decide even when a model is there: an explicit form, a refusal, a call, help. */
+const AUTHORITATIVE: ReadonlySet<OperatorCommandKind> = new Set(['CREATE_TASK', 'ADD_TASK_AFTER_CURRENT', 'ADD_TASK_TO_RUN', 'REFUSED_AT_MACHINE', 'CALL_ME', 'HELP'])
+/** Below this many words, a message the patterns understood is not sent to the model ("status", "continue"). */
+const SHORT_WORDS = 5
+
+const cleanTarget = (raw: unknown): string | null => (typeof raw === 'string' ? cleanProject(raw) || null : null)
 
 /**
  * Checks what a cheap model returned. It must be one of the closed set; a task text must appear word for word in the
@@ -190,32 +228,49 @@ export function validateClassification(raw: unknown, original: string): Operator
       const p = typeof r.project === 'string' ? cleanProject(r.project) : ''
       return t && p ? guardTask({ kind: 'CREATE_TASK', project: p, text: t }) : { kind: 'UNKNOWN' }
     }
+    // The words given to the work are the operator's whole message, never the model's: it chooses only where they go.
+    case 'ANSWER_BLOCKED':
+    case 'ADD_TASK_TO_RUN':
+      return guardTask({ kind: r.kind, text: original.trim().slice(0, MAX_TASK_CHARS), target: cleanTarget((r as { target?: unknown }).target) })
+    case 'STOP_RUN':
+      return { kind: 'STOP_RUN', target: cleanTarget((r as { target?: unknown }).target) }
     default:
       return { kind: r.kind } as OperatorCommand
   }
 }
 
-export async function interpretMessage(original: string, classify?: IntentClassifier): Promise<OperatorCommand> {
+/**
+ * 0.9.1: with a model, a sentence is understood as a sentence: "start a new task to fix all the blockers" is not the
+ * question "what is blocking?" because it contains "block". The patterns still decide alone what is explicit (a task's
+ * form, a refusal, a call, help) and what is short; the model's answer is validated, and when it fails or does not
+ * know, the patterns' answer stands.
+ */
+export async function interpretMessage(original: string, classify?: IntentClassifier, context?: string, o: { onlyUnknown?: boolean } = {}): Promise<OperatorCommand> {
   const clean = sanitizeInbound(original)
   const direct = interpretDeterministic(clean)
-  if (direct.kind !== 'UNKNOWN' || !classify) return direct
+  if (!classify || AUTHORITATIVE.has(direct.kind)) return direct
+  // On a call a model's few seconds are silence: there it is asked only what the patterns did not understand.
+  if (direct.kind !== 'UNKNOWN' && (o.onlyUnknown === true || clean.split(/\s+/).filter(Boolean).length < SHORT_WORDS)) return direct
   // The model sees only the sanitized text of an authenticated operator, and its answer is validated, not obeyed.
   const refused = detectRefusedTopic(fold(clean))
   if (refused) return { kind: 'REFUSED_AT_MACHINE', topic: refused }
   try {
-    return validateClassification(await classify(clean), clean)
+    const chosen = validateClassification(await classify(clean, context), clean)
+    return chosen.kind === 'UNKNOWN' ? direct : chosen
   } catch {
-    return { kind: 'UNKNOWN' }
+    return direct
   }
 }
 
-export type CommandRisk = 'READ_ONLY' | 'LOW_RISK_CONTROL' | 'TASK_HANDOFF' | 'REFUSED' | 'NONE'
+/** STOPS_WORK: carried out only after the operator confirms it (a reply "yes", on a message or a call). */
+export type CommandRisk = 'READ_ONLY' | 'LOW_RISK_CONTROL' | 'TASK_HANDOFF' | 'STOPS_WORK' | 'REFUSED' | 'NONE'
 
 export function commandRisk(command: OperatorCommand): CommandRisk {
   switch (command.kind) {
     case 'STATUS': case 'ETA': case 'BLOCKERS': case 'DETAILS': case 'LATEST_TEST_RESULTS': case 'PRIVILEGED_ACTIVITY': return 'READ_ONLY'
     case 'PAUSE_AFTER_CURRENT_TASK': case 'CONTINUE': case 'CALL_ME': return 'LOW_RISK_CONTROL'
-    case 'ADD_TASK_AFTER_CURRENT': case 'CREATE_TASK': return 'TASK_HANDOFF'
+    case 'ADD_TASK_AFTER_CURRENT': case 'CREATE_TASK': case 'ANSWER_BLOCKED': case 'ADD_TASK_TO_RUN': return 'TASK_HANDOFF'
+    case 'STOP_RUN': return 'STOPS_WORK'
     case 'REFUSED_AT_MACHINE': return 'REFUSED'
     default: return 'NONE'
   }

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Run } from '@shared/domain'
+import type { Run, Task } from '@shared/domain'
 import type { RunEvent } from '@shared/events'
 import type { ProgressSnapshot } from '@shared/progress'
 import type { RawUserIntent } from '@shared/director-line'
@@ -13,6 +13,11 @@ import type { ProtectedStorage } from '../modules/intelligence/connection'
  *
  * What is not here is the point: no capability broker, no settings, no boundary inbox, no power, no shell. A
  * message from the paired phone cannot grant anything, because the line holds nothing that grants.
+ *
+ * 0.9.1: the owner asked for more control from away. The line can now do what the owner does at the machine with
+ * their own work, through the window's own IPC entries: answer a blocked task (resolve its blocker with their words
+ * as the note), add a task to a mission in progress, and stop a mission once they confirm. None of these grants a
+ * permission: what the agents may do is still decided by the policy, the boundary inbox and the privilege service.
  */
 
 export interface DirectorLineHostDeps {
@@ -30,6 +35,15 @@ export interface DirectorLineHostDeps {
   resumeRun: (runId: string) => Promise<unknown>
   /** The same entry as the window's "new mission": admission, the Task Compiler and the capability broker follow from it. */
   createMission: (input: { projectId: string; prompt: string }) => Promise<{ id: string }>
+  /** 0.9.1: the tasks of a run, to find what is blocked. */
+  tasksOf?: (runId: string) => Pick<Task, 'id' | 'title' | 'state' | 'blockedReason'>[]
+  /**
+   * 0.9.1: the window's own entries, through the same IPC handlers (so the Task Compiler admits the operator's words as
+   * it admits what is typed at the machine): resolve a blocker with a note, add a task to a run, cancel a run.
+   */
+  resolveBlocker?: (taskId: string, note: string) => Promise<unknown>
+  addTask?: (input: { runId: string; title: string; description: string }) => Promise<{ id: string }>
+  cancelRun?: (runId: string) => Promise<unknown>
   /** Told of every event of the runtime, to pause a mission when its current task is done. */
   subscribe: (listener: (event: RunEvent) => void) => void
   logger: (line: string) => void
@@ -72,8 +86,61 @@ export function createDirectorLineHost(deps: DirectorLineHostDeps) {
     return all.length === 1 ? (all[0] ?? null) : null
   }
 
+  // ---- 0.9.1: blocked work, and which mission a message means ----------------------------------------------------
+
+  const ref = (prefix: 'R' | 'T', id: string): string => `${prefix}-${id.slice(0, 8)}`
+  const flat = (s: string, max: number): string => s.replace(/\s+/g, ' ').trim().slice(0, max)
+  type Blocked = { run: Run; task: Pick<Task, 'id' | 'title' | 'state' | 'blockedReason'> }
+  const blockedOf = (runs: Run[]): Blocked[] => runs.flatMap((run) => (deps.tasksOf?.(run.id) ?? []).filter((t) => t.state === 'blocked').map((task) => ({ run, task })))
+
+  /** A reference given in the context (R-…, T-…), an id's start, or a name: the runs and blocked tasks it means. */
+  const resolve = (target: string | null): { runs: Run[]; blocked: Blocked[] } => {
+    const runs = deps.openRuns()
+    const all = blockedOf(runs)
+    if (target === null || target.trim() === '') return { runs, blocked: all }
+    const t = target.trim().toLowerCase().replace(/^[rt][-\s]?(?=[0-9a-f]{6})/, '')
+    const byTask = all.filter((b) => b.task.id.toLowerCase().startsWith(t))
+    if (t.length >= 6 && byTask.length === 1) return { runs: [byTask[0]!.run], blocked: byTask }
+    const byRun = runs.filter((r) => r.id.toLowerCase().startsWith(t))
+    if (t.length >= 6 && byRun.length === 1) return { runs: byRun, blocked: all.filter((b) => b.run.id === byRun[0]!.id) }
+    if (t.length < 3) return { runs: [], blocked: [] }
+    const named = runs.filter((r) => (deps.projectName(r.projectId) ?? '').toLowerCase().includes(t) || r.prompt.toLowerCase().includes(t))
+    const byTitle = all.filter((b) => b.task.title.toLowerCase().includes(t))
+    if (named.length > 0) return { runs: named, blocked: all.filter((b) => named.some((r) => r.id === b.run.id)) }
+    return { runs: [...new Map(byTitle.map((b) => [b.run.id, b.run])).values()], blocked: byTitle }
+  }
+
+  const which = (runs: Run[]): string => runs.slice(0, 5).map((r) => `${nameOf(r)} (${ref('R', r.id)})`).join('; ')
+
+  /** The one open run a message means, or why it is not one. */
+  const oneRun = (target: string | null): { ok: true; run: Run } | { ok: false; text: string } => {
+    const { runs } = resolve(target)
+    if (runs.length === 1) return { ok: true, run: runs[0]! }
+    if (runs.length === 0) return { ok: false, text: target ? `No open mission matches "${flat(target, 40)}".` : 'No mission is open.' }
+    return { ok: false, text: `Which mission? ${which(runs)}. Say it with its name or its reference.` }
+  }
+
+  /** A mission that waits after an intervention or a pause by the user goes on; one that waits for a decision does not. */
+  const continueRun = async (runId: string): Promise<boolean> => {
+    const run = deps.openRuns().find((r) => r.id === runId)
+    if (!run || run.state !== 'paused' || run.pauseReason !== 'user') return false
+    pauseAfterTask.delete(runId)
+    await deps.resumeRun(runId)
+    return true
+  }
+
   return {
     reads: {
+      async getInterpretationContext() {
+        const runs = deps.openRuns()
+        if (runs.length === 0) return 'Open missions: none.'
+        const blocked = blockedOf(runs)
+        const lines = runs.slice(0, 8).flatMap((run) => [
+          `- ${ref('R', run.id)} ${flat(nameOf(run), 90)} (state ${run.state}${run.pauseReason ? `, paused: ${run.pauseReason}` : ''})`,
+          ...blocked.filter((b) => b.run.id === run.id).slice(0, 5).map((b) => `  - blocked task ${ref('T', b.task.id)} "${flat(b.task.title, 80)}": ${flat(b.task.blockedReason ?? 'no reason recorded', 240)}`),
+        ])
+        return ['Open missions (the R-… and T-… references are the targets you may name):', ...lines].join('\n')
+      },
       async getStatus() {
         const runs = deps.openRuns()
         return {
@@ -125,6 +192,68 @@ export function createDirectorLineHost(deps: DirectorLineHostDeps) {
         }
         const run = await deps.createMission({ projectId: project.id, prompt })
         return { accepted: true, reference: `mission ${run.id.slice(0, 8)} in ${project.name}` }
+      },
+
+      async answerBlocked(text: string, target: string | null) {
+        if (!deps.resolveBlocker) return { ok: false, text: 'Answering blocked work is not available here.' }
+        const { blocked } = resolve(target)
+        if (blocked.length === 0) {
+          const pending = deps.pendingBoundaryRequests()
+          return { ok: false, text: `No task is blocked${target ? ` in "${flat(target, 40)}"` : ''}.${pending > 0 ? ` ${pending} request(s) wait for your decision at the machine.` : ''}` }
+        }
+        const note = `${text.trim()}\n(The owner's words, sent from the Director Line.)`
+        const done: Blocked[] = []
+        const failed: string[] = []
+        for (const b of blocked.slice(0, 10)) {
+          try {
+            await deps.resolveBlocker(b.task.id, note)
+            done.push(b)
+          } catch (e) {
+            failed.push(`"${flat(b.task.title, 50)}" (${flat(e instanceof Error ? e.message : 'it failed', 80)})`)
+          }
+        }
+        const continued: string[] = []
+        for (const run of new Map(done.map((b) => [b.run.id, b.run])).values()) if (await continueRun(run.id)) continued.push(nameOf(run))
+        const parts = [
+          done.length > 0 ? `Sent your words to ${done.length} blocked task(s): ${done.map((b) => `"${flat(b.task.title, 60)}"`).join(', ')}. They start again with them.` : 'Nothing was sent.',
+          continued.length > 0 ? `Continued: ${continued.map((n) => flat(n, 60)).join('; ')}.` : '',
+          failed.length > 0 ? `Not done for ${failed.join(', ')}.` : '',
+          blocked.length > 10 ? `${blocked.length - 10} more blocked task(s) were left as they are.` : '',
+        ]
+        return { ok: done.length > 0, text: parts.filter(Boolean).join(' ') }
+      },
+
+      async addTaskToRun(text: string, target: string | null) {
+        if (!deps.addTask) return { ok: false, text: 'Adding a task to a mission is not available here.' }
+        const chosen = oneRun(target)
+        if (!chosen.ok) return chosen
+        const run = chosen.run
+        const stillBlocked = blockedOf([run])
+        const description = [
+          text.trim(),
+          '',
+          '(The owner asked for this task from the Director Line, while this mission was in progress.)',
+          ...(stillBlocked.length > 0 ? ['', 'Blocked tasks of this mission when it was asked:', ...stillBlocked.slice(0, 5).map((b) => `- "${flat(b.task.title, 80)}": ${flat(b.task.blockedReason ?? 'no reason recorded', 300)}`)] : []),
+        ].join('\n')
+        const title = flat(text.split('\n')[0] ?? text, 120) || 'Task from the Director Line'
+        const task = await deps.addTask({ runId: run.id, title, description })
+        const continued = await continueRun(run.id)
+        const after = stillBlocked.length > 0 ? ` ${stillBlocked.length} task(s) of it are still blocked: answer them with "answer: …" for them to start again.` : ''
+        return { ok: true, text: `Added to ${flat(nameOf(run), 70)}: "${flat(title, 80)}" (${ref('T', task.id)}).${continued ? ' The mission continues.' : ''}${after}` }
+      },
+
+      async stopTarget(target: string | null) {
+        const chosen = oneRun(target)
+        return chosen.ok ? { ok: true as const, runId: chosen.run.id, name: nameOf(chosen.run) } : chosen
+      },
+
+      async stopRun(runId: string) {
+        if (!deps.cancelRun) return { ok: false, text: 'Stopping a mission is not available here.' }
+        const run = deps.openRuns().find((r) => r.id === runId)
+        if (!run) return { ok: false, text: 'That mission is no longer open: nothing was stopped.' }
+        pauseAfterTask.delete(runId)
+        await deps.cancelRun(runId)
+        return { ok: true, text: `Stopped: ${flat(nameOf(run), 80)}. Its branches are kept.` }
       },
     },
   }

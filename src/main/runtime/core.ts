@@ -59,6 +59,7 @@ import { startNetworkResilience, type NetworkResilience } from './network-resili
 import type { FinishedTask } from '../modules/progress/estimator'
 import { DEFAULT_PROGRESS_REFRESH_SECONDS, type ProgressSnapshot } from '@shared/progress'
 import { createDirectorLineRuntime } from '../modules/director-line/runtime'
+import { createMessageInterpreter } from '../modules/director-line/message-interpreter'
 import type { HttpFetch } from '../modules/director-line'
 import { createDirectorLineHost, protectedSecretStore } from './director-line-host'
 import { createDirectorVoiceHost, createLocalVoiceSpeech } from './director-voice-host'
@@ -1751,6 +1752,12 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
   const openRunIds = db.prepare("SELECT id FROM runs WHERE state NOT IN ('completed', 'failed', 'cancelled') ORDER BY created_at")
   const lastOvernightReport = db.prepare("SELECT run_id FROM overnight_runs WHERE final_report IS NOT NULL ORDER BY rowid DESC LIMIT 1")
   const missionName = (run: Run): string => `${repos.projects.get(run.projectId)?.name ?? 'project'}: ${run.prompt.replace(/\s+/g, ' ').slice(0, 60)}`
+  // 0.9.1: a window entry called for the Director Line; a refusal is thrown with its own message, said back plainly.
+  const lineIpc = async (channel: Parameters<typeof dispatchIpc>[1], input: unknown): Promise<unknown> => {
+    const result = await dispatchIpc(handlers, channel, input)
+    if (!result.ok) throw new Error(result.error.message)
+    return result.value
+  }
   let createMissionFromLine: (input: { projectId: string; prompt: string }) => Promise<{ id: string }> = async () => {
     throw new Error('The runtime is still starting.')
   }
@@ -1774,6 +1781,13 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     pauseRun: (runId, detail) => orchestrator.pauseRun(runId, 'user', detail),
     resumeRun: (runId) => orchestrator.resumeRun(runId),
     createMission: (input) => createMissionFromLine(input),
+    // 0.9.1: the owner's control from away goes through the window's own entries (`handlers` is built below; these
+    // run only when a message arrives).
+    tasksOf: (runId) => repos.tasks.listByRun(runId),
+    resolveBlocker: (taskId, note) => lineIpc('tasks.resolveBlocker', { taskId, note }),
+    addTask: (input) =>
+      lineIpc('tasks.add', { ...input, role: 'worker', dependsOn: [], suggestedFiles: [], acceptanceCriteria: [], complexity: 'medium' }) as Promise<{ id: string }>,
+    cancelRun: (runId) => lineIpc('runs.cancel', { runId }),
     subscribe: (listener) => bus.subscribe(listener),
     logger,
   })
@@ -1789,6 +1803,23 @@ export async function startRuntimeCore(host: RuntimeHost): Promise<RuntimeCore> 
     localNotify: async (title, text) => host.notify?.(title, text.slice(0, 400)),
     recordNote: (note) => logger(`director line: refused a remote request (${note.topic})`),
     log: (line) => logger(`director line: ${line}`),
+    // 0.9.1: a sentence is understood as a sentence. No tools, no authority; its answer is validated (intent.ts).
+    ...(useFake
+      ? {}
+      : {
+          classify: createMessageInterpreter({
+            runtime: claudeRuntime,
+            cwd: (() => {
+              const dir = join(dataDir, 'director-line', 'interpreter-session')
+              mkdirSync(dir, { recursive: true })
+              return dir
+            })(),
+            model: () => repos.settings.get().models.tiers.fast,
+            subscriptionMode: () => repos.settings.get().claude.subscriptionMode,
+            admitted: () => usage.canDispatch(),
+            log: (line) => logger(`director line: ${line}`),
+          }),
+        }),
     // 0.9.1: the voice line (SIP). The session that words an answer is the plain runtime, not a worker session:
     // a call takes no slot from the work in progress.
     voice: createDirectorVoiceHost({
