@@ -445,7 +445,7 @@ export function createAuthorizer(ctx: PolicyContext): (req: ToolRequest) => Prom
       if (bad.length > 0) {
         const names = [...new Set(bad.map((s) => s.command || '(redirection)'))].join(', ')
         const hint = isInspectionOnlyRole(ctx.role)
-          ? 'Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed.'
+          ? 'Only read-only inspection commands (git status/log/diff/show, ls/dir, cat/type, rg/grep/findstr, pwd, version probes) without output redirection are allowed. A task that asks for a command your role may not run (tests, build, lint, type check) is not blocked by it: NEXUS runs the project checks after the task. Read the code and the tests instead, say in your summary which commands you did not run, and finish the task.'
           : 'Only read-only inspection and test/build/lint/typecheck commands without output redirection are allowed.'
         return deny(`Command not permitted for the ${ctx.role} role (${names}). ${hint}`)
       }

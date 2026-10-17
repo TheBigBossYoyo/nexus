@@ -320,6 +320,18 @@ describe('shell policy by role', () => {
     }
   })
 
+  // 0.9.1, seen in a real mission: a security_reviewer task was asked to run the tests, its role refused pnpm, and the
+  // reviewer reported a blocker that paused the mission for the owner. The refusal now says that is no reason to block.
+  it('tells an inspection-only role that a check it may not run does not block its task', async () => {
+    const d = await run('security_reviewer', 'PowerShell', { command: 'pnpm run typecheck' })
+    expect(d.behavior).toBe('deny')
+    if (d.behavior === 'deny') {
+      expect(d.reason).toContain('is not blocked by it')
+      expect(d.reason).toContain('NEXUS runs the project checks after the task')
+      expect(d.reason).toContain('finish the task')
+    }
+  })
+
   it('reviewers and verifiers run inspection plus test/build commands, nothing that writes', async () => {
     for (const role of ['reviewer', 'verifier'] as const) {
       for (const tool of shells) {

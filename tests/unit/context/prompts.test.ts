@@ -137,6 +137,14 @@ describe('what a plan may ask of a read-only task', () => {
     expect(p).toContain('belongs in a test written by a worker task')
   })
 
+  // 0.9.1, seen in a real mission: the planner asked a security_reviewer task to run the test, typecheck and lint
+  // commands, which that role may not run; the reviewer reported a blocker and the mission paused.
+  it('the planner is told which read-only roles run no project check', () => {
+    const p = rolePrompt('planner', 'plan')
+    expect(p).toContain('a security_reviewer, researcher or architect runs none of them')
+    expect(p).toContain('never ask such a task to run the tests, the build, the lint or the type check')
+  })
+
   // Seen in the same campaign on 0.7.1: a task's verifier failed a finished task on mission criteria that only
   // a later task could meet.
   it('mission criteria shown with a task say whose they are', () => {
