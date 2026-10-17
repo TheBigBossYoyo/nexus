@@ -63,7 +63,18 @@ describe('privilege.prepare UAC policy warning', () => {
     expect(order).toEqual(['warn', 'confirm'])
     expect(detail.split('\n\n')[0]).toBe(W)
     expect(detail).not.toMatch(/will then ask for administrator rights/)
+    expect(detail).toMatch(/The administrator broker is then started through Windows \(UAC\)\. Every operation is still checked by the policy and reviewed; one that runs a file NEXUS does not ship asks you again\./)
     expect(s.prepared).toBe(1)
+  })
+  it('changes only the UAC-promise sentence when a warning is shown', async () => {
+    const details: string[] = []
+    for (const uacWarning of [async () => null, async () => W]) {
+      const s = fakeService()
+      const h = createPrivilegeHandlers({ service: () => s.service, unavailableReason: null, integrity: intact, projectOfRun: () => 'p1', uacWarning, confirm: async (_m, d) => (details.push(d), true) })
+      await h['privilege.prepare']({ scope: 'UNTIL_IDLE' })
+    }
+    const expected = `${W}\n\n${details[0]!.replace('Windows will then ask for administrator rights once (UAC).', 'The administrator broker is then started through Windows (UAC).')}`
+    expect(details[1]).toBe(expected)
   })
   it('keeps the existing detail without a warning, and a rejected read counts as none', async () => {
     for (const uacWarning of [async () => null, async () => { throw new Error('x') }]) {
