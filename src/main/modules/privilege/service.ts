@@ -2,6 +2,7 @@ import { win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   DEFAULT_SESSION_CAPABILITIES,
+  PRIVILEGED_CAPABILITIES,
   type PersistenceReport,
   type PersistenceSnapshot,
   type PrivilegeSessionScope,
@@ -102,6 +103,15 @@ const OUTPUT_KEPT = 4000
 const OWNER_ANSWER_MS = 10 * 60_000
 /** The most the native confirmation shows. */
 const DETAIL_CHARS = 6000
+/** The validation errors a malformed request's receipt keeps: how many, and how long they are together. */
+const MALFORMED_ISSUES = 10
+const MALFORMED_CHARS = 1500
+
+/** One validation error of a malformed request (a ZodIssue, as far as the service needs it). */
+export interface MalformedIssue {
+  path: readonly PropertyKey[]
+  message: string
+}
 
 export type PrepareResult = { ok: true; status: PrivilegeSessionStatus } | { ok: false; reason: string; status: PrivilegeSessionStatus | null }
 
@@ -316,6 +326,83 @@ export class PrivilegeService {
     const run = this.queue.then(() => this.process(proposal, who))
     this.queue = run.catch(() => undefined)
     return run
+  }
+
+  /**
+   * 0.9.1 (second review, L9): a request that did not match the schema is refused without review and still recorded,
+   * in the same queue as the others. Nothing of it is kept raw: its text fields only when they are text, its secrets
+   * removed by value then by pattern, the validation errors too (they can echo what was sent). Refused even when it
+   * cannot be recorded.
+   */
+  rejectMalformed(raw: unknown, issues: readonly MalformedIssue[], who: PrivilegedRequester): Promise<PrivilegedOperationReceipt> {
+    const run = this.queue.then(() => this.processMalformed(raw, issues, who))
+    this.queue = run.catch(() => undefined)
+    return run
+  }
+
+  private processMalformed(raw: unknown, issues: readonly MalformedIssue[], who: PrivilegedRequester): PrivilegedOperationReceipt {
+    const o: Record<string, unknown> = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+    const rawArgs: unknown[] = Array.isArray(o['args']) ? (o['args'] as unknown[]).slice(0, 64) : []
+    const secretArgs = Array.isArray(o['secretArgs']) ? (o['secretArgs'] as unknown[]).filter((i): i is number => Number.isInteger(i) && (i as number) >= 0 && (i as number) < 64).slice(0, 16) : []
+    const env: Record<string, unknown> = typeof o['env'] === 'object' && o['env'] !== null && !Array.isArray(o['env']) ? (o['env'] as Record<string, unknown>) : {}
+    const secrets = [...secretArgs.map((i) => rawArgs[i]), ...Object.values(env)].filter((v): v is string => typeof v === 'string' && v.length >= 6).sort((a, b) => b.length - a.length)
+    const scrub = (text: string): string => redactText(secrets.reduce((t, secret) => t.split(secret).join('[secret]'), text))
+    const text = (key: string, max: number): string => (typeof o[key] === 'string' ? scrub(o[key] as string).slice(0, max) : '')
+    const listed = issues.slice(0, MALFORMED_ISSUES).map((i) => scrub(`${i.path.map(String).join('.') || 'input'}: ${i.message}`).slice(0, 200))
+    const more = issues.length > MALFORMED_ISSUES ? `; and ${issues.length - MALFORMED_ISSUES} more` : ''
+    const errors = `${listed.join('; ')}${more}`.slice(0, MALFORMED_CHARS)
+    const precheck: PrivilegedPolicyDecision = { verdict: 'DENIED', reason: `The request did not match the schema: ${errors || 'no detail'}.`, forbidden: null, councilRequired: false, councilWhy: [] }
+    const capability = typeof o['capability'] === 'string' && (PRIVILEGED_CAPABILITIES as readonly string[]).includes(o['capability']) ? (o['capability'] as PrivilegedCapability) : 'MALFORMED_REQUEST'
+    const current = this.active
+    const sessionId = current?.row.state === 'ACTIVE' ? current.row.id : null
+    const at = this.now().toISOString()
+    const r: PrivilegedOperationReceipt = {
+      id: this.newId(),
+      sessionId,
+      requestedAt: at,
+      finishedAt: at,
+      projectId: who.projectId,
+      runId: who.runId,
+      taskId: who.taskId,
+      missionTitle: who.missionTitle,
+      taskTitle: who.taskTitle,
+      role: who.role,
+      agentId: who.agentId,
+      capability,
+      goal: text('goal', 600),
+      whyRequired: text('whyRequired', 800),
+      whyElevation: text('whyElevation', 800),
+      whyNoUnelevatedAlternative: text('whyNoUnelevatedAlternative', 800),
+      executable: text('executable', 260),
+      args: redactArgs(rawArgs.map((a) => (typeof a === 'string' ? a.slice(0, 4096) : '[not text]')), secretArgs).map(scrub),
+      cwd: typeof o['cwd'] === 'string' ? text('cwd', 260) : null,
+      envNames: Object.keys(env).filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)).slice(0, 32).map(redactText),
+      expected: { files: [], registry: [], services: [], network: 'none' },
+      rollback: text('rollback', 800),
+      provenance: who.provenance,
+      followsOperationId: typeof o['followsOperationId'] === 'string' ? text('followsOperationId', 80) : null,
+      precheck,
+      reviews: [],
+      finalPolicy: null,
+      outcome: 'REJECTED_BY_POLICY',
+      outcomeReason: `The request did not match the schema, so it was refused without review: ${errors || 'no detail'}.`,
+      exitCode: null,
+      durationMs: null,
+      observed: [],
+      stdout: '',
+      stderr: '',
+      stagedSha256: null,
+    }
+    // Counted before it is recorded: a store that fails does not lift the limit on refusals.
+    const key = `${sessionId ?? 'none'}|${who.taskId ?? who.agentId ?? 'nexus'}`
+    this.refusals.set(key, (this.refusals.get(key) ?? 0) + 1)
+    try {
+      this.d.store.record(r)
+    } catch (e) {
+      this.d.log?.(`privilege: the refusal of malformed request ${r.id} could not be recorded (${e instanceof Error ? e.message.slice(0, 200) : 'unknown error'})`)
+    }
+    this.changed()
+    return r
   }
 
   private async process(proposal: PrivilegedOperationProposal, who: PrivilegedRequester): Promise<PrivilegedOperationReceipt> {

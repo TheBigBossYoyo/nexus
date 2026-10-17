@@ -181,7 +181,8 @@ export interface PrivilegedOperationReceipt {
   taskTitle: string | null
   role: PrivilegedRequesterRole
   agentId: string | null
-  capability: PrivilegedCapability
+  /** MALFORMED_REQUEST: the request did not match the schema and named no known capability (second review, L9). */
+  capability: PrivilegedCapability | 'MALFORMED_REQUEST'
   goal: string
   whyRequired: string
   whyElevation: string

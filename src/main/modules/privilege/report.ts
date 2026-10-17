@@ -214,7 +214,8 @@ export function buildPrivilegedActivitySummary(receipts: readonly PrivilegedOper
   out.push(`${headline(receipts)} UAC prompts: ${uac}.${sessions.some((s) => s.state === 'ACTIVE') ? ' A broker is still active.' : ' No broker is left running.'}`, '')
   for (const raw of receipts) {
     const r = shown(raw)
-    out.push(`**${time(r.requestedAt)} — ${r.goal}** (${r.capability})`)
+    // A malformed request (L9) may have given no goal.
+    out.push(`**${time(r.requestedAt)} — ${r.goal || '(no goal given)'}** (${r.capability})`)
     out.push(`Why admin: ${r.whyElevation}`)
     out.push(`Security review: ${reviewLine(r.reviews, r.precheck.councilRequired)} Deterministic policy: ${r.finalPolicy?.verdict ?? r.precheck.verdict}.`)
     out.push(`Command: ${codeSpan(shownCommand(r))}`)
