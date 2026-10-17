@@ -346,9 +346,16 @@ export class PrivilegeService {
     const secretArgs = Array.isArray(o['secretArgs']) ? (o['secretArgs'] as unknown[]).filter((i): i is number => Number.isInteger(i) && (i as number) >= 0 && (i as number) < 64).slice(0, 16) : []
     const env: Record<string, unknown> = typeof o['env'] === 'object' && o['env'] !== null && !Array.isArray(o['env']) ? (o['env'] as Record<string, unknown>) : {}
     const secrets = [...secretArgs.map((i) => rawArgs[i]), ...Object.values(env)].filter((v): v is string => typeof v === 'string' && v.length >= 6).sort((a, b) => b.length - a.length)
-    const scrub = (text: string): string => redactText(secrets.reduce((t, secret) => t.split(secret).join('[secret]'), text))
-    const text = (key: string, max: number): string => (typeof o[key] === 'string' ? scrub(o[key] as string).slice(0, max) : '')
-    const listed = issues.slice(0, MALFORMED_ISSUES).map((i) => scrub(`${i.path.map(String).join('.') || 'input'}: ${i.message}`).slice(0, 200))
+    // Secrets are removed by value on the whole text first, so none is cut in two and missed. The text is then cut near
+    // its bound (an unfinished last word dropped, it may be part of a credential) before the patterns, which are not
+    // linear on long input, and cut to its bound after them.
+    const scrub = (value: string, max: number): string => {
+      const v = secrets.reduce((t, secret) => t.split(secret).join('[secret]'), value)
+      const cut = v.length > max + 256 ? v.slice(0, max + 256).replace(/\S*$/, '') : v
+      return redactText(cut).slice(0, max)
+    }
+    const text = (key: string, max: number): string => (typeof o[key] === 'string' ? scrub(o[key] as string, max) : '')
+    const listed = issues.slice(0, MALFORMED_ISSUES).map((i) => scrub(`${i.path.map(String).join('.') || 'input'}: ${i.message}`, 200))
     const more = issues.length > MALFORMED_ISSUES ? `; and ${issues.length - MALFORMED_ISSUES} more` : ''
     const errors = `${listed.join('; ')}${more}`.slice(0, MALFORMED_CHARS)
     const precheck: PrivilegedPolicyDecision = { verdict: 'DENIED', reason: `The request did not match the schema: ${errors || 'no detail'}.`, forbidden: null, councilRequired: false, councilWhy: [] }
@@ -374,7 +381,7 @@ export class PrivilegeService {
       whyElevation: text('whyElevation', 800),
       whyNoUnelevatedAlternative: text('whyNoUnelevatedAlternative', 800),
       executable: text('executable', 260),
-      args: redactArgs(rawArgs.map((a) => (typeof a === 'string' ? a.slice(0, 4096) : '[not text]')), secretArgs).map(scrub),
+      args: rawArgs.map((a, i) => (secretArgs.includes(i) ? '[secret]' : typeof a === 'string' ? scrub(a, 4096) : '[not text]')),
       cwd: typeof o['cwd'] === 'string' ? text('cwd', 260) : null,
       envNames: Object.keys(env).filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)).slice(0, 32).map(redactText),
       expected: { files: [], registry: [], services: [], network: 'none' },

@@ -423,6 +423,31 @@ describe('malformed privileged requests', () => {
     expect(broker.ran).toHaveLength(0)
   })
 
+  it('removes a secret that straddles a field\'s bound, and bounds long text before the patterns', async () => {
+    const { service, store } = setup()
+    const secret = 'Z9Y8X7W6V5-LICENCE'
+    const raw = {
+      capability: 'PROJECT_TOOLCHAIN_INSTALL',
+      goal: `${' '.repeat(590)}${secret}`,
+      args: ['/i', `${' '.repeat(4090)}${secret}`, `${'a-'.repeat(200_000)}`, `${'x '.repeat(3000)}ghp_abcdefghijklmnopqrstuvwx${'y'.repeat(5000)}`],
+      env: { LICENCE: secret },
+      timeoutMs: 'soon',
+    }
+    const issues = [{ path: ['args', 1], message: `${' '.repeat(190)}${secret}` }]
+    const started = Date.now()
+    const r = await service.rejectMalformed(raw, issues, who())
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(r.args[1]?.length).toBeLessThanOrEqual(4096)
+    expect(r.args[2]?.length).toBeLessThanOrEqual(4096)
+    expect(r.goal.length).toBeLessThanOrEqual(600)
+    const kept = JSON.stringify(store.receiptRows)
+    const told = receiptForAgent(r)
+    for (const fragment of ['Z9Y8X7', 'ghp_abcdef']) {
+      expect(kept).not.toContain(fragment)
+      expect(told).not.toContain(fragment)
+    }
+  })
+
   it('handles null, arrays, numbers, strings and wrong-typed objects without throwing, and bounds the errors', async () => {
     const { service, store } = setup()
     const many = { capability: 'NOT_A_CAPABILITY', args: 'x', env: [1], inputs: Array.from({ length: 30 }, () => ({ arg: 'no' })), secretArgs: 'all', expected: 5, goal: 7 }
