@@ -44,9 +44,12 @@ type RunResult = Pick<ProcessResult, 'exitCode' | 'stdout'> & Partial<Pick<Proce
 export interface UacPolicyReaderDeps {
   systemRoot: string
   run?: (file: string, args: readonly string[]) => Promise<RunResult>
+  /** How long an answer is reused: the Admin access panel asks for it on every poll of the status. */
+  maxAgeMs?: number
+  now?: () => number
 }
 
-/** Reads the policy unelevated; any failure gives null values (no warning). */
+/** Reads the policy unelevated, at most once a minute; any failure gives null values (no warning). */
 export function createUacPolicyReader(deps: UacPolicyReaderDeps): () => Promise<UacPolicy> {
   const { systemRoot } = deps
   const run =
@@ -60,7 +63,10 @@ export function createUacPolicyReader(deps: UacPolicyReaderDeps): () => Promise<
         keep: 'head',
       }))
   const reg = win32.join(systemRoot, 'System32', 'reg.exe')
-  return async () => {
+  const maxAgeMs = deps.maxAgeMs ?? 60_000
+  const now = deps.now ?? Date.now
+  let last: { at: number; answer: Promise<UacPolicy> } | null = null
+  const read = async (): Promise<UacPolicy> => {
     try {
       const r = await run(reg, ['query', UAC_POLICY_KEY])
       if (r.exitCode !== 0 || r.timedOut || r.aborted) return { enableLua: null, consentPromptBehaviorAdmin: null }
@@ -68,5 +74,9 @@ export function createUacPolicyReader(deps: UacPolicyReaderDeps): () => Promise<
     } catch {
       return { enableLua: null, consentPromptBehaviorAdmin: null }
     }
+  }
+  return () => {
+    if (last === null || now() - last.at >= maxAgeMs) last = { at: now(), answer: read() }
+    return last.answer
   }
 }

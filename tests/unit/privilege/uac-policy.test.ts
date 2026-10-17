@@ -45,6 +45,19 @@ describe('createUacPolicyReader', () => {
     expect(await read()).toEqual({ enableLua: 0, consentPromptBehaviorAdmin: 5 })
     expect(calls).toEqual([['C:\\Windows\\System32\\reg.exe', ['query', UAC_POLICY_KEY]]])
   })
+  // Merge review: the Admin access panel polls privilege.status, which started one reg.exe per poll.
+  it('reads the registry at most once a minute', async () => {
+    let clock = 0
+    let calls = 0
+    const read = createUacPolicyReader({ systemRoot: 'C:\\Windows', now: () => clock, run: async () => (calls++, { exitCode: 0, stdout: listing('0x1', '0x5') }) })
+    await Promise.all([read(), read()])
+    clock = 59_999
+    await read()
+    expect(calls).toBe(1)
+    clock = 60_000
+    expect(await read()).toEqual({ enableLua: 1, consentPromptBehaviorAdmin: 5 })
+    expect(calls).toBe(2)
+  })
   it('gives no policy on a non-zero exit, a timeout or a throw', async () => {
     const none = { enableLua: null, consentPromptBehaviorAdmin: null }
     expect(await createUacPolicyReader({ systemRoot: 'C:\\Windows', run: async () => ({ exitCode: 1, stdout: listing('0x0', '0x0') }) })()).toEqual(none)
