@@ -223,6 +223,21 @@ export function severityTone(severity: string): Tone {
   return (SEVERITY_TONE as Record<string, Tone>)[severity] ?? 'neutral'
 }
 
+/** Who asked, in a short line made only of what NEXUS knows; unknown parts are left out. */
+export function whoAsked(request: BoundaryRequestView): string {
+  const role = request.agentRole?.toLowerCase() ?? null
+  const task = request.taskTitle ? `on "${request.taskTitle}"` : null
+  const mission = request.missionTitle ? `in mission "${request.missionTitle}"` : null
+  const parts = [role ?? (task || mission ? 'An agent' : null), task, mission].filter((p): p is string => p !== null)
+  return parts.join(' ')
+}
+
+/** Where the mission page of the request is, only when the run is known to exist. */
+export function missionLink(request: BoundaryRequestView): { runId: string; projectId: string; taskId: string | null } | null {
+  if (request.runId === null || request.missionTitle === null) return null
+  return { runId: request.runId, projectId: request.projectId, taskId: request.taskId }
+}
+
 export interface MissionGroup {
   key: string
   missionTitle: string | null

@@ -350,6 +350,10 @@ export interface BoundaryRequestView extends BoundaryRequest {
   resourceLabel: string
   projectName: string
   missionTitle: string | null
+  /** The title of the task that asked, from NEXUS's own row; null when there is none. */
+  taskTitle: string | null
+  /** The role of the agent that asked, from NEXUS's own rows; null when unknown. */
+  agentRole: string | null
   scopes: GrantScope[]
   /** What NEXUS did with the waiting work once the request was decided, in a sentence. Null while pending, and when nothing waited. */
   followUp: string | null
