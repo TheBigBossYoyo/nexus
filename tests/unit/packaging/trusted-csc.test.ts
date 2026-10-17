@@ -93,6 +93,14 @@ describe('trustedCsc', () => {
     expect(() => trustedCsc(deps({ real: sibling }))).toThrow(/resolves outside/)
   })
 
+  it('throws, keeping the cause, when the compiler path cannot be resolved', () => {
+    const failure = new Error('EACCES')
+    const real = () => {
+      throw failure
+    }
+    expect(() => trustedCsc(deps({ real }))).toThrow(expect.objectContaining({ message: expect.stringMatching(/could not be resolved: EACCES/), cause: failure }))
+  })
+
   it('accepts a different case and a legitimate redirect inside Framework64', () => {
     const real = (p: string) => (p === CSC ? 'c:\\windows\\microsoft.net\\framework64\\v4.0.30319\\csc.exe' : p)
     expect(trustedCsc(deps({ real }))).toBe(CSC)

@@ -51,7 +51,7 @@ export function trustedCsc(deps = {}) {
     realCsc = realpath(csc)
     realFramework = realpath(frameworkDir)
   } catch (error) {
-    throw new Error(`The C# compiler of Windows could not be resolved: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`The C# compiler of Windows could not be resolved: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
   if (!underFolder(realCsc, realFramework)) throw new Error(`The C# compiler resolves outside ${frameworkDir}: ${realCsc}`)
   return csc
