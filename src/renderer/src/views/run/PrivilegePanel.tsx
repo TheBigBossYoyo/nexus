@@ -99,6 +99,11 @@ export function PrivilegePanel({ runId, live }: { runId: string; live: boolean }
         </span>
       </div>
       {live && mine === null && active === null && <p className="privilege-note">{PRIVILEGE_SESSION_NOTICE}</p>}
+      {status.data.uacWarning && (
+        <p className="privilege-error" role="note" data-testid="privilege-uac-warning">
+          {status.data.uacWarning}
+        </p>
+      )}
       {error && (
         <p className="privilege-error" role="alert" data-testid="privilege-error">
           {error}
