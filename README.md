@@ -25,7 +25,9 @@ fixed, tamper-evident receipts built by NEXUS itself), the install for all users
 measured and fixed on real work, and missions' work at below-normal priority. Validated by the test suite (5,670
 tests), the end-to-end tests (41 passed, 3 skipped; the one failure was the known flake 2, explained and fixed), a real
 privilege session on the owner's machine and real missions run by the owner. No privileged operation has run through a
-real session yet; licensing blocks any public distribution. What was and was not proven:
+real session yet. The source is public under the Apache License 2.0; no installer is distributed, because of the
+licences of the voice components (see [Third-party software and licensing](#third-party-software-and-licensing)).
+What was and was not proven:
 [V0_9_1_RELEASE_REPORT](docs/V0_9_1_RELEASE_REPORT.md).
 
 **0.9.0 is PARTIAL against the gates its own brief set, and was released on the owner's decision.** It is
@@ -45,7 +47,7 @@ Nothing is signed (see [Code signing](#code-signing)). There is no update channe
 |---|---|
 | Windows 11 x64 | The only supported and packaged platform. CI runs on `windows-latest`. |
 | Git for Windows | Needed for worktrees. Developed against Git 2.53. |
-| A Claude subscription, and Claude Code logged in | Agents are `claude.exe` processes started by the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk` 0.3.288). Run `claude auth login` once. See [Authentication](#authentication). |
+| Claude Code logged in (an API key unless you are the author) | Agents are `claude.exe` processes started by the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk` 0.3.288). Run `claude auth login` once. See [Authentication](#authentication). |
 | Microsoft Edge | Used headless by the application and browser automation (`app_*` tools). Every Windows 11 has it; NEXUS looks for it in `Program Files`. |
 | Node.js 24 and pnpm 12.8.1 | Only to build from source. They match Electron 44.5.1 and the CI configuration (`.github/workflows/ci.yml`). A packaged install needs neither. |
 | Node.js 20 or newer on `PATH` | Needed only by the Arena: its built-in cases run `node --test`. NEXUS ships no Node. |
@@ -218,7 +220,21 @@ Read [V0_8_SECURITY_MODEL](docs/V0_8_SECURITY_MODEL.md) before relying on any of
 - **Electron and Chromium** are shipped inside the installer under their own licenses, together with the other
   production dependencies. `THIRD_PARTY_NOTICES.md` and the CycloneDX bill of materials in the release folder
   are generated from the lock file and the installed packages, not written by hand.
-- `claude.exe` comes from Anthropic's Agent SDK package and keeps Anthropic's signature and terms.
+- **The Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`, which brings `claude.exe`) is not open source. It
+  is installed from npm with the other dependencies, keeps Anthropic's signature and is governed by Anthropic's
+  Commercial Terms of Service.
+- **The voice components are not in this repository.** `pnpm fetch:linphone` downloads the Linphone SDK for the
+  SIP helper (`native/nexus-sip`); liblinphone, mediastreamer2 and oRTP are AGPL-3.0, belle-sip, bzrtp and
+  bctoolbox GPL-3.0 (its notice: `vendor/linphone-sdk/win64/NOTICE.txt` after the download).
+  `scripts/fetch-speech-models.mjs` downloads the speech models, each under its own licence
+  (`vendor/speech-models/NOTICE.txt`). Both stay on the machine that downloads them.
+- **What keeps an installer from being distributed.** The native library of `sherpa-onnx-node` (listed on npm as
+  Apache-2.0) has espeak-ng (GPL-3.0) compiled in, and it runs in the runtime process beside the Agent SDK, which
+  is not open source. The licence of the Kroko speech-recognition models is unclear. The French voice was
+  fine-tuned from a voice under a research-only licence. Until local speech runs as a program of its own (or is
+  an optional download) and those models are replaced or cleared, no installer is given to anybody. The source
+  in this repository asks nothing more of you than the Apache License 2.0 (and busybox's GPL-2.0 for
+  `vendor/busybox`). This is the author's reading of the licences, not legal advice.
 
 ## Code signing
 
@@ -606,7 +622,9 @@ Settings, Claude, "Subscription Mode" is on by default. While it is on, NEXUS gi
 of its environment with those two variables removed (your system and user environment variables are
 never modified). With it off, the variables are passed through and the runtime chooses the credential.
 Details and the policy caveat about third-party use of Claude subscription login are in
-[docs/AUTHENTICATION.md](docs/AUTHENTICATION.md). NEXUS makes no claim about subscription limits or
+[docs/AUTHENTICATION.md](docs/AUTHENTICATION.md). If you are not the author, log Claude Code in with an API
+key and turn Subscription Mode off: unless it has approved them, Anthropic does not allow third-party products,
+including agents built on the Agent SDK, to offer claude.ai login or its rate limits. NEXUS makes no claim about subscription limits or
 cost beyond that document.
 
 ## Launching and opening a project
