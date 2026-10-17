@@ -12,6 +12,8 @@ import {
   createNexusMcpServer,
 } from '@main/modules/agent-runtime/claude-sdk-runtime'
 import type { AgentEvent, NexusToolHandlers, SessionSpec, ToolDecision } from '@main/modules/agent-runtime/types'
+import { parseExtensionCall } from '@main/modules/agent-runtime/extension-tools'
+import { PrivilegedOperationProposalSchema } from '@shared/privilege'
 
 vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
   const actual = await importOriginal<typeof Sdk>()
@@ -401,6 +403,24 @@ describe('nexus MCP server', () => {
     expect(r.isError).toBeFalsy()
     expect(JSON.stringify(r.content)).toContain('Applied as plan v2')
     expect(proposeGraphChange).toHaveBeenCalledWith(args)
+  })
+
+  it('lets a privileged_request that does not match the schema reach NEXUS, with every field still described (L9)', async () => {
+    const extensionTool = vi.fn(async () => 'Not done: recorded')
+    const client = await connect(handlers({ extensionGroups: ['privileged'], extensionTool }))
+    const listed = (await client.listTools()).tools.find((t) => t.name === 'privileged_request')
+    const properties = (listed?.inputSchema.properties ?? {}) as Record<string, { description?: string }>
+    const strict = PrivilegedOperationProposalSchema.shape
+    expect(Object.keys(properties).sort()).toEqual(Object.keys(strict).sort())
+    for (const [key, s] of Object.entries(strict)) expect(properties[key]?.description).toBe(s.description)
+
+    const malformed = { capability: 'ADMIN_SHELL', args: 'cmd /c whoami', whyRequired: 'x' }
+    const r = await client.callTool({ name: 'privileged_request', arguments: malformed })
+    expect(JSON.stringify(r.content)).toContain('Not done: recorded')
+    expect(JSON.stringify(r.content)).not.toMatch(/Input validation error/)
+    expect(extensionTool).toHaveBeenCalledWith({ name: 'privileged_request', args: malformed })
+    // The strict shape still decides.
+    expect(parseExtensionCall({ name: 'privileged_request', args: malformed }, ['privileged'])).toMatchObject({ ok: false, error: expect.stringMatching(/^Invalid arguments for privileged_request/) })
   })
 
   it('turns handler errors into isError results', async () => {

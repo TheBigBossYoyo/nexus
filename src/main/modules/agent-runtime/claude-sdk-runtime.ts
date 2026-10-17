@@ -473,7 +473,7 @@ export function createNexusMcpServer(handlers: NexusToolHandlers, options: { alw
             ),
           ]
         : []),
-      ...(extension ? extensionDefs.map((def) => tool(def.name, def.description, def.shape, (a) => guarded(() => extension({ name: def.name, args: a })))) : []),
+      ...(extension ? extensionDefs.map((def) => tool(def.name, def.description, def.mcpShape ?? def.shape, (a) => guarded(() => extension({ name: def.name, args: a })))) : []),
       tool(
         'send_message',
         'Send a message to another task or role in this run (question, handoff, finding, warning).',

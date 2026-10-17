@@ -110,7 +110,7 @@ export function PrivilegePanel({ runId, live }: { runId: string; live: boolean }
             <li key={r.id}>
               <span className="privilege-time">{clock(r.requestedAt)}</span>
               <Badge tone={OUTCOME_TONE[r.outcome]}>{r.outcome.replace(/_/g, ' ')}</Badge>
-              <span className="privilege-goal">{r.goal}</span>
+              <span className="privilege-goal">{r.goal || '(no goal given)'}</span>
             </li>
           ))}
         </ul>

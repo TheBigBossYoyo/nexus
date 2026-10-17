@@ -17,6 +17,22 @@ export interface ExtensionToolDef {
   group: ExtensionGroup
   description: string
   shape: z.ZodRawShape
+  /**
+   * 0.9.1 (second review, L9): the shape the MCP server is given instead of `shape`, when a malformed call must still
+   * reach NEXUS (to be recorded) rather than be refused by the SDK. Only for registration: the call is validated
+   * against the strict `shape` in parseExtensionCall all the same.
+   */
+  mcpShape?: z.ZodRawShape
+}
+
+/** The same keys and descriptions as `shape`, each accepting anything: what the model sees is unchanged. */
+function permissive(shape: Record<string, z.ZodType>): z.ZodRawShape {
+  return Object.fromEntries(
+    Object.entries(shape).map(([key, s]) => {
+      const loose = z.unknown().optional()
+      return [key, s.description !== undefined ? loose.describe(s.description) : loose]
+    }),
+  )
 }
 
 const url = z.string().max(2048)
@@ -114,6 +130,7 @@ export const PRIVILEGED_TOOLS: ExtensionToolDef[] = [
     description:
       "Ask for ONE operation to run with Windows administrator rights, through the temporary broker the owner authorized for this mission or night (if none is active the request is refused and recorded). There is no administrator shell: name the program by its absolute path, its arguments as a list, the capability it falls under, and why it is needed, why it needs elevation and why nothing unelevated would do. PowerShell runs only as -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> with the script's SHA-256 in inputs; a program outside Program Files/System32 needs its SHA-256; installers run silently. It is checked by a fixed policy, reviewed by the Technical Director (and the Council for broad effects), run, verified and recorded for the owner's morning report; refused requests are recorded too. Never ask for anything that touches UAC, antivirus, accounts, passwords, credentials, boot, drivers or NEXUS's own policy: it is refused whatever the reason. If an operation fails, a repair may follow as a new request with followsOperationId.",
     shape: PrivilegedOperationProposalSchema.shape,
+    mcpShape: permissive(PrivilegedOperationProposalSchema.shape),
   },
 ]
 

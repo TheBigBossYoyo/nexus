@@ -424,17 +424,29 @@ export function redactText(text: string): string {
  */
 export function redactPrivilegedInput(o: Record<string, unknown>): Record<string, unknown> {
   // Through the extension tool the request arrives as { name, args: <request> }.
-  if (typeof o['args'] === 'object' && o['args'] !== null && !Array.isArray(o['args'])) return { ...o, args: redactPrivilegedInput(o['args'] as Record<string, unknown>) }
+  // 0.9.1 (second review, L9): only that call is opened (a request's own `args` that is an object is withheld below),
+  // and the keys beside its request are redacted too.
+  if (typeof o['name'] === 'string' && typeof o['args'] === 'object' && o['args'] !== null && !Array.isArray(o['args'])) {
+    const { args, ...rest } = o
+    return { ...redactPrivilegedInput(rest), args: redactPrivilegedInput(args as Record<string, unknown>) }
+  }
   const secret = Array.isArray(o['secretArgs']) ? (o['secretArgs'] as unknown[]).filter((i): i is number => typeof i === 'number') : []
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(o)) {
-    if (k === 'args' && Array.isArray(v)) out[k] = redactArgs(v.map(String), secret)
+    if (k === 'args' && Array.isArray(v)) out[k] = redactArgs(v.map((a) => (typeof a === 'string' ? a : JSON.stringify(redactDeep(a)) ?? String(a))), secret)
     else if (k === 'env' && typeof v === 'object' && v !== null) out[k] = Object.fromEntries(Object.keys(v).map((name) => [name, '[withheld]']))
-    else if (typeof v === 'string') out[k] = redactText(v)
     else if (k === 'args' || k === 'env') out[k] = '[withheld]'
-    else out[k] = v
+    else out[k] = redactDeep(v)
   }
   return out
+}
+
+/** Every text inside a value redacted (what a malformed request put under an unexpected key or type). */
+function redactDeep(v: unknown): unknown {
+  if (typeof v === 'string') return redactText(v)
+  if (Array.isArray(v)) return v.map(redactDeep)
+  if (typeof v === 'object' && v !== null) return Object.fromEntries(Object.entries(v).map(([k, x]) => [redactText(k), redactDeep(x)]))
+  return v
 }
 
 /** Whether a path is a drive path NEXUS may hand to the broker (for callers that build requests). */

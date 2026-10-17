@@ -1,15 +1,19 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AdvisoryProvider } from '@main/modules/intelligence/compiler'
+import type { ProtectedStorage } from '@main/modules/intelligence/connection'
+import { openDatabase } from '@main/modules/persistence'
+import { receiptChainVault } from '@main/modules/privilege/chain-key'
 import type { BrokerExecRequest, BrokerExecResult } from '@main/modules/privilege/broker-client'
 import type { ReceiptChainVerification } from '@main/modules/privilege/chain'
 import { PrivilegedPolicyEngine } from '@main/modules/privilege/policy'
 import { buildPrivilegedActivityReport, buildPrivilegedActivitySummary } from '@main/modules/privilege/report'
 import { PrivilegedReviewPipeline } from '@main/modules/privilege/review'
-import { PrivilegeService, type BrokerHandle, type PrivilegedRequester } from '@main/modules/privilege/service'
-import { MemoryPrivilegeStore } from '@main/modules/privilege/store'
+import { PrivilegeService, receiptForAgent, type BrokerHandle, type PrivilegedRequester } from '@main/modules/privilege/service'
+import { MemoryPrivilegeStore, SqlitePrivilegeStore } from '@main/modules/privilege/store'
 import { createTargetInspector } from '@main/modules/privilege/inspect'
 import { PRIVILEGED_CAPABILITIES, PrivilegedOperationProposalSchema, type PersistenceSnapshot, type PrivilegedOperationRequest, type PrivilegedCapability, type PrivilegedOperationProposal, type PrivilegedPolicyDecision } from '@shared/privilege'
 
@@ -381,6 +385,125 @@ describe('privilege sessions', () => {
     const summary = buildPrivilegedActivitySummary(receipts, sessions, intact)
     expect(summary).toContain('3 privileged attempts')
     expect(summary).toContain('No broker is left running.')
+  })
+})
+
+// 0.9.1 (second review, L9): a request that does not match the schema is refused and recorded, its secrets removed.
+describe('malformed privileged requests', () => {
+  const issuesOf = (raw: unknown) => PrivilegedOperationProposalSchema.safeParse(raw).error?.issues ?? []
+  const SECRETS = ['Z9Y8X7W6V5-LICENCE', 'K7Q2PLM9ZZ41', 'ghp_abcdefghijklmnopqrstuvwx', 'HIDDEN-VALUE-UNDER-EXTRA']
+
+  it('keeps neither secret values nor an unrecognized key\'s value in the receipt or the agent\'s answer', async () => {
+    const { service, store, broker } = setup()
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const raw = {
+      capability: 'PROJECT_TOOLCHAIN_INSTALL',
+      goal: 'install with ghp_abcdefghijklmnopqrstuvwx',
+      executable: 'C:\\Windows\\System32\\msiexec.exe',
+      args: ['/i', 'x.msi', 'K7Q2PLM9ZZ41', 'echo ghp_abcdefghijklmnopqrstuvwx'],
+      secretArgs: [2],
+      env: { LICENCE: 'Z9Y8X7W6V5-LICENCE' },
+      timeoutMs: 'soon',
+      extra: { hidden: 'HIDDEN-VALUE-UNDER-EXTRA' },
+    }
+    // Validation messages can echo what was sent: these do on purpose.
+    const issues = [...issuesOf(raw), { path: ['env', 'Z9Y8X7W6V5-LICENCE'], message: 'value K7Q2PLM9ZZ41 is not allowed' }, { path: ['goal'], message: 'saw ghp_abcdefghijklmnopqrstuvwx' }]
+    const r = await service.rejectMalformed(raw, issues, who())
+    expect(r).toMatchObject({ outcome: 'REJECTED_BY_POLICY', capability: 'PROJECT_TOOLCHAIN_INSTALL', reviews: [], precheck: { verdict: 'DENIED' }, envNames: ['LICENCE'] })
+    expect(r.args[2]).toBe('[secret]')
+    expect(r.outcomeReason).toMatch(/did not match the schema/)
+    expect(r.precheck.reason).toMatch(/timeoutMs: /)
+    expect(store.receiptRows).toHaveLength(1)
+    const kept = JSON.stringify(store.receiptRows)
+    const told = receiptForAgent(r)
+    for (const secret of SECRETS) {
+      expect(kept).not.toContain(secret)
+      expect(told).not.toContain(secret)
+    }
+    expect(broker.ran).toHaveLength(0)
+  })
+
+  it('removes a secret that straddles a field\'s bound, and bounds long text before the patterns', async () => {
+    const { service, store } = setup()
+    const secret = 'Z9Y8X7W6V5-LICENCE'
+    const raw = {
+      capability: 'PROJECT_TOOLCHAIN_INSTALL',
+      goal: `${' '.repeat(590)}${secret}`,
+      args: ['/i', `${' '.repeat(4090)}${secret}`, `${'a-'.repeat(200_000)}`, `${'x '.repeat(3000)}ghp_abcdefghijklmnopqrstuvwx${'y'.repeat(5000)}`],
+      env: { LICENCE: secret },
+      timeoutMs: 'soon',
+    }
+    const issues = [{ path: ['args', 1], message: `${' '.repeat(190)}${secret}` }]
+    const started = Date.now()
+    const r = await service.rejectMalformed(raw, issues, who())
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(r.args[1]?.length).toBeLessThanOrEqual(4096)
+    expect(r.args[2]?.length).toBeLessThanOrEqual(4096)
+    expect(r.goal.length).toBeLessThanOrEqual(600)
+    const kept = JSON.stringify(store.receiptRows)
+    const told = receiptForAgent(r)
+    for (const fragment of ['Z9Y8X7', 'ghp_abcdef']) {
+      expect(kept).not.toContain(fragment)
+      expect(told).not.toContain(fragment)
+    }
+  })
+
+  it('handles null, arrays, numbers, strings and wrong-typed objects without throwing, and bounds the errors', async () => {
+    const { service, store } = setup()
+    const many = { capability: 'NOT_A_CAPABILITY', args: 'x', env: [1], inputs: Array.from({ length: 30 }, () => ({ arg: 'no' })), secretArgs: 'all', expected: 5, goal: 7 }
+    for (const raw of [null, [1, 2], 42, 'a string', many]) {
+      const r = await service.rejectMalformed(raw, issuesOf(raw), who())
+      expect(r).toMatchObject({ outcome: 'REJECTED_BY_POLICY', capability: 'MALFORMED_REQUEST', goal: '', executable: '', args: [], envNames: [], taskId: 'task-1', runId: 'run-1', role: 'WORKER', agentId: 'agent-1' })
+    }
+    const last = store.receiptRows.at(-1)
+    expect(last?.precheck.reason.length).toBeLessThanOrEqual(1600)
+    expect(last?.precheck.reason).toMatch(/and \d+ more/)
+    expect(store.receiptRows).toHaveLength(5)
+    // The report renders it.
+    expect(buildPrivilegedActivitySummary(store.receiptRows, [], { state: 'UNAVAILABLE', reason: 'test', verified: 0, legacy: 0, pending: 0, evicted: 0, lastVerifiedChainSeq: null, findings: [] })).toContain('MALFORMED_REQUEST')
+  })
+
+  it('counts toward the refusals after which a task gets no more reviews', async () => {
+    const calls = { n: 0 }
+    const { service, broker } = setup({ technical: reviewer('APPROVE', calls) })
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    for (let i = 0; i < 8; i++) await service.rejectMalformed({ goal: i }, issuesOf({ goal: i }), who())
+    const next = await service.submit(fixture('fixture-repair.ps1'), who())
+    expect(next.outcome).toBe('REJECTED_BY_POLICY')
+    expect(next.precheck.reason).toMatch(/refused too many privileged requests/)
+    expect(calls.n).toBe(0)
+    expect(broker.ran).toHaveLength(0)
+  })
+
+  it('is still refused, without the broker, when the store cannot record it', async () => {
+    class Failing extends MemoryPrivilegeStore {
+      override record(): void {
+        throw new Error('disk full')
+      }
+    }
+    const { service, broker } = setup({ store: new Failing() })
+    await service.prepare({ scope: 'MISSION', runId: 'run-1', projectId: 'p1', capabilities: [...PRIVILEGED_CAPABILITIES] })
+    const r = await service.rejectMalformed({ goal: 1 }, issuesOf({ goal: 1 }), who())
+    expect(r.outcome).toBe('REJECTED_BY_POLICY')
+    expect(broker.ran).toHaveLength(0)
+  })
+
+  it('is chained with the other receipts, and the chain verifies', async () => {
+    const db = openDatabase(':memory:')
+    const dir = mkdtempSync(join(tmpdir(), 'malformed-chain-'))
+    try {
+      const storage: ProtectedStorage = { available: () => true, encrypt: (v) => Buffer.from(v, 'utf8'), decrypt: (b) => b.toString('utf8') }
+      const store = new SqlitePrivilegeStore(db, { vault: receiptChainVault(dir, storage) })
+      const { service } = setup({ store: store as unknown as MemoryPrivilegeStore })
+      await service.submit(fixture('fixture-repair.ps1'), who())
+      await service.rejectMalformed(null, issuesOf(null), who())
+      await service.submit(fixture('fixture-repair.ps1'), who())
+      expect(store.receipts({}).map((r) => r.capability)).toContain('MALFORMED_REQUEST')
+      expect(store.verifyChain()).toMatchObject({ state: 'INTACT', verified: 3 })
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3 })
+    }
   })
 })
 
