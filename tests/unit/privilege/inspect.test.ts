@@ -47,6 +47,27 @@ describe('target resolution', () => {
 })
 
 describe('script excerpt', () => {
+  // Review of the L7 merge: the whole 256 KiB read was redacted at once, and redactText's first pattern is quadratic on
+  // a run like "-a-a-a" (860 ms at 64 KiB, about 14 s at 256 KiB), blocking the runtime while the confirmation was built.
+  it('redacts only the shown lines, so an adversarial script cannot stall the runtime', async () => {
+    const run = '-a'.repeat(128 * 1024)
+    const started = Date.now()
+    const [out = ''] = await scripted(run).inspect(psReq())
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(out).toContain('First 40 lines of install.ps1 (not run):')
+    expect(out).toContain('[...]')
+    const many = await scripted(Array.from({ length: 40 }, () => '-a'.repeat(3000)).join('\n')).inspect(psReq())
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(many[0]).toContain('[...]')
+  })
+
+  it('still removes a credential at the end of a long line, never a fragment of it', async () => {
+    const [out = ''] = await scripted(`${'x '.repeat(220)}token=ABCDEFGH12345678`).inspect(psReq())
+    expect(out).not.toContain('ABCDEFGH')
+    const [cutHere = ''] = await scripted(`${'y'.repeat(380)} password=Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp`).inspect(psReq())
+    expect(cutHere).not.toContain('Zz9Yy8')
+  })
+
   it('cuts only at more than 40 lines', async () => {
     for (const [n, cut] of [[39, false], [40, false], [41, true]] as const) {
       const [out = ''] = await scripted(lines(n)).inspect(psReq())

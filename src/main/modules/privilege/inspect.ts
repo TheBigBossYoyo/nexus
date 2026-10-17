@@ -88,14 +88,16 @@ export function createTargetInspector(deps: TargetInspectorDeps = {}): (req: Pri
     try {
       const { size, head } = await readFile(path, READ_BYTES)
       if (size > MAX_SCRIPT_BYTES) return [`The script could not be read: it is larger than ${MAX_SCRIPT_BYTES / 1024 / 1024} MiB (${name} not shown).`]
-      const text = redactText(head.toString('utf8').replace(/^\ufeff/, '').replace(/\r/g, ''))
-      const all = text.split('\n')
+      const all = head.toString('utf8').replace(/^\ufeff/, '').replace(/\r/g, '').split('\n')
       // A file read only in part (cut at READ_BYTES) has more lines than the ones seen.
       const partial = size > head.length
       if (!partial && all.length > 0 && all[all.length - 1] === '') all.pop()
+      // Only the lines shown are redacted, each first cut near its bound (an unfinished last word dropped, it may be
+      // part of a credential): redactText is not linear on long input, and the script is the agent's text.
       const shown = all.slice(0, MAX_LINES).map((l) => {
-        const clean = l.replace(CONTROL, ' ')
-        return clean.length > LINE_CHARS ? `${clean.slice(0, LINE_CHARS)}[...]` : clean
+        const long = l.length > LINE_CHARS + 256
+        const clean = redactText(long ? l.slice(0, LINE_CHARS + 256).replace(/\S*$/, '') : l).replace(CONTROL, ' ')
+        return long || clean.length > LINE_CHARS ? `${clean.slice(0, LINE_CHARS)}[...]` : clean
       })
       const more = all.length - shown.length
       let out = [`First ${MAX_LINES} lines of ${name} (not run):`, ...shown].join('\n')
